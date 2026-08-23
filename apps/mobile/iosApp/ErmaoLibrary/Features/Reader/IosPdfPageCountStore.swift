@@ -8,17 +8,17 @@ final class IosPdfPageCountStore {
         self.defaults = defaults
     }
 
-    func save(pageCount: Int, sourceID: String) {
+    func save(pageCount: Int, resourceID: String) {
         guard pageCount > 0 else { return }
-        defaults.set(pageCount, forKey: key(sourceID: sourceID))
+        defaults.set(pageCount, forKey: key(resourceID: resourceID))
     }
 
-    func load(sourceID: String) -> Int? {
-        let value = defaults.integer(forKey: key(sourceID: sourceID))
+    func load(resourceID: String) -> Int? {
+        let value = defaults.integer(forKey: key(resourceID: resourceID))
         return value > 0 ? value : nil
     }
 
-    private func key(sourceID: String) -> String {
-        "reader.pdf.page-count.\(Data(sourceID.utf8).base64EncodedString())"
+    private func key(resourceID: String) -> String {
+        "reader.pdf.page-count.\(Data(resourceID.utf8).base64EncodedString())"
     }
 }

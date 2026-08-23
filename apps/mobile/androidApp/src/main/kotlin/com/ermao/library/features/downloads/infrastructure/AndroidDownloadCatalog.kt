@@ -39,8 +39,8 @@ class AndroidDownloadCatalog(
     suspend fun upsert(record: AndroidDownloadRecord): List<AndroidDownloadRecord> {
         var replaced = emptyList<AndroidDownloadRecord>()
         mutate(record.namespace) { records ->
-            replaced = records.filter { it.taskId == record.taskId || it.volumeId == record.volumeId }
-            records.filterNot { it.taskId == record.taskId || it.volumeId == record.volumeId } + record
+            replaced = records.filter { it.taskId == record.taskId || catalogKey(it) == catalogKey(record) }
+            records.filterNot { it.taskId == record.taskId || catalogKey(it) == catalogKey(record) } + record
         }
         return replaced
     }
@@ -81,7 +81,7 @@ class AndroidDownloadCatalog(
                 require(payload.schemaVersion == CATALOG_SCHEMA_VERSION)
                 require(payload.records.all { it.namespace == namespace })
                 require(payload.records.map(AndroidDownloadRecord::taskId).distinct().size == payload.records.size)
-                require(payload.records.map(AndroidDownloadRecord::volumeId).distinct().size == payload.records.size)
+                require(payload.records.map(::catalogKey).distinct().size == payload.records.size)
             }
         } catch (error: SerializationException) {
             resetInvalidCatalog(namespace, error)
@@ -129,6 +129,9 @@ class AndroidDownloadCatalog(
         sha256("${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"),
     )
 
+    private fun catalogKey(record: AndroidDownloadRecord): String =
+        "${record.bookId}:${record.resourceId}:${record.assetId}"
+
     @Serializable
     private data class CatalogPayload(
         val schemaVersion: Int = CATALOG_SCHEMA_VERSION,
@@ -136,7 +139,12 @@ class AndroidDownloadCatalog(
     )
 
     private companion object {
-        const val CATALOG_SCHEMA_VERSION = 1
+        /**
+         * Catalog v3 is the first catalog written by the Book/Resource/Asset
+         * mobile contract. A v2 payload is deliberately discarded rather than
+         * mapped because its pre-v3 ownership is not recoverable.
+         */
+        const val CATALOG_SCHEMA_VERSION = 3
     }
 }
 

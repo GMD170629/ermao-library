@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, column
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import TimestampMilliseconds
@@ -19,25 +19,31 @@ class PublicationNavigationCache(Base):
     __tablename__ = "PublicationNavigationCache"
     __table_args__ = (
         CheckConstraint(
-            '"chapterCount" >= 0',
+            column("chapterCount") >= 0,
             name="PublicationNavigationCache_chapterCount_check",
         ),
     )
 
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         primary_key=True,
     )
-    file_id: Mapped[str] = mapped_column(
-        "fileId",
+    asset_id: Mapped[str] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryFile.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    source_size_bytes: Mapped[int] = mapped_column("sourceSizeBytes", Integer, nullable=False)
-    source_mtime_ms: Mapped[int] = mapped_column("sourceMtimeMs", Integer, nullable=False)
+    source_size_bytes: Mapped[int] = mapped_column(
+        "sourceSizeBytes", Integer, nullable=False
+    )
+    source_mtime_ms: Mapped[int] = mapped_column(
+        "sourceMtimeMs", Integer, nullable=False
+    )
     parser: Mapped[str] = mapped_column(String(191), nullable=False)
     normalization: Mapped[str] = mapped_column(String(191), nullable=False)
     projection_version: Mapped[int] = mapped_column(

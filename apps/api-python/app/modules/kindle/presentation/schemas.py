@@ -36,8 +36,8 @@ class UpdateKindleSettingsRequest(HttpContractModel):
 
 
 class CreateKindleTaskRequest(HttpContractModel):
-    file_id: str | None = Field(default=None, alias="fileId")
-    work_id: str | None = Field(default=None, alias="workId")
+    asset_id: str | None = Field(default=None, alias="assetId")
+    book_id: str | None = Field(default=None, alias="bookId")
 
 
 class SmtpSettings(HttpContractModel):
@@ -78,11 +78,11 @@ class KindleSettingsPayload(HttpContractModel):
 class KindleTask(HttpContractModel):
     id: str
     user_id: str | None = Field(default=None, alias="userId")
-    work_id: str | None = Field(default=None, alias="workId")
-    volume_id: str | None = Field(default=None, alias="volumeId")
-    file_id: str | None = Field(default=None, alias="fileId")
+    book_id: str | None = Field(default=None, alias="bookId")
+    resource_id: str | None = Field(default=None, alias="resourceId")
+    asset_id: str | None = Field(default=None, alias="assetId")
     book_title: str = Field(alias="bookTitle")
-    volume_title: str | None = Field(default=None, alias="volumeTitle")
+    resource_title: str | None = Field(default=None, alias="resourceTitle")
     file_name: str = Field(alias="fileName")
     format: str
     mime_type: str = Field(alias="mimeType")

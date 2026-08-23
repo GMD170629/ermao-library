@@ -65,24 +65,24 @@ export function pendingSeekAfterAssignment(
     : pendingPositionMs;
 }
 
-export function beginAudioVolumeSwitch(
+export function beginAudioResourceSwitch(
   current: AudioPlaybackState,
-  requestedVolumeId: string,
+  requestedResourceId: string,
   pendingSummary: AudioLaunchSummary | null = null
 ): AudioPlaybackState {
   return {
     ...current,
     lifecycle: 'loading',
-    pendingVolumeId: requestedVolumeId,
+    pendingResourceId: requestedResourceId,
     pendingSummary,
     loadError: null,
     error: null
   };
 }
 
-export function failAudioVolumeSwitch(
+export function failAudioResourceSwitch(
   previous: AudioPlaybackState,
-  requestedVolumeId: string,
+  requestedResourceId: string,
   message: string,
   pendingSummary: AudioLaunchSummary | null = null
 ): AudioPlaybackState {
@@ -91,7 +91,7 @@ export function failAudioVolumeSwitch(
     lifecycle: previous.bootstrap
       ? previous.lifecycle === 'playing' || previous.lifecycle === 'loading' ? 'paused' : previous.lifecycle
       : 'error',
-    pendingVolumeId: requestedVolumeId,
+    pendingResourceId: requestedResourceId,
     pendingSummary,
     loadError: message
   };
@@ -112,7 +112,7 @@ export function orderedTracks(tracks: AudioTrack[]) {
     left.sortOrder - right.sortOrder
     || (left.discNumber ?? 0) - (right.discNumber ?? 0)
     || (left.trackNumber ?? 0) - (right.trackNumber ?? 0)
-    || left.fileId.localeCompare(right.fileId)
+    || left.assetId.localeCompare(right.assetId)
   ));
 }
 
@@ -152,8 +152,8 @@ export function targetForAbsolutePosition(tracks: AudioTrack[], absolutePosition
   return { trackIndex: 0, positionMs: 0 };
 }
 
-export function chapterAt(chapters: AudioChapter[], fileId: string, positionMs: number) {
-  const candidates = chapters.filter((chapter) => chapter.fileId === fileId);
+export function chapterAt(chapters: AudioChapter[], assetId: string, positionMs: number) {
+  const candidates = chapters.filter((chapter) => chapter.assetId === assetId);
   if (candidates.length === 0) return null;
   return candidates.find((chapter) => positionMs >= chapter.startMs && positionMs < chapter.endMs)
     ?? [...candidates].reverse().find((chapter) => positionMs >= chapter.startMs)
@@ -163,7 +163,7 @@ export function chapterAt(chapters: AudioChapter[], fileId: string, positionMs: 
 export function normalizeResumeTarget(bootstrap: AudioBootstrap) {
   const tracks = orderedTracks(bootstrap.tracks);
   const resume = bootstrap.resumeLocation;
-  const resumeTrackIndex = resume ? tracks.findIndex((track) => track.fileId === resume.fileId) : -1;
+  const resumeTrackIndex = resume ? tracks.findIndex((track) => track.assetId === resume.assetId) : -1;
   const trackIndex = resumeTrackIndex >= 0 ? resumeTrackIndex : 0;
   return {
     trackIndex,
@@ -185,12 +185,12 @@ export function audioLocation(
   track: AudioTrack,
   chapter: AudioChapter | null,
   positionMs: number,
-  volumeId: string
+  resourceId: string
 ): AudioLocation {
   return {
     type: 'audio',
-    volumeId,
-    fileId: track.fileId,
+    resourceId,
+    assetId: track.assetId,
     chapterId: chapter?.id ?? null,
     positionMs: Math.max(0, Math.round(positionMs))
   };

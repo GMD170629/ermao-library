@@ -1,7 +1,7 @@
 import type { BookshelfItem } from '../../../components/book/bookshelf';
 import type { SmartShelfCondition, SmartShelfRules } from '../smart-shelf-rules';
 import type { ShelfKind, ShelfView } from '../model/types';
-import type { MediaKind } from '../../../types/work';
+import type { MediaKind } from '../../../types/book';
 
 type JsonObject = Record<string, unknown>;
 

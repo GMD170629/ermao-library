@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.modules.publications.application.resolve_source_identity import (
-    PublicationSourceIdentity,
-)
 from app.modules.publications.domain.model import PublicationUnsupportedError
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
-    ReaderFileDto,
-    ReaderMediaVersionDto,
-    ReaderVolumeContextDto,
-    ReaderVolumeDto,
-    ReaderWorkDto,
+    ReaderAssetDto,
+    ReaderBookDto,
+    ReaderEngineLocatorDto,
+    ReaderReflowableExactLocationDto,
+    ReaderResourceContextDto,
+    ReaderResourceDto,
 )
 from app.modules.reader.infrastructure.publication_locator_index import (
     NormalizedPublicationLocatorIndex,
@@ -24,77 +22,79 @@ class _UnavailablePublication:
         raise PublicationUnsupportedError("MOBI runtime unavailable")
 
 
-class _SourceIdentity:
-    def execute(self, **_kwargs: object) -> PublicationSourceIdentity:
-        return PublicationSourceIdentity(
-            original_file_hash="sha256:" + "a" * 64,
-            source_format="mobi",
-        )
-
-
 class _ReaderRepository:
     def __init__(self) -> None:
-        volume = ReaderVolumeDto(
-            id="volume-1",
-            media_version_id="media-1",
+        resource = ReaderResourceDto(
+            id="resource-1",
+            book_id="book-1",
+            source_node_id="source-1",
             title="Legacy MOBI",
-            volume_index=1,
-            sort_order=0,
+            media_kind="EBOOK",
             format="MOBI",
-            derived_from_volume_id=None,
+            resource_index=1,
+            sort_order=0,
             page_count=None,
             chapter_count=None,
             duration_ms=None,
             track_count=None,
             updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
-        self.context = ReaderVolumeContextDto(
-            work=ReaderWorkDto("work-1", "Legacy MOBI", "Author"),
-            media_version=ReaderMediaVersionDto("media-1", "work-1", "EBOOK"),
-            volume=volume,
+        self.context = ReaderResourceContextDto(
+            book=ReaderBookDto("book-1", "Legacy MOBI", "Author"),
+            resource=resource,
         )
-        self.files = [
-            ReaderFileDto(
-                id="file-1",
-                volume_id=volume.id,
-                kind="MOBI",
+        self.assets = [
+            ReaderAssetDto(
+                id="asset-1",
+                resource_id=resource.id,
+                source_node_id="source-1",
+                role="PRIMARY",
                 mime_type="application/x-mobipocket-ebook",
                 size_bytes=100,
                 duration_ms=None,
                 disc_number=None,
                 track_number=None,
                 sort_order=0,
-                fingerprint=None,
-                full_hash=None,
                 mtime_ms=1,
             )
         ]
 
-    def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None:
-        return self.context if volume_id == self.context.volume.id else None
+    def get_context(self, resource_id: str) -> ReaderResourceContextDto | None:
+        return self.context if resource_id == self.context.resource.id else None
 
-    def list_files(self, volume_id: str) -> list[ReaderFileDto]:
-        return self.files if volume_id == self.context.volume.id else []
+    def list_assets(self, resource_id: str) -> list[ReaderAssetDto]:
+        return self.assets if resource_id == self.context.resource.id else []
+
+    def list_navigation_units(self, resource_id: str) -> list[object]:
+        del resource_id
+        return []
 
 
-def test_uses_actual_source_hash_when_mobi_parser_is_unavailable() -> None:
+def test_reflowable_validation_fails_when_publication_is_unavailable() -> None:
     repository = _ReaderRepository()
     index = NormalizedPublicationLocatorIndex(
         _UnavailablePublication(),  # type: ignore[arg-type]
         repository,  # type: ignore[arg-type]
-        _SourceIdentity(),  # type: ignore[arg-type]
     )
 
-    fingerprint = index.fingerprint(
-        volume_id="volume-1",
+    valid = index.validate(
+        resource_id="resource-1",
         access_scope=ReaderAccessScope(
             is_admin=True,
             can_view_manual_imports=True,
-            monitor_folder_ids=(),
+            library_ids=(),
+        ),
+        location=ReaderReflowableExactLocationDto(
+            resource_href="chapter.xhtml",
+            media_type="application/xhtml+xml",
+            resource_progression=0.0,
+            total_progression=0.0,
+            engine_locator=ReaderEngineLocatorDto(
+                platform="web",
+                version="readium-test:1",
+                payload_json="{}",
+            ),
         ),
     )
 
-    assert fingerprint is not None
-    assert fingerprint.original_file_hash == "sha256:" + "a" * 64
-    assert fingerprint.parser.startswith("libmobi:0.12")
-    assert fingerprint.normalization == "ermao-mobi-core-v1+shuku-locator-dom-v2"
+    assert valid is False

@@ -22,86 +22,62 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
 
 class KtorDownloadsGatewayTest {
     @Test
-    fun bootstrapMapsTheMinimumDownloadContract() = runBlocking {
+    fun bootstrapMapsBookResourceAndPrimaryAsset() = runBlocking {
         val gateway = gateway { request ->
-            assertTrue(request.url.encodedPath.endsWith("/api/reader/v4/volumes/volume/bootstrap"))
+            assertTrue(request.url.encodedPath.endsWith("/api/reader/v4/resources/resource/bootstrap"))
             respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
 
-        val result = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume"))
-        assertEquals("work", result.bootstrap.descriptor.identity.workId)
-        assertEquals("media", result.bootstrap.descriptor.mediaVersionId)
-        assertEquals("EBOOK", result.bootstrap.descriptor.mediaKind)
-        assertEquals(2, result.bootstrap.descriptor.volumeSortOrder)
-        assertEquals(6, result.bootstrap.descriptor.source.totalBytes)
+        val loaded = gateway.load(context, "resource")
+        val result = assertIs<DownloadBootstrapResult.Success>(loaded)
+        val descriptor = result.bootstrap.descriptor
+        assertEquals("book", descriptor.identity.bookId)
+        assertEquals("resource", descriptor.identity.resourceId)
+        assertEquals("asset", descriptor.identity.assetId)
+        assertEquals("/api/assets/asset", descriptor.source.apiPath)
+        assertEquals(2, descriptor.resourceSortOrder)
+        assertEquals(6, descriptor.source.totalBytes)
         Unit
     }
 
     @Test
-    fun bootstrapRejectsContradictoryMediaVersionIdentity() = runBlocking {
+    fun bootstrapRejectsContradictoryResourceAndAssetIdentity() = runBlocking {
         val gateway = gateway {
             respond(
-                BOOTSTRAP.replace("\"mediaVersionId\":\"media\"", "\"mediaVersionId\":\"other\""),
+                BOOTSTRAP.replace("\"resourceId\":\"resource\"", "\"resourceId\":\"other\""),
                 HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, "application/json"),
             )
         }
 
-        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "volume"))
+        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "resource"))
         Unit
     }
 
     @Test
-    fun bootstrapMapsMobiFamilyAndRejectsTxt() = runBlocking {
-        val mobi = BOOTSTRAP
-            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"azw3\"")
-            .replace("\"format\":\"EPUB\"", "\"format\":\"AZW3\"")
-            .replace("\"kind\":\"EPUB\"", "\"kind\":\"AZW3\"")
-            .replace("application/epub+zip", "application/vnd.amazon.ebook")
-        val mobiGateway = gateway {
-            respond(mobi, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(mobiGateway.load(context, "volume"))
-            .bootstrap.descriptor
-        assertEquals("AZW3", descriptor.format)
-        assertEquals("application/vnd.amazon.ebook", descriptor.source.mimeType)
-
-        val txt = BOOTSTRAP
-            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"txt\"")
-            .replace("\"format\":\"EPUB\"", "\"format\":\"TXT\"")
-            .replace("\"kind\":\"EPUB\"", "\"kind\":\"TXT\"")
-            .replace("application/epub+zip", "text/plain")
-        val txtGateway = gateway {
-            respond(txt, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
-        }
-        assertIs<DownloadBootstrapResult.Failure>(txtGateway.load(context, "volume"))
-        Unit
-    }
-
-    @Test
-    fun bootstrapMapsComicMediaFileToExplicitArchiveDownload() = runBlocking {
+    fun bootstrapMapsComicResourceToPrimaryAssetDownload() = runBlocking {
         val gateway = gateway {
             respond(COMIC_BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
 
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume"))
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
             .bootstrap.descriptor
 
-        assertEquals("CBZ", descriptor.format)
-        assertEquals("COMIC", descriptor.mediaKind)
-        assertEquals("/api/reader/v4/volumes/volume/comic/archive", descriptor.source.apiPath)
+        assertEquals("cbz", descriptor.format)
+        assertEquals("asset", descriptor.identity.assetId)
+        assertEquals("/api/assets/asset", descriptor.source.apiPath)
         assertEquals("application/vnd.comicbook+zip", descriptor.source.mimeType)
         assertEquals(12, descriptor.source.totalBytes)
         Unit
@@ -115,6 +91,7 @@ class KtorDownloadsGatewayTest {
             if (requestCount == 1) {
                 respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             } else {
+                assertTrue(it.url.encodedPath.endsWith("/api/assets/asset"))
                 respond(
                     "abcdef",
                     HttpStatusCode.OK,
@@ -126,7 +103,7 @@ class KtorDownloadsGatewayTest {
                 )
             }
         }
-        val bootstrap = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume")).bootstrap
+        val bootstrap = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap
         val sink = RecordingSink()
         val progress = mutableListOf<Long>()
 
@@ -141,6 +118,8 @@ class KtorDownloadsGatewayTest {
         assertEquals(6, progress.last())
         assertEquals(1, sink.commitCount)
         assertEquals(0, sink.abortCount)
+        assertEquals("resource", sink.request?.resourceId)
+        assertEquals("asset", sink.request?.assetId)
         Unit
     }
 
@@ -163,7 +142,7 @@ class KtorDownloadsGatewayTest {
                 )
             }
         }
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume")).bootstrap.descriptor
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
         val result = gateway.transfer(context, DownloadTransferRequest("task", descriptor, 2), RecordingSink())
         assertIs<DownloadTransferResult.Success>(result)
         Unit
@@ -180,7 +159,7 @@ class KtorDownloadsGatewayTest {
                 respond("abc", HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, "3"))
             }
         }
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume")).bootstrap.descriptor
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
         val sink = RecordingSink()
 
         assertIs<DownloadTransferResult.Failure>(
@@ -192,7 +171,7 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
-    fun cancellationAbortsSinkAndPropagates() = runBlocking {
+    fun cancellationPropagatesBeforeSinkTransactionExists() = runBlocking {
         var requestCount = 0
         val gateway = gateway {
             requestCount += 1
@@ -202,13 +181,12 @@ class KtorDownloadsGatewayTest {
                 throw CancellationException("cancel")
             }
         }
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "volume")).bootstrap.descriptor
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
         val sink = RecordingSink()
 
         assertFailsWith<CancellationException> {
             gateway.transfer(context, DownloadTransferRequest("task", descriptor), sink)
         }
-        // The request was cancelled before a sink transaction existed.
         assertEquals(0, sink.abortCount)
         Unit
     }
@@ -233,22 +211,29 @@ class KtorDownloadsGatewayTest {
         var bytes = byteArrayOf()
         var commitCount = 0
         var abortCount = 0
+        var request: DownloadSinkRequest? = null
 
-        override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession = this
+        override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession {
+            this.request = request
+            return this
+        }
+
         override suspend fun write(bytes: ByteArray) {
             this.bytes += bytes
         }
+
         override suspend fun commit(expectedTotalBytes: Long): String {
             commitCount += 1
-            return "local://volume"
+            return "local://asset"
         }
+
         override suspend fun abort() {
             abortCount += 1
         }
     }
 
     private companion object {
-        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"work","title":"Book","author":"Author","coverUrl":"/api/works/work/cover"},"mediaVersion":{"id":"media","workId":"work","mediaKind":"EBOOK","completed":false},"volume":{"id":"volume","mediaVersionId":"media","title":"Volume","volumeIndex":1.5,"sortOrder":2,"format":"EPUB","readerType":"reflowable"},"files":[{"id":"file","kind":"EPUB","mimeType":"application/epub+zip","sizeBytes":6,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file"}}"""
-        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"work","title":"Comic","author":"Author","coverUrl":"/api/works/work/cover"},"mediaVersion":{"id":"media","workId":"work","mediaKind":"COMIC","completed":false},"volume":{"id":"volume","mediaVersionId":"media","title":"Volume","volumeIndex":1.0,"sortOrder":0,"format":"CBZ","readerType":"comic"},"files":[{"id":"file","kind":"COMIC","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"url":"/api/files/file","sortOrder":0}],"fileUrl":"/api/volumes/volume/file","publication":{"kind":"comic","manifestUrl":"/api/reader/v4/volumes/volume/comic/manifest","pageUrlTemplate":"/api/reader/v4/volumes/volume/comic/pages/{pageIndex}","imageVariants":["original"],"downloadArtifact":{"url":"/api/reader/v4/volumes/volume/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
+        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"book","title":"Book","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.5,"sortOrder":2,"format":"epub","readerType":"reflowable"},"availableResources":[],"assets":[{"id":"asset","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":6,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{}}}"""
+        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"book","title":"Comic","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"cbz","readerType":"comic"},"availableResources":[],"assets":[{"id":"asset","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{},"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
     }
 }

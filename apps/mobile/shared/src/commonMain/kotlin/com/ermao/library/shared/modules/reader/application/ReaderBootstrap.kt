@@ -13,20 +13,20 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfile
 data class ReaderBootstrapRequest(
     val profile: ServerProfile,
     val namespace: ReaderSyncNamespace,
-    val volumeId: String,
+    val resourceId: String,
 ) {
     init {
         require(profile.serverIdentity == namespace.serverIdentity)
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
     }
 }
 
 data class ReaderPublicationDownload(
     val profile: ServerProfile,
-    val sourceId: String,
+    val resourceId: String,
     val displayTitle: String,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val assetId: String,
     val apiPath: String,
     /** Original library format; retained for metadata and compatibility. */
     val originalSourceFormat: ReaderSourceFormat,
@@ -36,10 +36,10 @@ data class ReaderPublicationDownload(
     val expectedSizeBytes: Long,
 ) {
     init {
-        require(sourceId == volumeId) { "Reader v4 source id must be its volume id" }
+        require(resourceId.isNotBlank())
         require(displayTitle.isNotBlank())
-        require(workId.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(bookId.isNotBlank())
+        require(assetId.isNotBlank())
         require(apiPath.startsWith("/api/") && !apiPath.contains('#'))
         require(sourceFormat.acceptsMimeType(mimeType)) { "Reader publication MIME type does not match its source format" }
         require(expectedSizeBytes > 0)
@@ -58,8 +58,8 @@ data class ReaderBootstrap(
     val pageCount: Int? = null,
 ) {
     init {
-        require(remoteSnapshot == null || remoteSnapshot.sourceId == target.volumeId) {
-            "Reader bootstrap snapshot belongs to another volume"
+        require(remoteSnapshot == null || remoteSnapshot.resourceId == target.resourceId) {
+            "Reader bootstrap snapshot belongs to another resource"
         }
         require(units == units.sortedBy(ReaderNavigationUnit::index)) {
             "Reader navigation units are not in canonical order"
@@ -89,7 +89,7 @@ data class ReaderNavigationUnit(
     val index: Int,
     val title: String,
     val href: String? = null,
-    val fileId: String? = null,
+    val assetId: String? = null,
     val startMs: Long? = null,
     val endMs: Long? = null,
     val durationMs: Long? = null,
@@ -219,10 +219,10 @@ class BootstrapReaderPublication(
         if (nativePdfiumRangeV1 && publication.sourceFormat == ReaderSourceFormat.Pdf) {
             return ReaderPublicationBootstrapResult.Content(
                 RemoteByteRangeReaderSource(
-                    sourceId = publication.sourceId,
+                    resourceId = publication.resourceId,
                     displayTitle = publication.displayTitle,
-                    workId = publication.workId,
-                    volumeId = publication.volumeId,
+                    bookId = publication.bookId,
+                    assetId = publication.assetId,
                     namespace = request.namespace,
                     apiPath = publication.apiPath,
                     expectedSizeBytes = publication.expectedSizeBytes,
@@ -235,10 +235,10 @@ class BootstrapReaderPublication(
                 ?: return ReaderPublicationBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
             return ReaderPublicationBootstrapResult.Content(
                 RemoteComicReaderSource(
-                    sourceId = publication.sourceId,
+                    resourceId = publication.resourceId,
                     displayTitle = publication.displayTitle,
-                    workId = publication.workId,
-                    volumeId = publication.volumeId,
+                    bookId = publication.bookId,
+                    assetId = publication.assetId,
                     namespace = request.namespace,
                     sourceFormat = publication.originalSourceFormat,
                     manifestApiPath = access.manifestApiPath,

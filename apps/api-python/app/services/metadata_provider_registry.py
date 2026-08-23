@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
+from app.modules.library.domain.media_kinds import effective_media_kind
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
@@ -192,11 +193,7 @@ class MetadataProviderRegistry:
     def _load_entry_points(self) -> None:
         try:
             entry_points = importlib_metadata.entry_points()
-            selected = (
-                entry_points.select(group=ENTRY_POINT_GROUP)
-                if hasattr(entry_points, "select")
-                else entry_points.get(ENTRY_POINT_GROUP, [])
-            )
+            selected = entry_points.select(group=ENTRY_POINT_GROUP)
         except Exception:
             LOGGER.exception("failed to discover metadata provider entry points")
             return
@@ -606,22 +603,6 @@ def provider_supports_media_kind(
 def enabled_metadata_provider_ids(
     db: Session, media_kind: str | None = None
 ) -> list[str]:
-    from sqlalchemy import inspect
-
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        providers = list_metadata_providers(db)
-        registry = metadata_provider_registry()
-        return [
-            str(provider["id"])
-            for provider in providers
-            if provider.get("enabled")
-            and (
-                media_kind is None
-                or provider_supports_media_kind(
-                    registry.require(str(provider["id"])).manifest, media_kind
-                )
-            )
-        ]
     if media_kind is None:
         return list_enabled_provider_ids(db)
     return list_enabled_provider_ids(db, str(media_kind).strip().upper())
@@ -654,31 +635,8 @@ def search_with_metadata_provider(
     use_cache: bool = True,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
-    from sqlalchemy import inspect
-
     plugin = metadata_provider_registry().require(provider_id)
-    if not inspect(db.connection()).has_table("Source"):
-        config = _default_config(plugin.manifest)
-        if isinstance(plugin, BuiltinMetadataProvider):
-            return plugin.search(
-                db,
-                context,
-                query,
-                config=config,
-                force=force,
-                use_cache=use_cache,
-                automatic_request_gate=automatic_request_gate,
-            )
-        db.close()
-        return plugin.search(
-            db, context, query, config=config, force=force, use_cache=use_cache
-        )
-    media_version = (
-        context.get("mediaVersion")
-        if isinstance(context.get("mediaVersion"), dict)
-        else {}
-    )
-    media_kind = media_version.get("mediaKind")
+    media_kind = _context_media_kind(context)
     config = metadata_provider_runtime_config(
         db, provider_id, str(media_kind) if media_kind else None
     )
@@ -706,6 +664,30 @@ def search_with_metadata_provider(
     return plugin.search(
         db, context, query, config=config, force=force, use_cache=use_cache
     )
+
+
+def _context_media_kind(context: dict[str, Any]) -> str | None:
+    resources = context.get("resources")
+    if not isinstance(resources, list):
+        return None
+    for raw_resource in resources:
+        if not isinstance(raw_resource, dict) or raw_resource.get("hidden") is True:
+            continue
+        resource_format = str(raw_resource.get("format") or "").strip()
+        if not resource_format:
+            continue
+        return effective_media_kind(
+            format=resource_format,
+            classification_source=str(
+                raw_resource.get("classificationSource") or "AUTO"
+            ),
+            suggested_media_kind=(
+                str(raw_resource["suggestedMediaKind"])
+                if raw_resource.get("suggestedMediaKind")
+                else None
+            ),
+        )
+    return None
 
 
 def reset_metadata_provider_registry_for_tests() -> None:

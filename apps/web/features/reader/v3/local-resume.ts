@@ -12,8 +12,8 @@ export function decidePendingVsServer(input: {
   const pending = input.pending;
   if (!pending) return { kind: 'server', snapshot: input.serverSnapshot, discardPending: false };
   const validLocal = input.localExact
-    && input.localExact.workId === pending.workId
-    && input.localExact.volumeId === pending.volumeId
+    && input.localExact.bookId === pending.bookId
+    && input.localExact.resourceId === pending.resourceId
     && progressLocationsMatch(input.localExact.locator, pending.locator)
     ? input.localExact : null;
   if (!validLocal) {

@@ -4,7 +4,7 @@
 
 export type AudioExactLocation_Input = {
   kind: "audio";
-  fileId: string;
+  assetId: string;
   chapterId?: string | null;
   positionMillis: number;
   engineLocator?: OpaqueReadiumEngineLocator_Input | null;
@@ -12,7 +12,7 @@ export type AudioExactLocation_Input = {
 
 export type AudioExactLocation_Output = {
   kind: "audio";
-  fileId: string;
+  assetId: string;
   chapterId?: string | null;
   positionMillis: number;
   engineLocator?: OpaqueReadiumEngineLocator_Output | null;
@@ -20,7 +20,7 @@ export type AudioExactLocation_Output = {
 
 export type AudioLocation = {
   kind: "audio";
-  fileId: string;
+  assetId: string;
   chapterId?: string | null;
   positionMs: number;
 };
@@ -81,6 +81,21 @@ export type PdfLocation = {
   pageNumber: number;
 };
 
+export type ReaderAssetSummary = {
+  id: string;
+  resourceId: string;
+  sourceNodeId: string;
+  role: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs?: number | null;
+  discNumber?: number | null;
+  trackNumber?: number | null;
+  sortOrder: number;
+  url: string;
+  codec?: string | null;
+};
+
 export type ReaderBookSummary = {
   id: string;
   title: string;
@@ -115,12 +130,11 @@ export type ReaderBootstrapData = {
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   sourceFormat: "epub" | "mobi" | "azw" | "azw3" | "prc" | "txt" | "cbz" | "zip" | "cbr" | "rar" | "pdf" | "audio" | "audiobook" | "m4b" | "m4a" | "mp3";
   book: ReaderBookSummary;
-  mediaVersion: ReaderMediaVersionSummary;
-  volume: ReaderVolumeSummary;
-  availableVolumes: Array<ReaderVolumeSummary>;
-  files: Array<ReaderFileSummary>;
-  units: Array<ReaderUnitSummary>;
-  fileUrl: string;
+  resource: ReaderResourceSummary;
+  availableResources: Array<ReaderResourceSummary>;
+  assets: Array<ReaderAssetSummary>;
+  units: Array<ReaderNavigationUnitSummary>;
+  resourceUrl: string;
   capabilities: ReaderCapabilities;
   publication?: ReaderPublicationAccess | null;
   progressSnapshot?: ReaderProgressSnapshot | null;
@@ -154,7 +168,7 @@ export type ReaderComicDownloadArtifact = {
 export type ReaderComicManifestData = {
   schemaVersion?: 1;
   kind?: "comic";
-  volumeId: string;
+  resourceId: string;
   sourceFormat: "cbz" | "zip" | "cbr" | "rar";
   pageCount: number;
   readingOrder: Array<ReaderComicManifestPage>;
@@ -183,19 +197,6 @@ export type ReaderErrorBody = {
   } | null;
 };
 
-export type ReaderFileSummary = {
-  id: string;
-  kind: string;
-  mimeType: string;
-  sizeBytes: number;
-  durationMs?: number | null;
-  discNumber?: number | null;
-  trackNumber?: number | null;
-  sortOrder: number;
-  url: string;
-  codec?: string | null;
-};
-
 export type ReaderJsonValue_Input = string | number | boolean | Array<ReaderJsonValue_Input> | {
   [key: string]: ReaderJsonValue_Input | null | undefined;
 } | null;
@@ -204,11 +205,18 @@ export type ReaderJsonValue_Output = string | number | boolean | Array<ReaderJso
   [key: string]: ReaderJsonValue_Output | null | undefined;
 } | null;
 
-export type ReaderMediaVersionSummary = {
+export type ReaderNavigationUnitSummary = {
   id: string;
-  workId: string;
-  mediaKind: "EBOOK" | "COMIC" | "AUDIOBOOK";
-  completed: boolean;
+  index: number;
+  title: string;
+  href?: string | null;
+  assetId?: string | null;
+  startMs?: number | null;
+  endMs?: number | null;
+  durationMs?: number | null;
+  metadata?: {
+    [key: string]: ReaderJsonValue_Output | null | undefined;
+  };
 };
 
 export type ReaderProgressConflictBody = {
@@ -261,7 +269,7 @@ export type ReaderPublicationAccess = {
 };
 
 export type ReaderReadingStatusData = {
-  volumeId: string;
+  resourceId: string;
   status: "UNREAD" | "FINISHED";
   percent: number;
 };
@@ -275,34 +283,22 @@ export type ReaderReadingStatusResponse = {
   data: ReaderReadingStatusData;
 };
 
-export type ReaderUnitSummary = {
+export type ReaderResourceSummary = {
   id: string;
-  index: number;
+  bookId: string;
+  sourceNodeId: string;
   title: string;
-  href?: string | null;
-  fileId?: string | null;
-  startMs?: number | null;
-  endMs?: number | null;
-  durationMs?: number | null;
-  metadata?: {
-    [key: string]: ReaderJsonValue_Output | null | undefined;
-  };
-};
-
-export type ReaderVolumeSummary = {
-  id: string;
-  mediaVersionId: string;
-  title: string;
-  volumeIndex?: number | null;
+  resourceIndex?: number | null;
   sortOrder: number;
   format: string;
+  mediaKind: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
-  derivedFromVolumeId?: string | null;
   pageCount?: number | null;
   chapterCount?: number | null;
   durationMs?: number | null;
   trackCount?: number | null;
   progress: number;
+  resourceCompleted: boolean;
   lastReadAt?: string | null;
 };
 

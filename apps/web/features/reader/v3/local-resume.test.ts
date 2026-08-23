@@ -10,12 +10,12 @@ if (!locator) throw new Error('invalid exact fixture');
 
 const exact: ExactProgressRecord = {
   key: 'exact', schemaVersion: 1, serverIdentity: 'server', userId: 'user', clientId: 'web-client',
-  workId: 'work', volumeId: 'volume', locator,
+  bookId: 'book', resourceId: 'resource', locator,
   displayPercent: 12, revision: 4, capturedAtEpochMillis: 100
 };
 const pending: PendingProgressMutation = {
   key: 'pending', schemaVersion: 1, serverIdentity: 'server', userId: 'user', clientId: 'web-client',
-  workId: 'work', volumeId: 'volume', mutationId: '11111111-1111-4111-8111-111111111111',
+  bookId: 'book', resourceId: 'resource', mutationId: '11111111-1111-4111-8111-111111111111',
   baseRevision: 4, capturedAtEpochMillis: 100, locator, displayPercent: 12
 };
 const server = (revision: number): ReaderProgressSnapshot => ({
@@ -25,7 +25,7 @@ const server = (revision: number): ReaderProgressSnapshot => ({
 test('online startup ignores confirmed local history and uses the fresh server snapshot', () => {
   const decision = resolveStartupResume({
     localExact: exact, serverSnapshot: server(8), context: { readerKind: 'reflowable', sourceFormat: 'epub' },
-    serverLocation: v4LocationToDomain(locator, 'volume', 'epub'), serverPercent: 12, hasDirectTarget: false
+    serverLocation: v4LocationToDomain(locator, 'resource', 'epub'), serverPercent: 12, hasDirectTarget: false
   });
   assert.equal(decision.source, 'server');
   assert.equal(decision.localExact, null);
@@ -39,7 +39,7 @@ test('a newer server revision requires a startup choice', () => {
   assert.equal(decidePendingVsServer({ localExact: exact, pending, serverSnapshot: server(5) }).kind, 'requires-choice');
 });
 
-test('pending progress remains scoped to the same work and volume without a fingerprint', () => {
+test('pending progress remains scoped to the same book and resource without a fingerprint', () => {
   const decision = decidePendingVsServer({ localExact: exact, pending: { ...pending, locator: { ...locator } }, serverSnapshot: server(5) });
   assert.equal(decision.kind, 'requires-choice');
 });

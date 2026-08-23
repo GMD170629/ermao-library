@@ -3,16 +3,9 @@ import Foundation
 
 @MainActor
 final class WorkManagementStore: ObservableObject {
-    struct PendingOwnership {
-        let volumeID: String
-        let workID: String?
-        let workTitle: String
-        let workAuthor: String
-        let mediaKind: LibraryMediaKind
-    }
     enum Action: Equatable {
-        case workUpdated, coverUpdated, workDeleted
-        case volumeUpdated, volumeReclassified, volumeSplit, volumeTransferred, volumeDeleted
+        case workUpdated, coverUpdated
+        case resourceUpdated, resourceReclassified
         case metadataApplied, kindleQueued, readingStatusUpdated
     }
 
@@ -21,21 +14,18 @@ final class WorkManagementStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var errorCode: String?
     @Published private(set) var completedAction: Action?
-    @Published private(set) var lastOutcome: ErmaoShared.WorkMutationOutcome?
-    @Published private(set) var pendingOwnership: PendingOwnership?
-    @Published private(set) var transferTargets: [ErmaoShared.WorkTransferTarget] = []
     @Published private(set) var metadataProviders: [ErmaoShared.MetadataProvider] = []
     @Published private(set) var metadataCandidates: [ErmaoShared.MetadataCandidate] = []
     @Published private(set) var kindleSettings: ErmaoShared.KindleSettings?
 
     private let repository: any ErmaoShared.WorkManagementRepository
     private let context: ErmaoShared.WorkManagementContext
-    private let workID: String
+    private let bookID: String
 
     init(
         repository: any ErmaoShared.WorkManagementRepository,
         context: ContentRequestContext,
-        workID: String
+        bookID: String
     ) {
         self.repository = repository
         self.context = ErmaoShared.PublicKt.createWorkManagementContext(
@@ -47,14 +37,12 @@ final class WorkManagementStore: ObservableObject {
             userId: context.userID,
             authorizationVersion: context.authorizationVersion
         )
-        self.workID = workID
+        self.bookID = bookID
         checkCapability()
     }
 
     func consumeCompletion() {
         completedAction = nil
-        lastOutcome = nil
-        pendingOwnership = nil
         errorCode = nil
     }
 
@@ -66,11 +54,11 @@ final class WorkManagementStore: ObservableObject {
         seriesIndex: Double?,
         tags: [String]
     ) {
-        run(.workUpdated) { [repository, context, workID] in
-            try await repository.updateWork(
+        run(.workUpdated) { [repository, context, bookID] in
+            try await repository.updateBook(
                 context: context,
-                workId: workID,
-                draft: ErmaoShared.WorkMetadataDraft(
+                bookId: bookID,
+                draft: ErmaoShared.BookMetadataDraft(
                     title: title,
                     author: author,
                     description: description,
@@ -82,50 +70,52 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func regenerateCover() {
-        run(.coverUpdated) { [repository, context, workID] in
-            try await repository.regenerateCover(context: context, workId: workID)
+    func regenerateCover(resourceID: String) {
+        run(.coverUpdated) { [repository, context, bookID] in
+            try await repository.regenerateResourceCover(
+                context: context,
+                bookId: bookID,
+                resourceId: resourceID
+            )
         }
     }
 
-    func uploadCover(data: Data, mimeType: String, fileName: String) {
+    func uploadCover(
+        data: Data,
+        mimeType: String,
+        fileName: String,
+        sourceNodeID: String,
+        title: String,
+        description: String?
+    ) {
         let bytes = KotlinByteArray(size: Int32(data.count))
         for (index, byte) in data.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: byte)) }
-        run(.coverUpdated) { [repository, context, workID] in
+        run(.coverUpdated) { [repository, context, bookID] in
             try await repository.uploadCover(
                 context: context,
-                workId: workID,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
+                title: title,
+                description: description,
                 upload: ErmaoShared.CoverUpload(fileName: fileName, mimeType: mimeType, bytes: bytes)
             )
         }
     }
 
-    func deleteWork() {
-        runMutation(.workDeleted) { [repository, context, workID] in
-            try await repository.deleteWork(context: context, workId: workID)
-        }
-    }
-
-    func updateVolume(
-        _ volume: WorkVolume,
-        title: String,
-        index: Double?,
-        sortOrder: Int32,
+    func updateResource(
+        _ resource: BookResource,
         publisher: String?,
         language: String?,
         isbn: String?,
         identifier: String?,
         narrator: String?
     ) {
-        runMutation(.volumeUpdated) { [repository, context, workID] in
-            try await repository.updateVolume(
+        runMutation(.resourceUpdated) { [repository, context, bookID] in
+            try await repository.updateResource(
                 context: context,
-                workId: workID,
-                volumeId: volume.id,
-                draft: ErmaoShared.VolumeMetadataDraft(
-                    title: title,
-                    volumeIndex: index.map(KotlinDouble.init(double:)),
-                    sortOrder: sortOrder,
+                bookId: bookID,
+                resourceId: resource.id,
+                draft: ErmaoShared.ResourceMetadataDraft(
                     publisher: publisher,
                     language: language,
                     isbn: isbn,
@@ -137,61 +127,13 @@ final class WorkManagementStore: ObservableObject {
     }
 
     func reclassify(
-        _ volume: WorkVolume,
-        kind: ErmaoShared.ManagedMediaKind,
-        work: WorkCard,
-        localKind: LibraryMediaKind
+        _ resource: BookResource,
+        kind: ErmaoShared.ManagedMediaKind
     ) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: work.id, workTitle: work.title,
-            workAuthor: work.author, mediaKind: localKind
-        )
-        runMutation(.volumeReclassified) { [repository, context, workID] in
-            try await repository.reclassifyVolume(
-                context: context, workId: workID, volumeId: volume.id, mediaKind: kind
+        runMutation(.resourceReclassified) { [repository, context, bookID] in
+            try await repository.reclassifyResource(
+                context: context, bookId: bookID, resourceId: resource.id, mediaKind: kind
             )
-        }
-    }
-
-    func split(_ volume: WorkVolume, title: String, author: String?, mediaKind: LibraryMediaKind) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: nil, workTitle: title,
-            workAuthor: author ?? "", mediaKind: mediaKind
-        )
-        runMutation(.volumeSplit) { [repository, context, workID] in
-            try await repository.splitVolume(
-                context: context, workId: workID, volumeId: volume.id, title: title, author: author
-            )
-        }
-    }
-
-    func searchTransferTargets(_ query: String) {
-        runValue { [repository, context, workID] in
-            let result = try await repository.searchTransferTargets(context: context, workId: workID, query: query)
-            let values: [ErmaoShared.WorkTransferTarget] = try Self.value(result)
-            self.transferTargets = values
-        }
-    }
-
-    func transfer(
-        _ volume: WorkVolume,
-        target: ErmaoShared.WorkTransferTarget,
-        mediaKind: LibraryMediaKind
-    ) {
-        pendingOwnership = PendingOwnership(
-            volumeID: volume.id, workID: target.id, workTitle: target.title,
-            workAuthor: target.author, mediaKind: mediaKind
-        )
-        runMutation(.volumeTransferred) { [repository, context, workID] in
-            try await repository.transferVolume(
-                context: context, workId: workID, volumeId: volume.id, targetWorkId: target.id
-            )
-        }
-    }
-
-    func deleteVolume(_ volume: WorkVolume) {
-        runMutation(.volumeDeleted) { [repository, context, workID] in
-            try await repository.deleteVolume(context: context, workId: workID, volumeId: volume.id)
         }
     }
 
@@ -203,10 +145,14 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func searchMetadata(providerID: String, query: String) {
-        runValue { [repository, context, workID] in
+    func searchMetadata(providerID: String, sourceNodeID: String, query: String) {
+        runValue { [repository, context, bookID] in
             let result = try await repository.searchMetadata(
-                context: context, workId: workID, providerId: providerID, query: query
+                context: context,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
+                providerId: providerID,
+                query: query
             )
             let search: ErmaoShared.MetadataSearchResult = try Self.value(result)
             self.metadataCandidates = search.candidates
@@ -217,18 +163,20 @@ final class WorkManagementStore: ObservableObject {
         providerID: String,
         candidate: ErmaoShared.MetadataCandidate,
         fields: Set<ErmaoShared.MetadataField>,
-        volumeID: String?,
-        applyToAllVolumes: Bool
+        resourceID: String?,
+        sourceNodeID: String,
+        applyToAllResources: Bool
     ) {
-        run(.metadataApplied) { [repository, context, workID] in
+        run(.metadataApplied) { [repository, context, bookID] in
             try await repository.applyMetadata(
                 context: context,
-                workId: workID,
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
                 providerId: providerID,
                 candidate: candidate,
                 fields: fields,
-                volumeId: volumeID,
-                applyToAllVolumes: applyToAllVolumes
+                resourceId: resourceID,
+                applyToAllResources: applyToAllResources
             )
         }
     }
@@ -241,15 +189,15 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func sendToKindle(fileID: String) {
-        run(.kindleQueued) { [repository, context, workID] in
-            try await repository.sendToKindle(context: context, workId: workID, fileId: fileID)
+    func sendToKindle(assetID: String) {
+        run(.kindleQueued) { [repository, context, bookID] in
+            try await repository.sendToKindle(context: context, bookId: bookID, assetId: assetID)
         }
     }
 
-    func setReadingStatus(volumeID: String, status: ErmaoShared.ManagedReadingStatus) {
+    func setReadingStatus(resourceID: String, status: ErmaoShared.ManagedReadingStatus) {
         run(.readingStatusUpdated) { [repository, context] in
-            try await repository.setReadingStatus(context: context, volumeId: volumeID, status: status)
+            try await repository.setReadingStatus(context: context, resourceId: resourceID, status: status)
         }
     }
 
@@ -284,8 +232,7 @@ final class WorkManagementStore: ObservableObject {
     ) {
         runValue {
             let result = try await operation()
-            let outcome: ErmaoShared.WorkMutationOutcome = try Self.value(result)
-            self.lastOutcome = outcome
+            let _: ErmaoShared.BookMutationOutcome = try Self.value(result)
             self.completedAction = action
         }
     }

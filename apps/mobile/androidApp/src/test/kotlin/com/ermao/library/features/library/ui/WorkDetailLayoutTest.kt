@@ -1,7 +1,7 @@
 package com.ermao.library.features.library.ui
 
 import androidx.compose.ui.unit.dp
-import com.ermao.library.features.content.model.VolumeContent
+import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
@@ -68,39 +68,38 @@ class WorkDetailLayoutTest {
 
     @Test
     fun audiobookActionStaysUnavailableUntilTheNowPlayingDestinationExists() {
-        val audiobook = testVolume(readerType = "audio", format = "M4B", progressPercent = 12)
+        val audiobook = testResource(readerType = "audio", format = "M4B", progressPercent = 12)
 
         assertEquals(
             WorkDetailPrimaryActionIntent.Unavailable,
-            workDetailPrimaryActionPresentation("AUDIOBOOK", audiobook, download = null).intent,
+            workDetailPrimaryActionPresentation(audiobook, download = null).intent,
         )
         assertFalse(
-            workDetailPrimaryActionPresentation("AUDIOBOOK", audiobook, download = null).enabled,
+            workDetailPrimaryActionPresentation(audiobook, download = null).enabled,
         )
     }
 
     @Test
     fun reflowableProgressDoesNotPretendThePublicationArtifactIsDownloaded() {
-        val currentVolume = testVolume(
+        val currentResource = testResource(
             readerType = "reflowable",
             format = "EPUB",
             progressPercent = 34,
         )
 
-        val volume = workDetailVolumePresentation(
-            volume = currentVolume,
+        val resource = workDetailVolumePresentation(
+            resource = currentResource,
             selected = true,
             download = null,
         )
         val primaryAction = workDetailPrimaryActionPresentation(
-            mediaKind = "EBOOK",
-            selectedVolume = currentVolume,
+            selectedResource = currentResource,
             download = null,
         )
 
-        assertTrue(volume.selected)
-        assertEquals(WorkDetailVolumeReadingState.Reading, volume.readingState)
-        assertEquals(WorkDetailVolumeDownloadState.NotDownloaded, volume.downloadState)
+        assertTrue(resource.selected)
+        assertEquals(WorkDetailVolumeReadingState.Reading, resource.readingState)
+        assertEquals(WorkDetailVolumeDownloadState.NotDownloaded, resource.downloadState)
         assertEquals(3.dp, WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH)
         assertEquals(WorkDetailPrimaryActionIntent.DownloadThenRead, primaryAction.intent)
         assertEquals(WorkDetailPrimaryActionLabel.DownloadToRead, primaryAction.label)
@@ -109,23 +108,22 @@ class WorkDetailLayoutTest {
 
     @Test
     fun onlyACompletedReflowableArtifactChangesThePrimaryIntentToReader() {
-        val volume = testVolume(readerType = "reflowable", format = "EPUB", progressPercent = 34)
-        val completedDownload = completedDownload(volume)
+        val resource = testResource(readerType = "reflowable", format = "EPUB", progressPercent = 34)
+        val completedDownload = completedDownload(resource)
 
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
-            workDetailPrimaryActionPresentation("EBOOK", volume, completedDownload).intent,
+            workDetailPrimaryActionPresentation(resource, completedDownload).intent,
         )
         assertEquals(
             WorkDetailPrimaryActionLabel.ContinueReading,
-            workDetailPrimaryActionPresentation("EBOOK", volume, completedDownload).label,
+            workDetailPrimaryActionPresentation(resource, completedDownload).label,
         )
 
         assertEquals(
             WorkDetailPrimaryActionIntent.DownloadThenRead,
             workDetailPrimaryActionPresentation(
-                "EBOOK",
-                volume.copy(id = "different-volume"),
+                resource.copy(id = "different-resource"),
                 completedDownload,
             ).intent,
         )
@@ -136,16 +134,14 @@ class WorkDetailLayoutTest {
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
-                mediaKind = "COMIC",
-                selectedVolume = testVolume(readerType = "comic", format = "CBZ", progressPercent = null),
+                selectedResource = testResource(readerType = "comic", format = "CBZ", progressPercent = null),
                 download = null,
             ).intent,
         )
         assertEquals(
             WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
-                mediaKind = "EBOOK",
-                selectedVolume = testVolume(readerType = "pdf", format = "PDF", progressPercent = null),
+                selectedResource = testResource(readerType = "pdf", format = "PDF", progressPercent = null),
                 download = null,
             ).intent,
         )
@@ -167,8 +163,8 @@ class WorkDetailLayoutTest {
 
     @Test
     fun controlDownloadStateReflectsTheSelectedVolumeAndKeepsCompletedRemovalExplicit() {
-        val volume = testVolume(readerType = "reflowable", format = "EPUB", progressPercent = 34)
-        val completed = completedDownload(volume)
+        val resource = testResource(readerType = "reflowable", format = "EPUB", progressPercent = 34)
+        val completed = completedDownload(resource)
         val paused = completed.copy(
             status = AndroidDownloadStatus.Paused,
             verified = false,
@@ -184,9 +180,9 @@ class WorkDetailLayoutTest {
 
     @Test
     fun readingSummaryStacksBeforeLargeTextCanTruncateItsPosition() {
-        assertEquals(WorkDetailSummaryLayout.Inline, workDetailSummaryLayout(fontScale = 1.49f))
-        assertEquals(WorkDetailSummaryLayout.Stacked, workDetailSummaryLayout(fontScale = 1.5f))
-        assertEquals(WorkDetailSummaryLayout.Stacked, workDetailSummaryLayout(fontScale = 2f))
+        assertEquals(BookDetailSummaryLayout.Inline, workDetailSummaryLayout(fontScale = 1.49f))
+        assertEquals(BookDetailSummaryLayout.Stacked, workDetailSummaryLayout(fontScale = 1.5f))
+        assertEquals(BookDetailSummaryLayout.Stacked, workDetailSummaryLayout(fontScale = 2f))
     }
 
     @Test
@@ -398,14 +394,14 @@ class WorkDetailLayoutTest {
         )
     }
 
-    private fun testVolume(
+    private fun testResource(
         readerType: String,
         format: String,
         progressPercent: Int?,
         readable: Boolean = true,
-    ): VolumeContent = VolumeContent(
-        id = "volume-2",
-        title = "Volume Two",
+    ): ResourceContent = ResourceContent(
+        id = "resource-2",
+        title = "Resource Two",
         format = format,
         readerType = readerType,
         progressPercent = progressPercent,
@@ -413,18 +409,19 @@ class WorkDetailLayoutTest {
         selected = true,
     )
 
-    private fun completedDownload(volume: VolumeContent): AndroidDownloadRecord = AndroidDownloadRecord(
+    private fun completedDownload(resource: ResourceContent): AndroidDownloadRecord = AndroidDownloadRecord(
         taskId = "task-2",
         namespace = AndroidDownloadNamespace("server", "user", 1),
-        workId = "work-1",
-        workTitle = "Work",
+        bookId = "book-1",
+        bookTitle = "Book",
         author = "Author",
         coverUrl = "",
-        volumeId = volume.id,
-        volumeTitle = volume.title,
-        format = volume.format,
-        readerType = volume.readerType,
-        sourceApiPath = "/api/volumes/${volume.id}/file",
+        resourceId = resource.id,
+        resourceTitle = resource.title,
+        format = resource.format,
+        readerType = resource.readerType,
+        assetId = resource.assets.firstOrNull()?.id ?: "asset-${resource.id}",
+        sourceApiPath = "/api/resources/${resource.id}/asset",
         sourceMimeType = "application/octet-stream",
         expectedBytes = 10,
         transferredBytes = 10,

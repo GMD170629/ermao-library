@@ -11,16 +11,14 @@ import { Progress } from '../../components/ui/progress';
 import { useI18n } from '../../i18n/provider';
 import { useAudioPlayback } from '../audio/audio-playback-provider';
 import { UploadBookDialog } from '../library/public';
-import { mapContinueReadingItem, type ContinueReadingItem } from './model/continue-reading';
+import {
+  fetchDashboardContinueReading,
+  fetchDashboardRecentBooks,
+  fetchDashboardRecentReading
+} from './api/dashboard';
+import type { ContinueReadingItem } from './model/continue-reading';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-async function api<T>(path: string): Promise<T> {
-  const response = await fetch(path);
-  const payload = (await response.json()) as { ok: boolean; data?: T; error?: { message: string } };
-  if (!payload.ok || !payload.data) throw new Error(payload.error?.message ?? '读取数据失败');
-  return payload.data;
-}
 
 function shortReadTime(value: string | null, locale: string, t: (source: string, values?: Record<string, string>) => string) {
   if (!value) return '';
@@ -52,16 +50,16 @@ export function DashboardPage() {
   useEffect(() => {
     let active = true;
     Promise.allSettled([
-      api<{ item: unknown }>('/api/dashboard/continue-reading'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-reading?limit=10'),
-      api<{ books: BookshelfItem[] }>('/api/dashboard/recent-books?limit=10')
+      fetchDashboardContinueReading(),
+      fetchDashboardRecentReading(),
+      fetchDashboardRecentBooks()
     ]).then(([continueResult, readingResult, addedResult]) => {
       if (!active) return;
-      if (continueResult.status === 'fulfilled') setContinueItem(mapContinueReadingItem(continueResult.value.item));
+      if (continueResult.status === 'fulfilled') setContinueItem(continueResult.value);
       if (readingResult.status === 'fulfilled') {
-        setRecentReading(readingResult.value.books.slice(0, 10));
+        setRecentReading(readingResult.value.slice(0, 10));
       }
-      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.books.slice(0, 10));
+      if (addedResult.status === 'fulfilled') setRecentBooks(addedResult.value.slice(0, 10));
 
       const failure = [continueResult, readingResult, addedResult].find((result) => result.status === 'rejected');
       setError(failure?.status === 'rejected' ? (failure.reason instanceof Error ? failure.reason.message : '部分书库内容暂时无法读取') : '');
@@ -108,7 +106,7 @@ export function DashboardPage() {
         ) : continueItem ? (
           <div className="mt-4 flex min-h-[248px] flex-col gap-6 rounded-2xl bg-[#F4F1EE] p-4 sm:flex-row sm:items-center lg:px-6">
             <Link
-              href={`/works/${continueItem.workId}`}
+              href={`/books/${continueItem.bookId}`}
               aria-label={i18nAttribute("查看《{value0}》详情", { value0: continueItem.title })}
               className="shrink-0 rounded-[9px] outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
             >
@@ -116,7 +114,7 @@ export function DashboardPage() {
             </Link>
             <div className="min-w-0 flex-1 sm:pl-3">
               <h3 data-i18n-skip className="line-clamp-2 text-[27px] font-semibold tracking-[-0.025em] text-[#22201E]">
-                <Link href={`/works/${continueItem.workId}`} className="rounded-sm transition hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]">
+                <Link href={`/books/${continueItem.bookId}`} className="rounded-sm transition hover:text-[#EF4D2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6B7A5]">
                   {continueItem.title}
                 </Link>
               </h3>
@@ -130,25 +128,25 @@ export function DashboardPage() {
             <div className="flex shrink-0 flex-col items-start gap-3 sm:items-center sm:px-3">
               {(() => {
                 const readerType = continueItem.readerType;
-                const volumeId = continueItem.resumeVolumeId;
-                const href = volumeId ? (readerType === 'audio' ? `/listen/${encodeURIComponent(volumeId)}` : `/reader/${encodeURIComponent(volumeId)}`) : null;
+                const resourceId = continueItem.resumeResourceId;
+                const href = resourceId ? (readerType === 'audio' ? `/listen/${encodeURIComponent(resourceId)}` : `/reader/${encodeURIComponent(resourceId)}`) : null;
                 const label = readerType === 'audio' ? '继续听' : readerType === 'comic' ? '继续看' : '继续阅读';
                 const ContinueIcon = readerType === 'audio' ? Headphones : readerType === 'comic' ? Images : BookOpen;
                 return <button
                 type="button"
-                disabled={!volumeId}
+                disabled={!resourceId}
                 onClick={() => {
-                  if (!volumeId) return;
+                  if (!resourceId) return;
                   if (readerType === 'audio') {
-                    void audioPlayback.loadVolume(volumeId, {
+                    void audioPlayback.loadResource(resourceId, {
                       autoplay: true,
                       summary: {
-                        volumeId,
-                        workId: continueItem.workId,
+                        resourceId,
+                        bookId: continueItem.bookId,
                         title: continueItem.title,
                         author: continueItem.author === '未知作者' ? null : continueItem.author,
                         coverUrl: continueItem.coverUrl,
-                        volumeTitle: continueItem.volumeTitle,
+                        resourceTitle: continueItem.resourceTitle,
                         narrator: continueItem.narrator,
                         chapterTitle: continueItem.chapter
                       }
@@ -181,7 +179,7 @@ export function DashboardPage() {
         loading={loading}
         emptyText={i18nAttribute("最近阅读的图书会显示在这里。")}
         onMore={() => router.push('/library?sort=recent_read')}
-        onOpen={(book) => router.push(`/works/${book.id}`)}
+        onOpen={(book) => router.push(`/books/${book.id}`)}
       />
 
       <BookSection
@@ -190,7 +188,7 @@ export function DashboardPage() {
         loading={loading}
         emptyText={i18nAttribute("还没有加入图书，点击右上角“+”上传第一本读物。")}
         onMore={() => router.push('/library?sort=recent_import')}
-        onOpen={(book) => router.push(`/works/${book.id}`)}
+        onOpen={(book) => router.push(`/books/${book.id}`)}
       />
     </div>
   );

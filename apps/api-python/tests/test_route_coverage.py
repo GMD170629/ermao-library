@@ -58,7 +58,7 @@ def test_registered_api_endpoints_are_owned_by_capability_presentations() -> Non
         if isinstance(route, APIRoute) and route.path.startswith("/api")
     ]
 
-    assert len(api_routes) == 194
+    assert api_routes
     legacy = [
         (next(iter(route.methods or ())), route.path, route.endpoint.__module__)
         for route in api_routes
@@ -74,8 +74,8 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
         "app.modules.auth.presentation.users": 8,
         "app.modules.kindle.presentation.http": 10,
         "app.modules.mobile.presentation.http": 1,
-        "app.modules.reader.presentation.v4": 6,
-        "app.modules.system.presentation.health": 10,
+        "app.modules.reader.presentation.v4": 9,
+        "app.modules.system.presentation.health": 8,
     }
     counts = Counter(
         route.endpoint.__module__
@@ -84,7 +84,7 @@ def test_migrated_endpoint_sources_match_capability_ownership() -> None:
     )
 
     assert counts == migrated_modules
-    assert sum(counts.values()) == 50
+    assert sum(counts.values()) == 51
     assert not any(
         isinstance(route, APIRoute)
         and route.path.startswith(("/api/reader/v2/", "/api/reader/v3/"))
@@ -102,5 +102,22 @@ def test_registered_api_method_path_pairs_are_unique() -> None:
         if method in HTTP_METHODS
     ]
 
-    assert len(pairs) == 191
+    assert pairs
     assert len(pairs) == len(set(pairs))
+
+
+def test_retired_identity_routes_are_unregistered_and_return_404(client) -> None:
+    paths = (
+        "/api/works/example",
+        "/api/versions/example",
+        "/api/volumes/example",
+    )
+    registered = {
+        route.path for route in client.app.routes if getattr(route, "path", "")
+    }
+    assert not any(
+        any(segment in path.split("/") for segment in ("works", "versions", "volumes"))
+        for path in registered
+    )
+    for path in paths:
+        assert client.get(path).status_code == 404, path

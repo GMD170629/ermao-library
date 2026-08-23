@@ -20,7 +20,7 @@
       },
       {
         "type": "tips",
-        "helpText": "共享数据目录“/shuku.monitor”会挂载为应用的 /monitor 扫描目录。升级后请使用所选独立端口访问应用。"
+        "helpText": "共享书库目录“/shuku.library”会挂载为应用的 /libraries/books 书库根目录。升级后请使用所选独立端口访问应用。"
       }
     ]
   }

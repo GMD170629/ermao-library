@@ -1,4 +1,4 @@
-"""Typed MediaVersion-to-Volume joins for library adapters."""
+"""Typed Book/ReadableResource joins used by library adapters."""
 
 from __future__ import annotations
 
@@ -7,100 +7,126 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryFile,
-    LibraryMediaVersion,
-    LibraryReadingUnit,
-    LibraryVolume,
+from app.models import (
+    LibraryBook,
+    LibraryReadableResource,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+    ReadableResourceNavigationUnit,
 )
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.books import entity_record
 
 
-def get_volume_context(db: Session, volume_id: str) -> dict[str, Any] | None:
+def get_resource_context(db: Session, resource_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(LibraryVolume.id == volume_id)
+        select(LibraryReadableResource, LibraryBook)
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+        .where(LibraryReadableResource.id == resource_id)
     ).first()
     if row is None:
         return None
-    volume, media_version = row
-    payload = entity_as_legacy_dict(volume)
+    resource, book = row
+    payload = entity_record(resource)
     payload.update(
-        workId=media_version.work_id,
-        mediaKind=media_version.media_kind,
-        mediaVersionId=media_version.id,
+        bookId=book.id,
+        mediaKind=resource.media_kind,
+        resourceId=resource.id,
     )
     return payload
 
 
 def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryReadingUnit, LibraryVolume, LibraryMediaVersion)
-        .join(LibraryVolume, LibraryVolume.id == LibraryReadingUnit.volume_id)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+        select(
+            ReadableResourceNavigationUnit,
+            LibraryReadableResource,
+            LibraryBook,
         )
-        .where(LibraryReadingUnit.id == unit_id)
+        .join(
+            LibraryReadableResource,
+            LibraryReadableResource.id == ReadableResourceNavigationUnit.resource_id,
+        )
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+        .where(ReadableResourceNavigationUnit.id == unit_id)
     ).first()
     if row is None:
         return None
-    unit, volume, media_version = row
-    payload = entity_as_legacy_dict(unit)
+    unit, resource, book = row
+    payload = entity_record(unit)
     payload.update(
-        workId=media_version.work_id,
-        mediaKind=media_version.media_kind,
-        mediaVersionId=media_version.id,
-        format=volume.format,
+        bookId=book.id,
+        mediaKind=resource.media_kind,
+        resourceId=resource.id,
+        format=resource.format,
     )
     return payload
 
 
-def list_file_paths_for_work(db: Session, work_id: str) -> list[str]:
+def list_source_paths_for_book(db: Session, book_id: str) -> list[str]:
     paths = db.scalars(
-        select(LibraryFile.path)
-        .join(LibraryVolume, LibraryVolume.id == LibraryFile.volume_id)
+        select(LibrarySourceNode.relative_path)
         .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
+            LibraryReadableResource,
+            LibraryReadableResource.source_node_id == LibrarySourceNode.id,
         )
-        .where(LibraryMediaVersion.work_id == work_id)
+        .where(LibraryReadableResource.book_id == book_id)
+        .order_by(LibrarySourceNode.relative_path.asc())
     ).all()
-    return [str(path) for path in paths if path]
+    return [str(path) for path in paths]
 
 
-def get_volume_for_work(
-    db: Session, *, volume_id: str, work_id: str
+def get_resource_for_book(
+    db: Session, *, resource_id: str, book_id: str
 ) -> dict[str, Any] | None:
     row = db.execute(
-        select(LibraryVolume, LibraryMediaVersion)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
+        select(LibraryReadableResource, LibraryBook)
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
         .where(
-            LibraryVolume.id == volume_id,
-            LibraryMediaVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
+            LibraryReadableResource.id == resource_id,
+            LibraryReadableResource.book_id == book_id,
+            LibraryReadableResource.enablement_state == "ENABLED",
         )
     ).first()
     if row is None:
         return None
-    volume, media_version = row
-    payload = entity_as_legacy_dict(volume)
+    resource, book = row
+    payload = entity_record(resource)
     payload.update(
-        sourceWorkId=media_version.work_id,
-        sourceFormat=volume.format,
-        mediaVersionId=media_version.id,
+        sourceBookId=book.id,
+        sourceFormat=resource.format,
+        resourceId=resource.id,
     )
     return payload
 
 
-def get_volume_belonging_to_work(
-    db: Session, *, volume_id: str, work_id: str
+def get_resource_belonging_to_book(
+    db: Session, *, resource_id: str, book_id: str
 ) -> dict[str, Any] | None:
-    return get_volume_for_work(db, volume_id=volume_id, work_id=work_id)
+    return get_resource_for_book(db, resource_id=resource_id, book_id=book_id)
+
+
+def list_asset_records_for_resource(
+    db: Session, resource_id: str
+) -> list[dict[str, Any]]:
+    assets = db.scalars(
+        select(LibraryResourceAsset)
+        .where(
+            LibraryResourceAsset.resource_id == resource_id,
+            LibraryResourceAsset.import_state == "READY",
+        )
+        .order_by(
+            LibraryResourceAsset.sequence_index.asc(),
+            LibraryResourceAsset.id.asc(),
+        )
+    ).all()
+    return [entity_record(asset) for asset in assets]
+
+
+__all__ = [
+    "get_resource_belonging_to_book",
+    "get_resource_context",
+    "get_resource_for_book",
+    "get_unit_context",
+    "list_asset_records_for_resource",
+    "list_source_paths_for_book",
+]

@@ -6,11 +6,13 @@ import com.ermao.library.shared.core.time.currentEpochMillis
 import com.ermao.library.shared.modules.downloads.domain.CompletedDownloadArtifact
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
+import com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
+import com.ermao.library.shared.modules.downloads.domain.transition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
-enum class DownloadVolumeObservationKind {
+enum class DownloadResourceObservationKind {
     Preparing,
     TaskCreated,
     Downloading,
@@ -20,10 +22,9 @@ enum class DownloadVolumeObservationKind {
     Cancelled,
 }
 
-/** Flat platform boundary for one volume's foreground download-to-reader handoff. */
-data class DownloadVolumeObservation(
-    val volumeId: String,
-    val kind: DownloadVolumeObservationKind,
+data class DownloadResourceObservation(
+    val resourceId: String,
+    val kind: DownloadResourceObservationKind,
     val task: DownloadTask? = null,
     val transferredBytes: Long = 0,
     val totalBytes: Long? = null,
@@ -31,29 +32,26 @@ data class DownloadVolumeObservation(
     val error: AppError? = null,
 ) {
     init {
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
         require(transferredBytes >= 0)
         require(totalBytes == null || totalBytes > 0)
         require(totalBytes == null || transferredBytes <= totalBytes)
-        require((kind == DownloadVolumeObservationKind.ReadyToOpen) == (artifact != null))
-        require((kind == DownloadVolumeObservationKind.Failed) == (error != null))
+        require((kind == DownloadResourceObservationKind.ReadyToOpen) == (artifact != null))
+        require((kind == DownloadResourceObservationKind.Failed) == (error != null))
     }
 }
 
-fun interface DownloadVolumeObserver {
-    fun onChanged(observation: DownloadVolumeObservation)
+fun interface DownloadResourceObserver {
+    fun onChanged(observation: DownloadResourceObservation)
 }
 
-sealed interface DownloadVolumeResult {
-    data class ReadyToOpen(val artifact: CompletedDownloadArtifact) : DownloadVolumeResult
-    data class Failure(val error: AppError) : DownloadVolumeResult
+sealed interface DownloadResourceResult {
+    data class ReadyToOpen(val artifact: CompletedDownloadArtifact) : DownloadResourceResult
+    data class Failure(val error: AppError) : DownloadResourceResult
 }
 
-/**
- * Executes the complete foreground intent without owning platform navigation.
- * ReadyToOpen is emitted only after the sink commit and completed artifact persistence.
- */
-class DownloadVolumeRuntime(
+/** Executes one resource's foreground download and emits ReadyToOpen after atomic persistence. */
+class DownloadResourceRuntime(
     catalog: DownloadCatalogRepository,
     private val gateway: DownloadsGateway,
     private val nowEpochMillis: () -> Long = ::currentEpochMillis,
@@ -62,35 +60,36 @@ class DownloadVolumeRuntime(
 
     suspend fun downloadThenOpen(
         context: DownloadRequestContext,
-        volumeId: String,
+        resourceId: String,
         taskId: String,
         sink: DownloadByteSink,
-        observer: DownloadVolumeObserver? = null,
-    ): DownloadVolumeResult {
-        require(volumeId.isNotBlank())
+        observer: DownloadResourceObserver? = null,
+    ): DownloadResourceResult {
+        require(resourceId.isNotBlank())
         require(taskId.isNotBlank())
-        observer.emit(DownloadVolumeObservation(volumeId, DownloadVolumeObservationKind.Preparing))
+        observer.emit(DownloadResourceObservation(resourceId, DownloadResourceObservationKind.Preparing))
         var task: DownloadTask? = null
         try {
-            val descriptor = when (val bootstrap = gateway.load(context, volumeId)) {
+            val descriptor = when (val bootstrap = gateway.load(context, resourceId)) {
                 is DownloadBootstrapResult.Success -> bootstrap.bootstrap.descriptor
                 is DownloadBootstrapResult.Failure -> {
                     observer.emit(
-                        DownloadVolumeObservation(
-                            volumeId = volumeId,
-                            kind = DownloadVolumeObservationKind.Failed,
+                        DownloadResourceObservation(
+                            resourceId = resourceId,
+                            kind = DownloadResourceObservationKind.Failed,
                             error = bootstrap.error,
                         ),
                     )
-                    return DownloadVolumeResult.Failure(bootstrap.error)
+                    return DownloadResourceResult.Failure(bootstrap.error)
                 }
             }
+            require(descriptor.identity.resourceId == resourceId) { "Download bootstrap resource does not match request" }
             task = DownloadTask(taskId, descriptor)
             runtime.saveTask(task)
-            observer.emit(task.observation(DownloadVolumeObservationKind.TaskCreated))
+            observer.emit(task.observation(DownloadResourceObservationKind.TaskCreated))
             val downloadingTask = runtime.transitionTask(context.namespace, taskId, DownloadTaskEvent.Start)
             task = downloadingTask
-            observer.emit(downloadingTask.observation(DownloadVolumeObservationKind.Downloading))
+            observer.emit(downloadingTask.observation(DownloadResourceObservationKind.Downloading))
 
             return when (val transfer = gateway.transfer(
                 context = context,
@@ -99,7 +98,7 @@ class DownloadVolumeRuntime(
                 progressObserver = DownloadProgressObserver { transferred, total ->
                     observer.emit(
                         downloadingTask.observation(
-                            kind = DownloadVolumeObservationKind.Progress,
+                            kind = DownloadResourceObservationKind.Progress,
                             transferredBytes = transferred,
                             totalBytes = total,
                         ),
@@ -120,13 +119,13 @@ class DownloadVolumeRuntime(
                     )
                     observer.emit(
                         task.observation(
-                            kind = DownloadVolumeObservationKind.ReadyToOpen,
+                            kind = DownloadResourceObservationKind.ReadyToOpen,
                             transferredBytes = artifact.verifiedBytes,
                             totalBytes = artifact.verifiedBytes,
                             artifact = artifact,
                         ),
                     )
-                    DownloadVolumeResult.ReadyToOpen(artifact)
+                    DownloadResourceResult.ReadyToOpen(artifact)
                 }
                 is DownloadTransferResult.Failure -> {
                     task = runtime.transitionTask(
@@ -137,8 +136,8 @@ class DownloadVolumeRuntime(
                             retryable = transfer.error.kind.isRetryableDownloadFailure(),
                         ),
                     )
-                    observer.emit(task.observation(DownloadVolumeObservationKind.Failed, error = transfer.error))
-                    DownloadVolumeResult.Failure(transfer.error)
+                    observer.emit(task.observation(DownloadResourceObservationKind.Failed, error = transfer.error))
+                    DownloadResourceResult.Failure(transfer.error)
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -149,9 +148,9 @@ class DownloadVolumeRuntime(
                         task = runtime.transitionTask(context.namespace, taskId, DownloadTaskEvent.Cancel)
                     }
                 }
-                observer.emit((task ?: activeTask).observation(DownloadVolumeObservationKind.Cancelled))
+                observer.emit((task ?: activeTask).observation(DownloadResourceObservationKind.Cancelled))
             } else {
-                observer.emit(DownloadVolumeObservation(volumeId, DownloadVolumeObservationKind.Cancelled))
+                observer.emit(DownloadResourceObservation(resourceId, DownloadResourceObservationKind.Cancelled))
             }
             throw cancelled
         }
@@ -159,13 +158,13 @@ class DownloadVolumeRuntime(
 }
 
 private fun DownloadTask.observation(
-    kind: DownloadVolumeObservationKind,
+    kind: DownloadResourceObservationKind,
     transferredBytes: Long = this.transferredBytes,
     totalBytes: Long = descriptor.source.totalBytes,
     artifact: CompletedDownloadArtifact? = null,
     error: AppError? = null,
-) = DownloadVolumeObservation(
-    volumeId = descriptor.identity.volumeId,
+) = DownloadResourceObservation(
+    resourceId = descriptor.identity.resourceId,
     kind = kind,
     task = this,
     transferredBytes = transferredBytes,
@@ -174,7 +173,7 @@ private fun DownloadTask.observation(
     error = error,
 )
 
-private fun DownloadVolumeObserver?.emit(observation: DownloadVolumeObservation) {
+private fun DownloadResourceObserver?.emit(observation: DownloadResourceObservation) {
     this?.onChanged(observation)
 }
 

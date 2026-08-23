@@ -23,12 +23,8 @@ export {
   smartFilterConditionComplete
 } from './model/smart-filter-rules';
 export type {
-  BookshelfWorkSummary,
-  LibraryWorkSummary,
-  ManagementWorkSummary
-} from './api/works';
+  BookshelfBookSummary,
+  LibraryBookSummary,
+  ManagementBookSummary
+} from './api/books';
 export { mediaKindsLabel, orderedMediaKinds } from './model/media-kind-label';
-export {
-  type MobileDeleteSwipeController,
-  useMobileDeleteSwipe
-} from './ui/use-mobile-delete-swipe';

@@ -8,7 +8,7 @@ from pydantic import Field
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.contracts.metadata_writeback import MetadataWritebackOperationContract
-from app.modules.library.public import WorkView
+from app.modules.library.public import BookView
 
 
 class OrganizeRules(HttpContractModel):
@@ -74,7 +74,7 @@ class OrganizeCandidate(HttpContractModel):
 class OrganizeCandidates(HttpContractModel):
     total: int
     reason_counts: dict[str, int] = Field(alias="reasonCounts")
-    works: list[OrganizeCandidate]
+    books: list[OrganizeCandidate]
 
 
 class OrganizeCandidatesPayload(HttpContractModel):
@@ -82,7 +82,7 @@ class OrganizeCandidatesPayload(HttpContractModel):
 
 
 class OrganizeRunScope(HttpContractModel):
-    work_ids: list[str] = Field(alias="workIds")
+    book_ids: list[str] = Field(alias="bookIds")
     rules: OrganizeRules
 
 
@@ -107,7 +107,7 @@ class OrganizeRunsPayload(HttpContractModel):
 
 class DeletedOrganizeJobPayload(HttpContractModel):
     id: str
-    work_id: str = Field(alias="workId")
+    book_id: str = Field(alias="bookId")
     deleted: Literal[True]
 
 
@@ -124,8 +124,7 @@ class ProviderExecution(HttpContractModel):
 class OrganizeJob(HttpContractModel):
     id: str
     run_id: str | None = Field(alias="runId")
-    volume_id: str | None = Field(alias="volumeId")
-    media_version_id: str | None = Field(default=None, alias="mediaVersionId")
+    resource_id: str | None = Field(default=None, alias="resourceId")
     trigger: str
     status: str
     status_category: Literal["SUCCESS", "FAILED", "RECOGNIZING", "WAITING"] = Field(
@@ -148,7 +147,7 @@ class OrganizeJob(HttpContractModel):
     finished_at: datetime | None = Field(alias="finishedAt")
     created_at: datetime | None = Field(alias="createdAt")
     updated_at: datetime | None = Field(alias="updatedAt")
-    book: WorkView
+    book: BookView
 
 
 class OrganizeJobListBook(HttpContractModel):
@@ -191,7 +190,7 @@ class OrganizeJobsPayload(HttpContractModel):
 
 class PendingOrganizeJobsPayload(HttpContractModel):
     jobs: list[OrganizeJob]
-    books: list[WorkView]
+    books: list[BookView]
     total: int
 
 

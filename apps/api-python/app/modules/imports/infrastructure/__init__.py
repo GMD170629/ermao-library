@@ -1,1 +1,1 @@
-"""ORM persistence adapters for import pipeline and monitor folders."""
+"""ORM persistence adapters for import pipeline and libraries."""

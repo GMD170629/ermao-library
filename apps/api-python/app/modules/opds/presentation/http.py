@@ -56,10 +56,10 @@ class OpdsHttpDependencies:
     progression: OpdsProgressionPort
     default_page_size: int = 50
     max_page_size: int = 100
-    work_cover: Callable[[str, str, Request], Response] | None = None
-    volume_cover: Callable[[str, str, Request], Response] | None = None
-    volume_file: Callable[[str, str, Request], Response] | None = None
-    volume_page: Callable[[str, PsePageRequestDto, Request], Response] | None = None
+    book_cover: Callable[[str, str, Request], Response] | None = None
+    resource_cover: Callable[[str, str, Request], Response] | None = None
+    resource_asset: Callable[[str, str, Request], Response] | None = None
+    resource_page: Callable[[str, PsePageRequestDto, Request], Response] | None = None
 
 
 def authentication_required_response(
@@ -281,8 +281,8 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             request=request,
         )
 
-    @router.get("/opds/v1.2/works")
-    def works(
+    @router.get("/opds/v1.2/books")
+    def books(
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
         page: Annotated[int, Query(ge=1)] = 1,
@@ -290,7 +290,7 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             int, Query(alias="pageSize", ge=1, le=100)
         ] = default_page_size,
     ) -> Response:
-        return section_feed("works", request, authorization, page, page_size)
+        return section_feed("books", request, authorization, page, page_size)
 
     @router.get("/opds/v1.2/recent")
     def recent(
@@ -303,13 +303,13 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
     ) -> Response:
         return section_feed("recent", request, authorization, page, page_size)
 
-    @router.get("/opds/v1.2/works/{work_id}")
-    def work(
-        work_id: str,
+    @router.get("/opds/v1.2/books/{book_id}")
+    def book(
+        book_id: str,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> Response:
-        return section_feed("work", request, authorization, 1, 100, work_id)
+        return section_feed("book", request, authorization, 1, 100, book_id)
 
     def facet_routes(kind: str) -> None:
         @router.get(f"/opds/v1.2/{kind}", name=f"opds_{kind}")
@@ -323,8 +323,8 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         ) -> Response:
             return section_feed(kind, request, authorization, page, page_size)
 
-        @router.get(f"/opds/v1.2/{kind}/{{facet_id}}", name=f"opds_{kind}_works")
-        def facet_works(
+        @router.get(f"/opds/v1.2/{kind}/{{facet_id}}", name=f"opds_{kind}_books")
+        def facet_books(
             facet_id: str,
             request: Request,
             authorization: Annotated[str | None, Header()] = None,
@@ -334,7 +334,7 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             ] = default_page_size,
         ) -> Response:
             return section_feed(
-                f"{kind}_works",
+                f"{kind}_books",
                 request,
                 authorization,
                 page,
@@ -388,9 +388,9 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             request=request,
         )
 
-    @router.get("/opds/v1.2/volumes/{volume_id}/progression")
+    @router.get("/opds/v1.2/resources/{resource_id}/progression")
     def get_progression(
-        volume_id: str,
+        resource_id: str,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> Response:
@@ -398,7 +398,7 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         if isinstance(actor, JSONResponse):
             return actor
         try:
-            document = dependencies.progression.get_progression(actor, volume_id)
+            document = dependencies.progression.get_progression(actor, resource_id)
         except (OpdsPublicationNotFound, OpdsProgressionIncorrectUser) as error:
             return _problem_for(error)
         if document is None:
@@ -414,9 +414,9 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             headers={"Cache-Control": "no-store", "Vary": "Authorization"},
         )
 
-    @router.put("/opds/v1.2/volumes/{volume_id}/progression")
+    @router.put("/opds/v1.2/resources/{resource_id}/progression")
     def put_progression(
-        volume_id: str,
+        resource_id: str,
         request: Request,
         document_payload: Annotated[object, Body()],
         authorization: Annotated[str | None, Header()] = None,
@@ -430,7 +430,7 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
             return _problem_for(OpdsProgressionInvalidPayload())
         try:
             result = dependencies.progression.update_progression(
-                actor, volume_id, document.to_dto()
+                actor, resource_id, document.to_dto()
             )
         except (
             OpdsPublicationNotFound,
@@ -462,48 +462,52 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         response.headers["Vary"] = "Authorization"
         return response
 
-    @router.api_route("/opds/v1.2/works/{work_id}/cover", methods=["GET", "HEAD"])
-    def work_cover(
-        work_id: str,
+    @router.api_route("/opds/v1.2/books/{book_id}/cover", methods=["GET", "HEAD"])
+    def book_cover(
+        book_id: str,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> Response:
         return resource_response(
-            actor_id(authorization, request), dependencies.work_cover, work_id, request
+            actor_id(authorization, request), dependencies.book_cover, book_id, request
         )
 
-    @router.api_route("/opds/v1.2/volumes/{volume_id}/cover", methods=["GET", "HEAD"])
-    def volume_cover(
-        volume_id: str,
+    @router.api_route(
+        "/opds/v1.2/resources/{resource_id}/cover", methods=["GET", "HEAD"]
+    )
+    def resource_cover(
+        resource_id: str,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> Response:
         return resource_response(
             actor_id(authorization, request),
-            dependencies.volume_cover,
-            volume_id,
-            request,
-        )
-
-    @router.api_route("/opds/v1.2/volumes/{volume_id}/file", methods=["GET", "HEAD"])
-    def volume_file(
-        volume_id: str,
-        request: Request,
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> Response:
-        return resource_response(
-            actor_id(authorization, request),
-            dependencies.volume_file,
-            volume_id,
+            dependencies.resource_cover,
+            resource_id,
             request,
         )
 
     @router.api_route(
-        "/opds/v1.2/volumes/{volume_id}/pages/{page_number}",
+        "/opds/v1.2/resources/{resource_id}/asset", methods=["GET", "HEAD"]
+    )
+    def resource_asset(
+        resource_id: str,
+        request: Request,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        return resource_response(
+            actor_id(authorization, request),
+            dependencies.resource_asset,
+            resource_id,
+            request,
+        )
+
+    @router.api_route(
+        "/opds/v1.2/resources/{resource_id}/pages/{page_number}",
         methods=["GET", "HEAD"],
     )
-    def volume_page(
-        volume_id: str,
+    def resource_page(
+        resource_id: str,
         page_number: int,
         request: Request,
         authorization: Annotated[str | None, Header()] = None,
@@ -512,18 +516,18 @@ def create_opds_router(dependencies: OpdsHttpDependencies) -> APIRouter:
         actor = actor_id(authorization, request)
         if isinstance(actor, JSONResponse):
             return actor
-        if dependencies.volume_page is None:
+        if dependencies.resource_page is None:
             return problem_response(404, "about:blank", "Page not found.")
         try:
             page_request = PsePageRequestDto(
                 actor_id=actor,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 page_number=page_number,
                 max_width=max_width,
             )
         except ValueError:
             return problem_response(404, "about:blank", "Page not found.")
-        response = dependencies.volume_page(actor, page_request, request)
+        response = dependencies.resource_page(actor, page_request, request)
         response.headers["Vary"] = "Authorization"
         return response
 

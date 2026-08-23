@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, cast
 
-from sqlalchemy import delete, insert, inspect, select, update
+from sqlalchemy import delete, insert, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Insert, Update
 
@@ -109,7 +111,7 @@ def prepare_download_task_update(
         "progress": ("progress", changes.progress),
         "remoteRef": ("remote_ref", changes.remote_ref),
     }
-    patch = {
+    patch: dict[str, object] = {
         attribute: value
         for field in changes.changed_fields
         if (mapped := field_mapping.get(field)) is not None
@@ -136,7 +138,7 @@ def prepare_download_task_delete(task_id: str) -> Delete:
 
 
 def execute_download_task_delete(db: Session, statement: Delete) -> bool:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return bool(result.rowcount)
 
 
@@ -144,12 +146,7 @@ class SqlAlchemyDownloadTaskRepository(DownloadTaskRepository):
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def _has_table(self) -> bool:
-        return inspect(self._session.connection()).has_table("DownloadTask")
-
     def list_recent(self, *, limit: int) -> list[DownloadTaskDTO]:
-        if not self._has_table():
-            return []
         tasks = self._session.scalars(
             select(DownloadTask)
             .order_by(DownloadTask.created_at.desc(), DownloadTask.id.desc())
@@ -158,8 +155,6 @@ class SqlAlchemyDownloadTaskRepository(DownloadTaskRepository):
         return [download_task_to_dto(task) for task in tasks]
 
     def get(self, task_id: str) -> DownloadTaskDTO | None:
-        if not self._has_table():
-            return None
         task = self._session.get(DownloadTask, task_id)
         return download_task_to_dto(task) if task is not None else None
 
@@ -173,8 +168,6 @@ class SqlAlchemyDownloadTaskRepository(DownloadTaskRepository):
         task_id: str,
         changes: UpdateDownloadTask,
     ) -> DownloadTaskDTO | None:
-        if not self._has_table():
-            return None
         statement = prepare_download_task_update(
             task_id,
             changes,
@@ -186,8 +179,6 @@ class SqlAlchemyDownloadTaskRepository(DownloadTaskRepository):
         return download_task_to_dto(task)
 
     def delete(self, task_id: str) -> bool:
-        if not self._has_table():
-            return False
         statement = prepare_download_task_delete(task_id)
         return execute_download_task_delete(self._session, statement)
 
@@ -199,8 +190,6 @@ def list_download_tasks_page(
     page_size: int,
     status: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
-    if not inspect(db.connection()).has_table("DownloadTask"):
-        return [], 0
     filters = []
     normalized = str(status or "").strip().lower()
     if normalized and normalized != "all":

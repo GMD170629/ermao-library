@@ -57,7 +57,7 @@ export type ReadiumAdapterOptions = {
   container: HTMLElement;
   initialHref?: string | null;
   onInputIntent?: ReaderAdapterInputHandler;
-  onEndOfVolume?: () => boolean | Promise<boolean>;
+  onEndOfResource?: () => boolean | Promise<boolean>;
 };
 
 function callbackNavigation(run: (callback: (ok: boolean) => void) => void) {
@@ -505,10 +505,10 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     if (!navigator) return this.failOperation(context, 'READIUM_NOT_READY');
     let accepted = false;
     if (command.type === 'next') {
-      if (!navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfVolume?.() ?? false);
+      if (!navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
       else {
         accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goForward(false, cb));
-        if (!accepted && !navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfVolume?.() ?? false);
+        if (!accepted && !navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
       }
     } else if (command.type === 'previous') {
       accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goBackward(false, cb));

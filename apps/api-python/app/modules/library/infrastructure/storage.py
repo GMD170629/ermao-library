@@ -1,54 +1,60 @@
-"""Volume-scoped library file, cover, and storage queries."""
+"""Book, ReadableResource, and ResourceAsset storage projections."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models.library import (
-    LibraryFile,
-    LibraryMediaVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
 )
-from app.modules.library.infrastructure.works import entity_as_legacy_dict
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
+from app.modules.library.infrastructure.books import entity_record
 
 
-def get_file(db: Session, file_id: str) -> dict[str, object] | None:
-    file = db.get(LibraryFile, file_id)
-    return entity_as_legacy_dict(file) if file is not None else None
+def get_asset(db: Session, asset_id: str) -> dict[str, object] | None:
+    asset = db.get(LibraryResourceAsset, asset_id)
+    return entity_record(asset) if asset is not None else None
 
 
-def first_file_for_volume(db: Session, *, volume_id: str) -> dict[str, object] | None:
-    file = db.scalar(
-        select(LibraryFile)
-        .where(LibraryFile.volume_id == volume_id)
+def first_asset_for_resource(
+    db: Session, *, resource_id: str
+) -> dict[str, object] | None:
+    asset = db.scalar(
+        select(LibraryResourceAsset)
+        .where(
+            LibraryResourceAsset.resource_id == resource_id,
+            LibraryResourceAsset.import_state == "READY",
+        )
         .order_by(
-            LibraryFile.sort_order.asc(),
-            LibraryFile.created_at.asc(),
-            LibraryFile.id.asc(),
+            LibraryResourceAsset.sequence_index.asc(),
+            LibraryResourceAsset.created_at.asc(),
+            LibraryResourceAsset.id.asc(),
         )
         .limit(1)
     )
-    return entity_as_legacy_dict(file) if file is not None else None
+    return entity_record(asset) if asset is not None else None
 
 
 def get_cover_record(
     db: Session,
     *,
-    work_id: str | None = None,
-    volume_id: str | None = None,
+    book_id: str | None = None,
+    resource_id: str | None = None,
 ) -> dict[str, object] | None:
-    record = (
-        db.get(LibraryWork, work_id)
-        if work_id is not None
-        else db.get(LibraryVolume, volume_id)
-        if volume_id is not None
-        else None
-    )
-    return entity_as_legacy_dict(record) if record is not None else None
+    record: LibraryBookMetadata | LibraryReadableResourceMetadata | None
+    if book_id is not None:
+        record = db.get(LibraryBookMetadata, book_id)
+    elif resource_id is not None:
+        record = db.get(LibraryReadableResourceMetadata, resource_id)
+    else:
+        record = None
+    return entity_record(record) if record is not None else None
 
 
 def update_cover_record(
@@ -60,117 +66,95 @@ def update_cover_record(
     cover_status: str | None,
     now: datetime,
 ) -> None:
-    model = LibraryWork if record_type == "LibraryWork" else LibraryVolume
     values: dict[str, object] = {"cover_path": cover_path, "updated_at": now}
     if cover_status is not None:
         values["cover_status"] = cover_status
-    db.execute(update(model).where(model.id == record_id).values(**values))
+    if record_type == "LibraryBook":
+        db.execute(
+            update(LibraryBookMetadata)
+            .where(LibraryBookMetadata.book_id == record_id)
+            .values(**values)
+        )
+    elif record_type == "LibraryReadableResource":
+        db.execute(
+            update(LibraryReadableResourceMetadata)
+            .where(LibraryReadableResourceMetadata.resource_id == record_id)
+            .values(**values)
+        )
+    else:
+        raise ValueError(f"Unsupported cover record type: {record_type}")
     db.flush()
 
 
-def preferred_work_cover_path(db: Session, work_id: str) -> str | None:
-    media_priority = case(
-        (LibraryMediaVersion.media_kind == "EBOOK", 0),
-        (LibraryMediaVersion.media_kind == "COMIC", 1),
-        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-        else_=3,
-    )
-    cover = db.scalar(
-        select(LibraryVolume.cover_path)
-        .join(
-            LibraryMediaVersion,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(
-            LibraryMediaVersion.work_id == work_id,
-            LibraryVolume.hidden.is_(False),
-            LibraryVolume.cover_path.is_not(None),
-            LibraryVolume.cover_path != "",
-        )
-        .order_by(
-            media_priority,
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
-        )
-        .limit(1)
-    )
-    return str(cover) if cover else None
+def preferred_book_cover_path(db: Session, book_id: str) -> str | None:
+    return SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
 
 
-def update_work_cover(
+def update_book_cover(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     cover_path: str,
     cover_status: str,
     now: datetime,
 ) -> bool:
     result = db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
+        update(LibraryBookMetadata)
+        .where(LibraryBookMetadata.book_id == book_id)
         .values(
             cover_path=cover_path,
             cover_status=cover_status,
             updated_at=now,
         )
     )
-    return bool(result.rowcount)
+    return bool(getattr(result, "rowcount", 0))
 
 
-def update_work_covers(
+def update_book_covers(
     db: Session,
     rows: tuple[dict[str, object], ...],
 ) -> int:
     if not rows:
         return 0
-    db.execute(update(LibraryWork), list(rows))
+    db.execute(update(LibraryBookMetadata), list(rows))
     return len(rows)
 
 
-def collect_storage_values(
-    db: Session, work_id: str
+def collect_book_storage_values(
+    db: Session, book_id: str
 ) -> tuple[
     str | None,
     list[dict[str, object]],
     list[dict[str, object]],
-    list[dict[str, object]],
 ]:
-    work_cover = db.scalar(
-        select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
+    book_cover = db.scalar(
+        select(LibraryBookMetadata.cover_path).where(
+            LibraryBookMetadata.book_id == book_id
+        )
     )
-    media_versions = db.scalars(
-        select(LibraryMediaVersion)
-        .where(LibraryMediaVersion.work_id == work_id)
+    resources = db.scalars(
+        select(LibraryReadableResource)
+        .where(LibraryReadableResource.book_id == book_id)
         .order_by(
-            LibraryMediaVersion.created_at.asc(),
-            LibraryMediaVersion.id.asc(),
+            LibraryReadableResource.created_at.asc(),
+            LibraryReadableResource.id.asc(),
         )
     ).all()
-    media_version_rows = [
-        entity_as_legacy_dict(media_version) for media_version in media_versions
-    ]
-    media_version_ids = [media_version.id for media_version in media_versions]
-    volumes = (
+    resource_ids = [resource.id for resource in resources]
+    assets = (
         db.scalars(
-            select(LibraryVolume).where(
-                LibraryVolume.media_version_id.in_(media_version_ids)
+            select(LibraryResourceAsset)
+            .where(LibraryResourceAsset.resource_id.in_(resource_ids))
+            .order_by(
+                LibraryResourceAsset.sequence_index.asc(),
+                LibraryResourceAsset.id.asc(),
             )
         ).all()
-        if media_version_ids
-        else []
-    )
-    volume_ids = [volume.id for volume in volumes]
-    files = (
-        db.scalars(
-            select(LibraryFile).where(LibraryFile.volume_id.in_(volume_ids))
-        ).all()
-        if volume_ids
+        if resource_ids
         else []
     )
     return (
-        work_cover,
-        media_version_rows,
-        [entity_as_legacy_dict(volume) for volume in volumes],
-        [entity_as_legacy_dict(file) for file in files],
+        book_cover,
+        [entity_record(resource) for resource in resources],
+        [entity_record(asset) for asset in assets],
     )

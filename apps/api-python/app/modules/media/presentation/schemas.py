@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from pydantic import Field
 
-from app.contracts.http import HttpContractModel
+from app.contracts.http import HttpContractModel, SuccessEnvelope
 
 
-class MediaFileResponse(Response):
+class MediaAssetResponse(Response):
     media_type = "application/octet-stream"
 
 
@@ -17,18 +17,10 @@ class MediaImageResponse(Response):
     media_type = "image/jpeg"
 
 
-class MediaArchiveResponse(FileResponse):
-    media_type = "application/zip"
-
-
-class VolumeArchiveRequest(HttpContractModel):
-    volume_ids: list[str] = Field(alias="volumeIds", min_length=1)
-
-
-class VolumePage(HttpContractModel):
+class ResourcePage(HttpContractModel):
     id: str
-    volume_id: str = Field(alias="volumeId")
-    file_id: str | None = Field(default=None, alias="fileId")
+    resource_id: str = Field(alias="resourceId")
+    asset_id: str | None = Field(default=None, alias="assetId")
     unit_type: str = Field(alias="unitType")
     title: str | None = None
     href: str | None = None
@@ -42,11 +34,20 @@ class VolumePage(HttpContractModel):
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
 
 
-class VolumePagesPayload(HttpContractModel):
-    pages: list[VolumePage]
+class ResourcePagesPayload(HttpContractModel):
+    pages: list[ResourcePage]
     total: int = Field(ge=0)
 
 
-class VolumePagesResponse(HttpContractModel):
+class ResourcePagesResponse(HttpContractModel):
     ok: Literal[True] = True
-    data: VolumePagesPayload
+    data: ResourcePagesPayload
+
+
+class ResourceDownloadPayload(HttpContractModel):
+    supported: Literal[False] = False
+    message: str
+
+
+class ResourceDownloadResponse(SuccessEnvelope[ResourceDownloadPayload]):
+    pass

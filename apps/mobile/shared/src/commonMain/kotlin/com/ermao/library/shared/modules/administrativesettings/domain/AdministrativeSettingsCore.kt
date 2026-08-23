@@ -20,6 +20,7 @@ enum class AdministrativeSettingsErrorKind {
     Forbidden,
     NotFound,
     Conflict,
+    Unavailable,
     RateLimited,
     Server,
     Transport,

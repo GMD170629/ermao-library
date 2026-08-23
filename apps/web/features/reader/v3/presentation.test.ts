@@ -3,7 +3,7 @@ import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
 import { locationProgress, preferencesToReaderSettings, readerSettingsToPreferences } from './presentation';
 
-test('round trips the complete work-scoped preference snapshot', () => {
+test('round trips the complete book-scoped preference snapshot', () => {
   const settings = preferencesToReaderSettings(DEFAULT_READER_PREFERENCES);
   assert.deepEqual(readerSettingsToPreferences(settings), DEFAULT_READER_PREFERENCES);
 });
@@ -20,7 +20,8 @@ test('projects discriminated locations into the existing visual progress model',
 
 test('never presents the EPUB table of contents as chapters or physical pages', () => {
   assert.deepEqual(locationProgress({
-    kind: 'epub',
+    kind: 'reflowable',
+    format: 'epub',
     cfi: 'epubcfi(/6/482!/4/2/8:12)',
     href: 'all-chapters.xhtml#chapter-241',
     spineIndex: 4,

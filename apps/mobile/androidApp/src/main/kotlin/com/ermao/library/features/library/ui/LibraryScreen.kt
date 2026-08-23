@@ -69,12 +69,12 @@ import com.ermao.library.features.content.model.GroupingCard
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
-import com.ermao.library.features.content.model.WorkCard
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.content.ui.CoverRole
-import com.ermao.library.features.content.ui.WorkCover
-import com.ermao.library.features.content.ui.WorkGridItem
-import com.ermao.library.features.content.ui.WorkListItem
+import com.ermao.library.features.content.ui.BookCover
+import com.ermao.library.features.content.ui.BookGridItem
+import com.ermao.library.features.content.ui.BookListItem
 import com.ermao.library.features.content.ui.responsiveCoverColumnCount
 import com.ermao.library.features.library.application.LibraryUiState
 import com.ermao.library.features.library.application.ScrollAnchor
@@ -155,7 +155,7 @@ fun LibraryScreen(
         title = stringResource(R.string.tab_library),
         modifier = modifier.testTag("tab-library"),
         actionContent = {
-            if (state.selectedScope == LibraryScope.Works) {
+            if (state.selectedScope == LibraryScope.Books) {
                 Box {
                     WarmPageIconAction(
                         icon = Icons.Outlined.MoreVert,
@@ -328,7 +328,7 @@ private fun LibraryContextRow(
                 style = theme.typography.callout,
                 color = theme.colors.textSecondary,
             )
-            if (state.selectedScope == LibraryScope.Works) {
+            if (state.selectedScope == LibraryScope.Books) {
                 WarmPageTextAction(
                     label = if (state.current.filters.count == 0) {
                         stringResource(R.string.library_filter_action)
@@ -344,7 +344,7 @@ private fun LibraryContextRow(
                 )
             }
         }
-        if (state.selectedScope == LibraryScope.Works && state.current.filters.count > 0) {
+        if (state.selectedScope == LibraryScope.Books && state.current.filters.count > 0) {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = theme.components.page.compactGutter),
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
@@ -406,7 +406,7 @@ private fun LibraryResults(
         current.works.isEmpty() && current.groups.isEmpty() -> WarmPageEmptyState(
             title = stringResource(
                 when (state.selectedScope) {
-                    LibraryScope.Works -> R.string.library_empty_works_title
+                    LibraryScope.Books -> R.string.library_empty_works_title
                     LibraryScope.Series -> R.string.library_empty_series_title
                     LibraryScope.Authors -> R.string.library_empty_authors_title
                 },
@@ -415,7 +415,7 @@ private fun LibraryResults(
             actionLabel = stringResource(R.string.clear_search_action).takeIf { current.query.isNotBlank() },
             onAction = onClearQuery.takeIf { current.query.isNotBlank() },
         )
-        state.selectedScope == LibraryScope.Works -> WorksResults(
+        state.selectedScope == LibraryScope.Books -> WorksResults(
             current.works,
             current.viewMode,
             repository,
@@ -444,7 +444,7 @@ private fun LibraryResults(
 
 @Composable
 private fun WorksResults(
-    works: List<WorkCard>,
+    works: List<BookCard>,
     viewMode: ContentViewMode,
     repository: ContentRepository,
     context: ContentRequestContext,
@@ -464,9 +464,9 @@ private fun WorksResults(
             modifier = Modifier.testTag("library-works-list"),
             contentPadding = PaddingValues(bottom = WarmPageThemeValues.components.page.contentBottomInset),
         ) {
-            items(works, key = WorkCard::id) { work ->
-                WorkListItem(
-                    work = work,
+            items(works, key = BookCard::id) { work ->
+                BookListItem(
+                    book = work,
                     repository = repository,
                     context = context,
                     modifier = Modifier
@@ -499,8 +499,8 @@ private fun WorksResults(
                 horizontalArrangement = Arrangement.spacedBy(WarmPageThemeValues.components.grid.horizontalGap),
                 verticalArrangement = Arrangement.spacedBy(WarmPageThemeValues.components.grid.verticalGap),
             ) {
-                items(works, key = WorkCard::id) { work ->
-                    WorkGridItem(
+                items(works, key = BookCard::id) { work ->
+                    BookGridItem(
                         work,
                         repository,
                         context,
@@ -566,19 +566,19 @@ private fun GroupingRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(theme.spacing.two),
     ) {
-        GroupingCoverStack(group.representativeWorks, repository, context)
+        GroupingCoverStack(group.representativeBooks, repository, context)
         Column(Modifier.weight(1f)) {
             Text(group.name, style = theme.typography.headline, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val representativeAuthor = group.representativeWorks.firstOrNull()?.author?.trim().orEmpty()
+            val representativeAuthor = group.representativeBooks.firstOrNull()?.author?.trim().orEmpty()
             val summary = if (scope == LibraryScope.Series && representativeAuthor.isNotEmpty()) {
                 pluralStringResource(
                     R.plurals.library_group_summary,
-                    group.workCount,
+                    group.bookCount,
                     representativeAuthor,
-                    group.workCount,
+                    group.bookCount,
                 )
             } else {
-                pluralStringResource(R.plurals.library_group_work_count, group.workCount, group.workCount)
+                pluralStringResource(R.plurals.library_group_work_count, group.bookCount, group.bookCount)
             }
             Text(summary, style = theme.typography.callout, color = theme.colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -588,14 +588,14 @@ private fun GroupingRow(
 
 @Composable
 private fun GroupingCoverStack(
-    works: List<WorkCard>,
+    works: List<BookCard>,
     repository: ContentRepository,
     context: ContentRequestContext,
 ) {
     val theme = WarmPageThemeValues
     Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.half)) {
         works.take(3).forEach { work ->
-            WorkCover(
+            BookCover(
                 work,
                 repository,
                 context,
@@ -609,10 +609,10 @@ private fun GroupingCoverStack(
 @Composable
 private fun ObserveListState(
     state: LazyListState,
-    works: List<WorkCard>,
+    works: List<BookCard>,
     onScrollAnchorChanged: (String?, Int) -> Unit,
     onLoadNextPage: () -> Unit,
-) = ObserveListState(state, works, onScrollAnchorChanged, onLoadNextPage, WorkCard::id)
+) = ObserveListState(state, works, onScrollAnchorChanged, onLoadNextPage, BookCard::id)
 
 @Composable
 private fun <T> ObserveListState(
@@ -637,7 +637,7 @@ private fun <T> ObserveListState(
 @Composable
 private fun ObserveGridState(
     state: LazyGridState,
-    works: List<WorkCard>,
+    works: List<BookCard>,
     onScrollAnchorChanged: (String?, Int) -> Unit,
     onLoadNextPage: () -> Unit,
 ) {
@@ -939,21 +939,21 @@ private fun <T> Set<T>.toggle(value: T, enabled: Boolean): Set<T> = if (enabled)
 
 private val LibraryScope.labelResource: Int
     get() = when (this) {
-        LibraryScope.Works -> R.string.library_scope_works
+        LibraryScope.Books -> R.string.library_scope_works
         LibraryScope.Series -> R.string.library_scope_series
         LibraryScope.Authors -> R.string.library_scope_authors
     }
 
 private val LibraryScope.searchPlaceholderResource: Int
     get() = when (this) {
-        LibraryScope.Works -> R.string.library_search_works_placeholder
+        LibraryScope.Books -> R.string.library_search_works_placeholder
         LibraryScope.Series -> R.string.library_search_series_placeholder
         LibraryScope.Authors -> R.string.library_search_authors_placeholder
     }
 
 private val LibraryScope.resultCountResource: Int
     get() = when (this) {
-        LibraryScope.Works -> R.plurals.library_result_count_works
+        LibraryScope.Books -> R.plurals.library_result_count_works
         LibraryScope.Series -> R.plurals.library_result_count_series
         LibraryScope.Authors -> R.plurals.library_result_count_authors
     }

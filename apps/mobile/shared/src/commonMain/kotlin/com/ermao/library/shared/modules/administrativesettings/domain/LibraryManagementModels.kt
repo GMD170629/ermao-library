@@ -1,12 +1,11 @@
 package com.ermao.library.shared.modules.administrativesettings.domain
 
-data class MonitorFolder(
+data class Library(
     val id: String,
     val name: String,
     val rootPath: String,
-    val shelfId: String?,
+    val organizationMode: LibraryOrganizationMode,
     val enabled: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
     val ignorePatterns: String?,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,
@@ -15,19 +14,23 @@ data class MonitorFolder(
     val updatedAt: String,
 )
 
-data class MonitorFolders(
-    val folders: List<MonitorFolder>,
-    val monitorRoot: String?,
+data class Libraries(
+    val libraries: List<Library>,
     val lastUploadTargetPath: String?,
     val lastDownloadTargetPath: String?,
 )
 
-data class MonitorFolderDraft(
+enum class LibraryOrganizationMode(val wireValue: String) {
+    Flat("FLAT"),
+    Volumes("VOLUMES"),
+    Audiobook("AUDIOBOOK"),
+}
+
+data class LibraryDraft(
     val rootPath: String,
     val name: String?,
-    val shelfId: String?,
+    val organizationMode: LibraryOrganizationMode,
     val enabled: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
     val ignorePatterns: String?,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,
@@ -48,15 +51,15 @@ data class DirectoryNode(
     val children: List<DirectoryChild>,
 )
 
-enum class ImportTaskStatus(val wireValue: String) {
-    Pending("PENDING"),
-    Parsing("PARSING"),
-    Completed("COMPLETED"),
+enum class ImportTaskState(val wireValue: String) {
+    Queued("QUEUED"),
+    Running("RUNNING"),
+    Succeeded("SUCCEEDED"),
     Failed("FAILED"),
 }
 
 data class ImportTaskFilter(
-    val status: ImportTaskStatus? = null,
+    val state: ImportTaskState? = null,
     val keyword: String? = null,
     val page: Int = 1,
     val pageSize: Int = 20,
@@ -64,41 +67,23 @@ data class ImportTaskFilter(
 
 data class ImportTask(
     val id: String,
-    val monitorFolderId: String?,
-    val workId: String?,
-    val volumeId: String?,
-    val origin: String,
-    val mediaKindPolicy: MediaKindPolicy,
-    val status: ImportTaskStatus,
-    val originalName: String?,
-    val requestedTitle: String?,
-    val requestedAuthor: String?,
-    val sourcePath: String,
-    val taskKind: String,
-    val assetCount: Int,
-    val processedAssetCount: Int,
-    val progress: Int,
-    val durationMilliseconds: Long,
-    val errorCode: String?,
+    val kind: String,
+    val libraryId: String,
+    val resourceId: String?,
+    val sourceNodeId: String?,
+    val role: String?,
+    val state: ImportTaskState,
     val errorSummary: String?,
-    val retryable: Boolean,
-    val attempts: Int,
+    val createdAt: String,
     val startedAt: String?,
     val finishedAt: String?,
-    val createdAt: String,
-    val updatedAt: String,
-    val sourceFileExists: Boolean,
-)
-
-data class ImportTaskSummary(
-    val completed: Int,
-    val failed: Int,
 )
 
 data class ImportTaskPage(
     val tasks: List<ImportTask>,
-    val summary: ImportTaskSummary,
     val pageInfo: PageInfo,
+    val completed: Int,
+    val failed: Int,
 )
 
 data class ImportTaskLog(
@@ -114,20 +99,9 @@ data class ImportTaskLogPage(
     val pageInfo: PageInfo,
 )
 
-enum class ImportDeleteMode(val wireValue: String) {
-    Record("record"),
-    Source("source"),
-}
-
 data class ImportTaskDeletion(
     val id: String,
     val deleted: Boolean,
-    val deleteMode: ImportDeleteMode,
-    val deletedLibraryRecord: Boolean,
-    val deletedWorkRecord: Boolean,
-    val deletedFiles: Int,
-    val missingFiles: List<String>,
-    val failedFileDeleteCount: Int,
 )
 
 enum class ImportScanStatus(val wireValue: String) {
@@ -140,7 +114,7 @@ enum class ImportScanStatus(val wireValue: String) {
 
 data class ImportScanJob(
     val id: String,
-    val monitorFolderId: String?,
+    val libraryId: String?,
     val rootPath: String,
     val trigger: String,
     val status: ImportScanStatus,
@@ -164,8 +138,6 @@ data class ImportRescanRequest(
 )
 
 data class ImportPreferences(
-    val stabilityCheckEnabled: Boolean,
-    val stabilitySeconds: Double,
     val allowedExtensions: List<String>,
     val ignorePatterns: String,
 )

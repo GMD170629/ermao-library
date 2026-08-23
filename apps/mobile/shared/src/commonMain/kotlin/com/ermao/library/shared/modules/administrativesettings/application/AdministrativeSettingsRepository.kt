@@ -13,12 +13,9 @@ import com.ermao.library.shared.modules.administrativesettings.domain.ClearedMan
 import com.ermao.library.shared.modules.administrativesettings.domain.CreateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.domain.DeletedManagedUser
 import com.ermao.library.shared.modules.administrativesettings.domain.DirectoryNode
-import com.ermao.library.shared.modules.administrativesettings.domain.DuplicateGroupPage
-import com.ermao.library.shared.modules.administrativesettings.domain.DuplicateMergeResult
 import com.ermao.library.shared.modules.administrativesettings.domain.EmailSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.EventStorage
 import com.ermao.library.shared.modules.administrativesettings.domain.HealthRun
-import com.ermao.library.shared.modules.administrativesettings.domain.ImportDeleteMode
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportPreferences
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportRescanRequest
 import com.ermao.library.shared.modules.administrativesettings.domain.ImportScanJob
@@ -44,9 +41,9 @@ import com.ermao.library.shared.modules.administrativesettings.domain.MetadataPi
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProvider
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviderUpdate
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviders
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolder
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolderDraft
-import com.ermao.library.shared.modules.administrativesettings.domain.MonitorFolders
+import com.ermao.library.shared.modules.administrativesettings.domain.Library
+import com.ermao.library.shared.modules.administrativesettings.domain.LibraryDraft
+import com.ermao.library.shared.modules.administrativesettings.domain.Libraries
 import com.ermao.library.shared.modules.administrativesettings.domain.OpdsSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.OpfQueueStatus
 import com.ermao.library.shared.modules.administrativesettings.domain.OrganizeCandidates
@@ -70,7 +67,7 @@ interface AdministrativeSettingsRepository {
     suspend fun loadKindleSettings(context: AdministrativeSettingsContext): AdministrativeSettingsResult<KindleSettings>
     suspend fun updateKindleEmail(context: AdministrativeSettingsContext, email: String): AdministrativeSettingsResult<KindleSettings>
     suspend fun listKindleTasks(context: AdministrativeSettingsContext, filter: KindleTaskFilter): AdministrativeSettingsResult<KindleTaskPage>
-    suspend fun createKindleTask(context: AdministrativeSettingsContext, fileId: String, workId: String?): AdministrativeSettingsResult<KindleTask>
+    suspend fun createKindleTask(context: AdministrativeSettingsContext, assetId: String, bookId: String?): AdministrativeSettingsResult<KindleTask>
     suspend fun cancelKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<KindleTask>
     suspend fun retryKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<KindleTask>
     suspend fun deleteKindleTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<Boolean>
@@ -86,17 +83,17 @@ interface AdministrativeSettingsRepository {
     suspend fun resetUserPassword(context: AdministrativeSettingsContext, userId: String, password: String): AdministrativeSettingsResult<ManagedPasswordChange>
     suspend fun deleteUser(context: AdministrativeSettingsContext, userId: String, confirmation: String): AdministrativeSettingsResult<DeletedManagedUser>
 
-    suspend fun loadMonitorFolders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<MonitorFolders>
-    suspend fun createMonitorFolder(context: AdministrativeSettingsContext, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder>
-    suspend fun updateMonitorFolder(context: AdministrativeSettingsContext, folderId: String, folder: MonitorFolderDraft): AdministrativeSettingsResult<MonitorFolder>
-    suspend fun deleteMonitorFolder(context: AdministrativeSettingsContext, folderId: String): AdministrativeSettingsResult<Boolean>
+    suspend fun loadLibraries(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Libraries>
+    suspend fun createLibrary(context: AdministrativeSettingsContext, library: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun updateLibrary(context: AdministrativeSettingsContext, libraryId: String, library: LibraryDraft): AdministrativeSettingsResult<Library>
+    suspend fun deleteLibrary(context: AdministrativeSettingsContext, libraryId: String): AdministrativeSettingsResult<Boolean>
     suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?): AdministrativeSettingsResult<DirectoryNode>
 
     suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage>
     suspend fun loadImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>
     suspend fun listImportTaskLogs(context: AdministrativeSettingsContext, taskId: String, page: Int = 1, pageSize: Int = 50): AdministrativeSettingsResult<ImportTaskLogPage>
     suspend fun retryImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>
-    suspend fun deleteImportTask(context: AdministrativeSettingsContext, taskId: String, mode: ImportDeleteMode, deleteLibraryRecord: Boolean): AdministrativeSettingsResult<ImportTaskDeletion>
+    suspend fun deleteImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTaskDeletion>
     suspend fun clearCompletedImportTasks(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Int>
     suspend fun clearImportQueue(context: AdministrativeSettingsContext): AdministrativeSettingsResult<QueueOperation>
     suspend fun rescanImportFolders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<ImportRescanRequest>
@@ -118,8 +115,6 @@ interface AdministrativeSettingsRepository {
     suspend fun updateOrganizePolicy(context: AdministrativeSettingsContext, policy: OrganizePolicy): AdministrativeSettingsResult<OrganizePolicy>
     suspend fun loadOpfQueueStatus(context: AdministrativeSettingsContext): AdministrativeSettingsResult<OpfQueueStatus>
 
-    suspend fun listDuplicateGroups(context: AdministrativeSettingsContext, page: Int, pageSize: Int): AdministrativeSettingsResult<DuplicateGroupPage>
-    suspend fun mergeDuplicateWorks(context: AdministrativeSettingsContext, targetWorkId: String, sourceWorkIds: List<String>): AdministrativeSettingsResult<DuplicateMergeResult>
     suspend fun listLibraryOperations(context: AdministrativeSettingsContext): AdministrativeSettingsResult<List<LibraryOperation>>
     suspend fun undoLibraryOperation(context: AdministrativeSettingsContext, operationId: String): AdministrativeSettingsResult<LibraryOperation>
     suspend fun listCategories(context: AdministrativeSettingsContext, filter: CategoryFilter): AdministrativeSettingsResult<CategoryPage>

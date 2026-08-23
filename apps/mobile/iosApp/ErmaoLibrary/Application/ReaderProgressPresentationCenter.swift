@@ -18,16 +18,16 @@ final class ReaderProgressPresentationCenter {
 
     func publish(
         namespaceKey: String,
-        workID: String,
-        volumeID: String,
+        bookID: String,
+        resourceID: String,
         percent: Double,
         progress: ErmaoShared.ReaderProgress,
         chapterTitle: String?
     ) {
         publish(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
-            workId: workID,
-            volumeId: volumeID,
+            bookId: bookID,
+            resourceId: resourceID,
             percent: percent,
             progress: progress,
             chapterTitle: chapterTitle

@@ -3,19 +3,6 @@
 from __future__ import annotations
 
 
-class ImportExecutionError(RuntimeError):
-    """Stable application failure translated from an import infrastructure adapter."""
-
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
-        super().__init__(message)
-        self.code = code
-        self.retryable = retryable
-
-
-class ConversionProgressConflict(RuntimeError):
-    """A conversion checkpoint cannot be reconciled with its idempotency scope."""
-
-
 class AudioInspectionError(ValueError):
     """A source cannot satisfy the audiobook media-inspection contract."""
 
@@ -60,10 +47,3 @@ class ComicArchiveBackendUnavailableError(ComicArchiveError):
 
 class ComicArchiveInvalidError(ComicArchiveError):
     """A comic archive is malformed or unsupported."""
-
-
-class MonitorFolderDeletedDuringImportError(RuntimeError):
-    """The monitor-folder configuration disappeared while its task was running."""
-
-    def __init__(self) -> None:
-        super().__init__("监控文件夹已在导入期间被删除")

@@ -57,8 +57,8 @@ class AdminCreateUserRequest(BaseModel):
     role: Literal["admin", "member"] = "member"
     can_manage_system: bool = Field(default=False, alias="canManageSystem")
     can_view_manual_imports: bool = Field(default=False, alias="canViewManualImports")
-    monitor_folder_ids: list[str] = Field(
-        default_factory=list, alias="monitorFolderIds", max_length=500
+    library_ids: list[str] = Field(
+        default_factory=list, alias="libraryIds", max_length=500
     )
     locale: Literal["zh-CN", "en-US"] = "zh-CN"
 
@@ -67,7 +67,7 @@ class AdminCreateUserRequest(BaseModel):
     def normalize_admin_name(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("monitor_folder_ids")
+    @field_validator("library_ids")
     @classmethod
     def normalize_folder_ids(cls, value: list[str]) -> list[str]:
         return list(
@@ -86,8 +86,8 @@ class AdminUpdateUserRequest(BaseModel):
     can_view_manual_imports: bool | None = Field(
         default=None, alias="canViewManualImports"
     )
-    monitor_folder_ids: list[str] | None = Field(
-        default=None, alias="monitorFolderIds", max_length=500
+    library_ids: list[str] | None = Field(
+        default=None, alias="libraryIds", max_length=500
     )
     locale: Literal["zh-CN", "en-US"] | None = None
 
@@ -96,7 +96,7 @@ class AdminUpdateUserRequest(BaseModel):
     def normalize_optional_admin_name(cls, value: str | None) -> str | None:
         return value.strip() if isinstance(value, str) else value
 
-    @field_validator("monitor_folder_ids")
+    @field_validator("library_ids")
     @classmethod
     def normalize_optional_folder_ids(cls, value: list[str] | None) -> list[str] | None:
         if value is None:

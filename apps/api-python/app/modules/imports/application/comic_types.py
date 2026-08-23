@@ -36,4 +36,3 @@ class ComicArchiveInspection(TypedDict):
     pages: list[ComicPageInspection]
     comicInfo: ComicInfoMetadata | None
     rawMetadata: dict[str, object]
-

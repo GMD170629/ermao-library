@@ -25,10 +25,10 @@ test('parses a shelf book with bounded reading progress', () => {
     name: '在读',
     kind: 'STATIC',
     books: [{
-      id: 'work-1',
+      id: 'book-1',
       title: 'Example',
       author: 'Author',
-      coverUrl: '/api/works/work-1/cover',
+      coverUrl: '/api/books/book-1/cover',
       availableMediaKinds: ['EBOOK'],
       progress: 37.5
     }],

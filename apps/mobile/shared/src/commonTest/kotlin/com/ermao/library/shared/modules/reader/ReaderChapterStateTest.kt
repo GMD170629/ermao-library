@@ -153,7 +153,7 @@ class ReaderChapterStateTest {
         val locations = listOf<PublicationLocation>(
             PdfPublicationLocation(pageIndex = 0, pageProgression = 0.25),
             ComicPublicationLocation(resourceHref = "page-1.jpg", pageIndex = 0),
-            AudioPublicationLocation(fileId = "track-1", positionMillis = 5_000),
+            AudioPublicationLocation(assetId = "asset-1", positionMillis = 5_000),
         )
 
         locations.forEach { location ->
@@ -172,7 +172,7 @@ class ReaderChapterStateTest {
             position = 4,
         )
         val progress = ReaderProgress(
-            sourceId = "reader-source",
+            resourceId = "reader-resource",
             location = ReflowReaderLocation(engineLocator = engineLocator),
             updatedAtEpochMillis = 123_456,
             deviceId = "device-1",
@@ -180,8 +180,8 @@ class ReaderChapterStateTest {
 
         val update = createReaderProgressPresentationUpdate(
             namespaceKey = "server:user",
-            workId = "work-1",
-            volumeId = "volume-1",
+            bookId = "book-1",
+            resourceId = "resource-1",
             percent = 42.0,
             progress = progress,
             chapterTitle = "第二章",

@@ -22,7 +22,9 @@ NOW = datetime(2026, 8, 3, 8, 0, tzinfo=UTC)
 
 
 class FakeAuthenticator:
-    def authenticate(self, request: OpdsAuthenticationRequestDto) -> OpdsActorDto | None:
+    def authenticate(
+        self, request: OpdsAuthenticationRequestDto
+    ) -> OpdsActorDto | None:
         credentials = request.credentials
         assert request.client_address
         assert request.method in {"GET", "PUT"}
@@ -59,7 +61,7 @@ class FakeProgression:
     stored: OpdsProgressionDocumentDto | None = None
 
     def get_progression(
-        self, actor_id: str, volume_id: str
+        self, actor_id: str, resource_id: str
     ) -> OpdsProgressionDocumentDto | None:
         assert actor_id == "user-1"
         return self.stored
@@ -67,7 +69,7 @@ class FakeProgression:
     def update_progression(
         self,
         actor_id: str,
-        volume_id: str,
+        resource_id: str,
         document: OpdsProgressionDocumentDto,
     ) -> OpdsProgressionUpdateResultDto:
         if self.conflict:
@@ -124,10 +126,7 @@ def test_catalog_requires_basic_and_partitions_cache_by_authorization() -> None:
         "application/opds-authentication+json"
     )
     assert invalid_credentials.status_code == 401
-    assert (
-        invalid_credentials.headers["www-authenticate"]
-        == 'Basic realm="Shuku OPDS"'
-    )
+    assert invalid_credentials.headers["www-authenticate"] == 'Basic realm="Shuku OPDS"'
     assert response.status_code == 200
     assert response.headers["vary"] == "Authorization"
     assert response.headers["content-type"].startswith("application/atom+xml")
@@ -150,19 +149,19 @@ def test_progression_create_read_and_date_conflict_contracts() -> None:
     }
 
     empty = client.get(
-        "/opds/v1.2/volumes/volume-1/progression", headers=_authorization()
+        "/opds/v1.2/resources/resource-1/progression", headers=_authorization()
     )
     created = client.put(
-        "/opds/v1.2/volumes/volume-1/progression",
+        "/opds/v1.2/resources/resource-1/progression",
         headers=_authorization(),
         json=payload,
     )
     fetched = client.get(
-        "/opds/v1.2/volumes/volume-1/progression", headers=_authorization()
+        "/opds/v1.2/resources/resource-1/progression", headers=_authorization()
     )
     progression.conflict = True
     conflict = client.put(
-        "/opds/v1.2/volumes/volume-1/progression",
+        "/opds/v1.2/resources/resource-1/progression",
         headers=_authorization(),
         json=payload,
     )
@@ -179,7 +178,7 @@ def test_progression_validation_uses_opds_problem_details_instead_of_422() -> No
     client, _, _ = _client()
 
     response = client.put(
-        "/opds/v1.2/volumes/volume-1/progression",
+        "/opds/v1.2/resources/resource-1/progression",
         headers=_authorization(),
         json={
             "modified": "not-a-date",

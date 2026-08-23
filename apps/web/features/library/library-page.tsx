@@ -1,6 +1,6 @@
 'use client';
 
-import { BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Filter, List, Loader2, Plus, Search, UploadCloud, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookshelfCollection } from '../../components/book/bookshelf';
@@ -11,11 +11,11 @@ import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import {
-  fetchLibraryWorksPage,
-  type BookshelfWorkSummary,
-  type LibraryWorkSummary,
-  type ManagementWorkSummary
-} from './api/works';
+  fetchLibraryBooksPage,
+  type BookshelfBookSummary,
+  type LibraryBookSummary,
+  type ManagementBookSummary
+} from './api/books';
 import { fetchLibraryFilterSchema } from './api/filtering';
 import { LibraryBatchContextMenu, LibraryBatchDialog, type LibraryBatchAction } from './library-batch-actions';
 import { canUseLibraryBatchAction } from './model/library-batch-action';
@@ -44,7 +44,7 @@ import {
   type LibrarySort,
   type LibrarySortDirection
 } from './model/library-sort-preference';
-import { workDetailHrefFromLibrary } from './model/library-navigation';
+import { bookDetailHrefFromLibrary } from './model/library-navigation';
 
 const formatOptions = [
   { value: '全部', label: '全部' },
@@ -103,7 +103,7 @@ export function LibraryPage() {
   const [smartFilterFields, setSmartFilterFields] = useState<SmartFilterField[]>([]);
   const [filterSchemaLoading, setFilterSchemaLoading] = useState(false);
   const [filterSchemaLoaded, setFilterSchemaLoaded] = useState(false);
-  const [books, setBooks] = useState<LibraryWorkSummary[]>([]);
+  const [books, setBooks] = useState<LibraryBookSummary[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(String(DEFAULT_LIBRARY_PAGE_SIZE));
   const [meta, setMeta] = useState({ total: 0, pageSize: DEFAULT_LIBRARY_PAGE_SIZE, totalPages: 1 });
@@ -115,10 +115,7 @@ export function LibraryPage() {
   const [canManageSystem, setCanManageSystem] = useState(false);
   const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<LibraryWorkSummary | null>(null);
-  const [deleteSource, setDeleteSource] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [selectedWorkIds, setSelectedWorkIds] = useState<string[]>([]);
+  const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
   const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -161,7 +158,7 @@ export function LibraryPage() {
     ? '0'
     : pageSize;
   const requestScope = `${queryBase}&pageSize=${requestPageSize}&view=${view}`;
-  const workDetailHref = (workId: string) => workDetailHrefFromLibrary(workId, searchParamString);
+  const bookDetailHref = (bookId: string) => bookDetailHrefFromLibrary(bookId, searchParamString);
 
   useEffect(() => {
     const debouncer = new LibraryQueryDebouncer(setSettledQuery);
@@ -268,7 +265,7 @@ export function LibraryPage() {
 
     const controller = new AbortController();
     setLoading(true);
-    fetchLibraryWorksPage(
+    fetchLibraryBooksPage(
       queryBase,
       requestedPage,
       requestPageSize,
@@ -319,7 +316,7 @@ export function LibraryPage() {
 
   useEffect(() => {
     const visibleIds = new Set(books.map((book) => book.id));
-    setSelectedWorkIds((current) => current.filter((id) => visibleIds.has(id)));
+    setSelectedBookIds((current) => current.filter((id) => visibleIds.has(id)));
   }, [books]);
 
   const advancedFilterCount = [statusFilter !== '全部', seriesNameFilter, facetIdFilter].filter(Boolean).length + smartFilterRules.conditions.length;
@@ -342,7 +339,7 @@ export function LibraryPage() {
     setView(nextView);
     if (nextView === 'grid') {
       setFiltersOpen(false);
-      setSelectedWorkIds([]);
+      setSelectedBookIds([]);
       setBatchContextPosition(null);
     }
     window.localStorage.setItem(userDevicePreferenceKey('shuku.library.view', currentUserId()), nextView);
@@ -407,39 +404,6 @@ export function LibraryPage() {
     clearUploadRoute();
   }
 
-  function openDeleteBook(book: LibraryWorkSummary) {
-    setDeleteSource(false);
-    setDeleteTarget(book);
-  }
-
-  async function deleteBook() {
-    const book = deleteTarget;
-    if (!book) return;
-    setDeleting(true);
-    setError('');
-    setMessage('');
-    try {
-      const response = await fetch(`/api/works/${book.id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deleteSource })
-      });
-      const payload = (await response.json()) as { ok: boolean; data?: { failedFileDeletes?: Array<{ path: string; message: string }> }; error?: { message: string } };
-      if (!payload.ok) throw new Error(payload.error?.message ?? '删除失败');
-      setDeleteTarget(null);
-      setMessage('已删除书库记录');
-      const failedCount = payload.data?.failedFileDeletes?.length ?? 0;
-      toast.success('已删除书库记录', failedCount > 0 ? `有 ${failedCount} 个文件未能删除，请检查系统日志` : deleteSource ? '关联的源文件已同步删除' : '来源文件已保留');
-      setReloadKey((key) => key + 1);
-    } catch (reason) {
-      const nextError = reason instanceof Error ? reason.message : '删除失败';
-      setError(nextError);
-      toast.error('删除失败', nextError);
-    } finally {
-      setDeleting(false);
-    }
-  }
-
   function clearAdvancedFilters() {
     setStatusFilter('全部');
     setSmartFilterRules({ combinator: 'ALL', conditions: [] });
@@ -454,11 +418,11 @@ export function LibraryPage() {
   }
 
   function toggleSelection(bookId: string) {
-    setSelectedWorkIds((current) => current.includes(bookId) ? current.filter((id) => id !== bookId) : [...current, bookId]);
+    setSelectedBookIds((current) => current.includes(bookId) ? current.filter((id) => id !== bookId) : [...current, bookId]);
   }
 
   function togglePageSelection(selected: boolean) {
-    setSelectedWorkIds(selected ? books.map((book) => book.id) : []);
+    setSelectedBookIds(selected ? books.map((book) => book.id) : []);
   }
 
   function openBatchAction(action: LibraryBatchAction) {
@@ -467,12 +431,11 @@ export function LibraryPage() {
     setBatchDialogAction(action);
   }
 
-  function finishBatchAction(nextMessage: string, mergedWorkId?: string) {
+  function finishBatchAction(nextMessage: string) {
     setMessage(nextMessage);
     setBatchDialogAction(null);
-    setSelectedWorkIds([]);
+    setSelectedBookIds([]);
     setReloadKey((key) => key + 1);
-    if (mergedWorkId) router.push(`/works/${encodeURIComponent(mergedWorkId)}`);
   }
 
   return (
@@ -516,31 +479,6 @@ export function LibraryPage() {
         }}
         onError={setError}
       /> : null}
-
-      {deleteTarget ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#241F1C]/35 p-0 backdrop-blur-[2px] md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={i18nAttribute("删除图书记录")}>
-          <div className="w-full max-w-lg rounded-t-3xl border border-black/[0.08] bg-[#FFFEFC] p-5 shadow-[0_28px_80px_rgba(47,37,31,0.22)] md:rounded-3xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-[#25221F]"><I18nText>删除图书记录</I18nText></h2>
-                <p className="mt-2 text-sm leading-6 text-[#6F6963]">{i18nAttribute('删除《{value0}》的书库记录和系统生成文件。你可以选择是否同时删除源文件。', { value0: deleteTarget.title })}</p>
-              </div>
-              <button type="button" disabled={deleting} onClick={() => setDeleteTarget(null)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#77716B] hover:bg-black/[0.05] disabled:opacity-50" aria-label={i18nAttribute("关闭")}><X size={18} /></button>
-            </div>
-            <label className={cn('mt-5 flex cursor-pointer gap-3 rounded-2xl border p-4 transition', deleteSource ? 'border-red-200 bg-red-50' : 'border-black/[0.08] bg-black/[0.02] hover:bg-black/[0.04]')}>
-              <input type="checkbox" checked={deleteSource} disabled={deleting} onChange={(event) => setDeleteSource(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-              <span>
-                <span className="block text-sm font-semibold text-[#302C29]"><I18nText>同步删除源文件</I18nText></span>
-                <span className="mt-1 block text-xs leading-5 text-[#77716B]"><I18nText>源文件将从监控或上传目录中永久删除；该操作无法恢复。</I18nText></span>
-              </span>
-            </label>
-            <div className="mt-6 flex justify-end gap-2">
-              <Button type="button" variant="secondary" disabled={deleting} onClick={() => setDeleteTarget(null)}><I18nText>取消</I18nText></Button>
-              <Button type="button" variant="danger" icon={Trash2} loading={deleting} loadingText={i18nAttribute("删除中")} onClick={() => void deleteBook()}>{deleteSource ? i18nAttribute("删除记录和源文件") : i18nAttribute("删除记录")}</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {view === 'list' ? <div className="mt-8 flex min-w-0 items-center gap-2">
         <label className="flex h-12 min-w-0 flex-1 items-center gap-3 rounded-xl border border-black/[0.1] bg-white/65 px-4">
@@ -636,9 +574,9 @@ export function LibraryPage() {
           {view === 'grid' ? (
             <div className="mt-8">
               <BookshelfCollection
-                books={books.filter((book): book is BookshelfWorkSummary => book.projection === 'bookshelf')}
+                books={books.filter((book): book is BookshelfBookSummary => book.projection === 'bookshelf')}
                 testId="library-book-bookshelves"
-                onOpen={(book) => router.push(workDetailHref(book.id))}
+                onOpen={(book) => router.push(bookDetailHref(book.id))}
               />
               <div ref={loadMoreRef} className="flex min-h-20 items-center justify-center py-5 text-xs tabular-nums text-[#8A847E]" role="status" aria-live="polite">
                 {loading && page > 1 ? <><Loader2 size={15} className="mr-2 animate-spin" /><I18nText>正在加载更多图书...</I18nText></> : i18nAttribute("已加载 {value0} / {value1} 本", { value0: books.length, value1: meta.total })}
@@ -647,7 +585,7 @@ export function LibraryPage() {
           ) : (
             <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
               <div className="lg:min-h-0 lg:flex-1">
-                <BookTable books={books.filter((book): book is ManagementWorkSummary => book.projection === 'management')} onOpen={(book) => router.push(workDetailHref(book.id))} onDelete={canManageSystem ? openDeleteBook : undefined} selectable selectedIds={selectedWorkIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedWorkIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+                <BookTable books={books.filter((book): book is ManagementBookSummary => book.projection === 'management')} onOpen={(book) => router.push(bookDetailHref(book.id))} selectable selectedIds={selectedBookIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedBookIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
               </div>
               <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
             </div>
@@ -655,10 +593,10 @@ export function LibraryPage() {
         </>
       ) : null}
 
-      {selectedWorkIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedWorkIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedWorkIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction(canManageSystem ? 'metadata' : 'shelves')}><I18nText>批量操作</I18nText></Button></div></div> : null}
+      {selectedBookIds.length > 0 ? <div className="fixed bottom-5 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-2xl -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/[0.08] bg-[#282522] px-4 py-3 text-white shadow-2xl"><div><div className="text-sm font-semibold"><I18nText>已选择 </I18nText>{selectedBookIds.length} <I18nText>本</I18nText></div><div className="mt-0.5 hidden text-[11px] text-white/55 sm:block"><I18nText>列表中右键可直接选择批量操作</I18nText></div></div><div className="flex gap-2"><Button variant="secondary" onClick={() => { setSelectedBookIds([]); setBatchContextPosition(null); }}><I18nText>清空</I18nText></Button><Button onClick={() => openBatchAction(canManageSystem ? 'metadata' : 'shelves')}><I18nText>批量操作</I18nText></Button></div></div> : null}
 
-      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedWorkIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
-      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedWorkIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
+      <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedBookIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
+      <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedBookIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
     </div>
   );
 }

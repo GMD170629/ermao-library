@@ -1,9 +1,10 @@
 package com.ermao.library.features.library.application
 
 import com.ermao.library.features.content.model.ChapterReadingState
+import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.model.ReadingUnitContent
-import com.ermao.library.features.content.model.WorkCard
-import com.ermao.library.features.content.model.WorkDetailContent
+import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.shared.modules.reader.ReaderEngine
 import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
@@ -41,8 +42,8 @@ class DetailViewModelsTest {
 
         val update = ReaderProgressPresentationUpdate(
             namespaceKey = "server:user",
-            workId = "work-1",
-            volumeId = "volume-1",
+            bookId = "book-1",
+            resourceId = "resource-1",
             percent = 42.0,
             location = ReflowablePublicationLocation(
                 engineLocator = createEngineLocator(
@@ -55,19 +56,19 @@ class DetailViewModelsTest {
             chapterTitle = "Chapter 2",
             capturedAtEpochMillis = 123,
         )
-        val updated = content.applying(update, selectedVolumeId = "volume-1")
+        val updated = content.applying(update, selectedResourceId = "resource-1")
 
         assertEquals(
             listOf(ChapterReadingState.Read, ChapterReadingState.Current, ChapterReadingState.Unread),
             updated.readingUnits.map(ReadingUnitContent::readingState),
         )
         assertEquals(listOf(null, 42, null), updated.readingUnits.map(ReadingUnitContent::progressPercent))
-        assertEquals(content, content.applying(update, selectedVolumeId = "volume-2"))
+        assertEquals(content, content.applying(update, selectedResourceId = "resource-2"))
     }
 
-    private fun contentWithChapters(vararg chapters: ReadingUnitContent): WorkDetailContent = WorkDetailContent(
-        work = WorkCard(
-            id = "work-1",
+    private fun contentWithChapters(vararg chapters: ReadingUnitContent): BookDetailContent = BookDetailContent(
+        book = BookCard(
+            id = "book-1",
             title = "Book",
             author = "Author",
             coverUrl = "",
@@ -79,8 +80,17 @@ class DetailViewModelsTest {
         authorFacetId = null,
         description = null,
         tags = emptyList(),
-        media = emptyList(),
-        selectedMediaKind = "EBOOK",
+        resources = listOf(
+            ResourceContent(
+                id = "resource-1",
+                title = "Resource",
+                format = "EPUB",
+                progressPercent = null,
+                readable = true,
+                selected = true,
+            ),
+        ),
+        selectedResourceId = "resource-1",
         readingUnits = chapters.toList(),
     )
 }

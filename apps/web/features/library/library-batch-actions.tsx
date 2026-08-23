@@ -5,18 +5,15 @@ import {
   Braces,
   Check,
   Eye,
-  GitMerge,
   Hash,
   ImagePlus,
   Images,
   LibraryBig,
-  Loader2,
   Minimize2,
   Replace,
   RotateCcw,
   Scissors,
   Tags,
-  Trash2,
   UserRound,
   X
 } from 'lucide-react';
@@ -24,7 +21,6 @@ import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '../../components/ui/button';
-import { Cover } from '../../components/book/cover';
 import { cn } from '../../components/ui/cn';
 import { ContextActionMenu } from '../../components/ui/context-action-menu';
 import { useToast } from '../../components/ui/feedback';
@@ -36,43 +32,27 @@ import {
   type LibraryBatchAction
 } from './model/library-batch-action';
 import {
-  createWorkMerge,
-  fetchWorkMergePreview,
-  type WorkMergeMetadata,
-  type WorkMergePreview
-} from './api/work-merge';
+  applyBulkBookFindReplace,
+  previewBulkBookFindReplace,
+  updateBulkBookMetadata,
+  updateBulkBookCovers,
+  updateBulkBookReadingStatus,
+  updateBulkBookShelfMembership,
+  type BulkFindReplaceInput,
+  type BulkFindReplacePreview
+} from './api/bulk-operations';
 
 export type { LibraryBatchAction } from './model/library-batch-action';
 
 type ContextPosition = { x: number; y: number };
 type ShelfOption = { id: string; name: string; kind?: 'STATIC' | 'SMART' };
-type BulkResponse = {
-  ok: boolean;
-  data?: {
-    updated?: number;
-    deleted?: number;
-    deletedFiles?: number;
-    deletedSourceFiles?: number;
-    failedFileDeletes?: Array<{ path: string; message: string }>;
-    changedValues?: number;
-    skipped?: Array<{ workId: string; reason: string }>;
-  };
-  error?: { message?: string };
-};
-type FindReplacePreview = {
-  changedWorks: number;
-  changedValues: number;
-  items: Array<{ workId: string; title: string; before: string | string[]; after: string | string[] }>;
-};
 
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
-  { value: 'merge', label: '合并图书', shortLabel: '合并', description: '汇总媒介版本和全部卷册', icon: GitMerge },
   { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、标签和系列', icon: Tags },
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
   { value: 'reading_status', label: '设置阅读状态', shortLabel: '阅读状态', description: '清空进度或统一设为 100%', icon: BookCheck },
-  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images },
-  { value: 'delete', label: '批量删除图书', shortLabel: '删除', description: '删除书库记录，可选择同步删除源文件', icon: Trash2 }
+  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images }
 ];
 
 const inputClass = 'h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3.5 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
@@ -84,6 +64,15 @@ function splitValues(value: string) {
 
 function valueLabel(value: string | string[]) {
   return Array.isArray(value) ? value.join('、') : value || '（空）';
+}
+
+function isBulkFindReplaceField(value: string): value is BulkFindReplaceInput['field'] {
+  return value === 'title'
+    || value === 'author'
+    || value === 'description'
+    || value === 'seriesName'
+    || value === 'tags'
+    || value === 'resourceTitle';
 }
 
 export function LibraryBatchContextMenu({
@@ -108,12 +97,9 @@ export function LibraryBatchContextMenu({
     items={actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => ({
       action: item.value,
       label: i18nAttribute(item.label),
-      description: item.value === 'merge' && selectedCount < 2
-        ? i18nAttribute('请至少选择两本图书')
-        : i18nAttribute(item.description),
+      description: i18nAttribute(item.description),
       icon: item.icon,
-      disabled: item.value === 'merge' && selectedCount < 2,
-      destructive: item.value === 'delete'
+      destructive: false
     }))}
     footer={i18nAttribute('拖动经过行可连续选择；按 Shift 点击可选择区间。')}
     onClose={onClose}
@@ -167,7 +153,7 @@ export function LibraryBatchDialog({
   canManageSystem: boolean;
   onActionChange: (action: LibraryBatchAction) => void;
   onClose: () => void;
-  onApplied: (message: string, workId?: string) => void;
+  onApplied: (message: string) => void;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const toast = useToast();
@@ -178,13 +164,13 @@ export function LibraryBatchDialog({
   const [seriesName, setSeriesName] = useState('');
   const [addTags, setAddTags] = useState('');
   const [removeTags, setRemoveTags] = useState('');
-  const [findField, setFindField] = useState('title');
+  const [findField, setFindField] = useState<BulkFindReplaceInput['field']>('title');
   const [findText, setFindText] = useState('');
   const [replacement, setReplacement] = useState('');
   const [regex, setRegex] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [startNumber, setStartNumber] = useState('1');
-  const [preview, setPreview] = useState<FindReplacePreview | null>(null);
+  const [preview, setPreview] = useState<BulkFindReplacePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [previewSignature, setPreviewSignature] = useState('');
   const [shelves, setShelves] = useState<ShelfOption[]>([]);
@@ -197,28 +183,18 @@ export function LibraryBatchDialog({
   const [coverQuality, setCoverQuality] = useState('82');
   const [coverMaxDimension, setCoverMaxDimension] = useState('1600');
   const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [deleteSource, setDeleteSource] = useState(false);
-  const [mergePreview, setMergePreview] = useState<WorkMergePreview | null>(null);
-  const [mergeLoading, setMergeLoading] = useState(false);
-  const [mergeError, setMergeError] = useState('');
-  const [mergeMetadata, setMergeMetadata] = useState<WorkMergeMetadata>({
-    title: '', author: '', description: null, seriesName: null, seriesIndex: null, tags: []
-  });
-  const [mergeSeriesIndex, setMergeSeriesIndex] = useState('');
-  const [mergeTags, setMergeTags] = useState('');
-  const [mergeCoverVolumeId, setMergeCoverVolumeId] = useState('');
 
   const activeAction = actions.find((item) => item.value === action);
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
   const previewCurrent = preview !== null && previewSignature === findReplaceSignature;
   const metadataReady = authorEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
   const findFieldOptions: SelectOption[] = [
-    { value: 'title', label: '书名', group: '作品元数据' },
-    { value: 'author', label: '作者', group: '作品元数据' },
-    { value: 'description', label: '简介', group: '作品元数据' },
-    { value: 'seriesName', label: '系列', group: '作品元数据' },
-    { value: 'tags', label: '标签', group: '作品元数据' },
-    { value: 'volumeTitle', label: '卷册名称', group: '卷册资源' }
+    { value: 'title', label: '书名', group: '图书元数据' },
+    { value: 'author', label: '作者', group: '图书元数据' },
+    { value: 'description', label: '简介', group: '图书元数据' },
+    { value: 'seriesName', label: '系列', group: '图书元数据' },
+    { value: 'tags', label: '标签', group: '图书元数据' },
+    { value: 'resourceTitle', label: '资源名称', group: '可读资源' }
   ];
 
   useEffect(() => {
@@ -253,50 +229,14 @@ export function LibraryBatchDialog({
     return () => { active = false; };
   }, [action, shelves.length, toast]);
 
-  useEffect(() => {
-    if (action !== 'delete') setDeleteSource(false);
-  }, [action]);
-
-  useEffect(() => {
-    if (action !== 'merge' || selectedIds.length < 2) return;
-    const controller = new AbortController();
-    setMergeLoading(true);
-    setMergeError('');
-    setMergePreview(null);
-    fetchWorkMergePreview(selectedIds, controller.signal)
-      .then((nextPreview) => {
-        setMergePreview(nextPreview);
-        setMergeMetadata(nextPreview.suggestedMetadata);
-        setMergeSeriesIndex(nextPreview.suggestedMetadata.seriesIndex === null ? '' : String(nextPreview.suggestedMetadata.seriesIndex));
-        setMergeTags(nextPreview.suggestedMetadata.tags.join(', '));
-        setMergeCoverVolumeId(nextPreview.defaultCoverVolumeId);
-      })
-      .catch((reason) => {
-        if (!controller.signal.aborted) setMergeError(reason instanceof Error ? reason.message : '读取合并预览失败');
-      })
-      .finally(() => { if (!controller.signal.aborted) setMergeLoading(false); });
-    return () => controller.abort();
-  }, [action, selectedIds]);
-
   if (!action || typeof document === 'undefined') return null;
-
-  async function postJson(body: Record<string, unknown>) {
-    const response = await fetch('/api/works/bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds, ...body })
-    });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量操作失败');
-    return payload;
-  }
 
   async function applyMetadata() {
     const fields: Record<string, string> = {};
     if (authorEnabled) fields.author = author;
     if (seriesEnabled) fields.seriesName = seriesName;
-    const payload = await postJson({ action: 'update_metadata', fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
-    return `已更新 ${payload.data?.updated ?? selectedIds.length} 本图书的元数据`;
+    const result = await updateBulkBookMetadata({ ids: selectedIds, fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
+    return `已更新 ${result.updated} 本图书的元数据`;
   }
 
   function findReplaceBody() {
@@ -315,14 +255,8 @@ export function LibraryBatchDialog({
     setPreviewing(true);
     try {
       const signature = findReplaceSignature;
-      const response = await fetch('/api/works/bulk/find-replace/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedIds, ...findReplaceBody() })
-      });
-      const payload = await response.json() as { ok: boolean; data?: FindReplacePreview; error?: { message?: string } };
-      if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error?.message ?? '生成预览失败');
-      setPreview(payload.data);
+      const result = await previewBulkBookFindReplace({ ids: selectedIds, ...findReplaceBody() });
+      setPreview(result);
       setPreviewSignature(signature);
     } catch (reason) {
       setPreview(null);
@@ -333,71 +267,40 @@ export function LibraryBatchDialog({
   }
 
   async function applyFindReplace() {
-    const payload = await postJson({ action: 'find_replace', ...findReplaceBody() });
-    return `已替换 ${payload.data?.changedValues ?? 0} 处元数据`;
+    const result = await applyBulkBookFindReplace({ ids: selectedIds, ...findReplaceBody() });
+    return `已替换 ${result.changedValues} 处元数据`;
   }
 
   async function applyShelves() {
-    const payload = await postJson({ action: 'shelf_membership', membership, shelfId });
+    const result = await updateBulkBookShelfMembership({ ids: selectedIds, membership, shelfId });
     return membership === 'ADD'
-      ? `已将 ${payload.data?.updated ?? selectedIds.length} 本图书加入书架`
-      : `已从书架移除 ${payload.data?.updated ?? selectedIds.length} 本图书`;
+      ? `已将 ${result.updated} 本图书加入书架`
+      : `已从书架移除 ${result.updated} 本图书`;
   }
 
   async function applyReadingStatus() {
-    const payload = await postJson({ action: 'reading_status', status: readingStatus });
+    const result = await updateBulkBookReadingStatus({ ids: selectedIds, status: readingStatus });
     return readingStatus === 'UNREAD'
-      ? `已清空 ${payload.data?.updated ?? selectedIds.length} 本图书的阅读记录`
-      : `已将 ${payload.data?.updated ?? selectedIds.length} 本图书设为已读`;
+      ? `已清空 ${result.updated} 本图书的阅读记录`
+      : `已将 ${result.updated} 本图书设为已读`;
   }
 
   async function applyCovers() {
-    const form = new FormData();
-    form.append('ids', JSON.stringify(selectedIds));
-    form.append('action', coverAction);
-    form.append('ratio', coverRatio);
-    form.append('quality', coverQuality);
-    form.append('maxDimension', coverMaxDimension);
-    if (coverFile) form.append('cover', coverFile);
-    const response = await fetch('/api/works/bulk/cover', { method: 'POST', body: form });
-    const payload = await response.json() as BulkResponse;
-    if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '批量处理封面失败');
-    const skipped = payload.data?.skipped?.length ?? 0;
-    return `已处理 ${payload.data?.updated ?? selectedIds.length} 本图书的封面${skipped ? `，跳过 ${skipped} 本` : ''}`;
-  }
-
-  async function applyDelete() {
-    const payload = await postJson({ action: 'delete_records', deleteSource });
-    const deleted = payload.data?.deleted ?? payload.data?.updated ?? 0;
-    const failed = payload.data?.failedFileDeletes?.length ?? 0;
-    const message = i18nAttribute('已删除 {value0} 本图书', { value0: deleted });
-    return failed > 0
-      ? `${message}，${i18nAttribute('有 {value0} 个文件未能删除，请检查系统日志', { value0: failed })}`
-      : message;
-  }
-
-  async function applyMerge() {
-    const result = await createWorkMerge({
-      workIds: selectedIds,
-      coverVolumeId: mergeCoverVolumeId,
-      metadata: {
-        ...mergeMetadata,
-        title: mergeMetadata.title.trim(),
-        author: mergeMetadata.author.trim(),
-        description: mergeMetadata.description?.trim() || null,
-        seriesName: mergeMetadata.seriesName?.trim() || null,
-        seriesIndex: mergeSeriesIndex.trim() ? Number(mergeSeriesIndex) : null,
-        tags: splitValues(mergeTags)
-      }
+    const result = await updateBulkBookCovers({
+      ids: selectedIds,
+      action: coverAction,
+      ratio: coverRatio,
+      quality: Number(coverQuality),
+      maxDimension: Number(coverMaxDimension),
+      ...(coverFile ? { cover: coverFile } : {})
     });
-    return { message: result.operation.summary, workId: result.workId };
+    return `已处理 ${result.updated} 本图书的封面${result.skipped.length ? `，跳过 ${result.skipped.length} 本` : ''}`;
   }
 
   async function submit() {
     setSaving(true);
     try {
-      const mergeResult = action === 'merge' ? await applyMerge() : null;
-      const message = mergeResult?.message ?? (action === 'metadata'
+      const message = action === 'metadata'
         ? await applyMetadata()
         : action === 'find_replace'
           ? await applyFindReplace()
@@ -407,9 +310,9 @@ export function LibraryBatchDialog({
               ? await applyReadingStatus()
               : action === 'covers'
                 ? await applyCovers()
-                : await applyDelete());
+                : '';
       toast.success(message);
-      onApplied(message, mergeResult?.workId);
+      onApplied(message);
     } catch (reason) {
       toast.error('批量操作失败', reason instanceof Error ? reason.message : '请稍后重试');
     } finally {
@@ -418,9 +321,8 @@ export function LibraryBatchDialog({
   }
 
   const disabled = selectedIds.length === 0
-    || (action === 'merge' && (selectedIds.length < 2 || mergeLoading || !mergePreview || !mergeMetadata.title.trim() || !mergeCoverVolumeId || (mergeSeriesIndex.trim() !== '' && !Number.isFinite(Number(mergeSeriesIndex)))))
     || (action === 'metadata' && !metadataReady)
-    || (action === 'find_replace' && (!previewCurrent || (preview?.changedWorks ?? 0) === 0))
+    || (action === 'find_replace' && (!previewCurrent || (preview?.changedBooks ?? 0) === 0))
     || (action === 'shelves' && !shelfId)
     || (action === 'covers' && coverAction === 'replace' && !coverFile);
 
@@ -442,13 +344,12 @@ export function LibraryBatchDialog({
           <nav className="mt-4 flex gap-1.5 overflow-x-auto pb-1" aria-label={i18nAttribute("批量操作类型")}>
             {actions.filter((item) => canUseLibraryBatchAction(item.value, canManageSystem)).map((item) => {
               const Icon = item.icon;
-              const destructive = item.value === 'delete';
               return (
-                <button key={item.value} type="button" title={item.value === 'merge' && selectedIds.length < 2 ? i18nAttribute('请至少选择两本图书') : undefined} disabled={saving || (item.value === 'merge' && selectedIds.length < 2)} onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn(
+                <button key={item.value} type="button" disabled={saving} onClick={() => onActionChange(item.value)} aria-current={action === item.value ? 'page' : undefined} className={cn(
                   'inline-flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-xs font-medium transition',
                   action === item.value
-                    ? destructive ? 'bg-red-700 text-white shadow-sm' : 'bg-[#2D2926] text-white shadow-sm'
-                    : destructive ? 'bg-red-50 text-red-700 hover:bg-red-100' : 'bg-black/[0.035] text-[#716A64] hover:bg-[#FFF0EA] hover:text-[#D7462B]',
+                    ? 'bg-[#2D2926] text-white shadow-sm'
+                    : 'bg-black/[0.035] text-[#716A64] hover:bg-[#FFF0EA] hover:text-[#D7462B]',
                   'disabled:cursor-not-allowed disabled:opacity-50'
                 )}>
                   <Icon size={15} />{item.shortLabel}
@@ -459,50 +360,10 @@ export function LibraryBatchDialog({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-6 md:py-6">
-          {action === 'merge' ? (
-            mergeLoading ? <div className="flex min-h-64 items-center justify-center text-sm text-[#817A74]" role="status"><Loader2 size={18} className="mr-2 animate-spin" /><I18nText>正在整理合并预览…</I18nText></div>
-              : mergeError ? <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{mergeError}</div>
-                : mergePreview ? <div className="space-y-6">
-                  <div className="grid gap-px overflow-hidden rounded-2xl border border-black/[0.08] bg-black/[0.08] md:grid-cols-2">
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>作品标题</I18nText><input value={mergeMetadata.title} onChange={(event) => setMergeMetadata({ ...mergeMetadata, title: event.target.value })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>作者</I18nText><input value={mergeMetadata.author} onChange={(event) => setMergeMetadata({ ...mergeMetadata, author: event.target.value })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>系列名</I18nText><input value={mergeMetadata.seriesName ?? ''} onChange={(event) => setMergeMetadata({ ...mergeMetadata, seriesName: event.target.value || null })} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843]"><I18nText>系列序号</I18nText><input value={mergeSeriesIndex} onChange={(event) => setMergeSeriesIndex(event.target.value)} inputMode="decimal" className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843] md:col-span-2"><I18nText>标签</I18nText><input value={mergeTags} onChange={(event) => setMergeTags(event.target.value)} placeholder={i18nAttribute("标签，用逗号分隔")} className={cn(inputClass, 'mt-2')} /></label>
-                    <label className="bg-white p-4 text-sm font-medium text-[#4D4843] md:col-span-2"><I18nText>简介</I18nText><textarea value={mergeMetadata.description ?? ''} onChange={(event) => setMergeMetadata({ ...mergeMetadata, description: event.target.value || null })} rows={4} className={cn(textareaClass, 'mt-2')} /></label>
-                  </div>
-
-                  <div>
-                    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-black/[0.08] pb-3">
-                      <div><h3 className="text-base font-semibold text-[#302C29]"><I18nText>选择作品封面</I18nText></h3><p className="mt-1 text-xs leading-5 text-[#817A74]"><I18nText>卷册按卷号自动排列；选择其中一个卷册的封面作为新作品封面。</I18nText></p></div>
-                      <span className="text-xs tabular-nums text-[#817A74]">{i18nAttribute('{value0} 个卷册', { value0: mergePreview.mediaGroups.reduce((total, group) => total + group.volumes.length, 0) })}</span>
-                    </div>
-                    <div className="mt-4 space-y-5">
-                      {mergePreview.mediaGroups.map((group) => (
-                        <section key={group.mediaKind} aria-label={i18nAttribute(group.mediaKind === 'EBOOK' ? '电子书' : group.mediaKind === 'COMIC' ? '漫画' : '有声书')}>
-                          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[#625C56]"><span className="h-px w-5 bg-[#EF4D2F]" />{i18nAttribute(group.mediaKind === 'EBOOK' ? '电子书' : group.mediaKind === 'COMIC' ? '漫画' : '有声书')}<span className="font-normal tabular-nums text-[#97908A]">{group.volumes.length}</span></div>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            {group.volumes.map((volume) => {
-                              const selected = mergeCoverVolumeId === volume.id;
-                              return <button key={volume.id} type="button" onClick={() => setMergeCoverVolumeId(volume.id)} aria-pressed={selected} className={cn('grid grid-cols-[46px_minmax(0,1fr)_20px] items-center gap-3 rounded-xl border p-2.5 text-left transition', selected ? 'border-[#EF4D2F] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:border-[#E8A18D]')}>
-                                <Cover book={{ id: volume.id, title: volume.title, author: '', coverUrl: volume.coverUrl }} size="small" className="aspect-[2/3] w-[46px] rounded-md" />
-                                <span className="min-w-0"><span data-i18n-skip className="block truncate text-sm font-semibold text-[#35312E]">{volume.title}</span><span className="mt-1 block truncate text-[11px] text-[#817A74]"><span data-i18n-skip>{volume.sourceWorkTitle}</span> · {volume.format}</span></span>
-                                <span className={cn('flex h-5 w-5 items-center justify-center rounded-full border', selected ? 'border-[#EF4D2F] bg-[#EF4D2F] text-white' : 'border-black/[0.18] text-transparent')}><Check size={13} /></span>
-                              </button>;
-                            })}
-                          </div>
-                        </section>
-                      ))}
-                    </div>
-                  </div>
-
-                </div> : null
-          ) : null}
-
           {action === 'metadata' ? (
             <div className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
-                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖作品作者")}>
+                <FieldToggle checked={authorEnabled} onChange={setAuthorEnabled} icon={UserRound} label={i18nAttribute("作者")} hint={i18nAttribute("统一覆盖图书作者")}>
                   <input value={author} onChange={(event) => setAuthor(event.target.value)} className={inputClass} placeholder={i18nAttribute("例如：余华")} />
                 </FieldToggle>
                 <FieldToggle checked={seriesEnabled} onChange={setSeriesEnabled} icon={LibraryBig} label={i18nAttribute("系列")} hint={i18nAttribute("统一设置或留空清除")}>
@@ -524,7 +385,7 @@ export function LibraryBatchDialog({
           {action === 'find_replace' ? (
             <div className="space-y-5">
               <div className="grid gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找字段</I18nText><Select value={findField} onChange={(value) => setFindField(value)} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel={i18nAttribute("查找字段")} />
+                <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找字段</I18nText><Select value={findField} onChange={(value) => { if (isBulkFindReplaceField(value)) setFindField(value); }} options={findFieldOptions} className="mt-2 w-full" menuWidth={320} ariaLabel={i18nAttribute("查找字段")} />
                 </label>
                 <label className="block text-sm font-medium text-[#4D4843]"><I18nText>查找内容</I18nText><input value={findText} onChange={(event) => setFindText(event.target.value)} className={cn(inputClass, 'mt-2')} placeholder={regex ? i18nAttribute("例如：第\\s*(\\d+)\\s*卷") : i18nAttribute("输入要查找的关键字")} />
                 </label>
@@ -555,12 +416,12 @@ export function LibraryBatchDialog({
                   <div><div className="text-sm font-semibold text-[#393531]"><I18nText>替换预览</I18nText></div><div className="mt-1 text-xs text-[#8A837C]"><I18nText>确认前最多展示 30 条实际变化。</I18nText></div></div>
                   <Button variant="secondary" icon={Eye} loading={previewing} loadingText={i18nAttribute("生成中")} disabled={!findText} onClick={() => void loadPreview()}><I18nText>生成预览</I18nText></Button>
                 </div>
-                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]"><I18nText>填写规则后生成预览，避免误改元数据。</I18nText></div> : preview && preview.changedWorks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800"><I18nText>没有找到匹配内容，不会修改任何图书。</I18nText></div> : preview ? (
+                {!previewCurrent ? <div className="mt-4 rounded-xl bg-[#F7F4F0] px-4 py-6 text-center text-xs text-[#918A83]"><I18nText>填写规则后生成预览，避免误改元数据。</I18nText></div> : preview && preview.changedBooks === 0 ? <div className="mt-4 rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-800"><I18nText>没有找到匹配内容，不会修改任何图书。</I18nText></div> : preview ? (
                   <div className="mt-4">
-                    <div className="mb-2 text-xs font-medium text-[#777069]"><I18nText>将修改 </I18nText>{preview.changedWorks} <I18nText>本图书，共 </I18nText>{preview.changedValues} <I18nText>处</I18nText></div>
+                    <div className="mb-2 text-xs font-medium text-[#777069]"><I18nText>将修改 </I18nText>{preview.changedBooks} <I18nText>本图书，共 </I18nText>{preview.changedValues} <I18nText>处</I18nText></div>
                     <div className="max-h-64 space-y-2 overflow-auto pr-1">
                       {preview.items.map((item, index) => (
-                        <div key={`${item.workId}-${index}`} className="rounded-xl border border-black/[0.06] bg-[#FAF8F5] px-3 py-2.5">
+                        <div key={`${item.bookId}-${index}`} className="rounded-xl border border-black/[0.06] bg-[#FAF8F5] px-3 py-2.5">
                           <div className="truncate text-xs font-semibold text-[#45403C]">{item.title}</div>
                           <div className="mt-1 grid gap-1 text-xs sm:grid-cols-[1fr_auto_1fr] sm:items-center">
                             <span className="break-words text-[#918A83] line-through">{valueLabel(item.before)}</span>
@@ -600,7 +461,7 @@ export function LibraryBatchDialog({
               </button>
               <button type="button" onClick={() => setReadingStatus('FINISHED')} className={cn('rounded-2xl border p-5 text-left transition', readingStatus === 'FINISHED' ? 'border-[#EFAE9B] bg-[#FFF3EE] ring-2 ring-[#FFE2D8]' : 'border-black/[0.08] bg-white hover:bg-black/[0.02]')}>
                 <span className="flex items-center justify-between text-base font-semibold text-[#37322F]"><I18nText>设为已读</I18nText>{readingStatus === 'FINISHED' ? <Check size={18} className="text-[#EF4D2F]" /> : null}</span>
-                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>将所有可见卷册的阅读进度更新为 100%；作品完成状态会据此动态计算。</I18nText></span>
+                <span className="mt-3 block text-sm leading-6 text-[#746D67]"><I18nText>将所有可见资源的阅读进度更新为 100%；图书完成状态会据此动态计算。</I18nText></span>
               </button>
             </div>
           ) : null}
@@ -610,7 +471,7 @@ export function LibraryBatchDialog({
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 {([
                   ['crop', '封面裁剪', '按统一比例居中裁剪', Scissors],
-                  ['regenerate', '重新生成', '从卷册资源恢复封面', RotateCcw],
+                  ['regenerate', '重新生成', '从资源资产恢复封面', RotateCcw],
                   ['compress', '封面压缩', '降低尺寸和文件体积', Minimize2],
                   ['replace', '替换封面', '使用同一张新图片', ImagePlus]
                 ] as const).map(([value, label, description, Icon]) => (
@@ -642,39 +503,18 @@ export function LibraryBatchDialog({
                   </label>
                 </div>
               ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和卷册顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和资源顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
             </div>
           ) : null}
 
-          {action === 'delete' ? (
-            <div className="space-y-5">
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-900">
-                <div className="flex items-start gap-3">
-                  <Trash2 size={20} className="mt-0.5 shrink-0 text-red-600" />
-                  <div>
-                    <div className="font-semibold"><I18nText>删除所选图书</I18nText></div>
-                    <p className="mt-1 text-sm leading-6 text-red-800"><I18nText>删除后，所选图书的书库记录、阅读进度、书签和系统生成文件将无法恢复。</I18nText></p>
-                  </div>
-                </div>
-              </div>
-              <label className={cn('flex cursor-pointer gap-3 rounded-2xl border p-4 transition', deleteSource ? 'border-red-200 bg-red-50' : 'border-black/[0.08] bg-black/[0.02] hover:bg-black/[0.04]')}>
-                <input type="checkbox" checked={deleteSource} disabled={saving} onChange={(event) => setDeleteSource(event.target.checked)} className="mt-0.5 h-4 w-4 accent-red-600" />
-                <span>
-                  <span className="block text-sm font-semibold text-[#302C29]"><I18nText>同步删除源文件</I18nText></span>
-                  <span className="mt-1 block text-xs leading-5 text-[#77716B]"><I18nText>源文件将从监控或上传目录中永久删除；该操作无法恢复。</I18nText></span>
-                </span>
-              </label>
-              {!deleteSource ? <p className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm text-[#706963]"><I18nText>来源文件将保留，只删除书库记录和系统生成文件。</I18nText></p> : null}
-            </div>
-          ) : null}
         </div>
 
         <footer className="flex shrink-0 flex-col gap-3 border-t border-black/[0.07] bg-[#FFFEFC] px-5 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6">
           <div className="text-xs leading-5 text-[#837C75]"><I18nText>仅处理当前已选择的 </I18nText>{selectedIds.length} <I18nText>本图书；未选择的项目不会变化。</I18nText></div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" disabled={saving} onClick={onClose}><I18nText>取消</I18nText></Button>
-            <Button type="button" variant={action === 'delete' ? 'danger' : 'primary'} icon={action === 'delete' ? Trash2 : action === 'merge' ? GitMerge : undefined} loading={saving} loadingText={action === 'delete' ? i18nAttribute("删除中") : action === 'merge' ? i18nAttribute("合并中") : i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
-              {action === 'merge' ? i18nAttribute("确认合并") : action === 'find_replace' ? i18nAttribute("确认替换") : action === 'delete' ? i18nAttribute("确认删除") : i18nAttribute("应用更改")}
+            <Button type="button" variant="primary" loading={saving} loadingText={i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
+              {action === 'find_replace' ? i18nAttribute("确认替换") : i18nAttribute("应用更改")}
             </Button>
           </div>
         </footer>

@@ -9,10 +9,11 @@ boundaries and map it into renderer-neutral domain values.
 content requires a Readium resource plus CSS selector, fragment/CFI, or bounded
 text anchor. PDF uses a zero-based page index plus normalized page-local
 progression. Comics use a zero-based page index plus canonical resource href.
-Audio uses file/chapter identity and playback milliseconds. An engine locator is
+Audio uses asset/chapter identity and playback milliseconds; the owning resource
+is carried by the Reader resource contract. An engine locator is
 optional for fixed-layout and audio locations, but required for reflowable
-content. Runtime validation additionally proves that every referenced resource
-belongs to the fingerprinted Publication.
+content. Boundary adapters additionally verify that every referenced resource
+belongs to the active Reader resource.
 
 `displayPercent`, resource progression, logical position, and total progression
 are presentation or diagnostic values. They must never be used for automatic

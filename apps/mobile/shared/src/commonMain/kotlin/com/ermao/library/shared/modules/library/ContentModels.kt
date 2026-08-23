@@ -2,13 +2,14 @@ package com.ermao.library.shared.modules.library
 
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.domain.AppliedFacet
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
-enum class LibraryScope { Works, Series, Authors }
+enum class LibraryScope { Books, Series, Authors }
 
 enum class LibrarySort(val wireValue: String) {
     RecentlyAdded("recent_import"),
@@ -40,13 +41,11 @@ sealed interface OfflineFilterAvailability {
     data object Available : OfflineFilterAvailability
 
     data class Unavailable(val reasonCode: String) : OfflineFilterAvailability {
-        init {
-            require(reasonCode.isNotBlank())
-        }
+        init { require(reasonCode.isNotBlank()) }
     }
 }
 
-data class WorksQuery(
+data class BooksQuery(
     val query: String = "",
     val sort: LibrarySort = LibrarySort.RecentlyAdded,
     val viewMode: LibraryViewMode = LibraryViewMode.Grid,
@@ -54,9 +53,7 @@ data class WorksQuery(
     val page: Int = 1,
     val pageSize: Int = 24,
 ) {
-    init {
-        require(page > 0 && pageSize in 1..100)
-    }
+    init { require(page > 0 && pageSize in 1..100) }
 
     fun fingerprint(): String = listOf(
         query.trim(),
@@ -73,9 +70,7 @@ data class GroupingQuery(
     val page: Int = 1,
     val pageSize: Int = 30,
 ) {
-    init {
-        require(page > 0 && pageSize in 1..100)
-    }
+    init { require(page > 0 && pageSize in 1..100) }
 }
 
 data class FacetQuery(
@@ -85,32 +80,27 @@ data class FacetQuery(
     val page: Int = 1,
     val pageSize: Int = 24,
 ) {
-    init {
-        require(facetId.isNotBlank() && page > 0 && pageSize in 1..100)
-    }
+    init { require(facetId.isNotBlank() && page > 0 && pageSize in 1..100) }
 }
 
-data class WorkDetailQuery(
-    val workId: String,
-    val mediaKind: MediaKind? = null,
-    val volumeId: String? = null,
+data class BookDetailQuery(
+    val bookId: String,
+    val resourceId: String? = null,
 ) {
-    init { require(workId.isNotBlank()) }
+    init { require(bookId.isNotBlank()) }
 }
 
-data class WorkVolumePageQuery(
-    val workId: String,
-    val mediaVersionId: String,
+data class BookResourcePageQuery(
+    val bookId: String,
     val page: Int,
     val pageSize: Int = 24,
 ) {
-    init { require(workId.isNotBlank() && mediaVersionId.isNotBlank() && page > 0 && pageSize in 1..100) }
+    init { require(bookId.isNotBlank() && page > 0 && pageSize in 1..100) }
 }
 
-data class WorkVolumePage(
-    val mediaVersionId: String,
-    val mediaKind: MediaKind,
-    val volumes: List<com.ermao.library.shared.modules.library.domain.Volume>,
+data class BookResourcePage(
+    val bookId: String,
+    val resources: List<Resource>,
     val page: Int,
     val pageSize: Int,
     val total: Int,
@@ -134,31 +124,34 @@ data class GroupingSummary(
     val name: String,
     val bookCount: Int,
     val updatedAt: String,
-    val representativeWorks: List<WorkSummary>,
+    val representativeBooks: List<BookSummary>,
 )
 
 data class FacetPage(
     val facet: AppliedFacet,
-    val works: LibraryPage<WorkSummary>,
+    val books: LibraryPage<BookSummary>,
 )
 
 data class ContinueReadingItem(
-    val workId: String,
+    val bookId: String,
     val title: String,
-    val author: String,
+    val author: String?,
     val coverUrl: String,
     val mediaKind: MediaKind,
-    val resumeVolumeId: String?,
+    val resourceFormat: String,
+    val readerType: String,
+    val resumeResourceId: String?,
     val progress: Double,
+    val chapter: String?,
     val lastReadAt: String?,
-    val volumeTitle: String?,
+    val resourceTitle: String?,
     val narrator: String?,
 )
 
 data class HomeSnapshot(
     val continueReading: HomeSection<ContinueReadingItem?>,
-    val recentReading: HomeSection<List<WorkSummary>>,
-    val recentAdded: HomeSection<List<WorkSummary>>,
+    val recentReading: HomeSection<List<BookSummary>>,
+    val recentAdded: HomeSection<List<BookSummary>>,
 )
 
 sealed interface HomeSection<out T> {
@@ -170,9 +163,7 @@ data class ContentRequestContext(
     val profile: ServerProfile,
     val namespace: PrivateDataNamespace,
 ) {
-    init {
-        require(profile.serverIdentity == namespace.serverIdentity)
-    }
+    init { require(profile.serverIdentity == namespace.serverIdentity) }
 }
 
 enum class ContentSource { Network }
@@ -191,31 +182,31 @@ sealed interface ContentResult<out T> {
 interface ContentRepository {
     suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot>
     suspend fun loadContinueReading(context: ContentRequestContext): ContentResult<ContinueReadingItem?>
-    suspend fun loadRecentReading(context: ContentRequestContext, limit: Int = 10): ContentResult<List<WorkSummary>>
-    suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int = 10): ContentResult<List<WorkSummary>>
-    suspend fun loadWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>>
+    suspend fun loadRecentReading(context: ContentRequestContext, limit: Int = 10): ContentResult<List<BookSummary>>
+    suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int = 10): ContentResult<List<BookSummary>>
+    suspend fun loadBooks(context: ContentRequestContext, query: BooksQuery): ContentResult<LibraryPage<BookSummary>>
     suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>
     suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>
-    suspend fun loadWorkDetail(context: ContentRequestContext, query: WorkDetailQuery): ContentResult<WorkDetailSummary>
-    suspend fun loadWorkVolumes(
+    suspend fun loadBookDetail(context: ContentRequestContext, query: BookDetailQuery): ContentResult<BookDetailSummary>
+    suspend fun loadBookResources(
         context: ContentRequestContext,
-        query: WorkVolumePageQuery,
-    ): ContentResult<WorkVolumePage> = ContentResult.Failure(
+        query: BookResourcePageQuery,
+    ): ContentResult<BookResourcePage> = ContentResult.Failure(
         com.ermao.library.shared.core.network.AppError(
             com.ermao.library.shared.core.network.AppErrorKind.ProtocolViolation,
-            "VOLUME_PAGINATION_UNAVAILABLE",
-            "Volume pagination is unavailable",
+            "RESOURCE_PAGINATION_UNAVAILABLE",
+            "Resource pagination is unavailable",
         ),
     )
     suspend fun loadCover(context: ContentRequestContext, apiPath: String, etag: String? = null): ContentResult<AuthenticatedCover>
     suspend fun invalidate(namespace: PrivateDataNamespace)
 }
 
-interface WorkVolumePageRepository {
-    suspend fun loadWorkVolumes(
+interface BookResourcePageRepository {
+    suspend fun loadBookResources(
         context: ContentRequestContext,
-        query: WorkVolumePageQuery,
-    ): ContentResult<WorkVolumePage>
+        query: BookResourcePageQuery,
+    ): ContentResult<BookResourcePage>
 }
 
 data class AuthenticatedCover(

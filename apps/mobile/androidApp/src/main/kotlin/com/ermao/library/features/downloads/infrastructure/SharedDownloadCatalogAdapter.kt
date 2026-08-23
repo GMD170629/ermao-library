@@ -28,19 +28,26 @@ class SharedDownloadCatalogAdapter(
     override suspend fun saveArtifact(artifact: CompletedDownloadArtifact) {
         val namespace = artifact.identity.namespace.toAndroid()
         val existing = catalog.records(namespace).firstOrNull {
-            it.volumeId == artifact.identity.volumeId
+            it.bookId == artifact.identity.bookId &&
+                it.resourceId == artifact.identity.resourceId &&
+                it.assetId == artifact.identity.assetId
         }
         replaceRecord(
             artifact.toRecord(
-                taskId = existing?.taskId ?: "artifact-${artifact.identity.volumeId}",
+                taskId = existing?.taskId ?: "artifact-${artifact.identity.assetId}",
                 createdAtEpochMillis = existing?.createdAtEpochMillis ?: artifact.completedAtEpochMillis,
             ),
         )
     }
 
-    override suspend fun deleteArtifact(namespace: DownloadNamespace, volumeId: String) {
+    override suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
         catalog.records(namespace.toAndroid())
-            .filter { it.volumeId == volumeId && it.isReadable }
+            .filter {
+                it.bookId == identity.bookId &&
+                    it.resourceId == identity.resourceId &&
+                    it.assetId == identity.assetId &&
+                    it.isReadable
+            }
             .forEach { record ->
                 catalog.remove(record.namespace, record.taskId)
                 record.localReference?.let(files::resolveLocalReference)?.deleteManagedFile()
@@ -95,21 +102,19 @@ private fun AndroidDownloadRecord.toTask(): DownloadTask = DownloadTask(
 private fun AndroidDownloadRecord.descriptor() = DownloadDescriptor(
     identity = DownloadIdentity(
         namespace = DownloadNamespace(namespace.serverIdentity, namespace.userId, namespace.authorizationVersion),
-        workId = workId,
-        volumeId = volumeId,
+        bookId = bookId,
+        resourceId = resourceId,
+        assetId = assetId,
     ),
-    workTitle = workTitle,
-    workAuthor = author.takeIf(String::isNotBlank),
+    bookTitle = bookTitle,
+    bookAuthor = author.takeIf(String::isNotBlank),
     coverApiPath = coverUrl.takeIf(String::isNotBlank),
-    mediaVersionId = mediaVersionId,
-    mediaKind = mediaKind,
-    mediaVersionCompleted = mediaVersionCompleted,
-    volumeTitle = volumeTitle,
+    resourceTitle = resourceTitle,
     format = format,
     readerType = downloadReaderType(readerType),
     source = DownloadSource(sourceApiPath, sourceMimeType, expectedBytes),
-    volumeIndex = volumeIndex,
-    volumeSortOrder = volumeSortOrder,
+    resourceIndex = resourceIndex,
+    resourceSortOrder = resourceSortOrder,
 )
 
 private fun AndroidDownloadRecord.toArtifact() = CompletedDownloadArtifact(
@@ -125,17 +130,15 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
     return AndroidDownloadRecord(
         taskId = id,
         namespace = descriptor.identity.namespace.toAndroid(),
-        workId = descriptor.identity.workId,
-        workTitle = descriptor.workTitle,
-        author = descriptor.workAuthor.orEmpty(),
+        bookId = descriptor.identity.bookId,
+        bookTitle = descriptor.bookTitle,
+        author = descriptor.bookAuthor.orEmpty(),
         coverUrl = descriptor.coverApiPath.orEmpty(),
-        mediaVersionId = descriptor.mediaVersionId,
-        mediaKind = descriptor.mediaKind,
-        mediaVersionCompleted = descriptor.mediaVersionCompleted,
-        volumeId = descriptor.identity.volumeId,
-        volumeTitle = descriptor.volumeTitle,
+        resourceId = descriptor.identity.resourceId,
+        resourceTitle = descriptor.resourceTitle,
         format = descriptor.format,
         readerType = descriptor.readerType.name.lowercase(),
+        assetId = descriptor.identity.assetId,
         sourceApiPath = descriptor.source.apiPath,
         sourceMimeType = descriptor.source.mimeType,
         expectedBytes = descriptor.source.totalBytes,
@@ -147,8 +150,8 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
         createdAtEpochMillis = createdAtEpochMillis,
         updatedAtEpochMillis = updatedAtEpochMillis,
         lastOpenedAtEpochMillis = artifact?.lastOpenedAtEpochMillis,
-        volumeIndex = descriptor.volumeIndex,
-        volumeSortOrder = descriptor.volumeSortOrder,
+        resourceIndex = descriptor.resourceIndex,
+        resourceSortOrder = descriptor.resourceSortOrder,
     )
 }
 

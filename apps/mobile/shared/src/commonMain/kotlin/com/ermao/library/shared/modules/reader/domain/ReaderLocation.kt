@@ -136,13 +136,13 @@ data class ComicReaderLocation(
 }
 
 data class AudioReaderLocation(
-    val fileId: String,
+    val assetId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
     val engineLocator: EngineLocator? = null,
 ) : ReaderLocation {
     init {
-        require(fileId.isNotBlank()) { "Audio file id is blank" }
+        require(assetId.isNotBlank()) { "Audio asset id is blank" }
         require(chapterId == null || chapterId.isNotBlank()) { "Audio chapter id is blank" }
         require(positionMillis >= 0) { "Audio position is negative" }
     }
@@ -151,7 +151,7 @@ data class AudioReaderLocation(
 private val PROGRESSION_RANGE = 0.0..1.0
 
 data class ReaderProgress(
-    val sourceId: String,
+    val resourceId: String,
     val location: ReaderLocation,
     val updatedAtEpochMillis: Long,
     val deviceId: String,
@@ -159,7 +159,7 @@ data class ReaderProgress(
     val percent: Double? = null,
 ) {
     init {
-        require(sourceId.isNotBlank()) { "Reader progress source id is blank" }
+        require(resourceId.isNotBlank()) { "Reader progress resource id is blank" }
         require(updatedAtEpochMillis >= 0) { "Reader progress timestamp is negative" }
         require(deviceId.isNotBlank()) { "Reader progress device id is blank" }
         require(percent == null || percent.isFinite() && percent in 0.0..100.0) {

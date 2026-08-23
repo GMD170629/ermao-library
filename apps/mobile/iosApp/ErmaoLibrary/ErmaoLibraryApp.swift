@@ -23,6 +23,7 @@ struct ErmaoLibraryApp: App {
         ] == "1"
         let cookieStore = KeychainCookiePayloadStore()
         let managedDownloads = ManagedDownloadStore()
+        let readerPrivateContentCache = IosReaderPrivateContentCache()
         readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
             cookieStore: cookieStore,
             downloadArtifacts: managedDownloads
@@ -64,7 +65,8 @@ struct ErmaoLibraryApp: App {
                 runtime: runtime,
                 privateContentCache: CompositePrivateContentCache(
                     libraryCache: contentCache,
-                    downloads: managedDownloads
+                    downloads: managedDownloads,
+                    reader: usesContentFixture ? nil : readerPrivateContentCache
                 )
             )
         )

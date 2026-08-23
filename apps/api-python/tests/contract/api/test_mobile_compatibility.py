@@ -34,17 +34,19 @@ def test_mobile_compatibility_is_public_and_uses_the_typed_contract(
             "serverIdentity": "server_contract_identity",
             "serverVersion": test_settings.app_version,
             "protocol": {
-                "version": 2,
-                "minimumSupportedClientVersion": 2,
+                "version": 3,
+                "minimumSupportedClientVersion": 3,
             },
             "readerSchemaVersion": 4,
+            "librarySchemaVersion": 1,
             "capabilities": {
                 "setup": True,
                 "cookieSession": True,
                 "readerV4": True,
                 "mediaRange": True,
-                "managedOfflineDownloads": False,
-                "workDetailManagement": True,
+                "managedOfflineDownloads": True,
+                "bookResourceAsset": True,
+                "bookDetailManagement": False,
             },
         },
     }

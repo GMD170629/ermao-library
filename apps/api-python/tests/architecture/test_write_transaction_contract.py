@@ -357,3 +357,39 @@ def test_system_events_do_not_hide_an_independent_commit() -> None:
                         f"{path.relative_to(APP_ROOT)}:{node.lineno}:commit=True"
                     )
     assert violations == []
+
+
+def test_library_infrastructure_uses_public_shelf_contracts() -> None:
+    library_infrastructure = APP_ROOT / "modules" / "library" / "infrastructure"
+    violations: list[str] = []
+    for path in _python_files(library_infrastructure):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                if node.module.startswith("app.modules.shelf.infrastructure"):
+                    violations.append(
+                        f"{path.relative_to(APP_ROOT)}:{node.lineno}:{node.module}"
+                    )
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("app.modules.shelf.infrastructure"):
+                        violations.append(
+                            f"{path.relative_to(APP_ROOT)}:{node.lineno}:{alias.name}"
+                        )
+    assert violations == []
+
+
+def test_library_bootstrap_does_not_import_pipeline_directly() -> None:
+    path = APP_ROOT / "bootstrap" / "library.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    violations: list[int] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module == "app.bootstrap.readable_resource_pipeline":
+                violations.append(node.lineno)
+        elif isinstance(node, ast.Import) and any(
+            alias.name == "app.bootstrap.readable_resource_pipeline"
+            for alias in node.names
+        ):
+            violations.append(node.lineno)
+    assert violations == []

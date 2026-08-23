@@ -23,7 +23,7 @@ protocol AdministrativeSettingsClient: Sendable {
     func loadUserAccess(id: String) async throws -> UserAccessSnapshot
     func saveUserAccess(
         id: String,
-        monitorFolderIDs: Set<String>,
+        libraryIDs: Set<String>,
         canViewManualImports: Bool
     ) async throws -> AdministrativeUser
 
@@ -57,9 +57,7 @@ protocol AdministrativeSettingsClient: Sendable {
     func loadRecognitionPolicy() async throws -> RecognitionPolicy
     func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy
 
-    func loadDuplicateGroups() async throws -> [DuplicateGroup]
     func loadLibraryOperations() async throws -> [LibraryOperation]
-    func mergeDuplicateWorks(_ request: MergeDuplicateRequest) async throws -> String
     func undoLibraryOperation(id: String) async throws
     func loadCategories(kind: CategoryKind, query: String) async throws -> [GovernedCategory]
     func renameCategory(id: String, name: String) async throws -> String

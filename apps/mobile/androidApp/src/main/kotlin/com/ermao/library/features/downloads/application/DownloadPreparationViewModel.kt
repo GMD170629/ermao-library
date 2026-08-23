@@ -50,13 +50,16 @@ sealed interface DownloadPreparationUiState {
 }
 
 data class PreparedDownloadArtifact(
+    val bookId: String,
+    val resourceId: String,
+    val assetId: String,
     val localReference: String,
     val expectedBytes: Long,
     val format: String,
 )
 
 class DownloadPreparationViewModel(
-    private val volumeId: String,
+    private val resourceId: String,
     private val context: DownloadRequestContext,
     private val catalog: DownloadCatalogRepository,
     private val sink: DownloadByteSink,
@@ -92,7 +95,7 @@ class DownloadPreparationViewModel(
 
     private fun start() {
         preparationJob = viewModelScope.launch {
-            val descriptor = when (val bootstrap = bootstrapGateway.load(context, volumeId)) {
+            val descriptor = when (val bootstrap = bootstrapGateway.load(context, resourceId)) {
                 is DownloadBootstrapSuccess -> bootstrap.bootstrap.descriptor
                 is DownloadBootstrapFailure -> {
                     mutableUiState.value = DownloadPreparationUiState.Failed(bootstrap.error.code)
@@ -102,7 +105,7 @@ class DownloadPreparationViewModel(
             when (val decision = runtime.readerAccess(
                 ReaderAccessRequest(
                     namespace = context.namespace,
-                    volumeId = descriptor.identity.volumeId,
+                    resourceId = descriptor.identity.resourceId,
                     readerType = descriptor.readerType,
                     isOnline = true,
                 ),
@@ -201,6 +204,9 @@ class DownloadPreparationViewModel(
         mutableUiState.value = DownloadPreparationUiState.Completed
         completedArtifacts.send(
             PreparedDownloadArtifact(
+                bookId = artifact.identity.bookId,
+                resourceId = artifact.identity.resourceId,
+                assetId = artifact.identity.assetId,
                 localReference = artifact.localReference,
                 expectedBytes = artifact.verifiedBytes,
                 format = artifact.descriptor.format,
@@ -210,7 +216,7 @@ class DownloadPreparationViewModel(
 
     companion object {
         fun factory(
-            volumeId: String,
+            resourceId: String,
             context: DownloadRequestContext,
             catalog: DownloadCatalogRepository,
             sink: DownloadByteSink,
@@ -218,7 +224,7 @@ class DownloadPreparationViewModel(
             transferGateway: DownloadTransferGateway,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                DownloadPreparationViewModel(volumeId, context, catalog, sink, bootstrapGateway, transferGateway)
+                DownloadPreparationViewModel(resourceId, context, catalog, sink, bootstrapGateway, transferGateway)
             }
         }
     }

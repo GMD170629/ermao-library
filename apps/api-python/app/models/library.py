@@ -4,6 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -11,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    column,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,358 +21,40 @@ from app.db.base import Base
 from app.models.common import cuid, db_timestamp, timestamp_ms_server_default
 
 
-class LibraryWork(Base):
-    __tablename__ = "LibraryWork"
+class Library(Base):
+    __tablename__ = "Library"
     __table_args__ = (
-        Index("LibraryWork_publicationStatus_idx", "publicationStatus"),
-        Index("LibraryWork_trackingStatus_idx", "trackingStatus"),
-        Index("LibraryWork_title_idx", "title"),
-        Index("LibraryWork_normalizedTitle_idx", "normalizedTitle"),
-        Index("LibraryWork_normalizedAuthor_idx", "normalizedAuthor"),
-        Index("LibraryWork_seriesName_idx", "seriesName"),
-        Index("LibraryWork_organizeStatus_idx", "organizeStatus"),
-        Index("LibraryWork_hidden_idx", "hidden"),
-        Index("LibraryWork_organized_idx", "organized"),
-        Index("LibraryWork_monitorFolderId_idx", "monitorFolderId"),
-        Index("LibraryWork_mergeKey_idx", "mergeKey"),
-        Index("LibraryWork_facetIndexVersion_id_idx", "facetIndexVersion", "id"),
-        Index("LibraryWork_createdAt_id_idx", "createdAt", "id"),
-        Index("LibraryWork_hidden_createdAt_id_idx", "hidden", "createdAt", "id"),
-        Index(
-            "LibraryWork_hidden_normalizedTitle_normalizedAuthor_id_idx",
-            "hidden",
-            "normalizedTitle",
-            "normalizedAuthor",
-            "id",
+        CheckConstraint(
+            column("organizationMode").in_(("FLAT", "VOLUMES")),
+            name="Library_organizationMode_check",
         ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
-        String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
+    name: Mapped[str] = mapped_column(String(191), nullable=False)
+    root_path: Mapped[str] = mapped_column(
+        "rootPath", String(191), unique=True, nullable=False
     )
-    origin: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
+    organization_mode: Mapped[str] = mapped_column(
+        "organizationMode", String(32), nullable=False
     )
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_title: Mapped[str] = mapped_column(
-        "normalizedTitle", Text, nullable=False
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
     )
-    author: Mapped[str | None] = mapped_column(Text, nullable=True)
-    normalized_author: Mapped[str | None] = mapped_column(
-        "normalizedAuthor", Text, nullable=True
+    ignore_patterns: Mapped[str | None] = mapped_column(
+        "ignorePatterns", Text, nullable=True
     )
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    publication_status: Mapped[str] = mapped_column(
-        "publicationStatus",
-        String(191),
+    ignore_hidden: Mapped[bool] = mapped_column(
+        "ignoreHidden", Boolean, nullable=False, default=True, server_default="1"
+    )
+    min_file_size_bytes: Mapped[int] = mapped_column(
+        "minFileSizeBytes",
+        Integer,
         nullable=False,
-        default="UNKNOWN",
-        server_default="UNKNOWN",
+        default=10240,
+        server_default="10240",
     )
-    tracking_status: Mapped[str] = mapped_column(
-        "trackingStatus",
-        String(191),
-        nullable=False,
-        default="NOT_TRACKING",
-        server_default="NOT_TRACKING",
-    )
-    local_latest_volume: Mapped[float | None] = mapped_column(
-        "localLatestVolume", Float, nullable=True
-    )
-    local_latest_chapter: Mapped[float | None] = mapped_column(
-        "localLatestChapter", Float, nullable=True
-    )
-    local_latest_title: Mapped[str | None] = mapped_column(
-        "localLatestTitle", Text, nullable=True
-    )
-    local_latest_at: Mapped[datetime | None] = mapped_column(
-        "localLatestAt", TimestampMilliseconds(), nullable=True
-    )
-    tags: Mapped[str] = mapped_column(Text, nullable=False)
-    series_name: Mapped[str | None] = mapped_column("seriesName", Text, nullable=True)
-    series_index: Mapped[float | None] = mapped_column(
-        "seriesIndex", Float, nullable=True
-    )
-    metadata_quality: Mapped[int] = mapped_column(
-        "metadataQuality", Integer, nullable=False, default=0, server_default="0"
-    )
-    organize_status: Mapped[str] = mapped_column(
-        "organizeStatus",
-        String(191),
-        nullable=False,
-        default="REVIEWING",
-        server_default="REVIEWING",
-    )
-    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
-    cover_status: Mapped[str] = mapped_column(
-        "coverStatus",
-        String(191),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    hidden: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    organized: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    merge_key: Mapped[str | None] = mapped_column("mergeKey", Text, nullable=True)
-    facet_index_version: Mapped[int] = mapped_column(
-        "facetIndexVersion", Integer, nullable=False, default=0, server_default="0"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class LibraryMediaVersion(Base):
-    __tablename__ = "LibraryMediaVersion"
-    __table_args__ = (
-        UniqueConstraint(
-            "workId", "mediaKind", name="LibraryMediaVersion_workId_mediaKind_key"
-        ),
-        Index("LibraryMediaVersion_workId_idx", "workId"),
-        Index("LibraryMediaVersion_mediaKind_idx", "mediaKind"),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column(
-        "workId",
-        String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    media_kind: Mapped[str] = mapped_column(
-        "mediaKind",
-        String(191),
-        nullable=False,
-        default="EBOOK",
-        server_default="EBOOK",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class LibraryVolume(Base):
-    __tablename__ = "LibraryVolume"
-    __table_args__ = (
-        Index(
-            "LibraryVolume_mediaVersionId_sortOrder_idx", "mediaVersionId", "sortOrder"
-        ),
-        Index(
-            "LibraryVolume_mediaVersionId_volumeIndex_idx",
-            "mediaVersionId",
-            "volumeIndex",
-        ),
-        Index(
-            "LibraryVolume_mediaVersionId_hidden_monitorFolderId_idx",
-            "mediaVersionId",
-            "hidden",
-            "monitorFolderId",
-        ),
-        Index("LibraryVolume_format_idx", "format"),
-        Index("LibraryVolume_identifier_idx", "identifier"),
-        Index("LibraryVolume_isbn_idx", "isbn"),
-        Index("LibraryVolume_resourceKey_idx", "resourceKey"),
-        Index("LibraryVolume_monitorFolderId_idx", "monitorFolderId"),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    media_version_id: Mapped[str] = mapped_column(
-        "mediaVersionId",
-        String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    monitor_folder_id: Mapped[str | None] = mapped_column(
-        "monitorFolderId",
-        String(191),
-        ForeignKey("MonitorFolder.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    origin: Mapped[str] = mapped_column(
-        String(191), nullable=False, default="MANUAL", server_default="MANUAL"
-    )
-    title: Mapped[str] = mapped_column(Text, nullable=False)
-    volume_index: Mapped[float | None] = mapped_column(
-        "volumeIndex", Float, nullable=True
-    )
-    sort_order: Mapped[int] = mapped_column(
-        "sortOrder", Integer, nullable=False, default=0, server_default="0"
-    )
-    format: Mapped[str] = mapped_column(String(191), nullable=False)
-    classification_source: Mapped[str] = mapped_column(
-        "classificationSource",
-        String(32),
-        nullable=False,
-        default="LEGACY",
-        server_default="LEGACY",
-    )
-    classification_reason: Mapped[str] = mapped_column(
-        "classificationReason",
-        String(64),
-        nullable=False,
-        default="LEGACY",
-        server_default="LEGACY",
-    )
-    suggested_media_kind: Mapped[str | None] = mapped_column(
-        "suggestedMediaKind", String(32), nullable=True
-    )
-    resource_key: Mapped[str] = mapped_column(
-        "resourceKey", String(191), nullable=False
-    )
-    source_group_key: Mapped[str | None] = mapped_column(
-        "sourceGroupKey", Text, nullable=True
-    )
-    derived_from_volume_id: Mapped[str | None] = mapped_column(
-        "derivedFromVolumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    language: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    publisher: Mapped[str | None] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime | None] = mapped_column(
-        "publishedAt", TimestampMilliseconds(), nullable=True
-    )
-    identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
-    isbn: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    import_status: Mapped[str] = mapped_column(
-        "importStatus",
-        String(191),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    import_error: Mapped[str | None] = mapped_column("importError", Text, nullable=True)
-    size_bytes: Mapped[int] = mapped_column(
-        "sizeBytes", Integer, nullable=False, default=0, server_default="0"
-    )
-    page_count: Mapped[int | None] = mapped_column("pageCount", Integer, nullable=True)
-    chapter_count: Mapped[int | None] = mapped_column(
-        "chapterCount", Integer, nullable=True
-    )
-    duration_ms: Mapped[int | None] = mapped_column(
-        "durationMs", Integer, nullable=True
-    )
-    track_count: Mapped[int | None] = mapped_column(
-        "trackCount", Integer, nullable=True
-    )
-    narrator: Mapped[str | None] = mapped_column(Text, nullable=True)
-    abridged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    cover_path: Mapped[str | None] = mapped_column("coverPath", Text, nullable=True)
-    cover_status: Mapped[str] = mapped_column(
-        "coverStatus",
-        String(191),
-        nullable=False,
-        default="PENDING",
-        server_default="PENDING",
-    )
-    hidden: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class LibraryFile(Base):
-    __tablename__ = "LibraryFile"
-    __table_args__ = (
-        Index("LibraryFile_path_key", "path", unique=True),
-        Index("LibraryFile_filePathHash_key", "filePathHash", unique=True),
-        Index("LibraryFile_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
-        Index("LibraryFile_sizeBytes_mtimeMs_idx", "sizeBytes", "mtimeMs"),
-        Index("LibraryFile_pathKey_idx", "pathKey"),
-        Index(
-            "LibraryFile_kind_pageIndexVersion_id_idx",
-            "kind",
-            "pageIndexVersion",
-            "id",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    path: Mapped[str] = mapped_column(Text, nullable=False)
-    path_key: Mapped[str | None] = mapped_column("pathKey", String(64), nullable=True)
-    file_path_hash: Mapped[str | None] = mapped_column(
-        "filePathHash", String(191), nullable=True
-    )
-    mtime_ms: Mapped[int] = mapped_column(
-        "mtimeMs", Integer, nullable=False, default=0, server_default="0"
-    )
-    kind: Mapped[str] = mapped_column(String(191), nullable=False)
-    mime_type: Mapped[str] = mapped_column("mimeType", String(191), nullable=False)
-    size_bytes: Mapped[int] = mapped_column(
-        "sizeBytes", Integer, nullable=False, default=0, server_default="0"
-    )
-    page_index_version: Mapped[int] = mapped_column(
-        "pageIndexVersion", Integer, nullable=False, default=0, server_default="0"
-    )
-    duration_ms: Mapped[int | None] = mapped_column(
-        "durationMs", Integer, nullable=True
-    )
-    codec: Mapped[str | None] = mapped_column(String(191), nullable=True)
-    bitrate: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sample_rate: Mapped[int | None] = mapped_column(
-        "sampleRate", Integer, nullable=True
-    )
-    channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    disc_number: Mapped[int | None] = mapped_column(
-        "discNumber", Integer, nullable=True
-    )
-    track_number: Mapped[int | None] = mapped_column(
-        "trackNumber", Integer, nullable=True
-    )
-    sort_order: Mapped[int] = mapped_column(
-        "sortOrder", Integer, nullable=False, default=0, server_default="0"
-    )
+    description: Mapped[str | None] = mapped_column(String(191), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",
         TimestampMilliseconds(),
@@ -388,6 +72,8 @@ class LibraryFile(Base):
 
 
 class LibraryFacet(Base):
+    """A normalized facet dictionary shared by book/resource links."""
+
     __tablename__ = "LibraryFacet"
     __table_args__ = (
         UniqueConstraint("kind", "normalizedName"),
@@ -417,9 +103,9 @@ class LibraryFacet(Base):
     )
 
 
-class LibraryWorkFacet(Base):
-    __tablename__ = "LibraryWorkFacet"
-    __table_args__ = (Index("LibraryWorkFacet_workId_idx", "workId"),)
+class LibraryBookFacet(Base):
+    __tablename__ = "LibraryBookFacet"
+    __table_args__ = (Index("LibraryBookFacet_bookId_idx", "bookId"),)
 
     facet_id: Mapped[str] = mapped_column(
         "facetId",
@@ -427,10 +113,10 @@ class LibraryWorkFacet(Base):
         ForeignKey("LibraryFacet.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    work_id: Mapped[str] = mapped_column(
-        "workId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
     sort_order: Mapped[int] = mapped_column(
@@ -445,9 +131,11 @@ class LibraryWorkFacet(Base):
     )
 
 
-class LibraryVolumeFacet(Base):
-    __tablename__ = "LibraryVolumeFacet"
-    __table_args__ = (Index("LibraryVolumeFacet_volumeId_idx", "volumeId"),)
+class LibraryReadableResourceFacet(Base):
+    __tablename__ = "LibraryReadableResourceFacet"
+    __table_args__ = (
+        Index("LibraryReadableResourceFacet_resourceId_idx", "resourceId"),
+    )
 
     facet_id: Mapped[str] = mapped_column(
         "facetId",
@@ -455,10 +143,12 @@ class LibraryVolumeFacet(Base):
         ForeignKey("LibraryFacet.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -523,42 +213,22 @@ class LibraryOperation(Base):
     )
 
 
-class MediaVersionMigrationEvent(Base):
-    """Durable audit record for ambiguous legacy resource attribution."""
-
-    __tablename__ = "MediaVersionMigrationEvent"
+class ReadableResourceNavigationUnit(Base):
+    __tablename__ = "ReadableResourceNavigationUnit"
     __table_args__ = (
-        UniqueConstraint(
-            "recordType",
-            "recordId",
-            "code",
-            name="MediaVersionMigrationEvent_record_code_key",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    work_id: Mapped[str] = mapped_column("workId", String(191), nullable=False)
-    record_type: Mapped[str] = mapped_column("recordType", String(64), nullable=False)
-    record_id: Mapped[str] = mapped_column("recordId", String(191), nullable=False)
-    code: Mapped[str] = mapped_column(String(64), nullable=False)
-    details_json: Mapped[str] = mapped_column("detailsJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-
-
-class LibraryReadingUnit(Base):
-    __tablename__ = "LibraryReadingUnit"
-    __table_args__ = (
-        Index("LibraryReadingUnit_volumeId_sortOrder_idx", "volumeId", "sortOrder"),
-        Index("LibraryReadingUnit_fileId_sortOrder_idx", "fileId", "sortOrder"),
         Index(
-            "LibraryReadingUnit_volumeId_unitType_sortOrder_key",
-            "volumeId",
+            "ReadableResourceNavigationUnit_resourceId_sortOrder_idx",
+            "resourceId",
+            "sortOrder",
+        ),
+        Index(
+            "ReadableResourceNavigationUnit_assetId_sortOrder_idx",
+            "assetId",
+            "sortOrder",
+        ),
+        Index(
+            "ReadableResourceNavigationUnit_resourceId_unitType_sortOrder_key",
+            "resourceId",
             "unitType",
             "sortOrder",
             unique=True,
@@ -566,16 +236,18 @@ class LibraryReadingUnit(Base):
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
     )
-    file_id: Mapped[str | None] = mapped_column(
-        "fileId",
+    asset_id: Mapped[str | None] = mapped_column(
+        "assetId",
         String(191),
-        ForeignKey("LibraryFile.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
         nullable=True,
     )
     unit_type: Mapped[str] = mapped_column("unitType", String(191), nullable=False)
@@ -610,55 +282,26 @@ class LibraryReadingUnit(Base):
     )
 
 
-class LibraryMetadata(Base):
-    __tablename__ = "LibraryMetadata"
-    __table_args__ = (Index("LibraryMetadata_volumeId_idx", "volumeId"),)
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    source: Mapped[str] = mapped_column(String(191), nullable=False)
-    raw_json: Mapped[str] = mapped_column("rawJson", Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class LibraryReadingProgress(Base):
-    __tablename__ = "LibraryReadingProgress"
+class ReaderResourceProgress(Base):
+    __tablename__ = "ReaderResourceProgress"
     __table_args__ = (
-        Index("LibraryReadingProgress_volumeId_idx", "volumeId"),
+        Index("ReaderResourceProgress_resourceId_idx", "resourceId"),
         Index(
-            "LibraryReadingProgress_clientId_clientSequence_idx",
+            "ReaderResourceProgress_clientId_clientSequence_idx",
             "clientId",
             "clientSequence",
         ),
         Index(
-            "LibraryReadingProgress_userId_volumeId_key",
+            "ReaderResourceProgress_userId_resourceId_key",
             "userId",
-            "volumeId",
+            "resourceId",
             unique=True,
         ),
         Index(
-            "LibraryReadingProgress_userId_updatedAt_volumeId_idx",
+            "ReaderResourceProgress_userId_updatedAt_resourceId_idx",
             "userId",
             "updatedAt",
-            "volumeId",
+            "resourceId",
         ),
     )
 
@@ -669,10 +312,12 @@ class LibraryReadingProgress(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
     )
     reader_type: Mapped[str] = mapped_column("readerType", String(191), nullable=False)
@@ -737,20 +382,20 @@ class LibraryReadingProgress(Base):
 
 
 class ReaderProgressMutation(Base):
-    """Bounded idempotency receipt for an exact Reader v4 progress mutation."""
+    """Bounded idempotency receipt for an exact resource progress mutation."""
 
     __tablename__ = "ReaderProgressMutation"
     __table_args__ = (
         UniqueConstraint(
             "userId",
-            "volumeId",
+            "resourceId",
             "mutationId",
-            name="ReaderProgressMutation_userId_volumeId_mutationId_key",
+            name="ReaderProgressMutation_userId_resourceId_mutationId_key",
         ),
         Index(
-            "ReaderProgressMutation_userId_volumeId_revision_idx",
+            "ReaderProgressMutation_userId_resourceId_revision_idx",
             "userId",
-            "volumeId",
+            "resourceId",
             "revision",
         ),
     )
@@ -762,10 +407,12 @@ class ReaderProgressMutation(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
     )
     mutation_id: Mapped[str] = mapped_column("mutationId", String(36), nullable=False)
@@ -783,21 +430,10 @@ class ReaderProgressMutation(Base):
     )
 
 
-class UserMediaHistory(Base):
-    __tablename__ = "UserMediaHistory"
+class BookDetailPreference(Base):
+    __tablename__ = "BookDetailPreference"
     __table_args__ = (
-        UniqueConstraint(
-            "userId",
-            "mediaVersionId",
-            name="UserMediaHistory_user_mediaVersion_key",
-        ),
-        Index("UserMediaHistory_updatedAt_idx", "updatedAt"),
-        Index(
-            "UserMediaHistory_userId_updatedAt_mediaVersionId_idx",
-            "userId",
-            "updatedAt",
-            "mediaVersionId",
-        ),
+        Index("BookDetailPreference_user_book_key", "userId", "bookId", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -807,51 +443,10 @@ class UserMediaHistory(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    media_version_id: Mapped[str] = mapped_column(
-        "mediaVersionId",
+    book_id: Mapped[str] = mapped_column(
+        "bookId",
         String(191),
-        ForeignKey("LibraryMediaVersion.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    last_volume_id: Mapped[str | None] = mapped_column(
-        "lastVolumeId",
-        String(191),
-        ForeignKey("LibraryVolume.id", ondelete="SET NULL", onupdate="CASCADE"),
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
-class WorkDetailPreference(Base):
-    __tablename__ = "WorkDetailPreference"
-    __table_args__ = (
-        Index("WorkDetailPreference_user_work_key", "userId", "workId", unique=True),
-    )
-
-    id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
-    user_id: Mapped[str] = mapped_column(
-        "userId",
-        String(191),
-        ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
-    work_id: Mapped[str] = mapped_column(
-        "workId",
-        String(191),
-        ForeignKey("LibraryWork.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("LibraryBook.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
     selected_tab: Mapped[str] = mapped_column(
@@ -906,3 +501,17 @@ class ExternalMetadataCache(Base):
         default=db_timestamp,
         onupdate=db_timestamp,
     )
+
+
+__all__ = [
+    "BookDetailPreference",
+    "ExternalMetadataCache",
+    "Library",
+    "LibraryBookFacet",
+    "LibraryFacet",
+    "LibraryOperation",
+    "LibraryReadableResourceFacet",
+    "ReadableResourceNavigationUnit",
+    "ReaderProgressMutation",
+    "ReaderResourceProgress",
+]

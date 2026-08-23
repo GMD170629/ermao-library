@@ -62,6 +62,6 @@ test('parses only exact v4 snapshots and never restores from display percent', (
   const snapshot = parseReaderV4ProgressSnapshot({ schemaVersion: 4, clientId: 'ios-client', revision: 18, locator: wire, displayPercent: 32.7, receivedAtEpochMillis: 1786500000100, capturedAtEpochMillis: 1786499999000 });
   assert.equal(snapshot?.revision, 18);
   assert.equal(snapshot?.capturedAtEpochMillis, 1786499999000);
-  assert.equal(v4LocationToDomain(snapshot?.locator ?? null, 'volume-1', 'mobi')?.kind, 'reflowable');
+  assert.equal(v4LocationToDomain(snapshot?.locator ?? null, 'resource-1', 'mobi')?.kind, 'reflowable');
   assert.equal(parseReaderV4ProgressSnapshot({ schemaVersion: 4, clientId: 'ios-client', revision: 18, locator: progressionOnly.locator, displayPercent: 32.7, receivedAtEpochMillis: 1786500000100 }), null);
 });

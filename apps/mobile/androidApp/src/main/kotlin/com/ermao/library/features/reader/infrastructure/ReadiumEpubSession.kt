@@ -380,7 +380,7 @@ internal class ReadiumEpubSession(
                                 val snapshot = verifiedTarget?.snapshot
                                 if (coordinator != null && snapshot != null) {
                                     val verified = ReaderProgress(
-                                        source.sourceId,
+                                        source.resourceId,
                                         exactLocation,
                                         nowEpochMillis(),
                                         deviceIdentity.stableDeviceId(),
@@ -657,7 +657,7 @@ internal class ReadiumEpubSession(
             if (location == lastPersistedLocation) return@withLock
             val exactProgress = runCatching {
                 ReaderProgress(
-                    sourceId = source.sourceId,
+                    resourceId = source.resourceId,
                     location = location,
                     updatedAtEpochMillis = nowEpochMillis(),
                     deviceId = deviceIdentity.stableDeviceId(),
@@ -709,8 +709,7 @@ internal class ReadiumEpubSession(
     private fun publishPresentationUpdate(progress: ReaderProgress) {
         val reflow = progress.location as? ReflowReaderLocation ?: return
         val namespaceKey = presentationNamespaceKey ?: return
-        val workId = source.workId ?: return
-        val volumeId = source.volumeId ?: source.sourceId
+        val bookId = source.bookId ?: return
         val href = reflow.resourceKey ?: return
         val percent = ((reflow.totalProgression ?: reflow.progression ?: 0.0) * 100).coerceIn(0.0, 100.0)
         val chapterTitle = tableOfContents.firstOrNull {
@@ -719,8 +718,8 @@ internal class ReadiumEpubSession(
         publishProgressUpdate(
             createReaderProgressPresentationUpdate(
                 namespaceKey = namespaceKey,
-                workId = workId,
-                volumeId = volumeId,
+                bookId = bookId,
+                resourceId = source.resourceId,
                 percent = percent,
                 progress = progress,
                 chapterTitle = chapterTitle,
@@ -745,7 +744,7 @@ internal class ReadiumEpubSession(
     }
 
     private suspend fun loadProgressSafely(): ReaderProgress? = try {
-        progressStore.load(source.sourceId)
+        progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {

@@ -36,11 +36,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.MoveToInbox
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Equalizer
@@ -50,7 +48,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Source
-import androidx.compose.material.icons.outlined.Splitscreen
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
@@ -104,13 +101,13 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.ermao.library.R
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ChapterReadingState
-import com.ermao.library.features.content.model.VolumeContent
-import com.ermao.library.features.content.model.WorkDetailContent
+import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.ui.ContentCover
 import com.ermao.library.features.content.ui.CoverProgress
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
-import com.ermao.library.features.content.ui.WorkCover
+import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -137,10 +134,8 @@ import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
-import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
 import com.ermao.library.features.workmanagement.ui.WorkManagementTarget
 import com.ermao.library.features.workmanagement.ui.WorkManagementTask
-import com.ermao.library.features.workmanagement.ui.WorkManagementTaskSheet
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
@@ -154,7 +149,7 @@ import androidx.compose.runtime.snapshotFlow
 
 private sealed interface WorkControlMenuTarget {
     data object Book : WorkControlMenuTarget
-    data class Volume(val value: VolumeContent) : WorkControlMenuTarget
+    data class Resource(val value: ResourceContent) : WorkControlMenuTarget
 }
 
 private data class WorkControlMenuState(
@@ -169,11 +164,11 @@ private data class WorkManagementSheetState(
 
 private enum class BookControlAction {
     AddSeries, AddShelf, MarkUnread, Download, Edit, Recognize, UploadCover,
-    RegenerateCover, SendToKindle, Delete,
+    RegenerateCover, SendToKindle,
 }
 
 private enum class VolumeControlAction {
-    MarkUnread, Download, Edit, ChangeMediaType, Split, Move, SendToKindle, Delete,
+    MarkUnread, Download, Edit, ChangeMediaType, SendToKindle,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,9 +179,8 @@ fun WorkDetailScreen(
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
     onBack: () -> Unit,
-    onSelectMedia: (String) -> Unit,
-    onSelectVolume: (String) -> Unit,
-    onLoadMoreVolumes: () -> Unit = {},
+    onSelectResource: (String) -> Unit,
+    onLoadMoreResources: () -> Unit = {},
     onOpenShelfPicker: () -> Unit,
     onDismissShelfPicker: () -> Unit,
     onToggleShelf: (String) -> Unit,
@@ -196,20 +190,20 @@ fun WorkDetailScreen(
     onOpenFacet: (LibraryScope, String) -> Unit,
     onRetry: () -> Unit,
     onRefresh: () -> Unit = {},
-    downloadRecordsByVolume: Map<String, AndroidDownloadRecord> = emptyMap(),
-    downloadFailuresByVolume: Map<String, String> = emptyMap(),
-    onDownloadVolume: (String) -> Unit = {},
+    downloadRecordsByResource: Map<String, AndroidDownloadRecord> = emptyMap(),
+    downloadFailuresByResource: Map<String, String> = emptyMap(),
+    onDownloadResource: (String) -> Unit = {},
     onCancelDownload: (String) -> Unit = {},
     onRemoveDownload: (AndroidDownloadRecord) -> Unit = {},
-    onOpenSelectedVolume: (VolumeContent) -> Unit = {},
+    onOpenSelectedResource: (ResourceContent) -> Unit = {},
     onSelectReadingStatus: (WorkReadingStatus) -> Unit = {},
     managementViewModel: WorkManagementViewModel? = null,
     canManageSystem: Boolean = managementViewModel != null,
 ) {
     var controlMenuState by remember { mutableStateOf<WorkControlMenuState?>(null) }
     var managementSheetState by remember { mutableStateOf<WorkManagementSheetState?>(null) }
-    val selectedVolume = state.resolveSelectedVolume()
-    var readingStatusOverride by remember(state.content?.work?.id, selectedVolume?.id) {
+    val selectedResource = state.resolveSelectedResource()
+    var readingStatusOverride by remember(state.content?.book?.id, selectedResource?.id) {
         mutableStateOf<WorkReadingStatus?>(null)
     }
     var pendingDownloadRemoval by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
@@ -225,10 +219,10 @@ fun WorkDetailScreen(
         empty = stringResource(R.string.work_shelf_empty),
         save = stringResource(R.string.work_shelf_save),
     )
-    val currentReadingStatus = readingStatusOverride ?: selectedVolume?.let { volume ->
+    val currentReadingStatus = readingStatusOverride ?: selectedResource?.let { resource ->
         workReadingStatus(
-            completed = state.content?.completed == true || (volume.progressPercent ?: 0) >= 100,
-            progressPercent = volume.progressPercent,
+            completed = state.content?.completed == true || (resource.progressPercent ?: 0) >= 100,
+            progressPercent = resource.progressPercent,
         )
     } ?: WorkReadingStatus.Unread
     val managementState by managementViewModel?.uiState?.collectAsStateWithLifecycle()
@@ -282,9 +276,8 @@ fun WorkDetailScreen(
                 state = state,
                 repository = repository,
                 context = context,
-                onSelectMedia = onSelectMedia,
-                onSelectVolume = onSelectVolume,
-                onLoadMoreVolumes = onLoadMoreVolumes,
+                onSelectResource = onSelectResource,
+                onLoadMoreResources = onLoadMoreResources,
                 onOpenShelfPicker = onOpenShelfPicker,
                 readingStatus = currentReadingStatus,
                 onToggleReadingStatus = {
@@ -295,8 +288,8 @@ fun WorkDetailScreen(
                     } else {
                         ManagedReadingStatus.Unread
                     }
-                    if (selectedVolume != null && managementViewModel != null) {
-                        managementViewModel.setReadingStatus(selectedVolume.id, managedStatus)
+                    if (selectedResource != null && managementViewModel != null) {
+                        managementViewModel.setReadingStatus(selectedResource.id, managedStatus)
                     } else {
                         onSelectReadingStatus(next)
                     }
@@ -305,14 +298,14 @@ fun WorkDetailScreen(
                     controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Book, anchor)
                 },
                 onOpenFacet = onOpenFacet,
-                downloadRecordsByVolume = downloadRecordsByVolume,
-                downloadFailuresByVolume = downloadFailuresByVolume,
-                onDownloadVolume = onDownloadVolume,
+                downloadRecordsByResource = downloadRecordsByResource,
+                downloadFailuresByResource = downloadFailuresByResource,
+                onDownloadResource = onDownloadResource,
                 onCancelDownload = onCancelDownload,
                 onRequestRemoveDownload = { pendingDownloadRemoval = it },
-                onOpenSelectedVolume = onOpenSelectedVolume,
-                onOpenVolumeControl = { volume, anchor ->
-                    controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Volume(volume), anchor)
+                onOpenSelectedResource = onOpenSelectedResource,
+                onOpenResourceControl = { resource, anchor ->
+                    controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Resource(resource), anchor)
                 },
                 modifier = Modifier.padding(padding),
             )
@@ -323,7 +316,7 @@ fun WorkDetailScreen(
         AlertDialog(
             onDismissRequest = { pendingDownloadRemoval = null },
             title = { Text(stringResource(R.string.downloads_remove_title)) },
-            text = { Text(stringResource(R.string.downloads_remove_message, download.volumeTitle)) },
+            text = { Text(stringResource(R.string.downloads_remove_message, download.resourceTitle)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -345,38 +338,38 @@ fun WorkDetailScreen(
             target = activeMenu.target,
             anchorInWindow = activeMenu.anchorInWindow,
             content = state.content,
-            selectedVolume = selectedVolume,
+            selectedResource = selectedResource,
             repository = repository,
             context = context,
             canManageSystem = canManageSystem,
             selectedDownload = when (val target = activeMenu.target) {
-                WorkControlMenuTarget.Book -> selectedVolume?.let { downloadRecordsByVolume[it.id] }
-                is WorkControlMenuTarget.Volume -> downloadRecordsByVolume[target.value.id]
+                WorkControlMenuTarget.Book -> selectedResource?.let { downloadRecordsByResource[it.id] }
+                is WorkControlMenuTarget.Resource -> downloadRecordsByResource[target.value.id]
             },
             onAddShelf = {
                 controlMenuState = null
                 onOpenShelfPicker()
             },
-            onMarkUnread = { volume ->
+            onMarkUnread = { resource ->
                 controlMenuState = null
                 readingStatusOverride = WorkReadingStatus.Unread
                 if (managementViewModel != null) {
-                    managementViewModel.setReadingStatus(volume.id, ManagedReadingStatus.Unread)
+                    managementViewModel.setReadingStatus(resource.id, ManagedReadingStatus.Unread)
                 } else {
                     onSelectReadingStatus(WorkReadingStatus.Unread)
                 }
             },
-            onDownload = { volume ->
+            onDownload = { resource ->
                 controlMenuState = null
-                val download = downloadRecordsByVolume[volume.id]
+                val download = downloadRecordsByResource[resource.id]
                 when {
                     download?.isReadable == true -> onRemoveDownload(download)
                     download?.status in setOf(
                         AndroidDownloadStatus.Queued,
                         AndroidDownloadStatus.Downloading,
                         AndroidDownloadStatus.Verifying,
-                    ) -> onCancelDownload(volume.id)
-                    else -> onDownloadVolume(volume.id)
+                    ) -> onCancelDownload(resource.id)
+                    else -> onDownloadResource(resource.id)
                 }
             },
             onBookTask = bookTask@{ action ->
@@ -389,61 +382,40 @@ fun WorkDetailScreen(
                     BookControlAction.RegenerateCover,
                     -> WorkManagementTask.Cover
                     BookControlAction.SendToKindle -> WorkManagementTask.Kindle
-                    BookControlAction.Delete -> WorkManagementTask.DeleteWork
                     BookControlAction.AddShelf,
                     BookControlAction.MarkUnread,
                     BookControlAction.Download,
                     -> return@bookTask
                 }
-                val target = if (action == BookControlAction.SendToKindle && selectedVolume != null) {
-                    WorkManagementTarget.Volume(selectedVolume)
+                val target = if (action == BookControlAction.SendToKindle && selectedResource != null) {
+                    WorkManagementTarget.Resource(selectedResource)
                 } else {
                     WorkManagementTarget.Work
                 }
                 managementSheetState = WorkManagementSheetState(task, target)
             },
-            onVolumeTask = volumeTask@{ action, volume ->
+            onResourceTask = resourceTask@{ action, resource ->
                 controlMenuState = null
                 val task = when (action) {
                     VolumeControlAction.Edit -> WorkManagementTask.EditVolume
                     VolumeControlAction.ChangeMediaType -> WorkManagementTask.MediaKind
-                    VolumeControlAction.Split -> WorkManagementTask.Split
-                    VolumeControlAction.Move -> WorkManagementTask.Transfer
                     VolumeControlAction.SendToKindle -> WorkManagementTask.Kindle
-                    VolumeControlAction.Delete -> WorkManagementTask.DeleteVolume
                     VolumeControlAction.MarkUnread,
                     VolumeControlAction.Download,
-                    -> return@volumeTask
+                    -> return@resourceTask
                 }
-                managementSheetState = WorkManagementSheetState(task, WorkManagementTarget.Volume(volume))
+                managementSheetState = WorkManagementSheetState(task, WorkManagementTarget.Resource(resource))
             },
             onDismiss = { controlMenuState = null },
         )
     }
     val activeManagementSheet = managementSheetState
-    if (activeManagementSheet != null && state.content != null && managementViewModel != null) {
-        WorkManagementTaskSheet(
-            task = activeManagementSheet.task,
-            target = activeManagementSheet.target,
-            content = state.content,
-            state = requireNotNull(managementState),
-            viewModel = managementViewModel,
-            downloadRecordsByVolume = downloadRecordsByVolume,
-            workCover = {
-                WorkCover(
-                    work = state.content.work,
-                    repository = repository,
-                    context = context,
-                    role = CoverRole.Compact,
-                )
-            },
-            onDismiss = { managementSheetState = null },
-        )
-    }
+    // Native management is intentionally disabled for the Book/Resource/Asset cutover.
+    // Shelf, reading status, downloads and Kindle remain available through their own flows.
     LaunchedEffect(managementState?.completedMutation) {
-        val completion = managementState?.completedMutation ?: return@LaunchedEffect
+        if (managementState?.completedMutation == null) return@LaunchedEffect
         managementSheetState = null
-        if (completion == WorkManagementCompletion.WorkDeleted) onBack() else onRefresh()
+        onRefresh()
         snackbarHostState.currentSnackbarData?.dismiss()
         snackbarHostState.showSnackbar(managementUpdatedMessage)
         managementViewModel?.consumeFeedback()
@@ -471,28 +443,25 @@ private fun WorkDetailBody(
     state: WorkDetailUiState,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onSelectMedia: (String) -> Unit,
-    onSelectVolume: (String) -> Unit,
-    onLoadMoreVolumes: () -> Unit,
+    onSelectResource: (String) -> Unit,
+    onLoadMoreResources: () -> Unit,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
     onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
-    downloadRecordsByVolume: Map<String, AndroidDownloadRecord>,
-    downloadFailuresByVolume: Map<String, String>,
-    onDownloadVolume: (String) -> Unit,
+    downloadRecordsByResource: Map<String, AndroidDownloadRecord>,
+    downloadFailuresByResource: Map<String, String>,
+    onDownloadResource: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
-    onOpenSelectedVolume: (VolumeContent) -> Unit,
-    onOpenVolumeControl: (VolumeContent, Offset) -> Unit,
+    onOpenSelectedResource: (ResourceContent) -> Unit,
+    onOpenResourceControl: (ResourceContent, Offset) -> Unit,
     modifier: Modifier,
 ) {
     val theme = WarmPageThemeValues
     val content = requireNotNull(state.content)
-    val selectedMedia = content.media.firstOrNull { it.kind == state.selectedMediaKind }
-        ?: content.media.firstOrNull()
-    val selectedVolume = state.resolveSelectedVolume()
+    val selectedResource = state.resolveSelectedResource()
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -512,77 +481,65 @@ private fun WorkDetailBody(
         }
         item {
             WorkDetailActionRow(
-                mediaKind = state.selectedMediaKind,
-                selectedVolume = selectedVolume,
-                selectedDownload = selectedVolume?.let { volume -> downloadRecordsByVolume[volume.id] },
+                selectedResource = selectedResource,
+                selectedDownload = selectedResource?.let { resource -> downloadRecordsByResource[resource.id] },
                 onOpenShelfPicker = onOpenShelfPicker,
                 readingStatus = readingStatus,
                 onToggleReadingStatus = onToggleReadingStatus,
                 onOpenBookControl = onOpenBookControl,
-                onDownloadVolume = onDownloadVolume,
+                onDownloadResource = onDownloadResource,
                 onCancelDownload = onCancelDownload,
                 onRequestRemoveDownload = onRequestRemoveDownload,
-                onOpenSelectedVolume = onOpenSelectedVolume,
+                onOpenSelectedResource = onOpenSelectedResource,
             )
         }
         if (content.hasDescription) item { WorkAboutSection(content) }
-        if (content.media.isNotEmpty()) {
-            item {
-                WorkMediaPicker(
-                    options = content.media.map { media -> WarmPageChoice(media.kind, mediaLabel(media.kind)) },
-                    selected = state.selectedMediaKind ?: content.media.first().kind,
-                    onSelect = onSelectMedia,
-                )
-            }
-        }
-        if (selectedMedia == null || selectedMedia.volumes.isEmpty()) {
+        if (content.resources.isEmpty()) {
             item {
                 WarmPageEmptyState(
-                    title = stringResource(R.string.work_no_readable_volumes),
+                    title = stringResource(R.string.work_no_readable_resources),
                     message = stringResource(R.string.work_reader_next_phase_message),
                 )
             }
         } else {
             item {
-                WorkVolumeRail(
-                    volumes = selectedMedia.volumes,
-                    selectedVolumeId = selectedVolume?.id,
-                    totalVolumes = selectedMedia.volumeCount,
-                    isLoadingMore = state.isLoadingMoreVolumes,
-                    paginationErrorCode = state.volumePaginationErrorCode,
+                WorkResourceRail(
+                    resources = content.resources,
+                    selectedResourceId = selectedResource?.id,
+                    totalResources = content.resources.size,
+                    isLoadingMore = state.isLoadingMoreResources,
+                    paginationErrorCode = state.resourcePaginationErrorCode,
                     repository = repository,
                     context = context,
-                    downloadRecordsByVolume = downloadRecordsByVolume,
-                    downloadFailuresByVolume = downloadFailuresByVolume,
-                    onSelectVolume = onSelectVolume,
-                    onLoadMore = onLoadMoreVolumes,
-                    onManageVolume = onOpenVolumeControl,
+                    downloadRecordsByResource = downloadRecordsByResource,
+                    downloadFailuresByResource = downloadFailuresByResource,
+                    onSelectResource = onSelectResource,
+                    onLoadMore = onLoadMoreResources,
+                    onManageResource = onOpenResourceControl,
                     managementAvailable = true,
                 )
             }
         }
-        selectedVolume?.let { volume -> item { SelectedVolumeMetadata(volume) } }
+        selectedResource?.let { resource -> item { SelectedResourceMetadata(resource) } }
     }
 }
 
 @Composable
 private fun WorkDetailActionRow(
-    mediaKind: String?,
-    selectedVolume: VolumeContent?,
+    selectedResource: ResourceContent?,
     selectedDownload: AndroidDownloadRecord?,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
     onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
-    onDownloadVolume: (String) -> Unit,
+    onDownloadResource: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
-    onOpenSelectedVolume: (VolumeContent) -> Unit,
+    onOpenSelectedResource: (ResourceContent) -> Unit,
 ) {
     val theme = WarmPageThemeValues
     val primaryAction = workDetailPrimaryActionPresentation(
-        mediaKind = mediaKind,
-        selectedVolume = selectedVolume,
+        selectedResource = selectedResource,
         download = selectedDownload,
     )
     val primaryLabel = primaryActionLabel(primaryAction.label)
@@ -596,10 +553,10 @@ private fun WorkDetailActionRow(
                 Icons.Filled.PlayArrow
             },
             onClick = {
-                selectedVolume?.let { volume ->
+                selectedResource?.let { resource ->
                     when (primaryAction.intent) {
-                        WorkDetailPrimaryActionIntent.OpenSelectedVolume -> onOpenSelectedVolume(volume)
-                        WorkDetailPrimaryActionIntent.DownloadThenRead -> onDownloadVolume(volume.id)
+                        WorkDetailPrimaryActionIntent.OpenSelectedVolume -> onOpenSelectedResource(resource)
+                        WorkDetailPrimaryActionIntent.DownloadThenRead -> onDownloadResource(resource.id)
                         WorkDetailPrimaryActionIntent.AwaitDownload,
                         WorkDetailPrimaryActionIntent.Unavailable,
                         -> Unit
@@ -629,13 +586,13 @@ private fun WorkDetailActionRow(
                     },
                 ),
                 onClick = {
-                    selectedVolume?.let { volume ->
+                    selectedResource?.let { resource ->
                         when (downloadAction) {
-                            WorkDetailDownloadAction.Downloading -> onCancelDownload(volume.id)
+                            WorkDetailDownloadAction.Downloading -> onCancelDownload(resource.id)
                             WorkDetailDownloadAction.NotDownloaded,
                             WorkDetailDownloadAction.Paused,
                             WorkDetailDownloadAction.Failed,
-                            -> onDownloadVolume(volume.id)
+                            -> onDownloadResource(resource.id)
                             WorkDetailDownloadAction.Downloaded -> Unit
                         }
                     }
@@ -644,7 +601,7 @@ private fun WorkDetailActionRow(
                     { onRequestRemoveDownload(download) }
                 },
                 longClickLabel = stringResource(R.string.work_quick_remove_download),
-                enabled = selectedVolume != null,
+                enabled = selectedResource != null,
                 modifier = Modifier.weight(1f),
                 testTag = "work-download-action",
             )
@@ -662,7 +619,7 @@ private fun WorkDetailActionRow(
                     },
                 ),
                 onClick = onToggleReadingStatus,
-                enabled = selectedVolume != null,
+                enabled = selectedResource != null,
                 modifier = Modifier.weight(1f),
                 testTag = "work-reading-status-action",
             )
@@ -683,9 +640,9 @@ private fun WorkDetailActionRow(
             )
         }
         val captionResource = when {
-            mediaKind.equals("AUDIOBOOK", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
-            selectedVolume == null -> R.string.work_reader_next_phase_message
-            !isSupportedNativeReaderEntry(selectedVolume.readerType, selectedVolume.format) ->
+            selectedResource?.readerType.equals("audio", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
+            selectedResource == null -> R.string.work_reader_next_phase_message
+            !isSupportedNativeReaderEntry(selectedResource.readerType, selectedResource.format) ->
                 R.string.work_reader_renderer_pending
             else -> null
         }
@@ -759,7 +716,7 @@ private fun WorkDetailQuickAction(
 
 @Composable
 private fun IdentityHeader(
-    content: WorkDetailContent,
+    content: BookDetailContent,
     repository: ContentRepository,
     context: ContentRequestContext,
     onOpenFacet: (LibraryScope, String) -> Unit,
@@ -770,8 +727,8 @@ private fun IdentityHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
     ) {
-        WorkCover(
-            content.work,
+        BookCover(
+            content.book,
             repository,
             context,
             CoverRole.Hero,
@@ -801,7 +758,7 @@ internal fun WorkDetailHeroRow(
 
 @Composable
 private fun WorkIdentityText(
-    content: WorkDetailContent,
+    content: BookDetailContent,
     onOpenFacet: (LibraryScope, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -809,7 +766,7 @@ private fun WorkIdentityText(
     val presentation = workDetailIdentityPresentation(
         tags = content.tags,
         completed = content.completed,
-        progressPercent = content.work.progressPercent,
+        progressPercent = content.book.progressPercent,
     )
     Column(
         modifier = modifier,
@@ -819,7 +776,7 @@ private fun WorkIdentityText(
         presentation.elements.forEach { element ->
             when (element) {
                 WorkDetailIdentityElement.Title -> Text(
-                    content.work.title,
+                    content.book.title,
                     style = theme.typography.title,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
@@ -838,7 +795,7 @@ private fun WorkIdentityText(
 
 @Composable
 private fun WorkCreatorAndSeriesLine(
-    content: WorkDetailContent,
+    content: BookDetailContent,
     onOpenFacet: (LibraryScope, String) -> Unit,
 ) {
     val theme = WarmPageThemeValues
@@ -848,7 +805,7 @@ private fun WorkCreatorAndSeriesLine(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FacetLink(
-            label = content.work.author,
+            label = content.book.author,
             enabled = content.authorFacetId != null,
             modifier = Modifier.weight(1f, fill = false),
         ) {
@@ -863,16 +820,6 @@ private fun WorkCreatorAndSeriesLine(
             ) {
                 content.seriesId?.let { onOpenFacet(LibraryScope.Series, it) }
             }
-        }
-        content.selectedMediaKind?.let { kind ->
-            Text(" / ", style = theme.typography.body, color = theme.colors.textTertiary)
-            Text(
-                mediaLabel(kind),
-                style = theme.typography.body,
-                color = theme.colors.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
@@ -944,16 +891,16 @@ private fun FacetLink(
 }
 
 @Composable
-private fun ReadingSummary(content: WorkDetailContent) {
+private fun ReadingSummary(content: BookDetailContent) {
     val theme = WarmPageThemeValues
-    val progress = content.work.progressPercent ?: 0
+    val progress = content.book.progressPercent ?: 0
     if (progress <= 0) return
     val currentPosition = content.readingUnits
         .firstOrNull { it.readingState == ChapterReadingState.Current }
         ?.title
     val layout = workDetailSummaryLayout(LocalDensity.current.fontScale)
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-        if (layout == WorkDetailSummaryLayout.Stacked) {
+        if (layout == BookDetailSummaryLayout.Stacked) {
             ReadingProgressHeading(progress)
             currentPosition?.let { title ->
                 Text(
@@ -982,7 +929,7 @@ private fun ReadingSummary(content: WorkDetailContent) {
         }
         ReadingProgressTrack(
             progressPercent = progress,
-            stateDescription = stringResource(R.string.work_volume_accessibility_progress, progress),
+            stateDescription = stringResource(R.string.work_resource_accessibility_progress, progress),
         )
     }
 }
@@ -1020,7 +967,7 @@ private fun WorkMediaPicker(
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
             ) {
                 Text(
-                    stringResource(R.string.work_media_versions_title),
+                    stringResource(R.string.work_resources_title),
                     style = theme.typography.sectionTitle,
                 )
                 Spacer(Modifier.weight(1f))
@@ -1029,7 +976,7 @@ private fun WorkMediaPicker(
                 }
             }
             WorkDetailMediaPickerLayout.VerticalChoices -> Column {
-                Text(stringResource(R.string.work_media_versions_title), style = theme.typography.sectionTitle)
+                Text(stringResource(R.string.work_resources_title), style = theme.typography.sectionTitle)
                 WorkMediaVerticalChoices(options = options, selected = selected, onSelect = onSelect)
             }
         }
@@ -1085,7 +1032,7 @@ private fun WorkMediaVerticalChoices(
 
 @Composable
 private fun WorkAboutSection(
-    content: WorkDetailContent,
+    content: BookDetailContent,
 ) {
     val theme = WarmPageThemeValues
     val description = remember(content.description) { plainWorkDescription(content.description) }
@@ -1121,27 +1068,27 @@ internal fun plainWorkDescription(rawValue: String?): String = rawValue
     .orEmpty()
 
 @Composable
-private fun WorkVolumeRail(
-    volumes: List<VolumeContent>,
-    selectedVolumeId: String?,
-    totalVolumes: Int,
+private fun WorkResourceRail(
+    resources: List<ResourceContent>,
+    selectedResourceId: String?,
+    totalResources: Int,
     isLoadingMore: Boolean,
     paginationErrorCode: String?,
     repository: ContentRepository,
     context: ContentRequestContext,
-    downloadRecordsByVolume: Map<String, AndroidDownloadRecord>,
-    downloadFailuresByVolume: Map<String, String>,
-    onSelectVolume: (String) -> Unit,
+    downloadRecordsByResource: Map<String, AndroidDownloadRecord>,
+    downloadFailuresByResource: Map<String, String>,
+    onSelectResource: (String) -> Unit,
     onLoadMore: () -> Unit,
-    onManageVolume: (VolumeContent, Offset) -> Unit,
+    onManageResource: (ResourceContent, Offset) -> Unit,
     managementAvailable: Boolean,
 ) {
     val theme = WarmPageThemeValues
     val listState = rememberLazyListState()
-    LaunchedEffect(listState, volumes.size, totalVolumes, isLoadingMore) {
+    LaunchedEffect(listState, resources.size, totalResources, isLoadingMore) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .distinctUntilChanged()
-            .filter { index -> index >= volumes.lastIndex - 2 && volumes.size < totalVolumes && !isLoadingMore }
+            .filter { index -> index >= resources.lastIndex - 2 && resources.size < totalResources && !isLoadingMore }
             .collect { onLoadMore() }
     }
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
@@ -1152,23 +1099,23 @@ private fun WorkVolumeRail(
                 fontScale = LocalDensity.current.fontScale,
             )
             LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
-                itemsIndexed(volumes, key = { _, volume -> volume.id }) { position, volume ->
-                    VolumeCoverItem(
-                        volume = volume,
+                itemsIndexed(resources, key = { _, resource -> resource.id }) { position, resource ->
+                    ResourceCoverItem(
+                        resource = resource,
                         position = position,
-                        selected = volume.id == selectedVolumeId,
+                        selected = resource.id == selectedResourceId,
                         repository = repository,
                         context = context,
-                        download = downloadRecordsByVolume[volume.id],
-                        downloadFailure = downloadFailuresByVolume[volume.id],
-                        onSelectVolume = onSelectVolume,
-                        onManageVolume = onManageVolume,
+                        download = downloadRecordsByResource[resource.id],
+                        downloadFailure = downloadFailuresByResource[resource.id],
+                        onSelectResource = onSelectResource,
+                        onManageResource = onManageResource,
                         managementAvailable = managementAvailable,
                         modifier = Modifier.width(itemWidth),
                     )
                 }
                 if (isLoadingMore || paginationErrorCode != null) {
-                    item(key = "volume-pagination-tail") {
+                    item(key = "resource-pagination-tail") {
                         Box(
                             modifier = Modifier
                                 .width(itemWidth)
@@ -1178,8 +1125,8 @@ private fun WorkVolumeRail(
                         ) {
                             Text(
                                 text = stringResource(
-                                    if (paginationErrorCode == null) R.string.work_volume_loading_more
-                                    else R.string.work_volume_load_more_failed,
+                                    if (paginationErrorCode == null) R.string.work_resource_loading_more
+                                    else R.string.work_resource_load_more_failed,
                                 ),
                                 style = theme.typography.caption,
                                 color = theme.colors.textSecondary,
@@ -1204,22 +1151,22 @@ internal fun workDetailVolumeRailItemWidth(
 }
 
 @Composable
-private fun SelectedVolumeMetadata(volume: VolumeContent) {
+private fun SelectedResourceMetadata(resource: ResourceContent) {
     val locale = LocalConfiguration.current.locales[0]
-    var fullPath by remember(volume.id) { mutableStateOf<String?>(null) }
+    var fullPath by remember(resource.id) { mutableStateOf<String?>(null) }
     val rows = listOf(
-        Triple(R.string.work_metadata_format, volume.format, false),
-        Triple(R.string.work_metadata_language, volume.language, false),
-        Triple(R.string.work_metadata_published, formatWorkMetadataDate(volume.publishedAt, locale), false),
-        Triple(R.string.work_metadata_page_count, volume.pageCount?.let {
+        Triple(R.string.work_metadata_format, resource.format, false),
+        Triple(R.string.work_metadata_language, resource.language, false),
+        Triple(R.string.work_metadata_published, formatWorkMetadataDate(resource.publishedAt, locale), false),
+        Triple(R.string.work_metadata_page_count, resource.pageCount?.let {
             pluralStringResource(R.plurals.work_metadata_page_count_value, it, it)
         }, false),
-        Triple(R.string.work_metadata_source, volume.metadataSource, false),
-        Triple(R.string.work_metadata_file_path, volume.files.firstOrNull()?.path, true),
+        Triple(R.string.work_metadata_source, resource.metadataSource, false),
+        Triple(R.string.work_metadata_file_path, resource.assets.firstOrNull()?.path, true),
     )
     val theme = WarmPageThemeValues
     Column(Modifier.fillMaxWidth().testTag("work-selected-volume-metadata")) {
-        Text(stringResource(R.string.work_volume_metadata_title), style = theme.typography.sectionTitle)
+        Text(stringResource(R.string.work_resource_metadata_title), style = theme.typography.sectionTitle)
         rows.forEach { (label, rawValue, isFilePath) ->
             val value = rawValue?.trim()?.takeIf(String::isNotEmpty)
                 ?: stringResource(R.string.work_metadata_missing)
@@ -1282,7 +1229,7 @@ internal fun formatWorkMetadataDate(rawValue: String?, locale: Locale): String? 
     return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale).format(date)
 }
 
-internal enum class WorkDetailSummaryLayout {
+internal enum class BookDetailSummaryLayout {
     Inline,
     Stacked,
 }
@@ -1426,11 +1373,10 @@ internal fun workReadingStatusChoices(): List<WorkReadingStatus> = listOf(
 )
 
 internal fun workDetailPrimaryActionPresentation(
-    mediaKind: String?,
-    selectedVolume: VolumeContent?,
+    selectedResource: ResourceContent?,
     download: AndroidDownloadRecord?,
 ): WorkDetailPrimaryActionPresentation {
-    val hasProgress = (selectedVolume?.progressPercent ?: 0) > 0
+    val hasProgress = (selectedResource?.progressPercent ?: 0) > 0
     val readingLabel = if (hasProgress) {
         WorkDetailPrimaryActionLabel.ContinueReading
     } else {
@@ -1441,17 +1387,15 @@ internal fun workDetailPrimaryActionPresentation(
     } else {
         WorkDetailPrimaryActionLabel.StartListening
     }
-    if (mediaKind.equals("AUDIOBOOK", ignoreCase = true) ||
-        selectedVolume?.readerType.equals("audio", ignoreCase = true)
-    ) {
+    if (selectedResource?.readerType.equals("audio", ignoreCase = true)) {
         return WorkDetailPrimaryActionPresentation(
             intent = WorkDetailPrimaryActionIntent.Unavailable,
             label = listeningLabel,
             enabled = false,
         )
     }
-    if (selectedVolume == null || !selectedVolume.readable ||
-        !isSupportedNativeReaderEntry(selectedVolume.readerType, selectedVolume.format)
+    if (selectedResource == null || !selectedResource.readable ||
+        !isSupportedNativeReaderEntry(selectedResource.readerType, selectedResource.format)
     ) {
         return WorkDetailPrimaryActionPresentation(
             intent = WorkDetailPrimaryActionIntent.Unavailable,
@@ -1459,8 +1403,8 @@ internal fun workDetailPrimaryActionPresentation(
             enabled = false,
         )
     }
-    val completedArtifactAvailable = download?.volumeId == selectedVolume.id && download.isReadable
-    if (selectedVolume.readerType.equals("reflowable", ignoreCase = true) && !completedArtifactAvailable) {
+    val completedArtifactAvailable = download?.resourceId == selectedResource.id && download.isReadable
+    if (selectedResource.readerType.equals("reflowable", ignoreCase = true) && !completedArtifactAvailable) {
         val downloadInProgress = download?.status in setOf(
             AndroidDownloadStatus.Queued,
             AndroidDownloadStatus.Downloading,
@@ -1488,19 +1432,19 @@ internal fun workDetailPrimaryActionPresentation(
 }
 
 internal fun workDetailVolumePresentation(
-    volume: VolumeContent,
+    resource: ResourceContent,
     selected: Boolean,
     download: AndroidDownloadRecord?,
 ): WorkDetailVolumePresentation {
-    val progress = volume.progressPercent?.coerceIn(0, 100) ?: 0
+    val progress = resource.progressPercent?.coerceIn(0, 100) ?: 0
     val readingState = when {
         progress >= 100 -> WorkDetailVolumeReadingState.Finished
         progress > 0 -> WorkDetailVolumeReadingState.Reading
         else -> WorkDetailVolumeReadingState.Unread
     }
     val downloadState = when {
-        download?.volumeId == volume.id && download.isReadable -> WorkDetailVolumeDownloadState.Downloaded
-        download?.volumeId == volume.id && download.status in setOf(
+        download?.resourceId == resource.id && download.isReadable -> WorkDetailVolumeDownloadState.Downloaded
+        download?.resourceId == resource.id && download.status in setOf(
             AndroidDownloadStatus.Queued,
             AndroidDownloadStatus.Downloading,
             AndroidDownloadStatus.Verifying,
@@ -1514,11 +1458,11 @@ internal fun workDetailVolumePresentation(
     )
 }
 
-internal fun workDetailSummaryLayout(fontScale: Float): WorkDetailSummaryLayout =
+internal fun workDetailSummaryLayout(fontScale: Float): BookDetailSummaryLayout =
     if (fontScale >= WORK_DETAIL_STACKED_LAYOUT_FONT_SCALE) {
-        WorkDetailSummaryLayout.Stacked
+        BookDetailSummaryLayout.Stacked
     } else {
-        WorkDetailSummaryLayout.Inline
+        BookDetailSummaryLayout.Inline
     }
 
 internal fun workDetailActionLayout(
@@ -1639,32 +1583,32 @@ internal fun workDetailVolumeItemWidth(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VolumeCoverItem(
-    volume: VolumeContent,
+private fun ResourceCoverItem(
+    resource: ResourceContent,
     position: Int,
     selected: Boolean,
     repository: ContentRepository,
     context: ContentRequestContext,
     download: AndroidDownloadRecord?,
     downloadFailure: String?,
-    onSelectVolume: (String) -> Unit,
-    onManageVolume: (VolumeContent, Offset) -> Unit,
+    onSelectResource: (String) -> Unit,
+    onManageResource: (ResourceContent, Offset) -> Unit,
     managementAvailable: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
-    val index = volume.displayIndex(position)
-    val progress = volume.progressPercent?.coerceIn(0, 100) ?: 0
-    val presentation = workDetailVolumePresentation(volume, selected, download)
+    val index = resource.displayIndex(position)
+    val progress = resource.progressPercent?.coerceIn(0, 100) ?: 0
+    val presentation = workDetailVolumePresentation(resource, selected, download)
     val state = when (presentation.readingState) {
-        WorkDetailVolumeReadingState.Finished -> stringResource(R.string.work_volume_accessibility_finished)
-        WorkDetailVolumeReadingState.Reading -> stringResource(R.string.work_volume_accessibility_progress, progress)
-        WorkDetailVolumeReadingState.Unread -> stringResource(R.string.work_volume_accessibility_not_started)
+        WorkDetailVolumeReadingState.Finished -> stringResource(R.string.work_resource_accessibility_finished)
+        WorkDetailVolumeReadingState.Reading -> stringResource(R.string.work_resource_accessibility_progress, progress)
+        WorkDetailVolumeReadingState.Unread -> stringResource(R.string.work_resource_accessibility_not_started)
     }
-    val manageVolumeLabel = stringResource(R.string.management_volume)
-    val volumeLabel = stringResource(R.string.work_volume_accessibility_label, index, volume.title)
-    var coverPositionInWindow by remember(volume.id) { mutableStateOf(Offset.Zero) }
-    var coverSize by remember(volume.id) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val manageResourceLabel = stringResource(R.string.management_resource)
+    val resourceLabel = stringResource(R.string.work_resource_accessibility_label, index, resource.title)
+    var coverPositionInWindow by remember(resource.id) { mutableStateOf(Offset.Zero) }
+    var coverSize by remember(resource.id) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val coverCenter = {
         coverPositionInWindow + Offset(coverSize.width / 2f, coverSize.height / 2f)
     }
@@ -1685,35 +1629,35 @@ private fun VolumeCoverItem(
                         coverPositionInWindow = coordinates.positionInWindow()
                         coverSize = coordinates.size
                     }
-                    .pointerInput(volume.id, managementAvailable) {
+                    .pointerInput(resource.id, managementAvailable) {
                         detectTapGestures(
-                            onTap = { onSelectVolume(volume.id) },
+                            onTap = { onSelectResource(resource.id) },
                             onLongPress = { localPress ->
                                 if (managementAvailable) {
-                                    onManageVolume(volume, coverPositionInWindow + localPress)
+                                    onManageResource(resource, coverPositionInWindow + localPress)
                                 }
                             },
                         )
                     }
                     .semantics(mergeDescendants = true) {
-                        contentDescription = volumeLabel
+                        contentDescription = resourceLabel
                         this.selected = selected
                         stateDescription = state
                         if (managementAvailable) {
                             customActions = listOf(
-                                CustomAccessibilityAction(manageVolumeLabel) {
-                                    onManageVolume(volume, coverCenter())
+                                CustomAccessibilityAction(manageResourceLabel) {
+                                    onManageResource(resource, coverCenter())
                                     true
                                 },
                             )
                         }
                     }
-                    .testTag("work-volume-${volume.id}"),
+                    .testTag("work-resource-${resource.id}"),
             ) {
                 ContentCover(
-                    contentId = volume.id,
-                    title = volume.title,
-                    coverUrl = volume.coverUrl,
+                    contentId = resource.id,
+                    title = resource.title,
+                    coverUrl = resource.coverUrl,
                     repository = repository,
                     context = context,
                     role = CoverRole.Compact,
@@ -1765,7 +1709,7 @@ private fun VolumeCoverItem(
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.CheckCircle,
-                        contentDescription = stringResource(R.string.work_volume_selected),
+                        contentDescription = stringResource(R.string.work_resource_selected),
                         tint = theme.colors.brandAccent,
                         modifier = Modifier.padding(theme.spacing.half),
                     )
@@ -1773,14 +1717,14 @@ private fun VolumeCoverItem(
             }
         }
         Text(
-            volume.title,
+            resource.title,
             style = theme.typography.callout,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             when {
-                progress > 0 && progress < 100 -> stringResource(R.string.work_volume_reading_badge, progress)
+                progress > 0 && progress < 100 -> stringResource(R.string.work_resource_reading_badge, progress)
                 progress >= 100 -> stringResource(R.string.work_chapter_read)
                 else -> stringResource(R.string.work_chapter_unread)
             },
@@ -1802,22 +1746,22 @@ private fun VolumeCoverItem(
 private fun WorkDetailControlMenu(
     target: WorkControlMenuTarget,
     anchorInWindow: Offset,
-    content: WorkDetailContent,
-    selectedVolume: VolumeContent?,
+    content: BookDetailContent,
+    selectedResource: ResourceContent?,
     repository: ContentRepository,
     context: ContentRequestContext,
     canManageSystem: Boolean,
     selectedDownload: AndroidDownloadRecord?,
     onAddShelf: () -> Unit,
-    onMarkUnread: (VolumeContent) -> Unit,
-    onDownload: (VolumeContent) -> Unit,
+    onMarkUnread: (ResourceContent) -> Unit,
+    onDownload: (ResourceContent) -> Unit,
     onBookTask: (BookControlAction) -> Unit,
-    onVolumeTask: (VolumeControlAction, VolumeContent) -> Unit,
+    onResourceTask: (VolumeControlAction, ResourceContent) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val menuVolume = when (target) {
-        WorkControlMenuTarget.Book -> selectedVolume
-        is WorkControlMenuTarget.Volume -> target.value
+    val menuResource = when (target) {
+        WorkControlMenuTarget.Book -> selectedResource
+        is WorkControlMenuTarget.Resource -> target.value
     }
     val downloadLabel = when {
         selectedDownload?.isReadable == true -> stringResource(R.string.downloads_remove_action)
@@ -1828,8 +1772,8 @@ private fun WorkDetailControlMenu(
         ) -> stringResource(R.string.work_download_pause)
         else -> stringResource(R.string.work_control_download)
     }
-    val kindleEligible = menuVolume?.files?.any { file ->
-        file.path.endsWith(".epub", ignoreCase = true) || file.path.endsWith(".pdf", ignoreCase = true)
+    val kindleEligible = menuResource?.assets?.any { asset ->
+        asset.path.endsWith(".epub", ignoreCase = true) || asset.path.endsWith(".pdf", ignoreCase = true)
     } == true
     when (target) {
         WorkControlMenuTarget.Book -> {
@@ -1853,7 +1797,7 @@ private fun WorkDetailControlMenu(
                         BookControlAction.MarkUnread,
                         stringResource(R.string.work_control_mark_unread),
                         Icons.Outlined.BookmarkBorder,
-                        enabled = menuVolume != null,
+                        enabled = menuResource != null,
                     ),
                 )
                 add(
@@ -1866,7 +1810,7 @@ private fun WorkDetailControlMenu(
                                 AndroidDownloadStatus.Verifying,
                             )
                         ) Icons.Outlined.PauseCircle else Icons.Outlined.CloudDownload,
-                        enabled = menuVolume != null,
+                        enabled = menuResource != null,
                     ),
                 )
                 if (canManageSystem) {
@@ -1881,14 +1825,6 @@ private fun WorkDetailControlMenu(
                             Icons.AutoMirrored.Outlined.Send,
                         ),
                     )
-                    add(
-                        WarmPageFloatingMenuAction(
-                            BookControlAction.Delete,
-                            stringResource(R.string.work_control_delete),
-                            Icons.Outlined.DeleteOutline,
-                            destructive = true,
-                        ),
-                    )
                 }
             }
             WarmPageFloatingActionMenu(
@@ -1897,15 +1833,14 @@ private fun WorkDetailControlMenu(
                 onSelect = { action ->
                     when (action) {
                         BookControlAction.AddShelf -> onAddShelf()
-                        BookControlAction.MarkUnread -> menuVolume?.let(onMarkUnread)
-                        BookControlAction.Download -> menuVolume?.let(onDownload)
+                        BookControlAction.MarkUnread -> menuResource?.let(onMarkUnread)
+                        BookControlAction.Download -> menuResource?.let(onDownload)
                         BookControlAction.AddSeries,
                         BookControlAction.Edit,
                         BookControlAction.Recognize,
                         BookControlAction.UploadCover,
                         BookControlAction.RegenerateCover,
                         BookControlAction.SendToKindle,
-                        BookControlAction.Delete,
                         -> onBookTask(action)
                     }
                 },
@@ -1913,13 +1848,13 @@ private fun WorkDetailControlMenu(
                 modifier = Modifier.testTag("work-book-control-menu"),
                 header = {
                     WorkControlMenuHeader(
-                        title = content.work.title,
-                        subtitle = menuVolume?.let { volume ->
-                            stringResource(R.string.work_control_selected_volume_format, volume.title, volume.format)
+                        title = content.book.title,
+                        subtitle = menuResource?.let { resource ->
+                            stringResource(R.string.work_control_selected_resource_format, resource.title, resource.format)
                         }.orEmpty(),
                         cover = {
-                            WorkCover(
-                                work = content.work,
+                            BookCover(
+                                book = content.book,
                                 repository = repository,
                                 context = context,
                                 role = CoverRole.Compact,
@@ -1930,8 +1865,8 @@ private fun WorkDetailControlMenu(
                 },
             )
         }
-        is WorkControlMenuTarget.Volume -> {
-            val volume = target.value
+        is WorkControlMenuTarget.Resource -> {
+            val resource = target.value
             val activeDownload = selectedDownload?.status in setOf(
                 AndroidDownloadStatus.Queued,
                 AndroidDownloadStatus.Downloading,
@@ -1943,10 +1878,7 @@ private fun WorkDetailControlMenu(
                 if (canManageSystem) {
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Edit, stringResource(R.string.work_control_edit), Icons.Outlined.Edit))
                     add(WarmPageFloatingMenuAction(VolumeControlAction.ChangeMediaType, stringResource(R.string.work_control_change_media_type), Icons.Outlined.Layers, enabled = !activeDownload))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Split, stringResource(R.string.work_control_split), Icons.Outlined.Splitscreen, enabled = !activeDownload))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Move, stringResource(R.string.work_control_move), Icons.Outlined.MoveToInbox, enabled = !activeDownload))
                     if (kindleEligible) add(WarmPageFloatingMenuAction(VolumeControlAction.SendToKindle, stringResource(R.string.work_control_send_kindle), Icons.AutoMirrored.Outlined.Send))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.Delete, stringResource(R.string.work_control_delete), Icons.Outlined.DeleteOutline, enabled = !activeDownload, destructive = true))
                 }
             }
             WarmPageFloatingActionMenu(
@@ -1954,28 +1886,25 @@ private fun WorkDetailControlMenu(
                 anchorInWindow = anchorInWindow,
                 onSelect = { action ->
                     when (action) {
-                        VolumeControlAction.MarkUnread -> onMarkUnread(volume)
-                        VolumeControlAction.Download -> onDownload(volume)
+                        VolumeControlAction.MarkUnread -> onMarkUnread(resource)
+                        VolumeControlAction.Download -> onDownload(resource)
                         VolumeControlAction.Edit,
                         VolumeControlAction.ChangeMediaType,
-                        VolumeControlAction.Split,
-                        VolumeControlAction.Move,
                         VolumeControlAction.SendToKindle,
-                        VolumeControlAction.Delete,
-                        -> onVolumeTask(action, volume)
+                        -> onResourceTask(action, resource)
                     }
                 },
                 onDismiss = onDismiss,
-                modifier = Modifier.testTag("work-volume-control-menu"),
+                modifier = Modifier.testTag("work-resource-control-menu"),
                 header = {
                     WorkControlMenuHeader(
-                        title = volume.title,
-                        subtitle = volume.format,
+                        title = resource.title,
+                        subtitle = resource.format,
                         cover = {
                             ContentCover(
-                                contentId = volume.id,
-                                title = volume.title,
-                                coverUrl = volume.coverUrl,
+                                contentId = resource.id,
+                                title = resource.title,
+                                coverUrl = resource.coverUrl,
                                 repository = repository,
                                 context = context,
                                 role = CoverRole.Compact,
@@ -2029,13 +1958,13 @@ private fun WorkControlMenuHeader(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WorkActionsSheet(
-    content: WorkDetailContent,
+    content: BookDetailContent,
     strings: WorkActionsSheetStrings,
-    selectedVolume: VolumeContent?,
+    selectedResource: ResourceContent?,
     selectedDownload: AndroidDownloadRecord?,
     selectedReadingStatus: WorkReadingStatus,
     onOpenShelfPicker: () -> Unit,
-    onDownloadVolume: (String) -> Unit,
+    onDownloadResource: (String) -> Unit,
     onCancelDownload: (String) -> Unit,
     onSelectReadingStatus: (WorkReadingStatus) -> Unit,
     onDismiss: () -> Unit,
@@ -2061,7 +1990,7 @@ private fun WorkActionsSheet(
                 modifier = Modifier.testTag("work-actions-title"),
             )
             Text(
-                listOf(content.work.title, content.work.author).joinToString(" · "),
+                listOf(content.book.title, content.book.author).joinToString(" · "),
                 style = theme.typography.callout,
                 color = theme.colors.textSecondary,
             )
@@ -2074,15 +2003,15 @@ private fun WorkActionsSheet(
                 label = strings.addToShelf,
                 onClick = onOpenShelfPicker,
             )
-            if (selectedVolume != null && selectedDownload?.isReadable != true) {
+            if (selectedResource != null && selectedDownload?.isReadable != true) {
                 WorkActionRow(
                     icon = if (isDownloading) Icons.Outlined.PauseCircle else Icons.Outlined.CloudDownload,
                     label = if (isDownloading) strings.pauseDownload else strings.download,
                     onClick = {
                         if (isDownloading) {
-                            onCancelDownload(selectedVolume.id)
+                            onCancelDownload(selectedResource.id)
                         } else {
-                            onDownloadVolume(selectedVolume.id)
+                            onDownloadResource(selectedResource.id)
                         }
                     },
                 )
@@ -2204,21 +2133,11 @@ private fun WorkActionRow(
     }
 }
 
-private fun WorkDetailUiState.resolveSelectedVolume(): VolumeContent? {
-    val content = content ?: return null
-    val media = content.media.firstOrNull { it.kind == selectedMediaKind }
-        ?: content.media.firstOrNull()
-    return media?.volumes?.firstOrNull { it.id == selectedVolumeId }
-        ?: media?.volumes?.firstOrNull { it.selected }
-        ?: media?.volumes?.firstOrNull()
-}
-
-@Composable
-private fun mediaLabel(kind: String): String = when (kind.uppercase()) {
-    "EBOOK" -> stringResource(R.string.media_ebook)
-    "COMIC" -> stringResource(R.string.media_comic)
-    "AUDIOBOOK" -> stringResource(R.string.media_audiobook)
-    else -> kind
+private fun WorkDetailUiState.resolveSelectedResource(): ResourceContent? {
+    val resources = content?.resources.orEmpty()
+    return selectedResourceId?.let { id -> resources.firstOrNull { it.id == id } }
+        ?: resources.firstOrNull { it.selected }
+        ?: resources.firstOrNull()
 }
 
 @Composable

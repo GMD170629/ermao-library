@@ -8,26 +8,24 @@ import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import {
+  deleteLibraryFacet,
+  fetchLibraryFacets,
+  mergeLibraryFacets,
+  renameLibraryFacet,
+  type LibraryFacet,
+  type LibraryFacetKind
+} from './api/facets';
 
-type Kind = 'AUTHOR' | 'TAG' | 'SERIES';
-type Category = { id: string; kind: Kind; name: string; aliases: string[]; bookCount: number };
-type CategoryPage = { categories: Category[]; page: number; pageSize: number; total: number; totalPages: number };
-type ApiPayload<T> = { ok: boolean; data?: T; error?: { message: string } };
-const tabs: Array<{ key: Kind; label: string }> = [
+const tabs: Array<{ key: LibraryFacetKind; label: string }> = [
   { key: 'AUTHOR', label: '作者' }, { key: 'TAG', label: '标签' }, { key: 'SERIES', label: '丛书' }
 ];
 
-async function payload<T>(response: Response, fallback: string) {
-  const result = await response.json().catch(() => null) as ApiPayload<T> | null;
-  if (!response.ok || !result?.ok) throw new Error(result?.error?.message ?? fallback);
-  return result.data as T;
-}
-
 export function ClassificationManagementPanel() {
   const { t: i18nAttribute } = useAttributeI18n();
-  const [kind, setKind] = useState<Kind>('AUTHOR');
-  const [items, setItems] = useState<Category[]>([]);
-  const [selectedItems, setSelectedItems] = useState<Category[]>([]);
+  const [kind, setKind] = useState<LibraryFacetKind>('AUTHOR');
+  const [items, setItems] = useState<LibraryFacet[]>([]);
+  const [selectedItems, setSelectedItems] = useState<LibraryFacet[]>([]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState('20');
@@ -35,11 +33,11 @@ export function ClassificationManagementPanel() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [renameItem, setRenameItem] = useState<Category | null>(null);
+  const [renameItem, setRenameItem] = useState<LibraryFacet | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
   const [targetId, setTargetId] = useState('');
-  const [deleteItem, setDeleteItem] = useState<Category | null>(null);
+  const [deleteItem, setDeleteItem] = useState<LibraryFacet | null>(null);
   const [error, setError] = useState('');
   const toast = useToast();
 
@@ -47,10 +45,13 @@ export function ClassificationManagementPanel() {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ kind: nextKind, page: String(nextPage), pageSize: nextPageSize });
-      if (nextSearch.trim()) params.set('search', nextSearch.trim());
-      const data = await payload<CategoryPage>(await fetch(`/api/library/categories?${params}`), '读取分类失败');
-      setItems(data.categories);
+      const data = await fetchLibraryFacets({
+        kind: nextKind,
+        page: nextPage,
+        pageSize: Number(nextPageSize),
+        search: nextSearch
+      });
+      setItems(data.facets);
       setPage(data.page);
       setTotal(data.total);
       setTotalPages(data.totalPages);
@@ -68,7 +69,7 @@ export function ClassificationManagementPanel() {
 
   const selectedIds = useMemo(() => selectedItems.map((item) => item.id), [selectedItems]);
 
-  function changeKind(nextKind: Kind) {
+  function changeKind(nextKind: LibraryFacetKind) {
     setKind(nextKind);
     setSelectedItems([]);
     setSearch('');
@@ -79,7 +80,7 @@ export function ClassificationManagementPanel() {
     if (!renameItem || !renameValue.trim()) return;
     setSaving(true);
     try {
-      await payload(await fetch(`/api/library/categories/${renameItem.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: renameValue.trim() }) }), '重命名失败');
+      await renameLibraryFacet(renameItem.id, renameValue.trim());
       toast.success('分类已重命名');
       setRenameItem(null);
       setSelectedItems([]);
@@ -99,10 +100,11 @@ export function ClassificationManagementPanel() {
     if (!targetId) return;
     setSaving(true);
     try {
-      await payload(await fetch('/api/library/categories/merge', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, targetId, sourceIds: selectedIds.filter((id) => id !== targetId) })
-      }), '合并分类失败');
+      await mergeLibraryFacets({
+        kind,
+        targetId,
+        sourceIds: selectedIds.filter((id) => id !== targetId)
+      });
       toast.success('分类已合并');
       setSelectedItems([]);
       setMergeOpen(false);
@@ -116,7 +118,7 @@ export function ClassificationManagementPanel() {
     if (!deleteItem) return;
     setSaving(true);
     try {
-      await payload(await fetch(`/api/library/categories/${deleteItem.id}`, { method: 'DELETE' }), '删除分类失败');
+      await deleteLibraryFacet(deleteItem.id);
       toast.success('分类及对应元数据已删除');
       setDeleteItem(null);
       setSelectedItems((current) => current.filter((item) => item.id !== deleteItem.id));
@@ -126,24 +128,21 @@ export function ClassificationManagementPanel() {
     } finally { setSaving(false); }
   }
 
-  function deleteDescription(item: Category) {
+  function deleteDescription(item: LibraryFacet) {
     if (item.kind === 'AUTHOR') {
       return i18nAttribute('将从 {value0} 本图书中移除作者“{value1}”。没有其他作者的图书会改为“未知作者”。', { value0: item.bookCount, value1: item.name });
     }
     if (item.kind === 'TAG') {
       return i18nAttribute('将从 {value0} 本图书中移除标签“{value1}”。其他标签不会受到影响。', { value0: item.bookCount, value1: item.name });
     }
-    if (item.kind === 'SERIES') {
-      return i18nAttribute('将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。', { value0: item.bookCount, value1: item.name });
-    }
-    return i18nAttribute('将从 {value0} 本图书的相关卷册中清除出版社“{value1}”。', { value0: item.bookCount, value1: item.name });
+    return i18nAttribute('将清除 {value0} 本图书的丛书“{value1}”及对应丛书序号。', { value0: item.bookCount, value1: item.name });
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-5">
         <h2 className="text-base font-semibold text-[#2C2926]"><I18nText>分类治理</I18nText></h2>
-        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签、丛书和出版社命名。作品字段与卷册出版信息会按各自作用域更新。</I18nText></p>
+        <p className="mt-1 text-sm leading-6 text-[#817B75]"><I18nText>统一作者、标签和丛书命名，并同步维护图书元数据。</I18nText></p>
         <div className="mt-4 flex flex-wrap gap-2">
           {tabs.map((tab) => <button key={tab.key} type="button" onClick={() => changeKind(tab.key)} className={cn('rounded-xl px-4 py-2 text-sm transition', kind === tab.key ? 'bg-[#F9DED4] font-medium text-[#D7462B]' : 'bg-black/[0.035] text-[#6F6963] hover:bg-black/[0.06]')}>{i18nAttribute(tab.label)}</button>)}
         </div>
@@ -201,7 +200,7 @@ export function ClassificationManagementPanel() {
       </Modal> : null}
 
       {mergeOpen ? <Modal title={i18nAttribute("合并 {value0} 个分类", { value0: selectedItems.length })} onClose={() => setMergeOpen(false)}>
-        <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联作品不会丢失。</I18nText></p>
+        <p className="mb-4 text-sm leading-6 text-[#746E68]"><I18nText>选择保留的规范名称，其余名称会作为别名保留，关联图书不会丢失。</I18nText></p>
         <Select value={targetId} options={selectedItems.map((item) => ({ value: item.id, label: `${item.name}（${item.bookCount} 本）`, translate: false }))} onChange={setTargetId} ariaLabel={i18nAttribute("保留的分类名称")} className="w-full" />
         <div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setMergeOpen(false)}><I18nText>取消</I18nText></Button><Button loading={saving} icon={GitMerge} onClick={() => void merge()}><I18nText>确认合并</I18nText></Button></div>
       </Modal> : null}

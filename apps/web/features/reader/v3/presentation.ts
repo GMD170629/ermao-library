@@ -138,8 +138,8 @@ export function locationProgress(location: ReaderLocation | null, percent: numbe
     };
   }
   return {
-    // EPUB screen counts are transient layout data and TOC entries are not
-    // pages. Keep the legacy shape neutral instead of fabricating either.
+    // Reflowable screen counts are transient layout data and TOC entries are
+    // not pages. Keep the visual model neutral instead of fabricating either.
     page: 1,
     total: null,
     percent: safePercent,
@@ -162,15 +162,6 @@ export function locationExtra(location: ReaderLocation | null) {
       progressEstimated: false
     };
   }
-  if (location.kind === 'epub') {
-    return {
-      readerType: 'epub',
-      cfi: location.cfi,
-      currentHref: location.href,
-      sectionIndex: location.spineIndex,
-      progression: location.progression
-    };
-  }
-  if (location.kind === 'comic') return { readerType: 'comic', volumeId: location.volumeId, pageIndex: location.pageIndex };
+  if (location.kind === 'comic') return { readerType: 'comic', resourceId: location.resourceId, pageIndex: location.pageIndex };
   return { readerType: 'pdf', pageIndex: location.pageIndex };
 }

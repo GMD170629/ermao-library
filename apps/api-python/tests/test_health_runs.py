@@ -9,14 +9,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import models as _models  # noqa: F401
+from app.bootstrap.system import record_queue_heartbeat
 from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
-from app.models.import_pipeline import ImportTask
+from app.models import Library, LibraryImportTask
 from app.modules.system.application.commands import SystemWriteTransaction
 from app.modules.system.infrastructure import health_runs
-from app.services.queue_runtime import queue_runtime_view, record_queue_heartbeat
+from app.modules.system.infrastructure.queue_runtime import queue_runtime_view
 
 
 def _setup_admin(client):
@@ -72,7 +73,7 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     test_settings,
 ):
     client, db_session = persistent_health_client
-    test_settings.resolved_monitor_root.mkdir(parents=True)
+    test_settings.resolved_library_root.mkdir(parents=True)
     for path in (
         test_settings.resolved_storage_root,
         test_settings.database_path.parent,
@@ -86,14 +87,21 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
         path.mkdir(parents=True, exist_ok=True)
     _setup_admin(client)
     pending_created_at = datetime(2026, 7, 31, 8, 30, tzinfo=UTC)
+    health_library = Library(
+        id="health-library",
+        name="Health library",
+        root_path=str(test_settings.resolved_library_root),
+        organization_mode="FLAT",
+    )
+    db_session.add(health_library)
+    db_session.flush()
     db_session.add(
-        ImportTask(
+        LibraryImportTask(
             id="health-pending-import",
-            origin="manual",
-            status="PENDING",
-            source_path="/library/pending.epub",
+            kind="SCAN_LIBRARY",
+            library_id=health_library.id,
+            state="QUEUED",
             created_at=pending_created_at,
-            updated_at=pending_created_at,
         )
     )
     db_session.flush()
@@ -129,7 +137,8 @@ def test_manual_health_run_exposes_initial_items_and_reaches_terminal_state(
     assert import_queue["status"] == "ok"
     assert import_queue["messageCode"] == "health.queue.ok"
     assert import_queue["details"]["oldestPendingAt"] == "2026-07-31T08:30:00Z"
-    assert isinstance(import_queue["details"]["runtime"]["heartbeatAt"], int)
+    assert import_queue["details"]["pending"] == 1
+    assert "runtime" not in import_queue["details"]
 
     with client.stream(
         "GET", f"/api/system/health/runs/{run['runId']}/events?after=0"
@@ -203,41 +212,7 @@ def test_queue_heartbeat_reports_staleness(db_session):
     assert runtime["staleAfterMs"] == 30_000
 
 
-def test_import_queue_clear_operation_is_idempotent_and_conflicts_with_restart(
-    client,
-    db_session,
-):
+def test_retired_import_queue_clear_route_is_not_available(client):
     _setup_admin(client)
-    record_queue_heartbeat(db_session, "import", "test-worker", 2)
-
-    first = client.post("/api/import-tasks/clear")
-    assert first.status_code == 202
-    first_data = first.json()["data"]
-    assert first_data["created"] is True
-    assert first_data["operation"]["action"] == "clear"
-    assert first_data["operation"]["status"] == "requested"
-
-    repeated = client.post("/api/import-tasks/clear")
-    assert repeated.status_code == 202
-    repeated_data = repeated.json()["data"]
-    assert repeated_data["created"] is False
-    assert repeated_data["operation"]["id"] == first_data["operation"]["id"]
-
-    restart = client.post("/api/system/queues/import/restart")
-    assert restart.status_code == 409
-    assert restart.json()["error"]["code"] == "QUEUE_OPERATION_CONFLICT"
-
-    operation = client.get(
-        f"/api/system/queue-operations/{first_data['operation']['id']}"
-    )
-    assert operation.status_code == 200
-    assert operation.json()["data"]["operation"]["action"] == "clear"
-
-
-def test_import_queue_clear_rejects_an_unavailable_worker(client):
-    _setup_admin(client)
-
     response = client.post("/api/import-tasks/clear")
-
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "IMPORT_QUEUE_OFFLINE"
+    assert response.status_code == 404

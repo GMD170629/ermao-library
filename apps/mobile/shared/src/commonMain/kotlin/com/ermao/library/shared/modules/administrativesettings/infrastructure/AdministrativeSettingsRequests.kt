@@ -31,7 +31,7 @@ internal fun CreateManagedUser.toRequest(): JsonObject = buildJsonObject {
     put("role", role.wireValue)
     put("canManageSystem", role == ManagedUserRole.Member && canManageSystem)
     put("canViewManualImports", role == ManagedUserRole.Member && canViewManualImports)
-    put("monitorFolderIds", JsonArray(if (role == ManagedUserRole.Member) monitorFolderIds.map(::JsonPrimitive) else emptyList()))
+    put("libraryIds", JsonArray(if (role == ManagedUserRole.Member) libraryIds.map(::JsonPrimitive) else emptyList()))
     put("locale", locale.wireValue)
 }
 
@@ -42,16 +42,15 @@ internal fun UpdateManagedUser.toRequest(): JsonObject = buildJsonObject {
     put("status", status.wireValue)
     put("canManageSystem", role == ManagedUserRole.Member && canManageSystem)
     put("canViewManualImports", role == ManagedUserRole.Member && canViewManualImports)
-    put("monitorFolderIds", JsonArray(if (role == ManagedUserRole.Member) monitorFolderIds.map(::JsonPrimitive) else emptyList()))
+    put("libraryIds", JsonArray(if (role == ManagedUserRole.Member) libraryIds.map(::JsonPrimitive) else emptyList()))
     put("locale", locale.wireValue)
 }
 
-internal fun MonitorFolderDraft.toRequest(): JsonObject = buildJsonObject {
+internal fun LibraryDraft.toRequest(): JsonObject = buildJsonObject {
     put("rootPath", rootPath.trim())
     put("name", name?.trim()?.let(::JsonPrimitive) ?: JsonNull)
-    put("shelfId", shelfId?.let(::JsonPrimitive) ?: JsonNull)
+    put("organizationMode", organizationMode.wireValue)
     put("enabled", enabled)
-    put("mediaKindPolicy", mediaKindPolicy.wireValue)
     put("ignorePatterns", ignorePatterns?.let(::JsonPrimitive) ?: JsonNull)
     put("ignoreHidden", ignoreHidden)
     put("minFileSizeBytes", minimumFileSizeBytes)

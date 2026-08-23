@@ -89,6 +89,7 @@
 		B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18800000000000000000188 /* IosPdfRangeAccess.swift */; };
 		B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18900000000000000000189 /* IosPdfiumDocument.swift */; };
 		B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19000000000000000000190 /* IosPdfiumNavigator.swift */; };
+		B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19200000000000000000192 /* IosReaderPrivateContentCache.swift */; };
 		B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19100000000000000000191 /* ShukuPdfium.xcframework */; };
 		B08700000000000000000087 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F08700000000000000000087 /* libsqlite3.tbd */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
@@ -245,6 +246,7 @@
 		F18800000000000000000188 /* IosPdfRangeAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfRangeAccess.swift; sourceTree = "<group>"; };
 		F18900000000000000000189 /* IosPdfiumDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumDocument.swift; sourceTree = "<group>"; };
 		F19000000000000000000190 /* IosPdfiumNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumNavigator.swift; sourceTree = "<group>"; };
+		F19200000000000000000192 /* IosReaderPrivateContentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderPrivateContentCache.swift; sourceTree = "<group>"; };
 		F08700000000000000000087 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -599,6 +601,7 @@
 				F18800000000000000000188 /* IosPdfRangeAccess.swift */,
 				F18900000000000000000189 /* IosPdfiumDocument.swift */,
 				F19000000000000000000190 /* IosPdfiumNavigator.swift */,
+				F19200000000000000000192 /* IosReaderPrivateContentCache.swift */,
 			);
 			path = Reader;
 			sourceTree = "<group>";
@@ -906,6 +909,7 @@
 				B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */,
 				B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */,
 				B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */,
+				B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */,
 				A17400000000000000000174 /* DownloadModels.swift in Sources */,
 				A17500000000000000000175 /* DownloadCenterStore.swift in Sources */,
 				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,

@@ -68,9 +68,9 @@ struct AdministrativeManagementView: View {
     private func libraryRows(_ summary: AdministrativeManagementSummary) -> [ManagementRow] {
         guard store.permissions.canManageSystem else { return [] }
         return [
-            .init(copy[.librarySources], "folder", .librarySources, "\(summary.librarySourceCount) · \(summary.monitoredSourceCount)"),
+            .init(copy[.librarySources], "folder", .librarySources, "\(summary.librarySourceCount) · \(summary.enabledLibraryCount)"),
             .init(copy[.importTasks], "arrow.down.to.line", .importTasks, summary.activeImportCount == 0 ? copy[.completed] : "\(summary.activeImportCount) \(copy[.active])"),
-            .init(copy[.importPreferences], "slider.horizontal.3", .importPreferences, summary.automaticImportEnabled ? copy[.enabled] : copy[.disabled])
+            .init(copy[.importPreferences], "slider.horizontal.3", .importPreferences, "\(summary.importFormatCount) \(copy[.allowedExtensions])")
         ]
     }
 
@@ -78,7 +78,7 @@ struct AdministrativeManagementView: View {
         guard store.permissions.canManageSystem else { return [] }
         return [
             .init(copy[.organizeQueue], "sparkles", .organizeQueue, "\(summary.pendingOrganizeCount) \(copy[.pending])"),
-            .init(copy[.duplicateCategories], "square.3.layers.3d", .duplicateWorks, "\(summary.duplicateGroupCount)"),
+            .init(copy[.categoryGovernanceTitle], "tag", .categoryGovernance, nil),
             .init(copy[.metadataProviders], "person.text.rectangle", .metadataProviders, "\(summary.availableProviderCount)/\(summary.providerCount) \(copy[.available])")
         ]
     }

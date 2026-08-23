@@ -16,6 +16,6 @@ __all__ = [
     "DownloadTaskDTO",
     "DownloadTaskRepository",
     "DownloadUnitOfWork",
-    "UpdateDownloadTask",
     "DownloadWriteTransaction",
+    "UpdateDownloadTask",
 ]

@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 
 from app.modules.imports.application.identity_policy import (
-    directory_merge_title_similarity,
-    directory_merge_titles_match,
     explicit_volume_range_start,
-    normalize_directory_merge_title,
+    normalize_identity_part,
+    parse_bracketed_series_identity,
     split_explicit_volume,
+    split_numeric_volume_fallback,
 )
 
 
@@ -73,43 +73,53 @@ def test_volume_range_requires_a_publication_marker(publication_title: str) -> N
 
 
 @pytest.mark.parametrize(
-    ("left", "right"),
+    ("folder_name", "filename", "expected"),
     [
-        ("東京卍復仇者 卷01", "東京卍復仇者 卷31"),
-        ("作品2023 全彩版", "作品2026 全彩版"),
-        ("第01部 第002册", "第99部 第120册"),
-        ("作品１２．５", "作品3.0"),
+        ("[活着][余华]", "活着.epub", ("活着", "余华")),
+        (
+            "[辣妹因为惩罚游戏才向我这个边缘人告白][結石][Vol.01-Vol.10]",
+            "辣妹因为惩罚游戏才向我这个边缘人告白 09.epub",
+            ("辣妹因为惩罚游戏才向我这个边缘人告白", "結石"),
+        ),
+        (
+            "[Chainsaw Man][电锯人][藤本タツキ][Vol.01-Vol.11]",
+            "VOL11.zip",
+            ("电锯人", "藤本タツキ"),
+        ),
     ],
 )
-def test_directory_merge_title_treats_numeric_values_as_equivalent(
-    left: str,
-    right: str,
+def test_bracketed_series_identity_selects_title_and_author(
+    folder_name: str,
+    filename: str,
+    expected: tuple[str, str],
 ) -> None:
-    assert normalize_directory_merge_title(left) == normalize_directory_merge_title(
-        right
-    )
+    assert parse_bracketed_series_identity(folder_name, filename) == expected
 
 
-def test_directory_merge_title_preserves_number_position_and_surrounding_text() -> None:
-    assert normalize_directory_merge_title(
-        "作品01前传"
-    ) != normalize_directory_merge_title("作品前传01")
-    assert normalize_directory_merge_title(
-        "作品01全彩"
-    ) != normalize_directory_merge_title("作品01黑白")
+def test_bracketed_series_identity_rejects_non_series_folder_names() -> None:
+    assert parse_bracketed_series_identity("[Title] extra [Author]") is None
 
 
-def test_directory_merge_title_similarity_unifies_numbers_before_comparison() -> None:
-    assert directory_merge_title_similarity("作品2023全彩版", "作品2026全彩版") == 1.0
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("FX戦士久留美 (1)", ("FX戦士久留美", 1)),
+        ("FX戦士久留美 [02]", ("FX戦士久留美", 2)),
+        ("FX戦士久留美_003", ("FX戦士久留美", 3)),
+        ("004 FX戦士久留美", ("FX戦士久留美", 4)),
+    ],
+)
+def test_numeric_volume_fallback_accepts_short_standalone_numbers(
+    value: str,
+    expected: tuple[str, float],
+) -> None:
+    assert split_numeric_volume_fallback(value) == expected
 
 
-def test_directory_merge_title_similarity_accepts_exactly_seventy_percent() -> None:
-    assert directory_merge_title_similarity(
-        "abcdefghij", "abcdefgxyz"
-    ) == pytest.approx(0.7)
-    assert directory_merge_titles_match("abcdefghij", "abcdefgxyz") is True
+@pytest.mark.parametrize("value", ["作品2024版", "作品123456特别篇"])
+def test_numeric_volume_fallback_ignores_long_attached_numbers(value: str) -> None:
+    assert split_numeric_volume_fallback(value) is None
 
 
-def test_directory_merge_title_similarity_rejects_below_seventy_percent() -> None:
-    assert directory_merge_titles_match("abcdefghij", "abcdefwxyz") is False
-    assert directory_merge_titles_match("", "") is False
+def test_identity_normalization_is_unicode_and_separator_insensitive() -> None:
+    assert normalize_identity_part("  Ａuthor - Name（特别） ") == "authorname特别"

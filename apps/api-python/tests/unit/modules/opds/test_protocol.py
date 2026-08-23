@@ -25,10 +25,12 @@ from app.modules.opds.presentation.opensearch import serialize_opensearch_descri
 from app.modules.opds.presentation.schemas import OpdsProgressionDocument
 
 
-def test_pse_page_number_is_zero_based_but_internal_index_is_one_based() -> None:
+def test_pse_resource_page_number_is_zero_based_but_internal_index_is_one_based() -> (
+    None
+):
     request = PsePageRequestDto(
         actor_id="user-1",
-        volume_id="volume-1",
+        resource_id="resource-1",
         page_number=0,
         max_width=1080,
     )
@@ -95,8 +97,8 @@ def test_atom_serializer_emits_opensearch_and_pse_contract() -> None:
         search_url_template="https://books.test/opds/v1.2/search?q={searchTerms}",
         entries=(
             OpdsEntryDto(
-                id="urn:shuku:volume:1",
-                title="Volume & One",
+                id="urn:shuku:resource:1",
+                title="Resource & One",
                 updated_at=now,
                 authors=(OpdsAuthorDto(name="Author <One>"),),
                 links=(
@@ -129,7 +131,8 @@ def test_atom_serializer_emits_opensearch_and_pse_contract() -> None:
     }
     assert root.findtext("opensearch:totalResults", namespaces=namespaces) == "1"
     assert (
-        root.findtext("atom:entry/atom:title", namespaces=namespaces) == "Volume & One"
+        root.findtext("atom:entry/atom:title", namespaces=namespaces)
+        == "Resource & One"
     )
     pse = root.find(
         "atom:entry/atom:link[@rel='http://vaemendis.net/opds-pse/stream']",

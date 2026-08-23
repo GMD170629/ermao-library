@@ -6,9 +6,8 @@ from sqlalchemy import event, insert
 from sqlalchemy.orm import Session
 
 from app.core.authorization import AuthorizationContext
-from app.models.import_pipeline import ImportLog, ImportTask
-from app.modules.imports.infrastructure.import_http import (
-    hydrate_import_task_page,
+from app.models import Library, LibraryImportTask
+from app.modules.imports.infrastructure.library_queries import (
     list_import_tasks_page,
 )
 from app.modules.imports.presentation.mappers import import_task_view
@@ -17,31 +16,27 @@ from app.modules.imports.presentation.mappers import import_task_view
 def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
     now = datetime.now(UTC)
     task_count = 100_000
+    db_session.add(
+        Library(
+            id="import-scale-library",
+            name="Import scale",
+            root_path="/tmp/import-scale-library",
+            organization_mode="FLAT",
+        )
+    )
+    db_session.flush()
     for start in range(0, task_count, 1_000):
         stop = min(task_count, start + 1_000)
         db_session.execute(
-            insert(ImportTask),
+            insert(LibraryImportTask),
             [
                 {
                     "id": f"import-scale-{index:06d}",
-                    "origin": "MANUAL",
-                    "status": "FAILED" if index % 4 == 0 else "COMPLETED",
-                    "source_path": f"/missing/import-scale-{index:06d}.epub",
+                    "kind": "SCAN_LIBRARY",
+                    "library_id": "import-scale-library",
+                    "state": "FAILED" if index % 4 == 0 else "SUCCEEDED",
                     "created_at": now - timedelta(seconds=index),
-                    "updated_at": now - timedelta(seconds=index),
-                }
-                for index in range(start, stop)
-            ],
-        )
-        db_session.execute(
-            insert(ImportLog),
-            [
-                {
-                    "id": f"import-scale-log-{index:06d}",
-                    "import_task_id": f"import-scale-{index:06d}",
-                    "level": "info",
-                    "message": "completed",
-                    "created_at": now - timedelta(seconds=index),
+                    "error_summary": "PARSE_FAILED" if index % 4 == 0 else None,
                 }
                 for index in range(start, stop)
             ],
@@ -52,7 +47,7 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
     select_count = 0
@@ -78,13 +73,28 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
             page=1,
             page_size=10,
         )
-        tasks = hydrate_import_task_page(db_session, tasks, log_limit=20)
-        views = [import_task_view(db_session, task, log_limit=20) for task in tasks]
+        views = [import_task_view(task) for task in tasks]
     finally:
         event.remove(engine, "before_cursor_execute", count_selects)
 
     assert total == task_count
     assert summary == {"completed": 75_000, "failed": 25_000}
     assert len(views) == 10
-    assert all(len(view["logs"]) == 1 for view in views)
-    assert select_count <= 10
+    assert all(
+        set(view)
+        == {
+            "id",
+            "kind",
+            "libraryId",
+            "resourceId",
+            "sourceNodeId",
+            "role",
+            "state",
+            "errorSummary",
+            "createdAt",
+            "startedAt",
+            "finishedAt",
+        }
+        for view in views
+    )
+    assert select_count <= 5

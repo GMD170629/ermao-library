@@ -3,21 +3,18 @@ package com.ermao.library.features.content.model
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
-import com.ermao.library.shared.modules.library.domain.Volume
-import com.ermao.library.shared.modules.reader.ReaderChapterListMetadata
-import com.ermao.library.shared.modules.reader.ReaderChapterState
-import com.ermao.library.shared.modules.reader.ReaderChapterUnit
-import com.ermao.library.shared.modules.reader.resolveReaderChapterStates
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
+import com.ermao.library.shared.modules.library.domain.Resource
 import java.time.Instant
 
-fun ContentResult.Content<*>.freshness(): ContentFreshness = ContentFreshness.Fresh
+fun ContentResult.Content<*>.freshness(): ContentFreshness =
+    if (isStale) ContentFreshness.Stale else ContentFreshness.Fresh
 
-fun WorkSummary.toCard(): WorkCard = WorkCard(
+fun BookSummary.toCard(): BookCard = BookCard(
     id = id,
     title = title,
-    author = author,
+    author = author.orEmpty(),
     coverUrl = coverUrl,
     mediaKinds = availableMediaKinds.map { it.wireValue },
     progressPercent = progress.toInt().takeIf { it > 0 },
@@ -39,22 +36,22 @@ fun HomeSnapshot.toUiContent(): HomeContent {
     return HomeContent(
         continueReading = continueItem?.let {
             ContinueReadingCard(
-                work = WorkCard(
-                    id = it.workId,
+                book = BookCard(
+                    id = it.bookId,
                     title = it.title,
-                    author = it.author,
+                    author = it.author.orEmpty(),
                     coverUrl = it.coverUrl,
                     mediaKinds = listOf(it.mediaKind.wireValue),
                     progressPercent = it.progress.toInt().takeIf { percent -> percent > 0 },
                 ),
-                volumeTitle = it.volumeTitle,
-                positionLabel = null,
+                resourceTitle = it.resourceTitle,
+                positionLabel = it.chapter,
                 lastReadAtEpochMillis = it.lastReadAt.toEpochMillisOrNull(),
-                resumeVolumeId = it.resumeVolumeId,
+                resumeResourceId = it.resumeResourceId,
             )
         },
-        recentReading = readingItems.map(WorkSummary::toCard),
-        recentAdded = addedItems.map(WorkSummary::toCard),
+        recentReading = readingItems.map(BookSummary::toCard),
+        recentAdded = addedItems.map(BookSummary::toCard),
     )
 }
 
@@ -64,80 +61,44 @@ internal fun String?.toEpochMillisOrNull(): Long? = this
     ?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
 fun HomeSnapshot.hasSectionFailure(): Boolean =
-    continueReading is HomeSection.Failure || recentReading is HomeSection.Failure || recentAdded is HomeSection.Failure
+    continueReading is HomeSection.Failure ||
+        recentReading is HomeSection.Failure ||
+        recentAdded is HomeSection.Failure
 
-fun WorkDetailSummary.toUiContent(): WorkDetailContent {
-    val units = (readingUnits.ifEmpty { activeMedia?.units.orEmpty() })
-        .distinctBy { unit -> unit.id }
-        .sortedBy { unit -> unit.sortOrder }
-    val page = readingUnitsPage
-    val chapterStates = resolveReaderChapterStates(
-        units = units.map {
-            ReaderChapterUnit(
-                href = it.href,
-                sortOrder = it.sortOrder,
-                readingOrderPosition = it.metadata.readingOrderPosition,
-            )
-        },
-        currentHref = activeMedia?.currentHref,
-        currentSortOrder = activeMedia?.currentChapterSortOrder,
-        progressPercent = activeMedia?.progress?.coerceIn(0.0, 100.0) ?: if (completed) 100.0 else 0.0,
-        metadata = ReaderChapterListMetadata(
-            page = page?.page ?: 1,
-            pageSize = page?.pageSize ?: maxOf(1, units.size),
-            currentIndex = activeMedia?.currentChapterIndex,
+fun BookDetailSummary.toUiContent(): BookDetailContent {
+    val mappedResources = resources.map { resource ->
+        resource.toUiContent(resource.id == continueResourceId)
+    }
+    val selectedResourceId = mappedResources.firstOrNull { it.selected }?.id
+        ?: mappedResources.firstOrNull()?.id
+    return BookDetailContent(
+        book = BookCard(
+            id = id,
+            title = title,
+            author = author.orEmpty(),
+            coverUrl = coverUrl,
+            mediaKinds = availableMediaKinds.map { it.wireValue },
+            progressPercent = continueResourceProgress.toInt().takeIf { it > 0 },
         ),
-    )
-    return WorkDetailContent(
-    work = WorkCard(
-        id = id,
-        title = title,
-        author = author,
-        coverUrl = coverUrl,
-        mediaKinds = availableMediaKinds.map { it.wireValue },
-        progressPercent = continueVolumeProgress.toInt().takeIf { it > 0 },
-    ),
-    seriesId = seriesFacet?.id,
-    seriesName = seriesFacet?.name ?: seriesName,
-    seriesIndex = seriesIndex,
-    authorFacetId = authorFacets.firstOrNull()?.id,
-    description = description,
-    tags = tags,
-    media = mediaVersions.map { media ->
-        MediaContent(
-            kind = media.mediaKind.wireValue,
-            volumeCount = media.volumeCount,
-            volumes = media.volumes.map { volume -> volume.toUiContent(volume.id == continueVolumeId) },
-        )
-    },
-    selectedMediaKind = recentMediaKind?.wireValue,
-    completed = completed,
-    readingUnits = units.mapIndexed { index, unit ->
-            ReadingUnitContent(
-                id = unit.id,
-                title = unit.title?.takeIf(String::isNotBlank) ?: unit.id,
-                progressPercent = activeMedia?.progress?.toInt()
-                    ?.takeIf { chapterStates[index] == ReaderChapterState.Current },
-                href = unit.href,
-                sortOrder = unit.sortOrder,
-                readingOrderPosition = unit.metadata.readingOrderPosition,
-                readingState = when (chapterStates[index]) {
-                    ReaderChapterState.Current -> ChapterReadingState.Current
-                    ReaderChapterState.Read -> ChapterReadingState.Read
-                    ReaderChapterState.Unread -> ChapterReadingState.Unread
-                },
-            )
-        },
+        seriesId = seriesFacet?.id,
+        seriesName = seriesFacet?.name ?: seriesName,
+        seriesIndex = seriesIndex,
+        authorFacetId = authorFacets.firstOrNull()?.id,
+        description = description,
+        tags = tags,
+        resources = mappedResources,
+        selectedResourceId = selectedResourceId,
+        completed = completed,
+        readingUnits = emptyList(),
     )
 }
 
-fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent(
+fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceContent(
     id = id,
     title = title,
     format = format,
     readerType = readerType,
-    mediaVersionId = mediaVersionId,
-    volumeIndex = volumeIndex,
+    resourceIndex = resourceIndex,
     sortOrder = sortOrder,
     publisher = publisher,
     publishedAt = publishedAt,
@@ -146,9 +107,17 @@ fun Volume.toUiContent(selected: Boolean = false): VolumeContent = VolumeContent
     identifier = identifier,
     narrator = narrator,
     pageCount = pageCount,
-    metadataSource = origin,
+    metadataSource = classification.source,
+    suggestedMediaKind = classification.suggestedMediaKind?.wireValue ?: mediaKind.wireValue,
     kindleSendAvailable = kindleSendAvailable,
-    files = files.map { file -> VolumeFileContent(file.id, file.path, file.sizeBytes, file.displaySize) },
+    assets = assets.map { asset ->
+        AssetContent(
+            id = asset.id,
+            path = asset.downloadUrl ?: asset.url.orEmpty(),
+            sizeBytes = asset.sizeBytes,
+            displaySize = asset.displaySize,
+        )
+    },
     coverUrl = coverUrl,
     sizeBytes = sizeBytes,
     progressPercent = progress.toInt().takeIf { it > 0 },
@@ -164,5 +133,8 @@ fun ContentSort.toShared(): com.ermao.library.shared.modules.library.LibrarySort
 }
 
 fun LibraryScope.toFacetKind(): com.ermao.library.shared.modules.library.domain.FacetKind =
-    if (this == LibraryScope.Series) com.ermao.library.shared.modules.library.domain.FacetKind.Series
-    else com.ermao.library.shared.modules.library.domain.FacetKind.Author
+    if (this == LibraryScope.Series) {
+        com.ermao.library.shared.modules.library.domain.FacetKind.Series
+    } else {
+        com.ermao.library.shared.modules.library.domain.FacetKind.Author
+    }

@@ -3,6 +3,7 @@ package com.ermao.library.shared.modules.downloads.application
 import com.ermao.library.shared.core.network.AppError
 import com.ermao.library.shared.modules.downloads.domain.CompletedDownloadArtifact
 import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
+import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -19,7 +20,7 @@ data class DownloadRequestContext(
 interface DownloadCatalogRepository {
     suspend fun listArtifacts(namespace: DownloadNamespace): List<CompletedDownloadArtifact>
     suspend fun saveArtifact(artifact: CompletedDownloadArtifact)
-    suspend fun deleteArtifact(namespace: DownloadNamespace, volumeId: String)
+    suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity)
     suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask>
     suspend fun saveTask(task: DownloadTask)
     suspend fun deleteTask(namespace: DownloadNamespace, taskId: String)
@@ -29,13 +30,15 @@ interface DownloadCatalogRepository {
 data class DownloadSinkRequest(
     val namespace: DownloadNamespace,
     val taskId: String,
-    val volumeId: String,
+    val resourceId: String,
+    val assetId: String,
     val expectedTotalBytes: Long,
     val resumeFromBytes: Long,
 ) {
     init {
         require(taskId.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(assetId.isNotBlank())
         require(expectedTotalBytes > 0)
         require(resumeFromBytes in 0 until expectedTotalBytes)
     }
@@ -63,7 +66,7 @@ sealed interface DownloadBootstrapResult {
 interface DownloadBootstrapGateway {
     suspend fun load(
         context: DownloadRequestContext,
-        volumeId: String,
+        resourceId: String,
     ): DownloadBootstrapResult
 }
 

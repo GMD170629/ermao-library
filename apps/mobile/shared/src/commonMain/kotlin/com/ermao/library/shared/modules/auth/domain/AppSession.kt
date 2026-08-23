@@ -97,7 +97,7 @@ data class AppSessionSnapshot(
     val allLibraryScopes: Boolean = false,
     val canViewManualImports: Boolean = false,
     val authorizationVersion: Long? = null,
-    val monitorFolderIds: List<String> = emptyList(),
+    val libraryIds: List<String> = emptyList(),
 )
 
 fun AppSession.toSnapshot(): AppSessionSnapshot = when (this) {
@@ -179,7 +179,7 @@ private fun authenticatedSnapshot(
     canViewManualImports = authorization?.canViewManualImports == true,
     authorizationVersion = authorization?.authorizationVersion
         ?: identity.namespace.authorizationVersion,
-    monitorFolderIds = authorization?.monitorFolderIds?.sorted().orEmpty(),
+    libraryIds = authorization?.libraryIds?.sorted().orEmpty(),
 )
 
 private val ServerConnectionFailureCode.stableCode: String

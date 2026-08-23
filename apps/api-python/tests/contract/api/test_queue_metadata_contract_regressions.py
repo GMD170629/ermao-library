@@ -144,24 +144,13 @@ def test_consumed_request_bodies_are_documented_in_openapi(
         ("put", "/api/metadata/provider-pipelines/{media_kind}"),
         ("put", "/api/metadata/providers/{provider_id}"),
         ("patch", "/api/metadata/providers/{provider_id}"),
+        ("post", "/api/libraries"),
+        ("patch", "/api/libraries/{library_id}"),
         ("put", "/api/organize/policy"),
-        ("post", "/api/works/import"),
-        ("post", "/api/import-tasks/scan-directory"),
-        ("delete", "/api/import-tasks/{task_id}"),
+        ("post", "/api/books/import"),
         ("post", "/api/tracking/release-title-parser"),
         ("post", "/api/download-tasks"),
         ("put", "/api/download-tasks/{task_id}"),
-        ("post", "/api/sources"),
-        ("put", "/api/sources/{source_id}"),
-        ("patch", "/api/sources/{source_id}"),
-        ("post", "/api/sources/{source_id}/search"),
-        ("post", "/api/source-search-records"),
-        ("post", "/api/source-search-records/create-download-task"),
-        ("put", "/api/source-search-records/{record_id}"),
-        (
-            "post",
-            "/api/source-search-records/{record_id}/create-download-task",
-        ),
         ("put", "/api/email-settings"),
         ("post", "/api/email-settings/smtp-test"),
         ("put", "/api/kindle-settings"),
@@ -174,10 +163,6 @@ def test_consumed_request_bodies_are_documented_in_openapi(
         if "requestBody" not in schema["paths"][path][method]
     }
     assert missing == set()
-    delete_body = schema["paths"]["/api/import-tasks/{task_id}"]["delete"][
-        "requestBody"
-    ]
-    assert delete_body.get("required") is not True
 
 
 def test_empty_bodies_never_escape_as_internal_errors(
@@ -189,23 +174,13 @@ def test_empty_bodies_never_escape_as_internal_errors(
         ("PUT", "/api/metadata/provider-pipelines/EBOOK"),
         ("PUT", "/api/metadata/providers/douban"),
         ("PATCH", "/api/metadata/providers/douban"),
+        ("POST", "/api/libraries"),
+        ("PATCH", "/api/libraries/missing"),
         ("PUT", "/api/organize/policy"),
-        ("POST", "/api/works/import"),
-        ("POST", "/api/import-tasks/scan-directory"),
+        ("POST", "/api/books/import"),
         ("POST", "/api/tracking/release-title-parser"),
         ("POST", "/api/download-tasks"),
         ("PUT", "/api/download-tasks/missing"),
-        ("POST", "/api/sources"),
-        ("PUT", "/api/sources/missing"),
-        ("PATCH", "/api/sources/missing"),
-        ("POST", "/api/sources/missing/search"),
-        ("POST", "/api/source-search-records"),
-        ("POST", "/api/source-search-records/create-download-task"),
-        ("PUT", "/api/source-search-records/missing"),
-        (
-            "POST",
-            "/api/source-search-records/missing/create-download-task",
-        ),
         ("PUT", "/api/email-settings"),
         ("POST", "/api/email-settings/smtp-test"),
         ("PUT", "/api/kindle-settings"),

@@ -2,8 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 enum WorkManagementTask: String, Identifiable {
-    case addSeries, editWork, recognize, cover, editVolume, mediaKind, split, transfer, kindle
-    case deleteWork, deleteVolume
+    case addSeries, editWork, recognize, cover, editResource, mediaKind, kindle
 
     var id: String { rawValue }
 }
@@ -13,14 +12,11 @@ struct WorkManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: WorkManagementStore
     let task: WorkManagementTask
-    let detail: WorkDetailContent
-    let volume: WorkVolume?
-    let downloadAction: (WorkVolume) -> Void
-    let removeDownload: (WorkVolume) -> Void
+    let detail: BookDetailContent
+    let resource: BookResource?
     let chooseCover: () -> Void
     let workCover: AnyView
-    let downloadForVolume: (String) -> ManagedDownloadRecord?
-    let onManagedVolumeChange: (String?) -> Void
+    let downloadForResource: (String) -> ManagedDownloadRecord?
 
     @State private var page: Page = .editWork
     @State private var title = ""
@@ -29,8 +25,6 @@ struct WorkManagementView: View {
     @State private var series = ""
     @State private var seriesIndex = ""
     @State private var tags = ""
-    @State private var volumeIndex = ""
-    @State private var sortOrder = "0"
     @State private var publisher = ""
     @State private var language = ""
     @State private var isbn = ""
@@ -40,24 +34,21 @@ struct WorkManagementView: View {
     @State private var providerID = ""
     @State private var selectedCandidate: ErmaoShared.MetadataCandidate?
     @State private var selectedMetadataFields: Set<ErmaoShared.MetadataField> = []
-    @State private var appliesMetadataToAllVolumes = true
-    @State private var managedVolumeID: String?
+    @State private var appliesMetadataToAllResources = true
+    @State private var managedResourceID: String?
     @State private var selectedKind: ErmaoShared.ManagedMediaKind = .ebook
     @State private var selectedReadingStatus: ErmaoShared.ManagedReadingStatus = .unread
-    @State private var selectedTransferTargetID: String?
-    @State private var selectedKindleFileID: String?
-    @State private var confirmsDeletion = false
-    @State private var confirmsDownloadRemoval = false
+    @State private var selectedKindleAssetID: String?
     @State private var confirmsCoverRegeneration = false
 
-    private enum Page { case addSeries, editWork, editVolume, metadata, cover, readingStatus, mediaKind, split, transfer, kindle }
+    private enum Page { case addSeries, editWork, editResource, metadata, cover, readingStatus, mediaKind, kindle }
 
-    private var activeVolume: WorkVolume? {
-        managedVolumeID.flatMap { id in detail.volumes.first { $0.id == id } }
+    private var activeResource: BookResource? {
+        managedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
     }
 
     private var activeDownload: ManagedDownloadRecord? {
-        activeVolume.flatMap { downloadForVolume($0.id) }
+        activeResource.flatMap { downloadForResource($0.id) }
     }
 
     private var initialPage: Page {
@@ -66,12 +57,9 @@ struct WorkManagementView: View {
         case .editWork: .editWork
         case .recognize: .metadata
         case .cover: .cover
-        case .editVolume: .editVolume
+        case .editResource: .editResource
         case .mediaKind: .mediaKind
-        case .split: .split
-        case .transfer: .transfer
         case .kindle: .kindle
-        case .deleteWork, .deleteVolume: volume == nil ? .editWork : .editVolume
         }
     }
 
@@ -81,13 +69,9 @@ struct WorkManagementView: View {
         case .editWork: "management.editWork"
         case .recognize: "management.metadata"
         case .cover: "management.cover"
-        case .editVolume: "management.editVolume"
+        case .editResource: "management.editVolume"
         case .mediaKind: "management.mediaKind"
-        case .split: "management.split"
-        case .transfer: "management.transfer"
         case .kindle: "management.kindle"
-        case .deleteWork: "management.deleteWork"
-        case .deleteVolume: "management.deleteVolume"
         }
     }
 
@@ -99,13 +83,11 @@ struct WorkManagementView: View {
             switch page {
             case .addSeries: editSeries
             case .editWork: editWork
-            case .editVolume: editVolume
+            case .editResource: editResource
             case .metadata: metadata
             case .cover: coverManagement
             case .readingStatus: readingStatus
             case .mediaKind: mediaKind
-            case .split: split
-            case .transfer: transfer
             case .kindle: kindle
             }
         }
@@ -119,53 +101,23 @@ struct WorkManagementView: View {
             }
         }
         .onAppear {
-            managedVolumeID = volume?.id
+            managedResourceID = resource?.id
             page = initialPage
             prepareFields()
-            if task == .deleteWork || task == .deleteVolume { confirmsDeletion = true }
         }
         .onChange(of: store.metadataProviders.map(\.id)) { ids in
             if providerID.isEmpty { providerID = ids.first ?? "" }
-        }
-        .onChange(of: store.completedAction) { action in
-            guard let action else { return }
-            switch action {
-            case .volumeReclassified, .volumeSplit, .volumeTransferred, .volumeDeleted:
-                managedVolumeID = nil
-                onManagedVolumeChange(nil)
-            default: break
-            }
-        }
-        .confirmationDialog(
-            LocalizedStringKey(activeVolume == nil ? "management.deleteWork" : "management.deleteVolume"),
-            isPresented: $confirmsDeletion,
-            titleVisibility: .visible
-        ) {
-            Button(LocalizedStringKey(activeVolume == nil ? "management.deleteWork" : "management.deleteVolume"), role: .destructive) {
-                if let activeVolume { store.deleteVolume(activeVolume) } else { store.deleteWork() }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text(LocalizedStringKey(activeVolume == nil ? "management.confirmDeleteWork" : "management.confirmDeleteVolume"))
-        }
-        .confirmationDialog(
-            "downloads.remove.confirm.title",
-            isPresented: $confirmsDownloadRemoval,
-            titleVisibility: .visible
-        ) {
-            Button("downloads.remove.action", role: .destructive) {
-                if let activeVolume { removeDownload(activeVolume) }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text("downloads.remove.confirm.message")
         }
         .confirmationDialog(
             "management.regenerateCoverConfirmTitle",
             isPresented: $confirmsCoverRegeneration,
             titleVisibility: .visible
         ) {
-            Button("management.regenerateCover") { store.regenerateCover() }
+            Button("management.regenerateCover") {
+                if let resource = activeResource ?? detail.resources.first {
+                    store.regenerateCover(resourceID: resource.id)
+                }
+            }
             Button("common.cancel", role: .cancel) {}
         } message: {
             Text("management.regenerateCoverConfirmMessage")
@@ -181,8 +133,8 @@ struct WorkManagementView: View {
         Section {
             Button("management.save") {
                 store.updateWork(
-                    title: detail.work.title,
-                    author: detail.work.author,
+                    title: detail.book.title,
+                    author: detail.book.author ?? "",
                     description: detail.description ?? "",
                     seriesName: series,
                     seriesIndex: Double(seriesIndex),
@@ -231,15 +183,15 @@ struct WorkManagementView: View {
     }
 
     @ViewBuilder private var readingStatus: some View {
-        if let volume = detail.volumes.first(where: \.isSelected) ?? detail.volumes.first {
-            Section(volume.title) {
+        if let resource = detail.resources.first(where: \.isSelected) ?? detail.resources.first {
+            Section(resource.title) {
                 Picker("management.readingStatus", selection: $selectedReadingStatus) {
                     Text("work.status.unread").tag(ErmaoShared.ManagedReadingStatus.unread)
                     Text("work.status.finished").tag(ErmaoShared.ManagedReadingStatus.finished)
                 }
                 .pickerStyle(.segmented)
                 Button("management.save") {
-                    store.setReadingStatus(volumeID: volume.id, status: selectedReadingStatus)
+                    store.setReadingStatus(resourceID: resource.id, status: selectedReadingStatus)
                 }
             }
         } else {
@@ -247,25 +199,17 @@ struct WorkManagementView: View {
         }
     }
 
-    @ViewBuilder private var editVolume: some View {
-        if let volume = activeVolume {
+    @ViewBuilder private var editResource: some View {
+        if let resource = activeResource {
             Section {
-                TextField("management.title", text: $title)
-                TextField("management.volumeIndex", text: $volumeIndex)
-                    .keyboardType(.decimalPad)
-                TextField("management.sortOrder", text: $sortOrder)
-                    .keyboardType(.numberPad)
                 TextField("management.publisher", text: $publisher)
                 TextField("management.language", text: $language)
                 TextField("management.isbn", text: $isbn)
                 TextField("management.identifier", text: $identifier)
                 TextField("management.narrator", text: $narrator)
                 Button("management.save") {
-                    store.updateVolume(
-                        volume,
-                        title: title,
-                        index: Double(volumeIndex),
-                        sortOrder: Int32(sortOrder) ?? 0,
+                    store.updateResource(
+                        resource,
                         publisher: publisher.nilIfBlank,
                         language: language.nilIfBlank,
                         isbn: isbn.nilIfBlank,
@@ -273,7 +217,6 @@ struct WorkManagementView: View {
                         narrator: narrator.nilIfBlank
                     )
                 }
-                .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || Int32(sortOrder) == nil)
             }
         }
     }
@@ -286,8 +229,11 @@ struct WorkManagementView: View {
                     Text(provider.name).tag(provider.id)
                 }
             }
-            Button("management.search") { store.searchMetadata(providerID: providerID, query: query) }
-                .disabled(providerID.isEmpty || query.isEmpty)
+            Button("management.search") {
+                let sourceNodeID = activeResource?.sourceNodeID ?? detail.resources.first?.sourceNodeID ?? ""
+                store.searchMetadata(providerID: providerID, sourceNodeID: sourceNodeID, query: query)
+            }
+                .disabled(providerID.isEmpty || query.isEmpty || (activeResource?.sourceNodeID ?? detail.resources.first?.sourceNodeID ?? "").isEmpty)
             ForEach(store.metadataCandidates, id: \.id) { candidate in
                 Button(candidate.title ?? candidate.id) {
                     selectedCandidate = candidate
@@ -304,14 +250,15 @@ struct WorkManagementView: View {
                         }
                     ))
                 }
-                Toggle("management.applyAllVolumes", isOn: $appliesMetadataToAllVolumes)
+                Toggle("management.applyAllVolumes", isOn: $appliesMetadataToAllResources)
                 Button("management.applyMetadata") {
                     store.applyMetadata(
                         providerID: providerID,
                         candidate: candidate,
                         fields: selectedMetadataFields,
-                        volumeID: detail.volumes.first(where: \.isSelected)?.id ?? detail.volumes.first?.id,
-                        applyToAllVolumes: appliesMetadataToAllVolumes
+                        resourceID: detail.resources.first(where: \.isSelected)?.id ?? detail.resources.first?.id,
+                        sourceNodeID: detail.resources.first(where: \.isSelected)?.sourceNodeID ?? detail.resources.first?.sourceNodeID ?? "",
+                        applyToAllResources: appliesMetadataToAllResources
                     )
                 }
                 .disabled(selectedMetadataFields.isEmpty)
@@ -320,7 +267,7 @@ struct WorkManagementView: View {
     }
 
     @ViewBuilder private var mediaKind: some View {
-        if let volume = activeVolume {
+        if let resource = activeResource {
             Section {
                 Picker("management.mediaKind", selection: $selectedKind) {
                     Text("management.ebook").tag(ErmaoShared.ManagedMediaKind.ebook)
@@ -330,52 +277,12 @@ struct WorkManagementView: View {
                 .pickerStyle(.inline)
                 Button("management.mediaKind") {
                     store.reclassify(
-                        volume,
-                        kind: selectedKind,
-                        work: detail.work,
-                        localKind: localKind(selectedKind)
+                        resource,
+                        kind: selectedKind
                     )
                 }
-                .disabled(hasActiveDownload || selectedKind == sharedKind(detail.selectedMediaKind ?? .ebook))
+                .disabled(hasActiveDownload || selectedKind == sharedKind(activeResource?.libraryMediaKind ?? .ebook))
                 if hasActiveDownload { Text("management.activeDownloadBlocked") }
-            }
-        }
-    }
-
-    @ViewBuilder private var split: some View {
-        if let volume = activeVolume {
-            Section {
-                TextField("management.title", text: $title)
-                TextField("management.author", text: $author)
-                Button("management.split") {
-                    store.split(volume, title: title, author: author.nilIfBlank, mediaKind: detail.selectedMediaKind ?? .ebook)
-                }
-                .disabled(title.isEmpty)
-            }
-        }
-    }
-
-    @ViewBuilder private var transfer: some View {
-        if let volume = activeVolume {
-            Section {
-                TextField("management.query", text: $query)
-                Button("management.search") { store.searchTransferTargets(query) }
-                ForEach(store.transferTargets, id: \.id) { target in
-                    Button {
-                        selectedTransferTargetID = target.id
-                    } label: {
-                        HStack {
-                            Text([target.title, target.author].filter { !$0.isEmpty }.joined(separator: " · "))
-                            Spacer()
-                            if selectedTransferTargetID == target.id { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-                Button("management.moveToSelectedWork") {
-                    guard let target = store.transferTargets.first(where: { $0.id == selectedTransferTargetID }) else { return }
-                    store.transfer(volume, target: target, mediaKind: detail.selectedMediaKind ?? .ebook)
-                }
-                .disabled(hasActiveDownload || selectedTransferTargetID == nil)
             }
         }
     }
@@ -390,30 +297,30 @@ struct WorkManagementView: View {
             } else {
                 Text("management.kindleNotReady")
             }
-            ForEach(activeVolume.map { [$0] } ?? detail.volumes, id: \.id) { volume in
-                ForEach(volume.files.filter(kindleFile), id: \.id) { file in
+            ForEach(activeResource.map { [$0] } ?? detail.resources, id: \.id) { resource in
+                ForEach(resource.assets.filter(kindleAsset), id: \.id) { asset in
                     Button {
-                        selectedKindleFileID = file.id
+                        selectedKindleAssetID = asset.id
                     } label: {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(file.path.split(separator: "/").last.map(String.init) ?? file.path)
-                                Text("\(volume.title) · \(file.displaySize)")
+                                Text(asset.path.split(separator: "/").last.map(String.init) ?? asset.path)
+                                Text("\(resource.title) · \(asset.displaySize)")
                                     .appTextStyle(.caption)
                                     .foregroundStyle(theme.textSecondary)
                             }
                             Spacer()
-                            if selectedKindleFileID == file.id { Image(systemName: "checkmark.circle.fill") }
+                            if selectedKindleAssetID == asset.id { Image(systemName: "checkmark.circle.fill") }
                         }
                     }
                     .disabled(store.kindleSettings?.ready != true)
                 }
             }
             Button("management.addToKindleQueue") {
-                guard let selectedKindleFileID else { return }
-                store.sendToKindle(fileID: selectedKindleFileID)
+                guard let selectedKindleAssetID else { return }
+                store.sendToKindle(assetID: selectedKindleAssetID)
             }
-            .disabled(store.kindleSettings?.ready != true || selectedKindleFileID == nil)
+            .disabled(store.kindleSettings?.ready != true || selectedKindleAssetID == nil)
         }
     }
 
@@ -423,72 +330,27 @@ struct WorkManagementView: View {
     }
 
     private func prepareFields() {
-        title = activeVolume?.title ?? detail.work.title
-        author = detail.work.author
+        title = activeResource?.title ?? detail.book.title
+        author = detail.book.author ?? ""
         description = detail.description ?? ""
         series = detail.seriesFacet?.name ?? ""
         seriesIndex = detail.seriesIndex.map(String.init) ?? ""
         tags = detail.tags.joined(separator: ", ")
-        volumeIndex = activeVolume?.volumeIndex.map(String.init) ?? ""
-        sortOrder = activeVolume.map { String($0.sortOrder) } ?? "0"
-        publisher = activeVolume?.publisher ?? ""
-        language = activeVolume?.language ?? ""
-        isbn = activeVolume?.isbn ?? ""
-        identifier = activeVolume?.identifier ?? ""
-        narrator = activeVolume?.narrator ?? ""
-        query = detail.work.title
+        publisher = activeResource?.publisher ?? ""
+        language = activeResource?.language ?? ""
+        isbn = activeResource?.isbn ?? ""
+        identifier = activeResource?.identifier ?? ""
+        narrator = activeResource?.narrator ?? ""
+        query = detail.book.title
         providerID = store.metadataProviders.first?.id ?? ""
-    }
-
-    private func downloadButton(download: ManagedDownloadRecord?, action: @escaping () -> Void) -> some View {
-        let title: LocalizedStringKey
-        let image: String
-        switch download?.state {
-        case .queued, .downloading:
-            title = "work.volume.download.pause"
-            image = "pause.circle"
-        case .paused, .failedRetryable, .failedTerminal:
-            title = "work.volume.download.retry"
-            image = "arrow.clockwise.circle"
-        case .completed:
-            title = "work.volume.download.completed"
-            image = "checkmark.circle"
-        case nil:
-            title = "work.volume.download.action"
-            image = "icloud.and.arrow.down"
-        }
-        return Button(title, systemImage: image, action: action)
     }
 
     private func sharedKind(_ kind: LibraryMediaKind) -> ErmaoShared.ManagedMediaKind {
         switch kind { case .ebook: .ebook; case .comic: .comic; case .audiobook: .audiobook }
     }
 
-    private func localKind(_ kind: ErmaoShared.ManagedMediaKind) -> LibraryMediaKind {
-        switch kind {
-        case .ebook: .ebook
-        case .comic: .comic
-        case .audiobook: .audiobook
-        default: detail.selectedMediaKind ?? .ebook
-        }
-    }
-
-    private func volumeSummary(_ volume: WorkVolume) -> String {
-        let state: String
-        switch downloadForVolume(volume.id)?.state {
-        case .queued, .downloading: state = String(localized: "management.downloadActive")
-        case .paused: state = String(localized: "management.downloadPaused")
-        case .completed: state = String(localized: "work.volume.download.completed")
-        case .failedRetryable, .failedTerminal: state = String(localized: "downloads.failed")
-        case nil: state = String(localized: "management.notDownloaded")
-        }
-        return [volume.files.first?.path.split(separator: ".").last.map { String($0).uppercased() }, state]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-    }
-
-    private func kindleFile(_ file: WorkVolumeFile) -> Bool {
-        let path = file.path.lowercased()
+    private func kindleAsset(_ asset: ResourceAsset) -> Bool {
+        let path = asset.path.lowercased()
         return path.hasSuffix(".epub") || path.hasSuffix(".pdf")
     }
 

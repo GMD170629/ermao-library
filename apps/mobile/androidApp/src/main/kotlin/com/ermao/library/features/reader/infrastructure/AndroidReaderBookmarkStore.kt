@@ -2,6 +2,7 @@ package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
 import androidx.core.content.edit
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import java.security.MessageDigest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,12 +26,14 @@ internal data class AndroidReaderBookmarkState(
 
 internal class AndroidReaderBookmarkStore(
     context: Context,
-    serverIdentity: String,
-    userId: String,
-    volumeId: String,
+    namespace: ReaderSyncNamespace,
+    resourceId: String,
 ) {
-    private val preferences = context.getSharedPreferences("reader_bookmarks_v1", Context.MODE_PRIVATE)
-    private val key = listOf(serverIdentity, userId, volumeId)
+    private val preferences = context.getSharedPreferences(
+        "reader_bookmarks_v3_${sha256(readerAccountStorageKey(namespace))}",
+        Context.MODE_PRIVATE,
+    )
+    private val key = listOf(namespace.stableKey, resourceId)
         .joinToString("\u0000")
         .sha256()
 
@@ -91,6 +94,12 @@ internal class AndroidReaderBookmarkStore(
                 percent = item.optDouble("percent").takeIf(Double::isFinite) ?: 0.0,
                 createdAt = item.optString("createdAt"),
             ))
+        }
+    }
+
+    companion object {
+        internal fun clearNamespace(context: Context, namespace: ReaderSyncNamespace) {
+            context.deleteSharedPreferences("reader_bookmarks_v3_${sha256(readerAccountStorageKey(namespace))}")
         }
     }
 }

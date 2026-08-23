@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete
 
@@ -20,15 +23,17 @@ from app.core.config import Settings
 from app.core.safe_errors import safe_error_message
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms, timestamp_ms_to_iso
+from app.models import DownloadTask, KindleSendTask, LibraryImportTask
 from app.models.auth import UserPreference
-from app.models.import_pipeline import DownloadTask, ImportTask, KindleSendTask
+from app.models.library import Library
 from app.models.organize import MetadataLookupTask
-from app.models.settings import MonitorFolder, SystemHealthRun
+from app.models.settings import SystemHealthRun
 from app.modules.system.application.commands import (
     SystemWriteTransaction,
     reset_failed_system_transaction,
 )
 from app.modules.system.domain.health import (
+    HealthRunItem,
     HealthRunSnapshot,
     normalize_health_run_snapshot,
     summarize_health_items,
@@ -47,7 +52,7 @@ from app.services.email_settings import (
 
 SessionFactory = Callable[[], Session]
 QUEUE_MODELS = {
-    "import": (ImportTask, ("PENDING",), ("PARSING",), ("FAILED",)),
+    "import": (LibraryImportTask, ("QUEUED",), ("RUNNING",), ("FAILED",)),
     "download": (
         DownloadTask,
         ("queued",),
@@ -161,14 +166,14 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
         _item("database", "storage", "health.item.database", "database"),
     ]
     folders = db.scalars(
-        select(MonitorFolder)
-        .where(MonitorFolder.enabled.is_(True))
-        .order_by(MonitorFolder.created_at, MonitorFolder.id)
+        select(Library)
+        .where(Library.enabled.is_(True))
+        .order_by(Library.created_at, Library.id)
     ).all()
     for folder in folders:
         items.append(
             _item(
-                f"monitor-folder:{folder.id}",
+                f"library:{folder.id}",
                 "storage",
                 "health.item.importFolder",
                 "directory",
@@ -318,7 +323,7 @@ def prepare_health_run_creation(
         )
     now = now_timestamp_ms()
     run_id = f"health_{uuid4().hex}"
-    snapshot = {
+    snapshot: dict[str, Any] = {
         "runId": run_id,
         "status": "running",
         "version": 1,
@@ -404,19 +409,22 @@ def _write_prepared_snapshot_update(
     db: Session,
     prepared: PreparedHealthRunUpdate,
 ) -> HealthRunSnapshot:
-    result = db.execute(
-        update(SystemHealthRun)
-        .where(
-            SystemHealthRun.id == prepared.run_id,
-            SystemHealthRun.version == prepared.expected_version,
-        )
-        .values(
-            status=prepared.status,
-            version=prepared.version,
-            snapshot=prepared.snapshot_json,
-            finished_at=prepared.finished_at,
-            updated_at=prepared.updated_at,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(SystemHealthRun)
+            .where(
+                SystemHealthRun.id == prepared.run_id,
+                SystemHealthRun.version == prepared.expected_version,
+            )
+            .values(
+                status=prepared.status,
+                version=prepared.version,
+                snapshot=prepared.snapshot_json,
+                finished_at=prepared.finished_at,
+                updated_at=prepared.updated_at,
+            )
+        ),
     )
     if int(result.rowcount or 0) != 1:
         raise RuntimeError("health-run-concurrent-update")
@@ -479,7 +487,7 @@ def _database_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     try:
         probe_database(db)
         return "ok", "health.database.ok", {}
-    except Exception as exc:
+    except SQLAlchemyError as exc:
         reset_failed_system_transaction(db)
         return "error", "health.database.error", {"error": safe_error_message(exc)}
 
@@ -490,15 +498,43 @@ def _queue_result(
     queue = str(options["queue"])
     if not bool(options.get("enabled")):
         return "skipped", "health.queue.disabled", {"queue": queue}
+
+    if queue == "import":
+        details: dict[str, Any] = {"queue": queue}
+        for key, states in (
+            ("pending", ("QUEUED",)),
+            ("running", ("RUNNING",)),
+            ("failed", ("FAILED",)),
+        ):
+            details[key] = int(
+                db.scalar(
+                    select(func.count())
+                    .select_from(LibraryImportTask)
+                    .where(LibraryImportTask.state.in_(states))
+                )
+                or 0
+            )
+        details["oldestPendingAt"] = timestamp_ms_to_iso(
+            db.scalar(
+                select(func.min(LibraryImportTask.created_at)).where(
+                    LibraryImportTask.state == "QUEUED"
+                )
+            )
+        )
+        if details["failed"]:
+            return "warning", "health.queue.failed", details
+        return "ok", "health.queue.ok", details
+
     runtime = queue_runtime_view(db, queue)
-    details: dict[str, Any] = {"queue": queue, "runtime": runtime}
+    runtime_details: dict[str, Any] = {"queue": queue, "runtime": runtime}
     model, pending_values, running_values, failed_values = QUEUE_MODELS[queue]
+    model = cast(Any, model)
     for key, statuses in (
         ("pending", pending_values),
         ("running", running_values),
         ("failed", failed_values),
     ):
-        details[key] = int(
+        runtime_details[key] = int(
             db.scalar(
                 select(func.count())
                 .select_from(model)
@@ -506,18 +542,18 @@ def _queue_result(
             )
             or 0
         )
-    details["oldestPendingAt"] = timestamp_ms_to_iso(
+    runtime_details["oldestPendingAt"] = timestamp_ms_to_iso(
         db.scalar(
             select(func.min(model.created_at)).where(model.status.in_(pending_values))
         )
     )
     if runtime is None:
-        return "error", "health.queue.noHeartbeat", details
+        return "error", "health.queue.noHeartbeat", runtime_details
     if runtime.get("status") != "running" or runtime.get("stale"):
-        return "error", "health.queue.stale", details
+        return "error", "health.queue.stale", runtime_details
     if runtime.get("lastError"):
-        return "warning", "health.queue.recentError", details
-    return "ok", "health.queue.ok", details
+        return "warning", "health.queue.recentError", runtime_details
+    return "ok", "health.queue.ok", runtime_details
 
 
 def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
@@ -545,7 +581,7 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     db.close()
     try:
         test_smtp_connection(values, timeout=10)
-    except Exception as exc:
+    except (EmailSettingsError, OSError, smtplib.SMTPException) as exc:
         return (
             "error",
             "health.smtp.connectionFailed",
@@ -589,7 +625,9 @@ def _providers_result(
                 }
             )
             failed += 0 if ok else 1
-        except Exception as exc:
+        # A provider is an external health-check boundary; one broken plugin
+        # must become a failed provider item without aborting the run.
+        except Exception as exc:  # noqa: BLE001
             failed += 1
             details["providers"].append(
                 {"id": provider_id, "ok": False, "message": safe_error_message(exc)}
@@ -602,7 +640,7 @@ def _providers_result(
 def _execute_item(
     factory: SessionFactory,
     close_sessions: bool,
-    item: dict[str, Any],
+    item: HealthRunItem,
     settings: Settings,
 ) -> tuple[str, str, dict[str, Any]]:
     kind = str(item["kind"])
@@ -695,7 +733,9 @@ def run_health_checks(
                     )
                 finally:
                     db.close()
-            except Exception as exc:
+            # Each health item is isolated so an adapter failure cannot strand
+            # the remaining items in a pending state.
+            except Exception as exc:  # noqa: BLE001
                 finished = now_timestamp_ms()
                 db = _isolated_session(factory, close_sessions)
                 try:
@@ -784,7 +824,8 @@ def run_health_checks(
                 write_prepared_system_events(db, [prepared_event])
         finally:
             db.close()
-    except Exception as exc:
+    # The worker boundary must persist an interrupted run before terminating.
+    except Exception as exc:  # noqa: BLE001
         db = _isolated_session(factory, close_sessions)
         try:
             snapshot = health_run_snapshot(db, run_id)
@@ -894,11 +935,5 @@ def prepare_old_health_runs_prune(max_age_hours: int = 24) -> Delete:
 
 
 def write_prepared_old_health_runs_prune(db: Session, statement: Delete) -> int:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)
-
-
-def active_health_run_id(db: Session) -> str | None:
-    return db.scalar(
-        select(SystemHealthRun.id).where(SystemHealthRun.status == "running").limit(1)
-    )

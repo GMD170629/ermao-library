@@ -3,15 +3,21 @@ from __future__ import annotations
 import hashlib
 from typing import Annotated, Any
 
+from fastapi import APIRouter, Depends, Request, Response
+from pydantic import EmailStr, TypeAdapter, ValidationError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.auth import (
-    list_monitor_folder_ids,
+    list_library_ids,
     persist_admin_password_reset,
     persist_admin_user_create,
     persist_admin_user_delete,
     persist_admin_user_update,
     persist_user_preferences,
-    validate_monitor_folder_ids,
+    validate_library_ids,
 )
 from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user, hash_password
@@ -55,11 +61,6 @@ from app.modules.auth.presentation.user_schemas import (
 )
 from app.modules.system.public import PreparedSystemEvent
 from app.services.system_events import prepare_system_event
-from fastapi import APIRouter, Depends, Request, Response
-from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 router = APIRouter(route_class=TypedContractRoute)
 preferences_router = APIRouter(route_class=TypedContractRoute)
@@ -105,7 +106,7 @@ def _admin_user(
 
 
 def _folder_ids(db: Session, user_id: str) -> list[str]:
-    return list_monitor_folder_ids(db, user_id)
+    return list_library_ids(db, user_id)
 
 
 def _user_view(db: Session, user: User) -> dict[str, Any]:
@@ -116,7 +117,7 @@ def _user_view(db: Session, user: User) -> dict[str, Any]:
     return {
         **user.to_auth_view(),
         "locale": locale,
-        "monitorFolderIds": [] if is_admin(user) else _folder_ids(db, user.id),
+        "libraryIds": [] if is_admin(user) else _folder_ids(db, user.id),
         "authorization": authorization_context(db, user).to_view(),
         "createdAt": user.created_at,
         "updatedAt": user.updated_at,
@@ -124,7 +125,7 @@ def _user_view(db: Session, user: User) -> dict[str, Any]:
 
 
 def _validate_folder_ids(db: Session, folder_ids: list[str]) -> list[str]:
-    return validate_monitor_folder_ids(db, folder_ids)
+    return validate_library_ids(db, folder_ids)
 
 
 def _validate_preference(key: str, value: object) -> object:
@@ -266,7 +267,7 @@ def create_user(
         folder_ids = (
             []
             if payload.role == "admin"
-            else _validate_folder_ids(db, payload.monitor_folder_ids)
+            else _validate_folder_ids(db, payload.library_ids)
         )
     except ValueError as exc:
         raise UserBadRequestError(
@@ -312,12 +313,12 @@ def create_user(
         raise UserConflictError(
             CodedMessageBody(message="该邮箱已被使用", code="EMAIL_IN_USE")
         )
-    user = db.get(User, user.id)
-    if user is None:
+    persisted_user = db.get(User, user.id)
+    if persisted_user is None:
         raise RuntimeError("created user was not persisted")
     return AdminUserResponse(
         data=AdminUserPayload(
-            user=AdminUser.model_validate(_user_view(db, user)),
+            user=AdminUser.model_validate(_user_view(db, persisted_user)),
             createdBy=actor.id,
         )
     )
@@ -399,14 +400,9 @@ def update_user(
             and payload.can_view_manual_imports is not None
         ):
             next_can_view_manual_imports = payload.can_view_manual_imports
-        if (
-            "monitor_folder_ids" in fields_set
-            and payload.monitor_folder_ids is not None
-        ):
+        if "library_ids" in fields_set and payload.library_ids is not None:
             try:
-                prepared_folder_ids = _validate_folder_ids(
-                    db, payload.monitor_folder_ids
-                )
+                prepared_folder_ids = _validate_folder_ids(db, payload.library_ids)
             except ValueError as exc:
                 raise UserBadRequestError(
                     CodedMessageBody(

@@ -7,10 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from sqlalchemy import case, exists, func, inspect, literal, or_, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -21,7 +21,7 @@ from app.modules.organize.application.dto import (
     OrganizeJobListItem,
     OrganizeStatusCategory,
 )
-from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+from app.modules.organize.infrastructure.runs import job_entity_record
 
 STATUS_CATEGORIES = ("SUCCESS", "FAILED", "RECOGNIZING", "WAITING")
 
@@ -59,30 +59,6 @@ class OrganizeJobPageResult:
     status_counts: dict[str, int]
 
 
-def has_work_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("LibraryWork")
-
-
-def has_job_tables(db: Session) -> bool:
-    return inspect(db.connection()).has_table("OrganizeJob") and has_work_table(db)
-
-
-def job_column_names(db: Session) -> set[str]:
-    if not inspect(db.connection()).has_table("OrganizeJob"):
-        return set()
-    return {
-        column["name"] for column in inspect(db.connection()).get_columns("OrganizeJob")
-    }
-
-
-def has_lookup_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("MetadataLookupTask")
-
-
-def has_execution_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("MetadataProviderExecution")
-
-
 def latest_lookup_status_subquery():
     return (
         select(func.upper(func.coalesce(MetadataLookupTask.status, "")))
@@ -96,11 +72,7 @@ def latest_lookup_status_subquery():
 
 def status_category_expression(db: Session):
     job_status = func.upper(func.coalesce(OrganizeJob.status, ""))
-    lookup_status = (
-        func.coalesce(latest_lookup_status_subquery(), "")
-        if has_lookup_table(db)
-        else literal("")
-    )
+    lookup_status = func.coalesce(latest_lookup_status_subquery(), "")
     return case(
         (job_status.in_(("APPLIED", "COMPLETED")), "SUCCESS"),
         (job_status.in_(("FAILED", "REVIEWING", "DISMISSED", "CANCELLED")), "FAILED"),
@@ -125,13 +97,11 @@ def _json_string_list(value: object) -> list[str]:
 
 def count_status_categories(db: Session) -> dict[str, int]:
     counts = {category: 0 for category in STATUS_CATEGORIES}
-    if not has_job_tables(db):
-        return counts
     category_expr = status_category_expression(db)
     rows = db.execute(
         select(category_expr.label("category"), func.count())
         .select_from(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .group_by(category_expr)
     ).all()
     for category, count in rows:
@@ -172,20 +142,15 @@ def _search_predicates(
         return []
     term = f"%{normalized}%"
     predicates: list[Any] = [
-        func.lower(func.coalesce(LibraryWork.title, "")).like(term),
-        func.lower(func.coalesce(LibraryWork.author, "")).like(term),
+        func.lower(func.coalesce(LibraryBookMetadata.title, "")).like(term),
+        func.lower(func.coalesce(LibraryBookMetadata.author, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.summary, "")).like(term),
         func.lower(func.coalesce(OrganizeJob.issue_codes, "")).like(term),
     ]
-    columns = job_column_names(db)
-    if "reasonCodes" in columns:
-        predicates.append(
-            func.lower(func.coalesce(OrganizeJob.reason_codes, "")).like(term)
-        )
-    if "trigger" in columns:
-        predicates.append(func.lower(func.coalesce(OrganizeJob.trigger, "")).like(term))
-    if has_execution_table(db):
-        predicates.append(
+    predicates.extend(
+        (
+            func.lower(func.coalesce(OrganizeJob.reason_codes, "")).like(term),
+            func.lower(func.coalesce(OrganizeJob.trigger, "")).like(term),
             exists(
                 select(MetadataProviderExecution.id).where(
                     MetadataProviderExecution.job_id == OrganizeJob.id,
@@ -193,10 +158,7 @@ def _search_predicates(
                         func.coalesce(MetadataProviderExecution.provider_id, "")
                     ).like(term),
                 )
-            )
-        )
-    if has_lookup_table(db):
-        predicates.append(
+            ),
             exists(
                 select(MetadataLookupTask.id).where(
                     MetadataLookupTask.organize_job_id == OrganizeJob.id,
@@ -209,8 +171,9 @@ def _search_predicates(
                         ).like(term),
                     ),
                 )
-            )
+            ),
         )
+    )
     for label, code in REASON_ALIASES.items():
         if normalized not in label.lower():
             continue
@@ -218,19 +181,17 @@ def _search_predicates(
         predicates.append(
             func.lower(func.coalesce(OrganizeJob.issue_codes, "")).like(code_term)
         )
-        if "reasonCodes" in columns:
-            predicates.append(
-                func.lower(func.coalesce(OrganizeJob.reason_codes, "")).like(code_term)
-            )
-        if "trigger" in columns:
-            predicates.append(
-                func.lower(func.coalesce(OrganizeJob.trigger, "")).like(code_term)
-            )
+        predicates.append(
+            func.lower(func.coalesce(OrganizeJob.reason_codes, "")).like(code_term)
+        )
+        predicates.append(
+            func.lower(func.coalesce(OrganizeJob.trigger, "")).like(code_term)
+        )
     for provider_id in provider_ids:
         provider_key = provider_id.lower()
         provider_terms: list[Any] = []
-        if has_execution_table(db):
-            provider_terms.append(
+        provider_terms.extend(
+            (
                 exists(
                     select(MetadataProviderExecution.id).where(
                         MetadataProviderExecution.job_id == OrganizeJob.id,
@@ -239,10 +200,7 @@ def _search_predicates(
                         )
                         == provider_key,
                     )
-                )
-            )
-        if has_lookup_table(db):
-            provider_terms.append(
+                ),
                 exists(
                     select(MetadataLookupTask.id).where(
                         MetadataLookupTask.organize_job_id == OrganizeJob.id,
@@ -256,8 +214,9 @@ def _search_predicates(
                             ).like(f'%"{provider_key}"%'),
                         ),
                     )
-                )
+                ),
             )
+        )
         if provider_terms:
             predicates.append(or_(*provider_terms))
     return [or_(*predicates)]
@@ -285,12 +244,11 @@ def count_filtered_jobs(
     search: str,
     provider_ids: Sequence[str],
 ) -> int:
-    if not has_job_tables(db):
-        return 0
     stmt = (
         select(func.count())
         .select_from(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
     )
     predicates = _filter_predicates(
         db, status=status, search=search, provider_ids=provider_ids
@@ -309,8 +267,6 @@ def list_filtered_job_rows(
     search: str,
     provider_ids: Sequence[str],
 ) -> list[OrganizeJobListItem]:
-    if not has_job_tables(db):
-        return []
     category_expr = status_category_expression(db)
     stmt = (
         select(
@@ -321,14 +277,15 @@ def list_filtered_job_rows(
             OrganizeJob.reason_codes,
             OrganizeJob.created_at,
             OrganizeJob.updated_at,
-            LibraryWork.id.label("work_id"),
-            LibraryWork.title,
-            LibraryWork.author,
+            LibraryBook.id.label("book_id"),
+            LibraryBookMetadata.title,
+            LibraryBookMetadata.author,
         )
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .outerjoin(
-            LibraryVolume,
-            LibraryVolume.id == OrganizeJob.volume_id,
+            LibraryReadableResource,
+            LibraryReadableResource.id == OrganizeJob.resource_id,
         )
     )
     predicates = _filter_predicates(
@@ -345,29 +302,37 @@ def list_filtered_job_rows(
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
-    work_ids = list(dict.fromkeys(str(row.work_id) for row in rows))
-    media_kinds_by_work: dict[str, list[str]] = {work_id: [] for work_id in work_ids}
-    if work_ids:
+    book_ids = list(dict.fromkeys(str(row.book_id) for row in rows))
+    media_kinds_by_book: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
+    if book_ids:
+        media_kind = LibraryReadableResource.media_kind
         media_rows = db.execute(
-            select(LibraryMediaVersion.work_id, LibraryMediaVersion.media_kind)
-            .where(LibraryMediaVersion.work_id.in_(work_ids))
+            select(
+                LibraryReadableResource.book_id,
+                media_kind.label("media_kind"),
+            )
+            .select_from(LibraryReadableResource)
+            .where(
+                LibraryReadableResource.book_id.in_(book_ids),
+                LibraryReadableResource.enablement_state == "ENABLED",
+            )
+            .group_by(LibraryReadableResource.book_id, media_kind)
             .order_by(
-                LibraryMediaVersion.work_id.asc(),
+                LibraryReadableResource.book_id.asc(),
                 case(
-                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                    (LibraryMediaVersion.media_kind == "COMIC", 1),
-                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                    (media_kind == "EBOOK", 0),
+                    (media_kind == "COMIC", 1),
+                    (media_kind == "AUDIOBOOK", 2),
                     else_=3,
                 ),
-                LibraryMediaVersion.id.asc(),
             )
         ).all()
-        for work_id, media_kind in media_rows:
-            media_kinds_by_work[str(work_id)].append(str(media_kind))
+        for book_id, media_kind in media_rows:
+            media_kinds_by_book[str(book_id)].append(str(media_kind))
     return [
         OrganizeJobListItem(
             id=str(row.id),
-            trigger=str(row.trigger or "LEGACY"),
+            trigger=str(row.trigger),
             status_category=cast(
                 OrganizeStatusCategory,
                 str(row.status_category),
@@ -378,10 +343,10 @@ def list_filtered_job_rows(
             created_at=row.created_at,
             updated_at=row.updated_at,
             book=OrganizeBookListItem(
-                id=str(row.work_id),
-                title=str(row.title or "未命名作品"),
+                id=str(row.book_id),
+                title=str(row.title or "未命名图书"),
                 author=str(row.author or "未知作者"),
-                available_media_kinds=media_kinds_by_work[str(row.work_id)],
+                available_media_kinds=media_kinds_by_book[str(row.book_id)],
             ),
         )
         for row in rows
@@ -398,15 +363,6 @@ def paginate_organize_jobs(
     provider_ids: Sequence[str],
 ) -> OrganizeJobPageResult:
     status_counts = count_status_categories(db)
-    if not has_job_tables(db):
-        return OrganizeJobPageResult(
-            rows=[],
-            page=1,
-            page_size=page_size,
-            total=0,
-            total_pages=1,
-            status_counts=status_counts,
-        )
     total = count_filtered_jobs(
         db,
         status=status,
@@ -447,26 +403,25 @@ def paginate_organize_jobs(
 
 
 def list_pending_job_rows(db: Session, *, limit: int) -> list[dict[str, Any]]:
-    if not has_job_tables(db):
-        return []
     rows = db.scalars(
         select(OrganizeJob)
-        .join(LibraryWork, LibraryWork.id == OrganizeJob.work_id)
+        .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .where(
             OrganizeJob.status == "REVIEWING",
-            func.coalesce(LibraryWork.hidden, False).is_(False),
+            LibraryBook.visibility_state == "VISIBLE",
+            LibraryBook.curation_state != "DISMISSED",
         )
         .order_by(OrganizeJob.updated_at.desc(), OrganizeJob.id.desc())
         .limit(limit)
     ).all()
-    return [job_entity_as_legacy_dict(row) for row in rows]
+    return [job_entity_record(row) for row in rows]
 
 
 def latest_lookup_rows_by_job(
     db: Session,
     job_ids: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
-    if not job_ids or not has_lookup_table(db):
+    if not job_ids:
         return {}
     ranked = (
         select(
@@ -507,7 +462,7 @@ def execution_provider_ids_by_job(
     db: Session,
     job_ids: Sequence[str],
 ) -> dict[str, list[str]]:
-    if not job_ids or not has_execution_table(db):
+    if not job_ids:
         return {}
     rows = db.execute(
         select(
@@ -551,7 +506,7 @@ def execution_rows_by_job(
     db: Session,
     job_ids: Sequence[str],
 ) -> dict[str, list[dict[str, Any]]]:
-    if not job_ids or not has_execution_table(db):
+    if not job_ids:
         return {}
     rows = db.scalars(
         select(MetadataProviderExecution)

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.metadata.application.opf import parse_opf_metadata
 from app.modules.metadata.infrastructure.file_writeback import (
     MetadataWritebackError,
@@ -21,7 +20,7 @@ def _payload(path: Path, **values: object) -> dict[str, object]:
     stat = path.stat()
     return {
         "title": "新标题",
-        "volumeTitle": "第一卷",
+        "resourceTitle": "第一卷",
         "authors": ["新作者"],
         "narrators": [],
         "abridged": None,
@@ -72,9 +71,7 @@ def test_every_book_format_writes_opf_without_mutating_source(
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
     assert prepared.output_path == source.with_suffix(".opf")
     assert prepared.warning_code is None
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     assert output == source.with_suffix(".opf")
     assert source.read_bytes() == original
@@ -100,9 +97,7 @@ def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
     )
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     content = output.read_bytes()
     metadata = parse_opf_metadata(content)
@@ -112,7 +107,7 @@ def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
     assert source.read_bytes() == b"immutable epub"
 
 
-def test_audiobook_fields_and_work_series_index_round_trip_independently(
+def test_audiobook_fields_and_book_series_index_round_trip_independently(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "audio.m4b"
@@ -130,9 +125,7 @@ def test_audiobook_fields_and_work_series_index_round_trip_independently(
         ),
         tmp_path,
     )
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     metadata = parse_opf_metadata(output.read_bytes())
     assert metadata.narrators == ("甲", "乙")
@@ -154,9 +147,7 @@ def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(
     prepared = prepare_writeback(
         str(source), _payload(source, coverPath=str(cover)), tmp_path
     )
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     package = etree.fromstring(output.read_bytes())
     cover_item = next(
@@ -168,10 +159,9 @@ def test_cover_is_written_beside_opf_and_referenced_with_real_media_type(
     assert cover_item.get("media-type") == "image/png"
     assert output.with_name("book.cover.png").read_bytes() == cover.read_bytes()
     assert source.read_bytes() == b"immutable pdf"
-    discovered = discover_sidecar_opf(source, directory_fallback=False)
-    assert discovered is not None
-    assert discovered.metadata.title == "新标题"
-    assert discovered.cover_path == output.with_name("book.cover.png")
+    metadata = parse_opf_metadata(output.read_bytes())
+    assert metadata.title == "新标题"
+    assert metadata.cover_href == "book.cover.png"
 
 
 def test_directory_book_writes_metadata_opf_without_changing_contents(
@@ -183,9 +173,7 @@ def test_directory_book_writes_metadata_opf_without_changing_contents(
     chapter.write_bytes(b"immutable chapter")
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)
-    output, _size, _mtime = publish_prepared(
-        str(source), str(prepared.prepared_path)
-    )
+    output, _size, _mtime = publish_prepared(str(source), str(prepared.prepared_path))
 
     assert output == source / "metadata.opf"
     assert chapter.read_bytes() == b"immutable chapter"

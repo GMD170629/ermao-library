@@ -13,22 +13,21 @@ import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressS
 import type { ReaderBookmark } from './bookmarks';
 
 type VisualReaderType = 'reflowable' | 'comic' | 'pdf';
-type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 
-export type ReaderVolume = Readonly<{
+export type ReaderResource = Readonly<{
   id: string;
-  mediaVersionId: string;
+  bookId: string;
   title: string;
-  volumeIndex: number | null;
+  resourceIndex: number | null;
   sortOrder: number;
   format: string;
   readerType: VisualReaderType | 'audio';
-  derivedFromVolumeId: string | null;
   pageCount: number | null;
   chapterCount: number | null;
   durationMs: number | null;
   trackCount: number | null;
   progress: number;
+  resourceCompleted: boolean;
   lastReadAt: string | null;
 }>;
 
@@ -37,7 +36,7 @@ export type ReaderUnit = Readonly<{
   index: number;
   title: string;
   href: string | null;
-  fileId: string | null;
+  assetId: string | null;
   startMs: number | null;
   endMs: number | null;
   durationMs: number | null;
@@ -60,13 +59,12 @@ export type ReaderBootstrap = Readonly<{
   readerType: VisualReaderType;
   sourceFormat: SupportedReaderSourceFormat;
   book: Readonly<{ id: string; title: string; author: string | null; coverUrl: string | null }>;
-  mediaVersion: Readonly<{ id: string; workId: string; mediaKind: MediaKind; completed: boolean }>;
-  volume: ReaderVolume;
-  availableVolumes: ReaderVolume[];
-  files: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
+  resource: ReaderResource;
+  resourceCompleted: boolean;
+  availableResources: ReaderResource[];
+  assets: ReadonlyArray<Readonly<{ id: string; kind: string; mimeType: string; sizeBytes: number; durationMs: number | null; discNumber: number | null; trackNumber: number | null; sortOrder: number; url: string }>>;
   units: ReaderUnit[];
   pages: ReaderPage[];
-  fileUrl: string;
   capabilities: import('@shuku/reader-core').ReaderCapabilities;
   progressPercent: number;
   serverProgressSnapshot: ReaderProgressSnapshot | null;
@@ -106,26 +104,26 @@ function visualReaderType(value: unknown): VisualReaderType | null {
   return value === 'reflowable' || value === 'comic' || value === 'pdf' ? value : null;
 }
 
-function mapVolume(value: unknown): ReaderVolume | null {
+function mapResource(value: unknown): ReaderResource | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
-  const mediaVersionId = stringValue(item.mediaVersionId).trim();
+  const bookId = stringValue(item.bookId).trim();
   const readerType = item.readerType === 'audio' ? 'audio' : visualReaderType(item.readerType);
-  if (!id || !mediaVersionId || !readerType) return null;
+  if (!id || !bookId || !readerType) return null;
   return {
     id,
-    mediaVersionId,
+    bookId,
     title: stringValue(item.title, id),
-    volumeIndex: nullableNumber(item.volumeIndex),
+    resourceIndex: nullableNumber(item.resourceIndex),
     sortOrder: numberValue(item.sortOrder),
     format: stringValue(item.format),
     readerType,
-    derivedFromVolumeId: nullableString(item.derivedFromVolumeId),
     pageCount: nullableNumber(item.pageCount),
     chapterCount: nullableNumber(item.chapterCount),
     durationMs: nullableNumber(item.durationMs),
     trackCount: nullableNumber(item.trackCount),
     progress: Math.max(0, Math.min(100, numberValue(item.progress))),
+    resourceCompleted: item.resourceCompleted === true,
     lastReadAt: nullableString(item.lastReadAt)
   };
 }
@@ -138,7 +136,7 @@ function mapUnits(value: unknown): ReaderUnit[] {
     if (!id || !Number.isInteger(index) || index < 0) {
       throw new ReaderBootstrapError('READER_BOOTSTRAP_INVALID', 'Reader navigation unit is invalid');
     }
-    return { id, index, title: stringValue(item.title).trim() || id, href: nullableString(item.href), fileId: nullableString(item.fileId), startMs: nullableNumber(item.startMs), endMs: nullableNumber(item.endMs), durationMs: nullableNumber(item.durationMs), metadata: record(item.metadata) };
+    return { id, index, title: stringValue(item.title).trim() || id, href: nullableString(item.href), assetId: nullableString(item.assetId), startMs: nullableNumber(item.startMs), endMs: nullableNumber(item.endMs), durationMs: nullableNumber(item.durationMs), metadata: record(item.metadata) };
   });
   units.sort((left, right) => left.index - right.index);
   if (new Set(units.map((unit) => unit.id)).size !== units.length
@@ -154,7 +152,7 @@ function serverNavigation(units: ReaderUnit[]): ReaderNavigationEntry[] {
 
 async function fetchComicManifest(
   manifestUrl: string,
-  volumeId: string,
+  resourceId: string,
   sourceFormat: SupportedReaderSourceFormat,
   signal: AbortSignal
 ): Promise<ReaderPage[]> {
@@ -166,7 +164,7 @@ async function fetchComicManifest(
   if (!response.ok || envelope.ok !== true
     || manifest.schemaVersion !== 1
     || manifest.kind !== 'comic'
-    || manifest.volumeId !== volumeId
+    || manifest.resourceId !== resourceId
     || manifest.sourceFormat !== sourceFormat
     || numberValue(manifest.pageCount, -1) !== readingOrder.length
     || readingOrder.length === 0) {
@@ -190,8 +188,8 @@ async function fetchComicManifest(
   });
 }
 
-export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal): Promise<ReaderBootstrap> {
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
+export async function fetchReaderBootstrap(resourceId: string, signal: AbortSignal): Promise<ReaderBootstrap> {
+  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   const envelope = record(payload);
   if (!response.ok || envelope.ok !== true) {
@@ -205,38 +203,42 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   const data = record(envelope.data);
   if (data.schemaVersion !== 4) throw new Error('当前客户端不支持该阅读协议');
   const readerType = visualReaderType(data.readerType);
-  const volume = mapVolume(data.volume);
+  const resource = mapResource(data.resource);
   const book = record(data.book);
-  const mediaVersion = record(data.mediaVersion);
-  const workId = stringValue(mediaVersion.workId).trim();
-  const mediaKind = mediaVersion.mediaKind;
-  if (!readerType || !volume || !workId || (mediaKind !== 'EBOOK' && mediaKind !== 'COMIC' && mediaKind !== 'AUDIOBOOK')) throw new Error('阅读器启动信息不完整');
+  const bookId = stringValue(book.id).trim();
+  if (!readerType || !resource || !bookId) throw new Error('阅读器启动信息不完整');
   const format = parseSupportedReaderSourceFormat(data.sourceFormat);
-  if (!format) throw new ReaderBootstrapError('VOLUME_FORMAT_UNSUPPORTED', '当前文件格式不受阅读器支持');
+  if (!format) throw new ReaderBootstrapError('RESOURCE_FORMAT_UNSUPPORTED', '当前文件格式不受阅读器支持');
   if (readerFormatCapability(format).readerKind !== readerType) {
     throw new ReaderBootstrapError('READER_FORMAT_MORPHOLOGY_MISMATCH', '阅读器格式与排版形态不匹配');
   }
   const units = mapUnits(data.units);
   const publicationAccess = record(data.publication);
-  const files = (Array.isArray(data.files) ? data.files : []).flatMap((raw) => {
-    const file = record(raw);
-    const id = stringValue(file.id).trim();
+  const assets = (Array.isArray(data.assets) ? data.assets : []).flatMap((raw) => {
+    const asset = record(raw);
+    const id = stringValue(asset.id).trim();
     if (!id) return [];
-    return [{ id, kind: stringValue(file.kind), mimeType: stringValue(file.mimeType), sizeBytes: numberValue(file.sizeBytes), durationMs: nullableNumber(file.durationMs), discNumber: nullableNumber(file.discNumber), trackNumber: nullableNumber(file.trackNumber), sortOrder: numberValue(file.sortOrder), url: withBasePath(stringValue(file.url)) }];
+    return [{ id, kind: stringValue(asset.kind), mimeType: stringValue(asset.mimeType), sizeBytes: numberValue(asset.sizeBytes), durationMs: nullableNumber(asset.durationMs), discNumber: nullableNumber(asset.discNumber), trackNumber: nullableNumber(asset.trackNumber), sortOrder: numberValue(asset.sortOrder), url: withBasePath(stringValue(asset.url, `/api/assets/${encodeURIComponent(id)}`)) }];
   });
   if (readerType === 'pdf') {
-    const pdfFile = files.find((file) => file.mimeType.toLowerCase() === 'application/pdf') ?? files[0];
-    if (!pdfFile || pdfFile.sizeBytes <= 0) {
+    const pdfAsset = assets.find((asset) => asset.mimeType.toLowerCase() === 'application/pdf') ?? assets[0];
+    if (!pdfAsset || pdfAsset.sizeBytes <= 0) {
       throw new ReaderBootstrapError('PDF_INVALID', 'PDF 阅读信息缺少准确大小');
     }
   }
-  const fileUrl = stringValue(data.fileUrl).trim();
-  if (!fileUrl) throw new Error('阅读器启动信息缺少内容文件');
+  const contentAsset = readerType === 'pdf'
+    ? assets.find((asset) => asset.mimeType.toLowerCase() === 'application/pdf') ?? assets[0]
+    : readerType === 'comic'
+      ? assets.find((asset) => !asset.mimeType.toLowerCase().startsWith('audio/')) ?? assets[0]
+      : null;
+  if (readerType !== 'reflowable' && (!contentAsset || !contentAsset.url)) {
+    throw new Error('阅读器启动信息缺少内容资产');
+  }
   const capabilities = record(data.capabilities);
   const comicManifestUrl = readerType === 'comic' ? nullableString(publicationAccess.manifestUrl) : null;
   const comicPageUrlTemplate = readerType === 'comic' ? nullableString(publicationAccess.pageUrlTemplate) : null;
-  const expectedComicManifestUrl = `/api/reader/v4/volumes/${encodeURIComponent(volume.id)}/comic/manifest`;
-  const expectedComicPageTemplate = `/api/reader/v4/volumes/${encodeURIComponent(volume.id)}/comic/pages/{pageIndex}`;
+  const expectedComicManifestUrl = `/api/reader/v4/resources/${encodeURIComponent(resource.id)}/comic/manifest`;
+  const expectedComicPageTemplate = `/api/reader/v4/resources/${encodeURIComponent(resource.id)}/comic/pages/{pageIndex}`;
   if (readerType === 'comic' && (
     publicationAccess.kind !== 'comic'
     || comicManifestUrl !== expectedComicManifestUrl
@@ -247,7 +249,7 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     throw new ReaderBootstrapError('READER_COMIC_PROTOCOL_INVALID', '漫画流式阅读协议无效');
   }
   const manifestPages = readerType === 'comic'
-    ? await fetchComicManifest(comicManifestUrl ?? '', volume.id, format, signal)
+    ? await fetchComicManifest(comicManifestUrl ?? '', resource.id, format, signal)
     : [];
   const pages = manifestPages.map((page) => ({
     ...page,
@@ -268,32 +270,32 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
   if (readerType === 'reflowable') {
     if (!publicationManifestUrl) throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
     source = {
-      workId,
-      volumeId: volume.id,
+      bookId,
+      resourceId: resource.id,
       kind: 'reflowable',
       sourceFormat: format as ReflowableFormat,
       publicationManifestUrl: withBasePath(publicationManifestUrl),
       navigation: serverNavigation(units),
-      totalPages: volume.pageCount
+      totalPages: resource.pageCount
     };
   } else if (readerType === 'comic') {
     source = {
-      workId,
-      volumeId: volume.id,
+      bookId,
+      resourceId: resource.id,
       kind: 'comic',
       sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar',
-      contentUrl: withBasePath(fileUrl),
+      contentUrl: contentAsset?.url ?? '',
       comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
       comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),
       totalPages: pages.length
     };
   } else {
     source = {
-      workId,
-      volumeId: volume.id,
+      bookId,
+      resourceId: resource.id,
       kind: 'pdf',
-      contentUrl: withBasePath(fileUrl),
-      totalPages: volume.pageCount
+      contentUrl: contentAsset?.url ?? '',
+      totalPages: resource.pageCount
     };
   }
   return {
@@ -301,14 +303,13 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     userId: stringValue(data.userId),
     readerType,
     sourceFormat: format,
-    book: { id: stringValue(book.id, workId), title: stringValue(book.title, '未命名作品'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
-    mediaVersion: { id: stringValue(mediaVersion.id), workId, mediaKind, completed: mediaVersion.completed === true },
-    volume,
-    availableVolumes: (Array.isArray(data.availableVolumes) ? data.availableVolumes : []).map(mapVolume).filter((item): item is ReaderVolume => item !== null),
-    files,
+    book: { id: stringValue(book.id, bookId), title: stringValue(book.title, '未命名图书'), author: nullableString(book.author), coverUrl: nullableString(book.coverUrl) },
+    resource,
+    resourceCompleted: resource.resourceCompleted,
+    availableResources: (Array.isArray(data.availableResources) ? data.availableResources : []).map(mapResource).filter((item): item is ReaderResource => item !== null),
+    assets,
     units,
     pages,
-    fileUrl,
     capabilities: {
       canGoNext: capabilities.canGoNext === true,
       canGoPrevious: capabilities.canGoPrevious === true,
@@ -327,7 +328,7 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
     source,
     initialLocation: v4LocationToDomain(
       serverProgressSnapshot?.locator ?? null,
-      volume.id,
+      resource.id,
       readerType === 'reflowable' ? format as ReflowableFormat : null
     ),
     serverPreferences: { settings: normalizeReaderPreferences({}), updatedAt: null }
@@ -336,7 +337,7 @@ export async function fetchReaderBootstrap(volumeId: string, signal: AbortSignal
 
 export function readerBookmarkFromWire(
   value: unknown,
-  volumeId: string,
+  resourceId: string,
   format: ReflowableFormat | null
 ): ReaderBookmark | null {
   const item = record(value);
@@ -383,21 +384,21 @@ export function readerBookmarkToWire(entry: ReaderBookmark) {
   };
 }
 
-export async function fetchReaderBookmarks(volumeId: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { credentials: 'same-origin', cache: 'no-store', signal });
+export async function fetchReaderBookmarks(resourceId: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
+  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bookmarks`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);
   if (!response.ok || root.ok !== true || !Array.isArray(data.bookmarks)) throw new Error(stringValue(record(root.error).message, '读取书签失败'));
-  return data.bookmarks.map((item) => readerBookmarkFromWire(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
+  return data.bookmarks.map((item) => readerBookmarkFromWire(item, resourceId, format)).filter((item): item is ReaderBookmark => item !== null);
 }
 
-export async function saveReaderBookmarks(volumeId: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
+export async function saveReaderBookmarks(resourceId: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
   const wireBookmarks = bookmarks.map(readerBookmarkToWire);
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarks: wireBookmarks }) });
+  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarks: wireBookmarks }) });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);
   if (!response.ok || root.ok !== true || !Array.isArray(data.bookmarks)) throw new Error(stringValue(record(root.error).message, '保存书签失败'));
-  return data.bookmarks.map((item) => readerBookmarkFromWire(item, volumeId, format)).filter((item): item is ReaderBookmark => item !== null);
+  return data.bookmarks.map((item) => readerBookmarkFromWire(item, resourceId, format)).filter((item): item is ReaderBookmark => item !== null);
 }

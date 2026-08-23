@@ -35,10 +35,3 @@ class PdfInspection:
     raw_metadata: Mapping[str, object]
     content_kind: PdfContentKind
     text_evidence: PdfTextEvidence
-
-
-@dataclass(frozen=True, slots=True)
-class PdfCoverPublication:
-    path: str | None
-    rendered_page: int | None = None
-    warning: str | None = None

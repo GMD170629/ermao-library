@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, func, inspect, select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
-from app.models.library import LibraryMediaVersion, LibraryVolume, LibraryWork
+from app.models import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+)
 from app.models.organize import OrganizeJob
 
 UNRESOLVED_JOB_STATUSES = (
@@ -22,39 +26,36 @@ UNRESOLVED_JOB_STATUSES = (
 )
 
 
-def work_entity_as_legacy_dict(entity: LibraryWork) -> dict[str, Any]:
+def book_entity_record(
+    entity: LibraryBook,
+    metadata: LibraryBookMetadata | None,
+) -> dict[str, Any]:
     return {
         "id": entity.id,
-        "monitorFolderId": entity.monitor_folder_id,
-        "origin": entity.origin,
-        "title": entity.title,
-        "normalizedTitle": entity.normalized_title,
-        "author": entity.author,
-        "normalizedAuthor": entity.normalized_author,
-        "description": entity.description,
-        "publicationStatus": entity.publication_status,
-        "trackingStatus": entity.tracking_status,
-        "localLatestVolume": entity.local_latest_volume,
-        "localLatestChapter": entity.local_latest_chapter,
-        "localLatestTitle": entity.local_latest_title,
-        "localLatestAt": entity.local_latest_at,
-        "tags": entity.tags,
-        "seriesName": entity.series_name,
-        "seriesIndex": entity.series_index,
-        "metadataQuality": entity.metadata_quality,
-        "organizeStatus": entity.organize_status,
-        "coverPath": entity.cover_path,
-        "coverStatus": entity.cover_status,
-        "hidden": entity.hidden,
-        "organized": entity.organized,
-        "mergeKey": entity.merge_key,
+        "libraryId": entity.library_id,
+        "title": metadata.title if metadata else "",
+        "normalizedTitle": metadata.normalized_title if metadata else "",
+        "author": metadata.author if metadata else None,
+        "normalizedAuthor": metadata.normalized_author if metadata else None,
+        "description": metadata.description if metadata else None,
+        "publicationStatus": metadata.publication_status if metadata else "UNKNOWN",
+        "trackingStatus": metadata.tracking_status if metadata else "NOT_TRACKING",
+        "tags": "[]",
+        "seriesName": metadata.series_name if metadata else None,
+        "seriesIndex": metadata.series_index if metadata else None,
+        "metadataQuality": metadata.metadata_quality if metadata else 0,
+        "organizeStatus": None,
+        "coverPath": metadata.cover_path if metadata else None,
+        "coverStatus": metadata.cover_status if metadata else "PENDING",
+        "hidden": entity.visibility_state != "VISIBLE",
+        "organized": entity.curation_state not in {"PENDING", "UNASSESSED"},
         "createdAt": entity.created_at,
         "updatedAt": entity.updated_at,
     }
 
 
-def reason_codes_for_work(
-    work: dict[str, Any],
+def reason_codes_for_book(
+    book: dict[str, Any],
     rules: dict[str, Any],
     *,
     force_selected: bool = False,
@@ -62,61 +63,55 @@ def reason_codes_for_work(
     if force_selected:
         return ["MANUAL_SELECTED"]
     reasons: list[str] = []
-    if rules.get("unrecognized") and not bool(work.get("organized")):
+    if rules.get("unrecognized") and not bool(book.get("organized")):
         reasons.append("UNRECOGNIZED")
     missing = any(
-        not str(work.get(field) or "").strip() for field in ("author", "coverPath")
+        not str(book.get(field) or "").strip() for field in ("author", "coverPath")
     )
     if rules.get("missingMetadata") and missing:
         reasons.append("MISSING_METADATA")
     return reasons
 
 
-def select_eligible_works(
+def select_eligible_books(
     db: Session,
     *,
     rules: dict[str, Any],
-    work_ids: list[str] | None = None,
+    book_ids: list[str] | None = None,
     trigger: str = "MANUAL",
     limit: int = 500,
     force_selected: bool = False,
     auto_run_on_new_since: Any = None,
 ) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("LibraryWork"):
-        return []
-
     bounded = min(max(int(limit), 1), 2000)
     filters = [
-        func.coalesce(LibraryWork.hidden, False).is_(False),
-        func.coalesce(LibraryWork.organize_status, "") != "DISMISSED",
+        LibraryBook.visibility_state == "VISIBLE",
+        LibraryBook.curation_state != "DISMISSED",
     ]
-    if work_ids:
+    if book_ids:
         normalized_ids = list(
-            dict.fromkeys(str(item) for item in work_ids if str(item).strip())
+            dict.fromkeys(str(item) for item in book_ids if str(item).strip())
         )
         if not normalized_ids:
             return []
-        filters.append(LibraryWork.id.in_(normalized_ids))
+        filters.append(LibraryBook.id.in_(normalized_ids))
 
-    if inspect(db.connection()).has_table("OrganizeJob"):
-        unresolved_exists = (
+    unresolved_exists = (
+        select(OrganizeJob.id)
+        .where(
+            OrganizeJob.book_id == LibraryBook.id,
+            OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
+        )
+        .exists()
+    )
+    filters.append(~unresolved_exists)
+    if trigger == "NEW":
+        new_trigger_exists = (
             select(OrganizeJob.id)
-            .where(
-                OrganizeJob.work_id == LibraryWork.id,
-                OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
-            )
+            .where(OrganizeJob.book_id == LibraryBook.id, OrganizeJob.trigger == "NEW")
             .exists()
         )
-        filters.append(~unresolved_exists)
-        if trigger == "NEW":
-            new_trigger_exists = (
-                select(OrganizeJob.id)
-                .where(
-                    OrganizeJob.work_id == LibraryWork.id, OrganizeJob.trigger == "NEW"
-                )
-                .exists()
-            )
-            filters.append(~new_trigger_exists)
+        filters.append(~new_trigger_exists)
 
     if trigger == "NEW":
         if not auto_run_on_new_since:
@@ -125,76 +120,71 @@ def select_eligible_works(
         since_dt = timestamp_ms_to_datetime(since_ms)
         if since_dt is None:
             return []
-        filters.append(LibraryWork.created_at >= since_dt)
+        filters.append(LibraryBook.created_at >= since_dt)
 
-    works = db.scalars(
-        select(LibraryWork)
+    books = db.execute(
+        select(LibraryBook, LibraryBookMetadata)
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .where(*filters)
-        .order_by(LibraryWork.created_at.asc(), LibraryWork.id.asc())
+        .order_by(LibraryBook.created_at.asc(), LibraryBook.id.asc())
         .limit(bounded)
     ).all()
 
     result: list[dict[str, Any]] = []
-    for entity in works:
-        work = work_entity_as_legacy_dict(entity)
-        work["availableMediaKinds"] = list(
+    for entity, metadata in books:
+        book = book_entity_record(entity, metadata)
+        media_kind = LibraryReadableResource.media_kind
+        book["availableMediaKinds"] = list(
             db.scalars(
-                select(LibraryMediaVersion.media_kind)
-                .where(LibraryMediaVersion.work_id == entity.id)
+                select(media_kind.label("media_kind"))
+                .select_from(LibraryReadableResource)
+                .where(
+                    LibraryReadableResource.book_id == entity.id,
+                    LibraryReadableResource.enablement_state == "ENABLED",
+                )
+                .group_by(media_kind)
                 .order_by(
                     case(
-                        (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                        (LibraryMediaVersion.media_kind == "COMIC", 1),
-                        (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                        (media_kind == "EBOOK", 0),
+                        (media_kind == "COMIC", 1),
+                        (media_kind == "AUDIOBOOK", 2),
                         else_=3,
-                    ),
-                    LibraryMediaVersion.id.asc(),
+                    )
                 )
             ).all()
         )
-        reasons = reason_codes_for_work(work, rules, force_selected=force_selected)
+        reasons = reason_codes_for_book(book, rules, force_selected=force_selected)
         if reasons:
-            result.append({**work, "reasonCodes": reasons})
+            result.append({**book, "reasonCodes": reasons})
     return result
 
 
-def first_media_selection_for_work(
-    db: Session, work_id: str, preferred_media_version_id: str | None = None
+def first_resource_selection_for_book(
+    db: Session, book_id: str, preferred_resource_id: str | None = None
 ) -> tuple[str, str, str | None] | None:
-    if not inspect(db.connection()).has_table("LibraryVolume"):
-        return None
-    filters = [LibraryMediaVersion.work_id == work_id]
-    if preferred_media_version_id:
-        filters.append(LibraryMediaVersion.id == preferred_media_version_id)
+    media_kind = LibraryReadableResource.media_kind
+    filters = [
+        LibraryReadableResource.book_id == book_id,
+        LibraryReadableResource.enablement_state == "ENABLED",
+    ]
+    if preferred_resource_id:
+        filters.append(LibraryReadableResource.id == preferred_resource_id)
     row = db.execute(
-        select(
-            LibraryMediaVersion.id,
-            LibraryMediaVersion.media_kind,
-            LibraryVolume.id.label("volume_id"),
-        )
-        .select_from(LibraryMediaVersion)
-        .outerjoin(
-            LibraryVolume,
-            LibraryMediaVersion.id == LibraryVolume.media_version_id,
-        )
-        .where(
-            *filters,
-            (LibraryVolume.hidden.is_(False) | LibraryVolume.id.is_(None)),
-        )
+        select(LibraryReadableResource)
+        .where(*filters)
         .order_by(
             case(
-                (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                (LibraryMediaVersion.media_kind == "COMIC", 1),
-                (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
+                (media_kind == "EBOOK", 0),
+                (media_kind == "COMIC", 1),
+                (media_kind == "AUDIOBOOK", 2),
                 else_=3,
             ),
-            LibraryMediaVersion.id.asc(),
-            LibraryVolume.sort_order.asc(),
-            LibraryVolume.created_at.asc(),
-            LibraryVolume.id.asc(),
+            LibraryReadableResource.created_at.asc(),
+            LibraryReadableResource.id.asc(),
         )
         .limit(1)
     ).first()
     if row is None:
         return None
-    return str(row.id), str(row.media_kind), str(row.volume_id) if row.volume_id else None
+    resource = row[0]
+    return (str(resource.id), str(resource.media_kind), str(resource.id))

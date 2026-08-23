@@ -7,17 +7,6 @@ export type ReaderFontFamily = 'pingfang' | 'heiti' | 'songti' | 'yahei' | 'kait
 export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
 export type ReaderOperationKind = 'bootstrap' | 'navigation' | 'render' | 'preferences' | 'pagination';
 
-export type EpubLocation = {
-  kind: 'epub';
-  cfi?: string;
-  href?: string;
-  spineIndex?: number;
-  progression?: number;
-};
-
-/** Persisted by the former EPUB.js reader and accepted for resume migration only. */
-export type LegacyEpubLocation = EpubLocation;
-
 export type ReflowableLocation = {
   kind: 'reflowable';
   format: ReflowableFormat;
@@ -42,7 +31,7 @@ export type ReflowableLocation = {
 
 export type ComicLocation = {
   kind: 'comic';
-  volumeId: string;
+  resourceId: string;
   pageIndex: number;
   resourceHref?: string;
 };
@@ -55,7 +44,7 @@ export type PdfLocation = {
   pageProgression: number;
 };
 
-export type ReaderLocation = ReflowableLocation | LegacyEpubLocation | ComicLocation | PdfLocation;
+export type ReaderLocation = ReflowableLocation | ComicLocation | PdfLocation;
 
 export type ReaderNavigationEntry = {
   id: string;
@@ -132,8 +121,8 @@ export type ReaderPreferences = {
 };
 
 type ReaderSourceBase = {
-  workId: string;
-  volumeId: string;
+  bookId: string;
+  resourceId: string;
   totalPages?: number | null;
 };
 

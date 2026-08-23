@@ -48,7 +48,7 @@ class KtorReaderBookmarkSyncPort(
             when (val result = client.execute(
                 ApiRequest(
                     method = method,
-                    apiPath = "/api/reader/v4/volumes/${encodePathSegment(target.volumeId)}/bookmarks",
+                    apiPath = "/api/reader/v4/resources/${encodePathSegment(target.resourceId)}/bookmarks",
                     queryParameters = emptyMap(),
                     responseDeserializer = ReaderBookmarksDataWire.serializer(),
                     requestBody = requestBody,

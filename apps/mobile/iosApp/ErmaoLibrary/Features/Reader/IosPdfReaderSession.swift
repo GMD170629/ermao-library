@@ -21,7 +21,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     @Published var controlsVisible = false
     @Published private(set) var preferences: IosReaderPreferences
 
-    let sourceID: String
+    let resourceID: String
     let displayTitle: String
     @Published private(set) var canonicalPageCount: Int
     private let pageTitleHints: [String]
@@ -35,7 +35,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let progressCoordination: IosReaderProgressSessionCoordination?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
-    private let workID: String
+    private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private let deviceIdentity: IosReaderDeviceIdentity
     private var managedPublication: IosManagedPublication?
@@ -49,7 +49,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private var didOpen = false
 
     init(
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
         pageCountHint: Int?,
         pageTitleHints: [String],
@@ -63,11 +63,11 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
         namespaceKey: String,
-        workID: String,
+        bookID: String,
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void,
         deviceIdentity: IosReaderDeviceIdentity
     ) {
-        self.sourceID = sourceID
+        self.resourceID = resourceID
         self.displayTitle = displayTitle
         canonicalPageCount = max(1, pageCountHint ?? pageTitleHints.count)
         self.pageTitleHints = pageTitleHints
@@ -81,7 +81,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
         self.namespaceKey = namespaceKey
-        self.workID = workID
+        self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
         self.deviceIdentity = deviceIdentity
     }
@@ -103,7 +103,10 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 try await openRemote(remoteSource)
                 return
             }
-            let managed = try await managedStore.resolve(sourceID: sourceID)
+            let managed = try await managedStore.resolve(
+                resourceID: resourceID,
+                namespace: namespaceKey
+            )
             guard managed.sourceFormat == .pdf else { throw IosReaderFailure(code: .corruptFile) }
             let opened = try await IosReadiumRuntime().open(managed)
             managedPublication = managed
@@ -126,13 +129,13 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                     depth: 0
                 )
             }
-            let local = try? await progressStore.load(sourceId: sourceID)
+            let local = try? await progressStore.load(resourceId: resourceID)
             let openedSource = ErmaoShared.LocalReaderSource(
-                sourceId: managed.sourceID,
+                resourceId: managed.resourceID,
                 displayTitle: managed.displayTitle,
                 format: managed.sourceFormat.readerFormat,
-                workId: managed.workID,
-                volumeId: managed.volumeID,
+                bookId: managed.bookID,
+                resourceId: managed.resourceID,
                 sourceFormat: managed.sourceFormat
             )
             let initialPage = restorePage(local: local, remote: remoteSnapshot, source: openedSource)
@@ -407,8 +410,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         remoteProgressSnapshot = progressCoordination?.remoteSnapshot
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
-            workId: workID,
-            volumeId: sourceID,
+            bookId: bookID,
+            resourceId: resourceID,
             percent: percent,
             progress: progress,
             chapterTitle: nil
@@ -424,7 +427,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         let percent = canonicalPageCount <= 1 ? 100 : Double(index) / Double(canonicalPageCount - 1) * 100
         return ErmaoShared.ReaderProgress(
-            sourceId: sourceID,
+            resourceId: resourceID,
             location: location,
             updatedAtEpochMillis: timestamp,
             deviceId: deviceIdentity.stableDeviceId(),
@@ -469,7 +472,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 depth: 0
             )
         }
-        let local = try? await progressStore.load(sourceId: sourceID)
+        let local = try? await progressStore.load(resourceId: resourceID)
         let initialPage = restorePage(local: local, remote: remoteSnapshot, source: source) ?? 0
         let navigator = IosPdfiumNavigatorViewController(
             document: document,

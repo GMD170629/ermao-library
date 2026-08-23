@@ -17,13 +17,6 @@ data class DownloadNamespace(
 
 enum class DownloadReaderType { Reflowable, Pdf, Comic, Audio }
 
-enum class DownloadMediaKind(val wireValue: String) {
-    Ebook("EBOOK"),
-    Comic("COMIC"),
-    Audiobook("AUDIOBOOK"),
-    Unknown("UNKNOWN"),
-}
-
 data class DownloadSource(
     val apiPath: String,
     val mimeType: String,
@@ -36,42 +29,39 @@ data class DownloadSource(
     }
 }
 
+/** Stable completed-artifact identity: Book -> Resource -> Asset. */
 data class DownloadIdentity(
     val namespace: DownloadNamespace,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val resourceId: String,
+    val assetId: String,
 ) {
     init {
-        require(workId.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(bookId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(assetId.isNotBlank())
     }
 }
 
 data class DownloadDescriptor(
     val identity: DownloadIdentity,
-    val workTitle: String,
-    val workAuthor: String?,
+    val bookTitle: String,
+    val bookAuthor: String?,
     val coverApiPath: String?,
-    val volumeTitle: String,
+    val resourceTitle: String,
     val format: String,
     val readerType: DownloadReaderType,
     val source: DownloadSource,
-    /** Legacy manifests deterministically place an unknown volume in its own media-version group. */
-    val mediaVersionId: String = legacyMediaVersionId(identity.volumeId),
-    val mediaKind: String = legacyMediaKind(readerType),
-    val mediaVersionCompleted: Boolean? = null,
-    val volumeIndex: Double? = null,
-    val volumeSortOrder: Int? = null,
+    val resourceIndex: Double? = null,
+    val resourceSortOrder: Int? = null,
 ) {
     init {
-        require(workTitle.isNotBlank())
-        require(volumeTitle.isNotBlank())
+        require(bookTitle.isNotBlank())
+        require(resourceTitle.isNotBlank())
         require(format.isNotBlank())
-        require(mediaVersionId.isNotBlank())
-        require(mediaKind.isNotBlank())
         require(coverApiPath == null || coverApiPath.isSafeApiPath())
-        require(volumeIndex == null || volumeIndex.isFinite())
-        require(volumeSortOrder == null || volumeSortOrder >= 0)
+        require(resourceIndex == null || resourceIndex.isFinite())
+        require(resourceSortOrder == null || resourceSortOrder >= 0)
     }
 }
 
@@ -183,122 +173,104 @@ fun DownloadTask.transition(event: DownloadTaskEvent): DownloadTask = when (even
     }
 }
 
-data class DownloadedWork(
-    val workId: String,
+data class DownloadedBook(
+    val bookId: String,
     val title: String,
     val author: String?,
     val coverApiPath: String?,
-    val mediaVersions: List<DownloadedMediaVersion>,
+    val resources: List<DownloadedResource>,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
-        require(workId.isNotBlank())
+        require(bookId.isNotBlank())
         require(title.isNotBlank())
-        require(mediaVersions.isNotEmpty())
+        require(resources.isNotEmpty())
         require(artifacts.isNotEmpty())
-        require(artifacts.all { it.identity.workId == workId })
-        require(mediaVersions.flatMap(DownloadedMediaVersion::artifacts) == artifacts)
+        require(artifacts.all { it.identity.bookId == bookId })
+        require(resources.flatMap(DownloadedResource::artifacts) == artifacts)
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
     val lastOpenedAtEpochMillis: Long? = artifacts.mapNotNull { it.lastOpenedAtEpochMillis }.maxOrNull()
 }
 
-data class DownloadedMediaVersion(
-    val mediaVersionId: String,
-    val mediaKind: DownloadMediaKind,
-    val isServerComplete: Boolean?,
+data class DownloadedResource(
+    val resourceId: String,
+    val title: String,
+    val format: String,
+    val readerType: DownloadReaderType,
+    val resourceIndex: Double?,
+    val resourceSortOrder: Int?,
     val artifacts: List<CompletedDownloadArtifact>,
 ) {
     init {
-        require(mediaVersionId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(title.isNotBlank())
+        require(format.isNotBlank())
         require(artifacts.isNotEmpty())
-        require(artifacts.all { it.descriptor.effectiveMediaVersionId == mediaVersionId })
+        require(artifacts.all { it.identity.resourceId == resourceId })
     }
 
     val totalBytes: Long = artifacts.sumOf { it.verifiedBytes }
 }
 
-fun completedDownloadsByWork(
+fun completedDownloadsByBook(
     namespace: DownloadNamespace,
     artifacts: List<CompletedDownloadArtifact>,
     query: String = "",
-): List<DownloadedWork> {
+): List<DownloadedBook> {
     val normalizedQuery = query.trim().lowercase()
     return artifacts
         .asSequence()
         .filter { it.identity.namespace == namespace }
-        .groupBy { it.identity.workId }
+        .groupBy { it.identity.bookId }
         .values
-        .map { workArtifacts ->
-            val mediaVersions = workArtifacts
-                .groupBy { it.descriptor.effectiveMediaVersionId }
+        .map { bookArtifacts ->
+            val resources = bookArtifacts
+                .groupBy { it.identity.resourceId }
                 .values
-                .map { mediaArtifacts ->
-                    val orderedVolumes = mediaArtifacts.sortedWith(volumeArtifactComparator)
-                    val media = orderedVolumes.first().descriptor
-                    DownloadedMediaVersion(
-                        mediaVersionId = orderedVolumes.first().descriptor.effectiveMediaVersionId,
-                        mediaKind = media.mediaKind.toDownloadMediaKindOrUnknown(),
-                        isServerComplete = media.mediaVersionCompleted,
-                        artifacts = orderedVolumes,
+                .map { resourceArtifacts ->
+                    val orderedAssets = resourceArtifacts.sortedWith(assetArtifactComparator)
+                    val descriptor = orderedAssets.first().descriptor
+                    DownloadedResource(
+                        resourceId = descriptor.identity.resourceId,
+                        title = descriptor.resourceTitle,
+                        format = descriptor.format,
+                        readerType = descriptor.readerType,
+                        resourceIndex = descriptor.resourceIndex,
+                        resourceSortOrder = descriptor.resourceSortOrder,
+                        artifacts = orderedAssets,
                     )
                 }
-                .sortedWith(
-                    compareBy<DownloadedMediaVersion> { it.mediaKind.sortOrder }
-                        .thenBy { if (it.mediaVersionId.startsWith("legacy-volume:")) 1 else 0 }
-                        .thenBy { it.mediaVersionId },
-                )
-            val ordered = mediaVersions.flatMap(DownloadedMediaVersion::artifacts)
+                .sortedWith(resourceComparator)
+            val ordered = resources.flatMap(DownloadedResource::artifacts)
             val first = ordered.first().descriptor
-            DownloadedWork(
-                workId = first.identity.workId,
-                title = first.workTitle,
-                author = first.workAuthor,
+            DownloadedBook(
+                bookId = first.identity.bookId,
+                title = first.bookTitle,
+                author = first.bookAuthor,
                 coverApiPath = first.coverApiPath,
-                mediaVersions = mediaVersions,
+                resources = resources,
                 artifacts = ordered,
             )
         }
-        .filter { work ->
-            normalizedQuery.isEmpty() || (
-                listOfNotNull(work.title, work.author) + work.artifacts.map { it.descriptor.volumeTitle }
-                )
-                .any { normalizedQuery in it.lowercase() }
+        .filter { book ->
+            normalizedQuery.isEmpty() ||
+                (listOfNotNull(book.title, book.author) + book.resources.map(DownloadedResource::title))
+                    .any { normalizedQuery in it.lowercase() }
         }
-        .sortedWith(compareByDescending<DownloadedWork> { it.lastOpenedAtEpochMillis ?: 0 }.thenBy { it.title.lowercase() })
+        .sortedWith(compareByDescending<DownloadedBook> { it.lastOpenedAtEpochMillis ?: 0 }.thenBy { it.title.lowercase() })
         .toList()
 }
 
-val DownloadDescriptor.effectiveMediaVersionId: String
-    get() = mediaVersionId
+private val assetArtifactComparator =
+    compareBy<CompletedDownloadArtifact> { it.identity.assetId }
 
-private fun legacyMediaVersionId(volumeId: String): String = "legacy-volume:$volumeId"
-
-private fun legacyMediaKind(readerType: DownloadReaderType): String = when (readerType) {
-    DownloadReaderType.Comic -> DownloadMediaKind.Comic.wireValue
-    DownloadReaderType.Audio -> DownloadMediaKind.Audiobook.wireValue
-    DownloadReaderType.Reflowable,
-    DownloadReaderType.Pdf,
-    -> DownloadMediaKind.Ebook.wireValue
-}
-
-private fun String.toDownloadMediaKindOrUnknown(): DownloadMediaKind =
-    DownloadMediaKind.entries.firstOrNull { it.wireValue == trim().uppercase() } ?: DownloadMediaKind.Unknown
-
-private val volumeArtifactComparator =
-    compareBy<CompletedDownloadArtifact> { it.descriptor.volumeSortOrder ?: Int.MAX_VALUE }
-        .thenBy { it.descriptor.volumeIndex ?: Double.MAX_VALUE }
-        .thenBy { it.descriptor.volumeTitle.lowercase() }
-        .thenBy { it.identity.volumeId }
-
-private val DownloadMediaKind.sortOrder: Int
-    get() = when (this) {
-        DownloadMediaKind.Ebook -> 0
-        DownloadMediaKind.Comic -> 1
-        DownloadMediaKind.Audiobook -> 2
-        DownloadMediaKind.Unknown -> 3
-    }
+private val resourceComparator =
+    compareBy<DownloadedResource> { it.resourceSortOrder ?: Int.MAX_VALUE }
+        .thenBy { it.resourceIndex ?: Double.MAX_VALUE }
+        .thenBy { it.title.lowercase() }
+        .thenBy { it.resourceId }
 
 private val activeStatuses = setOf(
     DownloadTaskStatus.Queued,
@@ -326,9 +298,8 @@ private fun String.encodeForKey(): String = encodeToByteArray().joinToString("")
 
 internal fun String.isSafeMediaApiPath(): Boolean =
     isSafeApiPath() && (
-        matches(Regex("^/api/files/[^/?#]+$")) ||
-            matches(Regex("^/api/volumes/[^/?#]+/file$")) ||
-            matches(Regex("^/api/reader/v4/volumes/[^/?#]+/comic/archive$"))
+        matches(Regex("^/api/assets/[^/?#]+$")) ||
+            matches(Regex("^/api/resources/[^/?#]+/asset$"))
         )
 
 internal fun String.isSafeApiPath(): Boolean =

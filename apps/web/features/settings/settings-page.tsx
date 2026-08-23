@@ -13,7 +13,9 @@ import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
-type MonitorFolder = {
+type OrganizationMode = 'FLAT' | 'VOLUMES';
+
+type Library = {
   id: string;
   name: string;
   rootPath: string;
@@ -21,18 +23,32 @@ type MonitorFolder = {
   ignorePatterns?: string | null;
   ignoreHidden: boolean;
   minFileSizeBytes: number;
-  mediaKindPolicy: MediaKindPolicy;
+  organizationMode: OrganizationMode;
   description?: string | null;
 };
 
-type MediaKindPolicy = 'MIXED' | 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
-
-type MonitorFoldersPayload = {
-  folders: MonitorFolder[];
-  monitorRoot?: string;
+type LibrariesPayload = {
+  libraries: Library[];
   lastUploadTargetPath?: string | null;
   lastDownloadTargetPath?: string | null;
 };
+
+const ORGANIZATION_MODE_OPTIONS: Array<{
+  value: OrganizationMode;
+  label: string;
+  description: string;
+}> = [
+  { value: 'FLAT', label: '平铺', description: '平铺：根目录文件各自作为独立图书' },
+  { value: 'VOLUMES', label: '按目录归组', description: '按目录归组：图书 / 可读资源 / 资产' }
+];
+
+function organizationModeLabel(mode: OrganizationMode): string {
+  return ORGANIZATION_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+}
+
+function organizationModeDescription(mode: OrganizationMode): string {
+  return ORGANIZATION_MODE_OPTIONS.find((option) => option.value === mode)?.description ?? '';
+}
 
 type BackupItem = {
   id: string;
@@ -41,9 +57,9 @@ type BackupItem = {
   sizeBytes: number;
   createdAt: string;
   counts?: {
-    works: number;
+    books: number;
     readingProgresses: number;
-    monitorFolders: number;
+    libraries: number;
   };
 };
 
@@ -56,16 +72,16 @@ function formatBytes(bytes: number) {
 export function SettingsPage({ embedded = false, initialSection }: { embedded?: boolean; initialSection?: string }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const groups = ['监控文件夹', '备份与恢复'];
-  const [active, setActive] = useState(initialSection ?? '监控文件夹');
-  const [folders, setFolders] = useState<MonitorFolder[]>([]);
+  const groups = ['书库', '备份与恢复'];
+  const [active, setActive] = useState(initialSection ?? '书库');
+  const [folders, setFolders] = useState<Library[]>([]);
   const [backups, setBackups] = useState<BackupItem[]>([]);
-  const [name, setName] = useState('我的监控文件夹');
+  const [name, setName] = useState('我的书库');
   const [rootPath, setRootPath] = useState('');
   const [ignorePatterns, setIgnorePatterns] = useState('');
   const [ignoreHidden, setIgnoreHidden] = useState(true);
   const [minFileSizeKb, setMinFileSizeKb] = useState('10');
-  const [mediaKindPolicy, setMediaKindPolicy] = useState<MediaKindPolicy>('MIXED');
+  const [organizationMode, setOrganizationMode] = useState<OrganizationMode>('FLAT');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [backupBusy, setBackupBusy] = useState('');
@@ -78,12 +94,12 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   const toast = useToast();
 
   const loadPaths = useCallback(async () => {
-    const response = await fetch('/api/monitor-folders');
-    const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
+    const response = await fetch('/api/libraries');
+    const payload = (await response.json()) as { ok: boolean; data?: LibrariesPayload; error?: { message: string } };
     if (payload.ok) {
-      setFolders(payload.data?.folders ?? []);
+      setFolders(payload.data?.libraries ?? []);
     } else {
-      setError(payload.error?.message ?? '读取监控文件夹失败');
+      setError(payload.error?.message ?? '读取书库失败');
     }
   }, []);
 
@@ -95,7 +111,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   }, []);
 
   useEffect(() => {
-    if (active === '监控规则') setActive('监控文件夹');
+    if (active === '监控规则') setActive('书库');
   }, [active]);
 
   useEffect(() => {
@@ -105,7 +121,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   useEffect(() => {
     if (active === '监控规则') return;
     setError('');
-    if (active === '监控文件夹') {
+    if (active === '书库') {
       void loadPaths();
     } else if (active === '备份与恢复') {
       void loadBackups();
@@ -117,10 +133,10 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     setError('');
     setMessage('');
     setPathBusy('create');
-    const response = await fetch('/api/monitor-folders', {
+    const response = await fetch('/api/libraries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, rootPath, enabled: true, ignorePatterns, ignoreHidden, mediaKindPolicy, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
+      body: JSON.stringify({ name, rootPath, organizationMode, enabled: true, ignorePatterns, ignoreHidden, minFileSizeBytes: Math.max(0, Math.round(Number(minFileSizeKb || 0) * 1024)) })
     });
     const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
     if (!payload.ok) {
@@ -130,8 +146,8 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
       setPathBusy('');
       return;
     }
-    setMessage('监控文件夹已保存');
-    toast.success('监控文件夹已保存');
+    setMessage('书库已保存');
+    toast.success('书库已保存');
     await loadPaths();
     setShowCreateFolder(false);
     setPathBusy('');
@@ -143,52 +159,52 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     if (nextVisible) setShowCreateRules(true);
   }
 
-  async function togglePath(path: MonitorFolder) {
+  async function togglePath(path: Library) {
     setPathBusy(`toggle:${path.id}`);
-    await fetch(`/api/monitor-folders/${path.id}`, {
-      method: 'PUT',
+    await fetch(`/api/libraries/${path.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !path.enabled })
     });
     await loadPaths();
-    toast.success(path.enabled ? '监控文件夹已停用' : '监控文件夹已启用');
+    toast.success(path.enabled ? '书库已停用' : '书库已启用');
     setPathBusy('');
   }
 
-  async function deletePath(path: MonitorFolder) {
+  async function deletePath(path: Library) {
     const confirmed = await confirm({
-      title: '删除监控文件夹',
-      description: `删除监控文件夹“${path.name}”？不会删除原始读物文件。`,
+      title: '删除书库',
+      description: `删除书库“${path.name}”？不会删除原始读物文件。`,
       confirmLabel: '删除',
       tone: 'danger'
     });
     if (!confirmed) return;
     setPathBusy(`delete:${path.id}`);
-    await fetch(`/api/monitor-folders/${path.id}`, { method: 'DELETE' });
+    await fetch(`/api/libraries/${path.id}`, { method: 'DELETE' });
     await loadPaths();
-    toast.success('监控文件夹已删除');
+    toast.success('书库已删除');
     setPathBusy('');
   }
 
-  async function saveFolderSettings(path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'mediaKindPolicy'>) {
+  async function saveFolderSettings(path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) {
     setError('');
     setMessage('');
     setRuleBusy(path.id);
-    const response = await fetch(`/api/monitor-folders/${path.id}`, {
-      method: 'PUT',
+    const response = await fetch(`/api/libraries/${path.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates)
     });
     const payload = (await response.json()) as { ok: boolean; error?: { message: string } };
     if (!payload.ok) {
-      const nextError = payload.error?.message ?? '保存监控文件夹设置失败';
+      const nextError = payload.error?.message ?? '保存书库设置失败';
       setError(nextError);
-      toast.error('保存监控文件夹设置失败', nextError);
+      toast.error('保存书库设置失败', nextError);
       setRuleBusy('');
       return;
     }
-    setMessage('监控文件夹设置已保存');
-    toast.success('监控文件夹设置已保存', '新分类规则仅用于之后导入的文件，已有内容不会改变。');
+    setMessage('书库设置已保存');
+    toast.success('书库设置已保存');
     await loadPaths();
     setRuleBusy('');
   }
@@ -218,7 +234,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   async function restoreBackup(backup: BackupItem) {
     const first = await confirm({
       title: '恢复备份',
-      description: '恢复备份会覆盖当前读物元数据、标签、阅读进度和监控文件夹配置，但不会删除原始读物文件。是否继续？',
+      description: '恢复备份会覆盖当前读物元数据、标签、阅读进度和书库配置，但不会删除原始读物文件。是否继续？',
       confirmLabel: '继续恢复',
       tone: 'danger'
     });
@@ -296,11 +312,11 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
         </div> : null}
         <div className={embedded ? 'min-w-0' : 'rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm lg:col-span-9'}>
           {!embedded ? <h1 className="text-xl font-semibold">{active}</h1> : null}
-          {active === '监控文件夹' ? (
+          {active === '书库' ? (
             <div className="mt-6 space-y-5">
               <div className="flex justify-end">
                 <Button type="button" variant="secondary" icon={FolderOpen} onClick={toggleCreateFolderForm}>
-                  {showCreateFolder ? i18nAttribute("收起添加表单") : i18nAttribute("添加文件夹")}
+                  {showCreateFolder ? i18nAttribute("收起添加表单") : i18nAttribute("新增书库")}
                 </Button>
               </div>
               {showCreateFolder ? <form onSubmit={savePath} className="grid grid-cols-1 gap-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4 md:grid-cols-12 md:items-end">
@@ -309,17 +325,17 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                   <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
                 </label>
                 <div className="md:col-span-7">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
+                  <span className="text-sm font-medium text-slate-700"><I18nText>书库路径</I18nText></span>
                   <SharedDirectoryPathPicker value={rootPath} onChange={setRootPath} compact />
                 </div>
                 <div className="md:col-span-2">
                   <Button className="h-10 w-full" icon={FolderOpen} loading={pathBusy === 'create'} loadingText={i18nAttribute("保存中")}><I18nText>保存</I18nText></Button>
                 </div>
                 <label className="md:col-span-4">
-                  <span className="text-sm font-medium text-slate-700"><I18nText>内容分类</I18nText></span>
-                  <Select value={mediaKindPolicy} onChange={setMediaKindPolicy} ariaLabel="内容分类" className="mt-1.5 w-full" size="sm" options={[{ value: 'MIXED', label: '混合内容' }, { value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} />
+                  <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
+                  <Select value={organizationMode} onChange={(value) => setOrganizationMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))} />
                 </label>
-                <div className="self-end text-xs leading-5 text-slate-500 md:col-span-8"><I18nText>内容分类只决定书库标签和整理方式；阅读器与可用操作由实际文件格式决定。</I18nText></div>
+                <div className="self-end text-xs leading-5 text-slate-500 md:col-span-8">{i18nAttribute(organizationModeDescription(organizationMode))}</div>
                 <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></div>
                 <button
                   type="button"
@@ -365,9 +381,9 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold">{path.name}</div>
                         <div className="break-words text-sm text-slate-500">{path.rootPath}</div>
-                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {i18nAttribute(path.mediaKindPolicy === 'MIXED' ? '混合内容' : path.mediaKindPolicy === 'EBOOK' ? '电子书' : path.mediaKindPolicy === 'COMIC' ? '漫画' : '有声书')} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
+                        <div className="mt-2 text-xs text-slate-500"><I18nText>引用原文件</I18nText> · {i18nAttribute(organizationModeLabel(path.organizationMode))} · {path.ignoreHidden ? i18nAttribute("忽略隐藏文件") : i18nAttribute("包含隐藏文件")} <I18nText>· 小于 </I18nText>{Math.round((path.minFileSizeBytes ?? 0) / 1024)} <I18nText>KB 跳过</I18nText></div>
                       </div>
-                      <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用监控文件夹")}>
+                      <button disabled={pathBusy === `toggle:${path.id}`} onClick={() => togglePath(path)} className={cn('h-7 w-12 rounded-full p-1 transition disabled:cursor-not-allowed disabled:opacity-60', path.enabled ? 'bg-[#ff4f26]' : 'bg-slate-300')} aria-label={i18nAttribute("启用书库")}>
                         <span className={cn('block h-5 w-5 rounded-full bg-white transition', path.enabled && 'translate-x-5')} />
                       </button>
                       <Button
@@ -382,12 +398,12 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                     </div>
                     {expandedRules[path.id] ? (
                       <div className="mt-4 border-t border-slate-100 pt-4">
-                        <MonitorFolderEditor path={path} saving={ruleBusy === path.id} onSave={saveFolderSettings} compact />
+                        <LibraryEditor path={path} saving={ruleBusy === path.id} onSave={saveFolderSettings} compact />
                       </div>
                     ) : null}
                   </div>
                 ))}
-                {folders.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500"><I18nText>尚未保存监控文件夹。</I18nText></div> : null}
+                {folders.length === 0 ? <div className="rounded-3xl bg-slate-50 p-6 text-sm text-slate-500"><I18nText>尚未保存书库。</I18nText></div> : null}
               </div>
             </div>
           ) : active === '备份与恢复' ? (
@@ -395,7 +411,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
               <div className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-slate-50 p-5 md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="font-semibold"><I18nText>备份范围</I18nText></div>
-                  <div className="mt-1 text-sm leading-6 text-slate-500"><I18nText>仅包含系统设置和数据库数据，包括读物元数据、标签、阅读进度、监控文件夹配置和封面缓存索引；不包含原始读物文件或封面图片文件。</I18nText></div>
+                  <div className="mt-1 text-sm leading-6 text-slate-500"><I18nText>仅包含系统设置和数据库数据，包括读物元数据、标签、阅读进度、书库配置和封面缓存索引；不包含原始读物文件或封面图片文件。</I18nText></div>
                   <div className="mt-2 text-xs text-slate-500"><I18nText>当前支持手动备份；恢复备份会覆盖数据库中的相关记录。</I18nText></div>
                 </div>
                 <Button icon={Save} onClick={createBackup} loading={backupBusy === 'create'} loadingText={i18nAttribute("创建中")}><I18nText>备份</I18nText></Button>
@@ -416,7 +432,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                       <div className="mt-1 text-sm text-slate-500">{new Date(backup.createdAt).toLocaleString(locale)} · {formatBytes(backup.sizeBytes)}</div>
                       {backup.counts ? (
                         <div className="mt-2 text-xs text-slate-500">
-                          {backup.counts.works} <I18nText>部作品 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.monitorFolders} <I18nText>个监控文件夹</I18nText></div>
+                          {backup.counts.books} <I18nText>本图书 · </I18nText>{backup.counts.readingProgresses} <I18nText>条阅读进度 · </I18nText>{backup.counts.libraries} <I18nText>个书库</I18nText></div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -438,15 +454,15 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
   );
 }
 
-function MonitorFolderEditor({
+function LibraryEditor({
   path,
   saving,
   onSave,
   compact = false
 }: {
-  path: MonitorFolder;
+  path: Library;
   saving: boolean;
-  onSave: (path: MonitorFolder, updates: Pick<MonitorFolder, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'mediaKindPolicy'>) => Promise<void>;
+  onSave: (path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) => Promise<void>;
   compact?: boolean;
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
@@ -455,14 +471,14 @@ function MonitorFolderEditor({
   const [patterns, setPatterns] = useState(path.ignorePatterns ?? '');
   const [hidden, setHidden] = useState(path.ignoreHidden);
   const [minSizeKb, setMinSizeKb] = useState(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
-  const [policy, setPolicy] = useState<MediaKindPolicy>(path.mediaKindPolicy ?? 'MIXED');
+  const [mode, setMode] = useState<OrganizationMode>(path.organizationMode);
   useEffect(() => {
     setFolderName(path.name);
     setFolderPath(path.rootPath);
     setPatterns(path.ignorePatterns ?? '');
     setHidden(path.ignoreHidden);
     setMinSizeKb(String(Math.round((path.minFileSizeBytes ?? 0) / 1024)));
-    setPolicy(path.mediaKindPolicy ?? 'MIXED');
+    setMode(path.organizationMode);
   }, [path]);
 
   return (
@@ -473,7 +489,7 @@ function MonitorFolderEditor({
           <input value={folderName} onChange={(event) => setFolderName(event.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]" />
         </label>
         <div className="md:col-span-8">
-          <span className="text-sm font-medium text-slate-700"><I18nText>监控文件夹路径</I18nText></span>
+          <span className="text-sm font-medium text-slate-700"><I18nText>书库路径</I18nText></span>
           <SharedDirectoryPathPicker value={folderPath} onChange={setFolderPath} compact />
         </div>
         <label className="flex h-10 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 md:col-span-4 md:mt-[26px]">
@@ -490,11 +506,11 @@ function MonitorFolderEditor({
           />
         </label>
         <label className="md:col-span-4">
-          <span className="text-sm font-medium text-slate-700"><I18nText>内容分类</I18nText></span>
-          <Select value={policy} onChange={setPolicy} ariaLabel="内容分类" className="mt-1.5 w-full" size="sm" options={[{ value: 'MIXED', label: '混合内容' }, { value: 'EBOOK', label: '电子书' }, { value: 'COMIC', label: '漫画' }, { value: 'AUDIOBOOK', label: '有声书' }]} />
+          <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
+          <Select value={mode} onChange={(value) => setMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))} />
         </label>
       </div>
-      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>内容分类只决定书库标签和整理方式；阅读器与可用操作由实际文件格式决定。</I18nText></div>
+      <div className="mt-2 text-xs leading-5 text-slate-500">{i18nAttribute(organizationModeDescription(mode))}</div>
       <label className="mt-4 block">
         <span className="text-sm font-medium text-slate-700"><I18nText>自定义忽略规则</I18nText></span>
         <textarea
@@ -518,7 +534,7 @@ function MonitorFolderEditor({
             rootPath: folderPath,
             ignorePatterns: patterns,
             ignoreHidden: hidden,
-            mediaKindPolicy: policy,
+            organizationMode: mode,
             minFileSizeBytes: Math.max(0, Math.round(Number(minSizeKb || 0) * 1024))
           })}
         >

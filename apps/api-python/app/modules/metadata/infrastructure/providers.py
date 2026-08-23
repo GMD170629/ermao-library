@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -41,7 +42,7 @@ def prepare_pipeline_update_write(
             "provider_id": str(row["provider_id"]),
             "included": True,
             "enabled": bool(row["enabled"]),
-            "position": int(row["position"]),
+            "position": int(str(row["position"])),
             "created_at": now,
             "updated_at": now,
         }
@@ -51,9 +52,7 @@ def prepare_pipeline_update_write(
         pipeline_rows,
         parameters_per_row=7,
     ):
-        pipeline_insert = sqlite_insert(MetadataProviderPipeline).values(
-            list(chunk)
-        )
+        pipeline_insert = sqlite_insert(MetadataProviderPipeline).values(list(chunk))
         statements.append(
             pipeline_insert.on_conflict_do_update(
                 index_elements=[
@@ -71,12 +70,12 @@ def prepare_pipeline_update_write(
             )
         )
     state_rows = tuple(provider_states.items())
-    for chunk in sqlite_parameter_chunks(state_rows, parameters_per_row=5):
+    for state_chunk in sqlite_parameter_chunks(state_rows, parameters_per_row=5):
         enabled_by_provider = {
-            provider_id: enabled for provider_id, (enabled, _priority) in chunk
+            provider_id: enabled for provider_id, (enabled, _priority) in state_chunk
         }
         priority_by_provider = {
-            provider_id: priority for provider_id, (_enabled, priority) in chunk
+            provider_id: priority for provider_id, (_enabled, priority) in state_chunk
         }
         provider_ids = tuple(enabled_by_provider)
         statements.append(
@@ -174,8 +173,6 @@ def pipeline_to_dict(row: MetadataProviderPipeline) -> dict[str, Any]:
 
 
 def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("Source"):
-        return []
     rows = db.scalars(
         select(Source)
         .where(Source.kind == METADATA_SOURCE_KIND)
@@ -185,8 +182,6 @@ def list_metadata_sources(db: Session) -> list[dict[str, Any]]:
 
 
 def get_provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
-    if not inspect(db.connection()).has_table("Source"):
-        return None
     row = db.scalars(
         select(Source)
         .where(Source.kind == METADATA_SOURCE_KIND, Source.provider_type == provider_id)
@@ -228,8 +223,6 @@ def ensure_pipeline_row(
 
 
 def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     rows = db.scalars(
         select(MetadataProviderPipeline)
         .where(MetadataProviderPipeline.included.is_(True))
@@ -243,8 +236,6 @@ def list_included_pipelines(db: Session) -> list[dict[str, Any]]:
 
 
 def list_pipeline_keys(db: Session) -> set[tuple[str, str]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return set()
     return {
         (str(media_kind), str(provider_id))
         for media_kind, provider_id in db.execute(
@@ -257,8 +248,6 @@ def list_pipeline_keys(db: Session) -> set[tuple[str, str]]:
 
 
 def list_pipelines_for_provider(db: Session, provider_id: str) -> list[dict[str, Any]]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     rows = db.scalars(
         select(MetadataProviderPipeline).where(
             MetadataProviderPipeline.provider_id == provider_id,
@@ -346,22 +335,23 @@ def update_source_test_result(
     error: str | None,
     now: datetime,
 ) -> bool:
-    result = db.execute(
-        update(Source)
-        .where(Source.id == source_id, Source.updated_at == expected_updated_at)
-        .values(
-            last_test_at=now,
-            last_test_status=status,
-            last_error=error,
-            updated_at=now,
-        )
+    result = cast(
+        CursorResult[Any],
+        db.execute(
+            update(Source)
+            .where(Source.id == source_id, Source.updated_at == expected_updated_at)
+            .values(
+                last_test_at=now,
+                last_test_status=status,
+                last_error=error,
+                updated_at=now,
+            )
+        ),
     )
     return bool(result.rowcount)
 
 
 def list_enabled_provider_ids(db: Session, media_kind: str | None = None) -> list[str]:
-    if not inspect(db.connection()).has_table("MetadataProviderPipeline"):
-        return []
     if media_kind is None:
         position_col = func.min(MetadataProviderPipeline.position).label("position")
         rows = db.execute(
@@ -375,7 +365,7 @@ def list_enabled_provider_ids(db: Session, media_kind: str | None = None) -> lis
         ).all()
         return [str(provider_id) for provider_id, _position in rows]
 
-    rows = db.scalars(
+    provider_rows = db.scalars(
         select(MetadataProviderPipeline.provider_id)
         .where(
             MetadataProviderPipeline.media_kind == media_kind,
@@ -386,4 +376,4 @@ def list_enabled_provider_ids(db: Session, media_kind: str | None = None) -> lis
             MetadataProviderPipeline.position, MetadataProviderPipeline.created_at
         )
     ).all()
-    return [str(provider_id) for provider_id in rows]
+    return [str(provider_id) for provider_id in provider_rows]

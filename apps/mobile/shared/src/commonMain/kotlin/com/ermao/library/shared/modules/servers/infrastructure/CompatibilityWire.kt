@@ -12,6 +12,7 @@ data class ServerCompatibilityWire(
     val serverVersion: String,
     val protocol: ServerProtocolWire,
     val readerSchemaVersion: Int,
+    val librarySchemaVersion: Int,
     val capabilities: ServerCapabilitiesWire,
 )
 
@@ -28,7 +29,8 @@ data class ServerCapabilitiesWire(
     val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
-    val workDetailManagement: Boolean = false,
+    val bookResourceAsset: Boolean,
+    val bookDetailManagement: Boolean,
 )
 
 fun ServerCompatibilityWire.toDomain(): ServerCompatibility = ServerCompatibility(
@@ -38,12 +40,14 @@ fun ServerCompatibilityWire.toDomain(): ServerCompatibility = ServerCompatibilit
     protocolVersion = protocol.version,
     minimumSupportedClientVersion = protocol.minimumSupportedClientVersion,
     readerSchemaVersion = readerSchemaVersion,
+    librarySchemaVersion = librarySchemaVersion,
     capabilities = ServerCapabilities(
         setup = capabilities.setup,
         cookieSession = capabilities.cookieSession,
         readerV4 = capabilities.readerV4,
         mediaRange = capabilities.mediaRange,
         managedOfflineDownloads = capabilities.managedOfflineDownloads,
-        workDetailManagement = capabilities.workDetailManagement,
+        bookResourceAsset = capabilities.bookResourceAsset,
+        bookDetailManagement = capabilities.bookDetailManagement,
     ),
 )

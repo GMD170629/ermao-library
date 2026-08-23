@@ -4,9 +4,8 @@ import { ChevronDown, ChevronRight, FolderOpen, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../../../components/ui/cn';
 import { I18nText, useI18n } from '@/i18n/provider';
-import { loadMonitorDirectory } from '../api/monitor-folders-client';
-import type { DirectoryNode } from '../api/monitor-folders-client';
-import { directoryPathChain } from '../model/directory-path';
+import { loadLibraryDirectory } from '../api/libraries-client';
+import type { DirectoryNode } from '../api/libraries-client';
 
 type DirectoryPathPickerVariant = 'default' | 'setup';
 
@@ -26,12 +25,15 @@ export function DirectoryPathPicker({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [rootPath, setRootPath] = useState('');
+  const [displayNode, setDisplayNode] = useState<DirectoryNode | null>(null);
   const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingPath, setLoadingPath] = useState('');
   const [treeError, setTreeError] = useState('');
+  const [panelMaxHeight, setPanelMaxHeight] = useState<number>();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
   const treeId = useId();
 
   const loadNode = useCallback(async (
@@ -41,8 +43,11 @@ export function DirectoryPathPicker({
     setLoadingPath(path || '__root__');
     setTreeError('');
     try {
-      const node = await loadMonitorDirectory(path, signal);
-      if (!path) setRootPath(node.path);
+      const node = await loadLibraryDirectory(path, signal);
+      if (!path) {
+        setRootPath(node.path);
+        setDisplayNode((current) => current ?? node);
+      }
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
     } catch (reason) {
@@ -54,15 +59,52 @@ export function DirectoryPathPicker({
     }
   }, []);
 
-  const revealPath = useCallback(async (path: string, signal?: AbortSignal) => {
-    const pathChain = directoryPathChain(path);
-    for (const pathPart of pathChain) {
-      if (signal?.aborted) return;
-      const node = await loadNode(pathPart === '/' ? undefined : pathPart, signal);
-      if (!node) return;
-      setExpanded((current) => ({ ...current, [node.path]: true }));
+  const focusTypedPath = useCallback(async (path: string, signal?: AbortSignal) => {
+    if (path && !path.startsWith('/')) {
+      setDisplayNode(null);
+      setTreeError(t('请输入有效的绝对路径'));
+      return;
     }
-  }, [loadNode]);
+    const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+    if (!normalizedPath || normalizedPath === '/') {
+      const node = await loadNode(undefined, signal);
+      if (!signal?.aborted) {
+        setDisplayNode(node);
+        if (node) setExpanded((current) => ({ ...current, [node.path]: true }));
+      }
+      return;
+    }
+    const lastSeparator = normalizedPath.lastIndexOf('/');
+    const parentPath = lastSeparator <= 0 ? '/' : normalizedPath.slice(0, lastSeparator);
+    const namePrefix = normalizedPath.slice(lastSeparator + 1);
+    const parentNode = await loadNode(parentPath === '/' ? undefined : parentPath, signal);
+    if (signal?.aborted) return;
+    if (!parentNode) {
+      setDisplayNode(null);
+      return;
+    }
+    const exactChild = parentNode.children.find((child) => child.name === namePrefix || child.path === normalizedPath);
+    if (exactChild) {
+      const exactNode = await loadNode(exactChild.path, signal);
+      if (signal?.aborted) return;
+      if (!exactNode) {
+        setDisplayNode(null);
+        return;
+      }
+      setDisplayNode(exactNode);
+      setExpanded((current) => ({ ...current, [exactNode.path]: true }));
+    } else {
+      const matchingChildren = parentNode.children.filter((child) => child.name.startsWith(namePrefix));
+      if (matchingChildren.length === 0) {
+        setDisplayNode(null);
+        setTreeError(t('路径不存在或不可读'));
+        return;
+      }
+      setDisplayNode({ ...parentNode, children: matchingChildren });
+      setExpanded((current) => ({ ...current, [parentNode.path]: true }));
+    }
+    window.requestAnimationFrame(() => { if (treeContainerRef.current) treeContainerRef.current.scrollTop = 0; });
+  }, [loadNode, t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,16 +115,27 @@ export function DirectoryPathPicker({
   useEffect(() => {
     if (!open) return;
     const typedPath = value.trim();
-    if (typedPath && !typedPath.startsWith('/')) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void revealPath(typedPath || '/', controller.signal);
-    }, 250);
+      void focusTypedPath(typedPath, controller.signal);
+    }, 150);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [open, revealPath, value]);
+  }, [focusTypedPath, open, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePanelHeight = () => {
+      const pickerBottom = rootRef.current?.getBoundingClientRect().bottom ?? 0;
+      const dialogBottom = rootRef.current?.closest('[role="dialog"]')?.getBoundingClientRect().bottom ?? window.innerHeight - 16;
+      setPanelMaxHeight(Math.max(120, Math.floor(dialogBottom - pickerBottom - 12)));
+    };
+    updatePanelHeight();
+    window.addEventListener('resize', updatePanelHeight);
+    return () => window.removeEventListener('resize', updatePanelHeight);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,14 +173,10 @@ export function DirectoryPathPicker({
 
   async function refreshTree() {
     const typedPath = value.trim();
-    if (typedPath && !typedPath.startsWith('/')) {
-      await loadNode();
-      return;
-    }
-    await revealPath(typedPath || '/');
+    await focusTypedPath(typedPath);
   }
 
-  const rootNode = rootPath ? nodes[rootPath] : Object.values(nodes)[0];
+  const rootNode = displayNode;
   const setup = variant === 'setup';
   return (
     <div ref={rootRef} className={cn('relative', compact ? 'mt-1.5' : 'mt-2')}>
@@ -144,7 +193,7 @@ export function DirectoryPathPicker({
           ref={inputRef}
           value={value}
           disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => { onChange(event.target.value); setOpen(true); }}
           onKeyDown={(event) => {
             if (event.key === 'ArrowDown') {
               event.preventDefault();
@@ -156,7 +205,7 @@ export function DirectoryPathPicker({
             }
           }}
           placeholder={t('请输入或选择文件夹')}
-          aria-label={t('监控文件夹路径')}
+          aria-label={t('书库路径')}
           aria-controls={treeId}
           aria-expanded={open}
           aria-autocomplete="list"
@@ -187,16 +236,16 @@ export function DirectoryPathPicker({
       </div>
 
       {open ? (
-        <div className={cn(
-          'left-0 right-0 z-50 mt-2 border p-3 text-sm shadow-xl',
+        <div style={{ maxHeight: panelMaxHeight }} className={cn(
+          'absolute left-0 right-0 top-full z-[70] mt-2 flex flex-col overflow-hidden border p-3 text-sm shadow-xl',
           setup
-            ? 'relative rounded-2xl border-[#B08B6E]/45 bg-[#E8DCC7] text-[#606C38] shadow-[#606C38]/15'
-            : 'absolute top-full rounded-2xl border-slate-200 bg-white text-slate-700 shadow-slate-200/60'
+            ? 'rounded-2xl border-[#B08B6E]/45 bg-[#E8DCC7] text-[#606C38] shadow-[#606C38]/15'
+            : 'rounded-2xl border-slate-200 bg-white text-slate-700 shadow-slate-200/60'
         )}>
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className={cn('font-semibold', setup ? 'text-[#606C38]' : 'text-slate-950')}><I18nText>可访问目录</I18nText></div>
-              <div className={cn('truncate text-xs', setup ? 'text-[#606C38]/65' : 'text-slate-500')}>{rootPath || t('读取中')}</div>
+              <div className={cn('truncate text-xs', setup ? 'text-[#606C38]/65' : 'text-slate-500')}>{value.trim() || rootPath || t('读取中')}</div>
             </div>
             <button
               type="button"
@@ -213,12 +262,14 @@ export function DirectoryPathPicker({
             </button>
           </div>
           <div
+            ref={treeContainerRef}
             id={treeId}
             role="tree"
             aria-label={t('文件夹路径树')}
             className={cn(
               'overflow-auto rounded-xl p-2',
-              setup ? 'shuku-setup-scrollbar max-h-64' : 'max-h-64',
+              'min-h-0 flex-1',
+              setup ? 'shuku-setup-scrollbar' : '',
               setup ? 'bg-[#DCC7A7]/45' : 'bg-slate-50'
             )}
           >
@@ -277,7 +328,7 @@ function DirectoryNodeRow({
   const setup = variant === 'setup';
 
   return (
-    <div role="treeitem" aria-expanded={isExpanded} aria-selected={isSelected} aria-disabled={!node.readable}>
+    <div data-directory-path={node.path} role="treeitem" aria-expanded={isExpanded} aria-selected={isSelected} aria-disabled={!node.readable}>
       <div
         className={cn(
           'flex items-center gap-1 rounded-xl px-2 py-1.5 transition',

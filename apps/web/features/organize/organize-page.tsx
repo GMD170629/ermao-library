@@ -10,11 +10,11 @@ import { useConfirm, useToast } from '../../components/ui/feedback';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import { useI18n } from '../../i18n/provider';
-import type { WorkView } from '../../types/work';
+import type { BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { mediaKindsLabel } from '../library/public';
-import type { MediaKind } from '../../types/work';
+import type { MediaKind } from '../../types/book';
 
 type ProviderExecution = {
   id: string;
@@ -45,7 +45,7 @@ export type OrganizeJobView = {
   finishedAt?: string | null;
   createdAt?: string | null;
   updatedAt: string;
-  book: WorkView;
+  book: BookView;
 };
 
 type OrganizeBookSummary = {
@@ -104,7 +104,7 @@ export function normalizeOrganizeJob(job: OrganizeJobView): OrganizeJobView | nu
     providerExecutions: Array.isArray(job.providerExecutions) ? job.providerExecutions : [],
     book: {
       ...job.book,
-      title: job.book.title ?? '未命名作品',
+      title: job.book.title ?? '未命名图书',
       author: job.book.author ?? '未知作者',
       tags: Array.isArray(job.book.tags) ? job.book.tags : []
     }
@@ -150,7 +150,7 @@ function reasonLabel(code: string) {
 
 function jobReasons(job: OrganizeJobView | OrganizeJobSummaryView) {
   const rawCodes = job.reasonCodes?.length ? job.reasonCodes : job.issueCodes;
-  const codes = rawCodes.filter((code) => code !== 'DUPLICATE' && !code.startsWith('SUGGEST_'));
+  const codes = rawCodes.filter((code) => !code.startsWith('SUGGEST_'));
   if (codes.length) return [...new Set(codes.map(reasonLabel))];
   if (job.trigger === 'NEW') return ['新增后自动执行'];
   if (job.trigger === 'SCHEDULE') return ['定时识别'];
@@ -171,7 +171,7 @@ function normalizeOrganizeJobSummary(job: OrganizeJobSummaryView): OrganizeJobSu
     metadataSources: Array.isArray(job.metadataSources) ? job.metadataSources : [],
     book: {
       ...job.book,
-      title: job.book.title || '未命名作品',
+      title: job.book.title || '未命名图书',
       author: job.book.author || '未知作者',
     },
   };

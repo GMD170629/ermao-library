@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class ServerCompatibilityCheckerTest {
-    private val checker = ServerCompatibilityChecker(1, setOf(1), setOf(4))
+    private val checker = ServerCompatibilityChecker(3, setOf(3), setOf(4), setOf(1))
 
     @Test
     fun acceptsTheCurrentProtocol() {
@@ -18,7 +18,7 @@ class ServerCompatibilityCheckerTest {
     @Test
     fun rejectsAClientBelowTheServerMinimum() {
         val decision = assertIs<ServerCompatibilityDecision.Incompatible>(
-            checker.check(compatibility(minimumClient = 2)),
+            checker.check(compatibility(minimumClient = 4)),
         )
         assertEquals("CLIENT_UPDATE_REQUIRED", decision.reasonCode)
     }
@@ -26,7 +26,7 @@ class ServerCompatibilityCheckerTest {
     @Test
     fun rejectsAnUnsupportedServerProtocolEvenWhenClientIsNewEnough() {
         val decision = assertIs<ServerCompatibilityDecision.Incompatible>(
-            checker.check(compatibility(protocol = 2)),
+            checker.check(compatibility(protocol = 4)),
         )
         assertEquals("UNSUPPORTED_PROTOCOL_VERSION", decision.reasonCode)
     }
@@ -42,9 +42,30 @@ class ServerCompatibilityCheckerTest {
         assertEquals("READER_V4_REQUIRED", decision.reasonCode)
     }
 
+    @Test
+    fun rejectsThePreCutoverLibraryIdentityContract() {
+        val decision = assertIs<ServerCompatibilityDecision.Incompatible>(
+            checker.check(compatibility(librarySchema = 0)),
+        )
+
+        assertEquals("UNSUPPORTED_LIBRARY_SCHEMA", decision.reasonCode)
+    }
+
+    @Test
+    fun rejectsAServerWithoutBookResourceAssetIdentity() {
+        val unsupported = compatibility().let { current ->
+            current.copy(capabilities = current.capabilities.copy(bookResourceAsset = false))
+        }
+
+        val decision = assertIs<ServerCompatibilityDecision.Incompatible>(checker.check(unsupported))
+
+        assertEquals("BOOK_RESOURCE_ASSET_REQUIRED", decision.reasonCode)
+    }
+
     private fun compatibility(
-        protocol: Int = 1,
-        minimumClient: Int = 1,
+        protocol: Int = 3,
+        minimumClient: Int = 3,
+        librarySchema: Int = 1,
     ) = ServerCompatibility(
         service = "ermao-books",
         serverIdentity = "server",
@@ -52,13 +73,15 @@ class ServerCompatibilityCheckerTest {
         protocolVersion = protocol,
         minimumSupportedClientVersion = minimumClient,
         readerSchemaVersion = 4,
+        librarySchemaVersion = librarySchema,
         capabilities = ServerCapabilities(
             setup = true,
             cookieSession = true,
             readerV4 = true,
             mediaRange = true,
-            managedOfflineDownloads = false,
-            workDetailManagement = true,
+            managedOfflineDownloads = true,
+            bookResourceAsset = true,
+            bookDetailManagement = false,
         ),
     )
 }

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -15,11 +14,12 @@ from app.modules.publications.infrastructure.fb2_adapter import Fb2PublicationAd
 
 def _source(path: Path) -> PublicationSource:
     return PublicationSource(
-        volume_id="fb2-volume",
-        file_id="fb2-file",
+        resource_id="fb2-resource",
+        asset_id="fb2-asset",
         source_format="fb2",
         path=str(path),
-        full_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+        size_bytes=path.stat().st_size,
+        mtime_ms=int(path.stat().st_mtime * 1000),
         title="Fallback",
         author="Fallback Author",
     )
@@ -54,8 +54,8 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     assert publication.title == "原始 FB2"
     assert publication.author == "测试 作者"
     assert publication.language == "zh-CN"
-    assert publication.fingerprint.parser == "shuku-fb2-parser-v1"
-    assert publication.fingerprint.normalization == "shuku-fb2-publication-v1"
+    assert publication.revision.parser == "shuku-fb2-parser-v1"
+    assert publication.revision.normalization == "shuku-fb2-publication-v1"
     assert [entry.title for entry in publication.toc] == ["第一部", "注释"]
     assert [entry.title for entry in publication.toc[0].children] == ["第二章"]
     assert [link.href for link in publication.reading_order] == [
@@ -66,6 +66,7 @@ def test_fb2_adapter_builds_nested_toc_and_safe_virtual_resources(
     chapter = adapter.read_resource(source, "fb2/section-0001.xhtml")
     markup = chapter.content.decode()
     assert "开篇 &amp; 正文" in markup
+    assert 'data-shuku-security-profile="web-v2"' in markup
     assert "<em>重点</em>" in markup
     assert 'href="section-0002.xhtml#fb2-node-' in markup
     assert 'src="images/' in markup

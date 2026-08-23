@@ -237,6 +237,9 @@ function ShelfBookMetadata<T extends BookshelfItem>({
   book: T;
   divider?: boolean;
 }) {
+  const { t } = useAttributeI18n();
+  const author = book.author?.trim() || t("未知作者");
+
   return (
     <div
       data-bookshelf-book-metadata
@@ -251,9 +254,9 @@ function ShelfBookMetadata<T extends BookshelfItem>({
       </div>
       <div
         className="mt-0.5 truncate text-[11px] leading-4 text-[#817A74] sm:text-[12px]"
-        title={book.author}
+        title={author}
       >
-        {book.author}
+        {author}
       </div>
     </div>
   );

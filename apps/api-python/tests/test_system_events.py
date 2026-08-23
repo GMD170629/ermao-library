@@ -1,5 +1,8 @@
-import app.bootstrap.system as system_bootstrap
 import pytest
+from sqlalchemy import event as sqlalchemy_event
+from sqlalchemy import func, select
+
+import app.bootstrap.system as system_bootstrap
 from app.bootstrap.system import (
     get_setting,
     maintain_system_events,
@@ -13,8 +16,6 @@ from app.bootstrap.system import (
     write_prepared_system_events,
 )
 from app.models.settings import SystemEvent
-from sqlalchemy import event as sqlalchemy_event
-from sqlalchemy import func, select
 
 
 def test_record_system_event_normalizes_level_and_serializes_metadata(db_session):

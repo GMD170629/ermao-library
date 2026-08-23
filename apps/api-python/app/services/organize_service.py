@@ -4,32 +4,18 @@ import json
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import unescape
 from time import time_ns
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.bootstrap.organize import (
-    apply_duplicate_actions_command,
-    apply_organize_job_command,
-    bulk_apply_organize_jobs_command,
-    create_legacy_organize_job_command,
-    dismiss_organize_job_command,
-    fail_organize_job_command,
-    insert_organize_suggestions_command,
-    merge_organize_works_command,
-    refresh_duplicate_candidates_command,
-    refresh_organize_job_command,
-    set_organize_work_hidden_command,
-)
 from app.core.database_errors import is_database_busy_error
-from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import now_timestamp_ms
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
@@ -37,35 +23,13 @@ from app.modules.metadata.infrastructure import external_cache as metadata_cache
 from app.modules.metadata.infrastructure.short_writes import (
     metadata_short_write_session,
 )
-from app.modules.organize.application.dto import PreparedDuplicateAction
-from app.modules.organize.infrastructure import duplicates as organize_duplicates
 from app.modules.organize.infrastructure import review as organize_review
-from app.modules.organize.infrastructure import suggestions as organize_suggestions
-from app.services.book_identity import (
-    UNKNOWN_AUTHOR,
-    identity_merge_key,
-    normalize_identity_part,
-)
 
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class ApplyResult:
-    job: dict[str, Any]
-    applied: int
-    applied_external: int
-    auto_marked_organized: bool
-    dismissed: bool
-    duplicate_actions_applied: int
-
-
 def now() -> datetime:
     return datetime.now(UTC)
-
-
-def has_table(db: Session, table: str) -> bool:
-    return organize_review.has_table(db, table)
 
 
 def parse_json_value(value: Any) -> Any:
@@ -174,7 +138,8 @@ def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
         *_metadata_title_strings(candidate.get("title")),
         *_metadata_title_strings(candidate.get("titleAliases")),
     ]
-    raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+    raw_value = candidate.get("raw")
+    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
     for key in (
         "title",
         "name",
@@ -187,7 +152,8 @@ def metadata_candidate_title_values(candidate: dict[str, Any]) -> list[str]:
         "aka",
     ):
         values.extend(_metadata_title_strings(raw.get(key)))
-    infobox = raw.get("infobox") if isinstance(raw.get("infobox"), list) else []
+    infobox_value = raw.get("infobox")
+    infobox = infobox_value if isinstance(infobox_value, list) else []
     for entry in infobox:
         if not isinstance(entry, dict) or not re.search(
             r"别名|又名|中文名|简体中文|繁体中文|原名|日文名|英文名",
@@ -248,363 +214,30 @@ def first_exact_title_candidate(
     )
 
 
-def selected_suggestions(
-    db: Session,
-    job_id: str,
-    suggestion_ids: list[str] | None,
-    high_confidence_only: bool,
-) -> list[dict[str, Any]]:
-    suggestions = organize_suggestions.list_pending_suggestions(db, job_id)
-    allowed = set(suggestion_ids or [])
-    return [
-        suggestion
-        for suggestion in suggestions
-        if (not suggestion_ids or suggestion["id"] in allowed)
-        and (
-            not high_confidence_only or float(suggestion.get("confidence") or 0) >= 0.8
-        )
-    ]
-
-
-def work_patch_from_suggestions(
-    db: Session, suggestions: list[dict[str, Any]]
-) -> dict[str, Any]:
-    allowed = organize_review.work_column_names(db)
-    patch: dict[str, Any] = {}
-    for suggestion in suggestions:
-        field = suggestion.get("field")
-        value = parse_json_value(suggestion.get("suggestedValue"))
-        if field == "title" and isinstance(value, str) and value.strip():
-            patch["title"] = value.strip()
-            if "normalizedTitle" in allowed:
-                patch["normalizedTitle"] = normalize_identity_part(value)
-        elif field == "author" and isinstance(value, str):
-            patch["author"] = value.strip() or None
-            if "normalizedAuthor" in allowed:
-                patch["normalizedAuthor"] = normalize_identity_part(value) or None
-        elif field == "description" and isinstance(value, str):
-            patch["description"] = value
-        elif field == "tags":
-            tags = (
-                [str(item).strip() for item in value] if isinstance(value, list) else []
-            )
-            patch["tags"] = json_text(sorted({tag for tag in tags if tag}))
-        elif (
-            field == "seriesName" and isinstance(value, str) and "seriesName" in allowed
-        ):
-            patch["seriesName"] = value.strip() or None
-        elif (
-            field == "seriesIndex"
-            and isinstance(value, (int, float))
-            and "seriesIndex" in allowed
-        ):
-            patch["seriesIndex"] = value
-    return patch
-
-
-def apply_organize_job(
-    db: Session, job_id: str, payload: dict[str, Any]
-) -> ApplyResult:
-    job = organize_review.get_job(db, job_id)
-    if not job:
-        raise ValueError("整理任务不存在")
-    if payload.get("dismiss"):
-        stamp = now()
-        work_id = str(job.get("workId") or "")
-        has_work_table = has_table(db, "LibraryWork")
-        dismiss_organize_job_command(
-            db,
-            job_row={"id": job_id, "status": "DISMISSED", "updatedAt": stamp},
-            work_row=(
-                {
-                    "id": work_id,
-                    "organizeStatus": "DISMISSED",
-                    "updatedAt": stamp,
-                }
-                if work_id and has_work_table
-                else None
-            ),
-        )
-        return ApplyResult(
-            {**job, "status": "DISMISSED", "updatedAt": stamp},
-            0,
-            0,
-            False,
-            True,
-            0,
-        )
-
-    suggestion_ids = [str(item) for item in payload.get("suggestionIds") or []] or None
-    high_confidence_only = bool(payload.get("highConfidenceOnly"))
-    suggestions = selected_suggestions(db, job_id, suggestion_ids, high_confidence_only)
-    patch = work_patch_from_suggestions(db, suggestions)
-    if (
-        ("title" in patch or "author" in patch)
-        and job.get("workId")
-        and has_table(db, "LibraryWork")
-    ):
-        current_work = organize_review.get_work(db, job["workId"])
-        if current_work:
-            title = string_value(patch.get("title")) or string_value(
-                current_work.get("title")
-            )
-            author = (
-                string_value(patch.get("author"))
-                or string_value(current_work.get("author"))
-                or UNKNOWN_AUTHOR
-            )
-            merge_key = identity_merge_key(title, author)
-            patch.update(
-                {
-                    "title": title,
-                    "author": author,
-                    "normalizedTitle": normalize_identity_part(title),
-                    "normalizedAuthor": normalize_identity_part(author),
-                    "mergeKey": merge_key,
-                }
-            )
-    mark_organized = bool(payload.get("markOrganized"))
-    if mark_organized:
-        patch["organized"] = True
-        patch["organizeStatus"] = "APPLIED"
-    duplicate_ids = [
-        str(item) for item in payload.get("duplicateIds") or [] if str(item)
-    ]
-    duplicate_actions = (
-        prepare_duplicate_actions(db, job, duplicate_ids) if duplicate_ids else ()
-    )
-    stamp = now()
-    if patch:
-        patch["updatedAt"] = stamp
-    job_patch = {
-        "status": "APPLIED" if mark_organized else job.get("status"),
-        "updatedAt": stamp,
-    }
-    has_work_table = has_table(db, "LibraryWork")
-    apply_organize_job_command(
-        db,
-        work_row=(
-            {"id": str(job["workId"]), **patch}
-            if patch and job.get("workId") and has_work_table
-            else None
-        ),
-        suggestion_ids=tuple(str(item["id"]) for item in suggestions),
-        duplicate_actions=duplicate_actions,
-        dismiss_job_id=job_id if mark_organized else None,
-        job_row={"id": job_id, **job_patch},
-    )
-    updated_job = {**job, **job_patch}
-    return ApplyResult(
-        updated_job,
-        len(suggestions),
-        sum(1 for item in suggestions if item.get("source") == "external"),
-        False,
-        False,
-        len(duplicate_actions),
-    )
-
-
-def set_work_hidden(
-    db: Session, work_id: str, hidden: bool, organize_status: str = "APPLIED"
-) -> None:
-    stamp = now()
-    set_organize_work_hidden_command(
-        db,
-        work_id=work_id,
-        hidden=hidden,
-        organize_status=organize_status,
-        timestamp=stamp,
-    )
-
-
-def merge_works(db: Session, source_work_id: str, target_work_id: str) -> None:
-    if source_work_id == target_work_id:
-        return
-    stamp = now()
-    merge_organize_works_command(
-        db,
-        source_work_id=source_work_id,
-        target_work_id=target_work_id,
-        timestamp=stamp,
-    )
-
-
-def prepare_duplicate_actions(
-    db: Session, job: dict[str, Any], duplicate_ids: list[str]
-) -> tuple[PreparedDuplicateAction, ...]:
-    duplicates = organize_duplicates.list_duplicates_by_ids(
-        db, job_id=str(job["id"]), duplicate_ids=duplicate_ids
-    )
-    target_work_id = str(job.get("workId") or "")
-    if not target_work_id:
-        return ()
-    stamp = now()
-    return tuple(
-        PreparedDuplicateAction(
-            duplicate_id=str(duplicate["id"]),
-            source_work_id=str(duplicate["targetWorkId"]),
-            target_work_id=target_work_id,
-            action=string_value(duplicate.get("suggestedAction")) or "KEEP_SEPARATE",
-            timestamp=stamp,
-        )
-        for duplicate in duplicates
-        if duplicate.get("targetWorkId")
-        and str(duplicate["targetWorkId"]) != target_work_id
-    )
-
-
-def apply_duplicate_actions(
-    db: Session, job: dict[str, Any], duplicate_ids: list[str]
-) -> int:
-    actions = prepare_duplicate_actions(db, job, duplicate_ids)
-    apply_duplicate_actions_command(db, actions)
-    return len(actions)
-
-
-def issue_codes_for_work(
-    work: dict[str, Any], volumes: list[dict[str, Any]], duplicate: bool
-) -> list[str]:
-    issues: list[str] = []
-    if not work.get("organized"):
-        issues.append("NEW_IMPORT")
-    if not work.get("coverPath") or work.get("coverStatus") != "READY":
-        issues.append("MISSING_COVER")
-    if not str(work.get("author") or "").strip():
-        issues.append("MISSING_AUTHOR")
-    title = str(work.get("title") or "").strip()
-    if metadata_title_needs_ai(title):
-        issues.append("ODD_TITLE")
-    if any(
-        volume.get("importStatus") == "FAILED" or volume.get("importError")
-        for volume in volumes
-    ):
-        issues.append("IMPORT_FAILED")
-    if duplicate:
-        issues.append("DUPLICATE")
-    return list(dict.fromkeys(issues))
-
-
-def refresh_organize_job(db: Session, job_id: str) -> dict[str, Any]:
-    job = organize_review.get_job(db, job_id)
-    if not job:
-        raise ValueError("整理任务不存在")
-    work = (
-        organize_review.get_work(db, str(job["workId"])) if job.get("workId") else None
-    )
-    if not work:
-        stamp = now()
-        updated = {
-            **job,
-            "status": "FAILED",
-            "errorSummary": "作品不存在",
-            "updatedAt": stamp,
-        }
-        fail_organize_job_command(
-            db,
-            {
-                "id": job_id,
-                "status": "FAILED",
-                "errorSummary": "作品不存在",
-                "updatedAt": stamp,
-            },
-        )
-        return updated
-    volumes = organize_review.list_volumes_for_work(db, str(work["id"]))
-    duplicate_rows = prepare_duplicate_candidate_rows(db, job, work)
-    duplicate_chunks = tuple(
-        sqlite_parameter_chunks(duplicate_rows, parameters_per_row=9)
-    )
-    duplicate_count = len(duplicate_rows)
-    issues = issue_codes_for_work(work, volumes, duplicate_count > 0)
-    status = "REVIEWING" if issues else "APPLIED"
-    summary = (
-        f"发现 {len(issues)} 类整理问题，{duplicate_count} 条重复作品候选"
-        if issues or duplicate_count
-        else "未发现需要整理的问题"
-    )
-    stamp = now()
-    job_patch = {
-        "status": status,
-        "issueCodes": json_text(issues),
-        "summary": summary,
-        "errorSummary": None,
-        "updatedAt": stamp,
-    }
-    work_patch = {
-        "organizeStatus": status,
-        "metadataQuality": max(0, 100 - len(issues) * 15),
-        "organized": status == "APPLIED" or bool(work.get("organized")),
-        "updatedAt": stamp,
-    }
-    refresh_organize_job_command(
-        db,
-        job_id=str(job["id"]),
-        duplicate_chunks=duplicate_chunks,
-        job_row={"id": job_id, **job_patch},
-        work_row={"id": str(work["id"]), **work_patch},
-    )
-    updated_job = {**job, **job_patch}
-    return {
-        **updated_job,
-        "refreshed": True,
-        "issueCodes": issues,
-        "duplicateCount": duplicate_count,
-    }
-
-
-def ensure_organize_job_for_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    if not has_table(db, "OrganizeJob") or not has_table(db, "LibraryWork"):
-        return None
-    work = organize_review.get_visible_work(db, work_id)
-    if not work:
-        return None
-    existing = organize_review.get_unresolved_job_for_work(db, work_id)
-    if existing:
-        return existing
-    volume_id = organize_review.earliest_volume_id(db, work_id)
-    already_organized = (
-        bool(work.get("organized")) or work.get("organizeStatus") == "APPLIED"
-    )
-    job_id = f"py_{time_ns()}"
-    status = "APPLIED" if already_organized else "REVIEWING"
-    issue_codes_json = json_text([] if already_organized else ["NEW_IMPORT"])
-    summary = "已整理，等待元数据刷新" if already_organized else "等待元数据刷新"
-    stamp = now()
-    created = create_legacy_organize_job_command(
-        db,
-        job_id=job_id,
-        work_id=work_id,
-        volume_id=str(volume_id) if volume_id else None,
-        status=status,
-        issue_codes_json=issue_codes_json,
-        summary=summary,
-        timestamp=stamp,
-    )
-    return created
-
-
-def context_for_job(db: Session, job: dict[str, Any]) -> dict[str, Any] | None:
-    return organize_review.load_job_context(db, job)
+def metadata_context_for_book(db: Session, book_id: str) -> dict[str, Any] | None:
+    return organize_review.load_book_context(db, book_id)
 
 
 def local_metadata_summary(context: dict[str, Any]) -> dict[str, Any]:
-    work = context["work"]
+    book = context["book"]
     files = context["files"][:8]
     metadata = [
         parse_json_value(item.get("rawJson")) for item in context["metadata"][:4]
     ]
     return {
-        "title": work.get("title"),
-        "author": work.get("author"),
-        "seriesName": work.get("seriesName"),
-        "seriesIndex": work.get("seriesIndex"),
-        "tags": parse_json_value(work.get("tags")) or [],
-        "fileNames": [str(file.get("path") or "").rsplit("/", 1)[-1] for file in files],
+        "title": book.get("title"),
+        "author": book.get("author"),
+        "seriesName": book.get("seriesName"),
+        "seriesIndex": book.get("seriesIndex"),
+        "tags": parse_json_value(book.get("tags")) or [],
+        "fileNames": [
+            str(file.get("relativePath") or "").rsplit("/", 1)[-1] for file in files
+        ],
         "parentPaths": sorted(
             {
-                str(file.get("path") or "").rsplit("/", 1)[0]
+                str(file.get("relativePath") or "").rsplit("/", 1)[0]
                 for file in files
-                if "/" in str(file.get("path") or "")
+                if "/" in str(file.get("relativePath") or "")
             }
         ),
         "embeddedMetadata": metadata,
@@ -673,22 +306,25 @@ def suggestion_from_external(
 
 def douban_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     raw = payload if isinstance(payload, dict) else {}
-    books = (
-        raw.get("books")
-        if isinstance(raw.get("books"), list)
-        else raw.get("items")
-        if isinstance(raw.get("items"), list)
-        else raw.get("results")
-        if isinstance(raw.get("results"), list)
-        else raw.get("subjects")
-        if isinstance(raw.get("subjects"), list)
-        else raw.get("data")
-        if isinstance(raw.get("data"), list)
-        else payload
-        if isinstance(payload, list)
-        else [raw]
-        if raw.get("title") or raw.get("id")
-        else []
+    books: list[Any] = cast(
+        list[Any],
+        (
+            raw.get("books")
+            if isinstance(raw.get("books"), list)
+            else raw.get("items")
+            if isinstance(raw.get("items"), list)
+            else raw.get("results")
+            if isinstance(raw.get("results"), list)
+            else raw.get("subjects")
+            if isinstance(raw.get("subjects"), list)
+            else raw.get("data")
+            if isinstance(raw.get("data"), list)
+            else payload
+            if isinstance(payload, list)
+            else [raw]
+            if raw.get("title") or raw.get("id")
+            else []
+        ),
     )
     candidates = []
     for index, item in enumerate(books):
@@ -859,6 +495,10 @@ def parse_douban_subject_html(
     html: str, fallback: dict[str, Any] | None = None
 ) -> dict[str, Any] | None:
     fallback = fallback or {}
+    fallback_raw_value = fallback.get("raw")
+    fallback_raw: dict[str, Any] = (
+        fallback_raw_value if isinstance(fallback_raw_value, dict) else {}
+    )
     json_ld = parse_json_ld_book(html) or {}
     info = parse_douban_info_block(html)
     author_value = json_ld.get("author")
@@ -888,22 +528,16 @@ def parse_douban_subject_html(
     description = first_string(parse_douban_intro(html), fallback.get("description"))
     pubdate = first_string(
         info.get("出版年"),
-        (fallback.get("raw") or {}).get("pubdate")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("pubdate"),
     )
     publisher = first_string(
         info.get("出版社"),
-        (fallback.get("raw") or {}).get("publisher")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("publisher"),
     )
     series_name = first_string(
         info.get("丛书"),
         fallback.get("seriesName"),
-        (fallback.get("raw") or {}).get("seriesName")
-        if isinstance(fallback.get("raw"), dict)
-        else None,
+        fallback_raw.get("seriesName"),
     )
     cover_url = first_url(meta_content(html, "og:image"), fallback.get("coverUrl"))
     isbn = first_string(
@@ -927,7 +561,7 @@ def parse_douban_subject_html(
         "coverUrl": cover_url,
         "confidence": float(fallback.get("confidence") or 0.78),
         "raw": {
-            **(fallback.get("raw") if isinstance(fallback.get("raw"), dict) else {}),
+            **fallback_raw,
             "id": candidate_id,
             "url": url,
             "isbn": isbn,
@@ -947,10 +581,13 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
         payload = json.loads(match.group(1))
     except json.JSONDecodeError:
         return []
-    items = (
-        payload.get("items")
-        if isinstance(payload, dict) and isinstance(payload.get("items"), list)
-        else []
+    items: list[Any] = cast(
+        list[Any],
+        (
+            payload.get("items")
+            if isinstance(payload, dict) and isinstance(payload.get("items"), list)
+            else []
+        ),
     )
     candidates: list[dict[str, Any]] = []
     for item in items:
@@ -996,7 +633,8 @@ def parse_douban_search_html(html: str, confidence: float) -> list[dict[str, Any
 
 
 def normalize_douban_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+    raw_value = candidate.get("raw")
+    raw: dict[str, Any] = raw_value if isinstance(raw_value, dict) else {}
     return {
         **candidate,
         "seriesName": first_string(
@@ -1082,10 +720,15 @@ def run_douban_crawler_provider(
 ) -> dict[str, Any]:
     base_url = douban_base_url(config)
     headers = douban_crawler_headers(config)
-    volume = next(iter(context["volumes"]), {})
+    volumes_value = context.get("volumes")
+    volumes: list[Any] = (
+        list(volumes_value) if isinstance(volumes_value, (list, tuple)) else []
+    )
+    volume_value: object = next(iter(volumes), {})
+    volume: dict[str, Any] = volume_value if isinstance(volume_value, dict) else {}
     isbn = first_string(volume.get("isbn"), volume.get("identifier"))
-    title = first_string(context["work"].get("title")) or ""
-    author = first_string(context["work"].get("author")) or ""
+    title = first_string(context["book"].get("title")) or ""
+    author = first_string(context["book"].get("author")) or ""
     query_text = query or isbn or " ".join(part for part in [title, author] if part)
     confidence = 0.9 if isbn else 0.8 if author else 0.7
     if not query_text:
@@ -1147,7 +790,7 @@ def run_douban_crawler_provider(
                 else None
             )
         # A failed optional detail fetch must not discard the valid search result.
-        except Exception:
+        except (OSError, ValueError, TypeError, KeyError):
             subject_candidate = None
         candidate = subject_candidate or selected
         if candidate:
@@ -1161,7 +804,7 @@ def run_douban_crawler_provider(
                 ],
             ]
     if not candidate:
-        message = (
+        message: str | None = (
             "豆瓣未找到标题完全匹配的图书"
             if match_title and candidates
             else "豆瓣未找到匹配图书"
@@ -1249,18 +892,21 @@ def douban_book_suggestions(payload: Any, confidence: float) -> list[dict[str, A
 
 def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
     raw = payload if isinstance(payload, dict) else {}
-    data = (
-        raw.get("data")
-        if isinstance(raw.get("data"), list)
-        else raw.get("list")
-        if isinstance(raw.get("list"), list)
-        else raw.get("results")
-        if isinstance(raw.get("results"), list)
-        else payload
-        if isinstance(payload, list)
-        else [raw]
-        if raw.get("name") or raw.get("name_cn") or raw.get("id")
-        else []
+    data: list[Any] = cast(
+        list[Any],
+        (
+            raw.get("data")
+            if isinstance(raw.get("data"), list)
+            else raw.get("list")
+            if isinstance(raw.get("list"), list)
+            else raw.get("results")
+            if isinstance(raw.get("results"), list)
+            else payload
+            if isinstance(payload, list)
+            else [raw]
+            if raw.get("name") or raw.get("name_cn") or raw.get("id")
+            else []
+        ),
     )
     candidates = []
     for index, item in enumerate(data):
@@ -1275,7 +921,8 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
             if isinstance(item.get("tags"), list)
             else []
         )
-        infobox = item.get("infobox") if isinstance(item.get("infobox"), list) else []
+        infobox_value = item.get("infobox")
+        infobox = infobox_value if isinstance(infobox_value, list) else []
         authors = []
         title_aliases = [
             *_metadata_title_strings(item.get("name")),
@@ -1294,7 +941,8 @@ def bangumi_candidates(payload: Any, confidence: float) -> list[dict[str, Any]]:
                 re.IGNORECASE,
             ):
                 title_aliases.extend(_metadata_title_strings(value))
-        images = item.get("images") if isinstance(item.get("images"), dict) else {}
+        images_value = item.get("images")
+        images = images_value if isinstance(images_value, dict) else {}
         candidates.append(
             {
                 "id": str(item.get("id") or item.get("url") or f"bangumi-{index}"),
@@ -1396,7 +1044,8 @@ def ai_suggestions_from_payload(payload: Any) -> list[dict[str, Any]]:
         if isinstance(content, str)
         else raw
     )
-    suggestions = parsed.get("suggestions") if isinstance(parsed, dict) else []
+    suggestions_value = parsed.get("suggestions") if isinstance(parsed, dict) else []
+    suggestions = suggestions_value if isinstance(suggestions_value, list) else []
     return [
         suggestion
         for item in suggestions
@@ -1485,7 +1134,7 @@ def run_bangumi_metadata_provider(
         headers["Authorization"] = f"Bearer {access_token}"
     title = (
         query
-        or first_string(context["work"].get("seriesName"), context["work"].get("title"))
+        or first_string(context["book"].get("seriesName"), context["book"].get("title"))
         or ""
     )
     if not title:
@@ -1520,7 +1169,7 @@ def run_bangumi_metadata_provider(
     )
     suggestions = bangumi_candidate_suggestions(subject, 0.82)
     if match_title and not subject:
-        message = "Bangumi 未找到标题完全匹配的条目"
+        message: str | None = "Bangumi 未找到标题完全匹配的条目"
     else:
         message = None if suggestions else "Bangumi 未找到匹配条目"
     return {
@@ -1598,10 +1247,7 @@ def external_metadata_cache_put(
     *,
     cache_ready: bool | None = None,
 ) -> None:
-    if (
-        not query_key
-        or not external_metadata_result_cacheable(result)
-    ):
+    if not query_key or not external_metadata_result_cacheable(result):
         return
     if cache_ready is None:
         cache_ready = metadata_cache.external_metadata_cache_ready(db)
@@ -1629,10 +1275,12 @@ def external_metadata_cache_put(
         now_ms=timestamp,
     )
     try:
-        with metadata_short_write_session(db) as writer:
-            with MetadataWriteTransaction(writer):
-                metadata_cache.write_prepared_cache_entry(writer, prepared)
-    except Exception as exc:
+        with (
+            metadata_short_write_session(db) as writer,
+            MetadataWriteTransaction(writer),
+        ):
+            metadata_cache.write_prepared_cache_entry(writer, prepared)
+    except SQLAlchemyError as exc:
         if not is_database_busy_error(exc):
             raise
         LOGGER.info(
@@ -1652,7 +1300,7 @@ def metadata_search_candidates(
     use_cache: bool = True,
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
-    search_text = query or first_string(context["work"].get("title")) or ""
+    search_text = query or first_string(context["book"].get("title")) or ""
     query_key = metadata_title_key(search_text)
     cache_eligible = source in {"bangumi", "douban", "ai"}
     cache_ready = (
@@ -1704,7 +1352,7 @@ def metadata_search_candidates(
             item["field"]: parse_json_value(item.get("suggestedValue"))
             for item in ai_result.get("suggestions") or []
         }
-        candidate = {
+        candidate: dict[str, Any] = {
             "id": "ai-suggestion",
             "source": "ai",
             "title": fields.get("title"),
@@ -1731,7 +1379,7 @@ def metadata_search_candidates(
             **result,
             "candidates": sort_candidates_for_title(
                 result.get("candidates") or [],
-                query or first_string(context["work"].get("title")),
+                query or first_string(context["book"].get("title")),
             ),
         }
     if cache_eligible and result.get("enabled"):
@@ -1743,180 +1391,3 @@ def metadata_search_candidates(
             cache_ready=cache_ready,
         )
     return result
-
-
-def add_suggestions_to_job(
-    db: Session, job_id: str, suggestions: list[dict[str, Any]]
-) -> int:
-    if not suggestions or not has_table(db, "MetadataSuggestion"):
-        return 0
-    existing = organize_suggestions.list_suggestion_dedupe_keys(db, job_id)
-    rows: list[dict[str, Any]] = []
-    stamp = now()
-    base_id = time_ns()
-    for suggestion in suggestions:
-        key = f"{suggestion.get('field')}:{suggestion.get('source')}:{suggestion.get('suggestedValue')}"
-        if key in existing:
-            continue
-        rows.append(
-            {
-                "id": f"py_{base_id}_{len(rows)}",
-                "job_id": job_id,
-                "field": str(suggestion.get("field") or ""),
-                "current_value": (
-                    None
-                    if suggestion.get("currentValue") is None
-                    else str(suggestion.get("currentValue"))
-                ),
-                "suggested_value": str(suggestion.get("suggestedValue")),
-                "source": str(suggestion.get("source") or ""),
-                "confidence": float(suggestion.get("confidence") or 0),
-                "reason": str(suggestion.get("reason") or ""),
-                "status": str(suggestion.get("status") or "PENDING"),
-                "created_at": stamp,
-                "updated_at": stamp,
-            }
-        )
-        existing.add(key)
-    prepared_rows = tuple(rows)
-    chunks = tuple(sqlite_parameter_chunks(prepared_rows, parameters_per_row=11))
-    if chunks:
-        insert_organize_suggestions_command(db, chunks)
-    return len(prepared_rows)
-
-
-def prepare_duplicate_candidate_rows(
-    db: Session, job: dict[str, Any], work: dict[str, Any]
-) -> tuple[dict[str, Any], ...]:
-    title_key = normalize_key(work.get("title"))
-    if len(title_key) < 4:
-        return ()
-    candidates = organize_duplicates.list_visible_works_except(db, str(work["id"]))
-    stamp = now()
-    base_id = time_ns()
-    matching = [
-        candidate
-        for candidate in candidates
-        if normalize_key(candidate.get("title")) == title_key
-    ]
-    return tuple(
-        {
-            "id": f"py_{base_id}_{index}",
-            "job_id": str(job["id"]),
-            "target_work_id": str(candidate["id"]),
-            "reasons": json_text(["title"]),
-            "confidence": 0.75,
-            "suggested_action": "MERGE_WORKS",
-            "status": "PENDING",
-            "created_at": stamp,
-            "updated_at": stamp,
-        }
-        for index, candidate in enumerate(matching)
-    )
-
-
-def refresh_duplicate_candidates(
-    db: Session, job: dict[str, Any], work: dict[str, Any]
-) -> int:
-    if not has_table(db, "DuplicateCandidate") or not has_table(db, "LibraryWork"):
-        return 0
-    rows = prepare_duplicate_candidate_rows(db, job, work)
-    chunks = tuple(sqlite_parameter_chunks(rows, parameters_per_row=9))
-    refresh_duplicate_candidates_command(
-        db, job_id=str(job["id"]), chunks=chunks
-    )
-    return len(rows)
-
-
-def bulk_apply_organize_jobs(
-    db: Session, job_ids: list[str], payload: dict[str, Any]
-) -> dict[str, Any]:
-    if not job_ids:
-        raise ValueError("请选择要批量处理的整理任务")
-    if len(job_ids) > 200:
-        raise ValueError("单次最多批量处理 200 个整理任务")
-    tags = [
-        str(tag).strip() for tag in payload.get("addTags") or [] if str(tag).strip()
-    ]
-    stamp = now()
-    high_confidence_only = bool(payload.get("highConfidenceOnly", True))
-    mark_organized = bool(payload.get("markOrganized"))
-    work_rows: list[dict[str, Any]] = []
-    job_rows: list[dict[str, Any]] = []
-    applied_suggestion_ids: list[str] = []
-    dismiss_job_ids: list[str] = []
-    applied = 0
-    jobs = 0
-    for job_id in dict.fromkeys(job_ids):
-        job = organize_review.get_job(db, job_id)
-        if not job:
-            continue
-        suggestions = selected_suggestions(db, job_id, None, high_confidence_only)
-        patch = work_patch_from_suggestions(db, suggestions)
-        work = (
-            organize_review.get_work(db, str(job.get("workId")))
-            if job.get("workId")
-            else None
-        )
-        if work and ("title" in patch or "author" in patch):
-            title = string_value(patch.get("title")) or string_value(work.get("title"))
-            author = (
-                string_value(patch.get("author"))
-                or string_value(work.get("author"))
-                or UNKNOWN_AUTHOR
-            )
-            patch.update(
-                {
-                    "title": title,
-                    "author": author,
-                    "normalizedTitle": normalize_identity_part(title),
-                    "normalizedAuthor": normalize_identity_part(author),
-                    "mergeKey": identity_merge_key(title, author),
-                }
-            )
-        if work and tags:
-            current = parse_json_value(work.get("tags"))
-            current_tags = current if isinstance(current, list) else []
-            patch["tags"] = json_text(
-                sorted(
-                    {
-                        *(str(item).strip() for item in current_tags if str(item).strip()),
-                        *tags,
-                    }
-                )
-            )
-        if mark_organized:
-            patch["organized"] = True
-            patch["organizeStatus"] = "APPLIED"
-            dismiss_job_ids.append(job_id)
-        if work and patch:
-            work_rows.append({"id": str(work["id"]), **patch, "updatedAt": stamp})
-        job_rows.append(
-            {
-                "id": job_id,
-                "status": "APPLIED" if mark_organized else job.get("status"),
-                "updatedAt": stamp,
-            }
-        )
-        applied_suggestion_ids.extend(str(item["id"]) for item in suggestions)
-        applied += len(suggestions)
-        jobs += 1
-    suggestion_id_chunks = tuple(
-        sqlite_parameter_chunks(tuple(applied_suggestion_ids), parameters_per_row=1)
-    )
-    dismiss_job_chunks = tuple(
-        sqlite_parameter_chunks(tuple(dismiss_job_ids), parameters_per_row=1)
-    )
-    bulk_apply_organize_jobs_command(
-        db,
-        work_rows=tuple(work_rows),
-        job_rows=tuple(job_rows),
-        suggestion_id_chunks=suggestion_id_chunks,
-        dismiss_job_chunks=dismiss_job_chunks,
-    )
-    return {
-        "matched": len(job_ids),
-        "jobs": jobs,
-        "applied": applied,
-        "tagsAdded": len(set(tags)),
-    }

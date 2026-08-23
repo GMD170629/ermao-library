@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from pydantic import Field
+
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
 from app.modules.auth.presentation.schemas import (
@@ -12,12 +14,11 @@ from app.modules.auth.presentation.schemas import (
     AuthUser,
     UserPreferences,
 )
-from pydantic import Field
 
 
 class AdminUser(AuthUser):
     locale: Literal["zh-CN", "en-US"]
-    monitor_folder_ids: list[str] = Field(alias="monitorFolderIds")
+    library_ids: list[str] = Field(alias="libraryIds")
     authorization: AuthorizationView
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")

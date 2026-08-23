@@ -7,16 +7,16 @@ import {
 } from '@shuku/reader-core';
 
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v4';
-export const READER_DB_SCHEMA_VERSION = 4;
+export const READER_DB_SCHEMA_VERSION = 5;
 export const READER_PROGRESS_DEBOUNCE_MS = 500;
 
-export type AudioProgressLocation = Readonly<{ kind: 'audio'; volumeId: string; fileId: string; chapterId: string | null; positionMs: number }>;
+export type AudioProgressLocation = Readonly<{ kind: 'audio'; resourceId: string; assetId: string; chapterId: string | null; positionMs: number }>;
 export type ReaderProgressLocation = ReaderLocation | AudioProgressLocation;
 
 export type ReaderPreferenceSnapshot = {
   key: string;
   userId: string;
-  workId: string;
+  bookId: string;
   schemaVersion: typeof READER_SCHEMA_VERSION;
   preferences: ReaderPreferences;
   updatedAt: number;
@@ -26,8 +26,8 @@ export type ExactProgressIdentity = Readonly<{
   serverIdentity: string;
   userId: string;
   clientId: string;
-  workId: string;
-  volumeId: string;
+  bookId: string;
+  resourceId: string;
 }>;
 
 export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
@@ -35,12 +35,8 @@ export type ExactProgressRecord = ExactProgressIdentity & Readonly<{
   schemaVersion: 1;
   locator: PublicationLocation;
   displayPercent: number | null;
-  /** Compatibility alias for non-Reader audio presentation only. */
-  percent?: number | null;
   revision: number;
   capturedAtEpochMillis: number;
-  /** Compatibility alias for the separate audio player. */
-  updatedAtEpochMillis?: number;
 }>;
 
 export type ReaderProgressConflict = Readonly<{
@@ -57,8 +53,8 @@ export type PendingProgressMutation = Readonly<{
   schemaVersion: 1;
   serverIdentity: string;
   userId: string;
-  workId: string;
-  volumeId: string;
+  bookId: string;
+  resourceId: string;
   clientId: string;
   mutationId: string;
   baseRevision: number;
@@ -70,8 +66,8 @@ export type PendingProgressMutation = Readonly<{
 export type ExactProgressSaveInput = Readonly<{
   serverIdentity: string;
   userId: string;
-  workId: string;
-  volumeId: string;
+  bookId: string;
+  resourceId: string;
   baseRevision: number;
   locator: PublicationLocation;
   displayPercent: number | null;
@@ -116,7 +112,7 @@ export type PendingVsServerDecision =
   | Readonly<{ kind: 'requires-choice'; pending: PendingProgressMutation; localExact: ExactProgressRecord; server: ReaderProgressSnapshot }>;
 
 export type ProgressUpload = Readonly<{
-  volumeId: string;
+  resourceId: string;
   request: ReaderProgressPut;
 }>;
 
@@ -137,7 +133,7 @@ export type ProgressQueryResult =
   | Readonly<{ kind: 'current'; snapshot: ReaderProgressSnapshot | null; etag: string | null }>;
 
 export type ProgressQueryTransport = (
-  volumeId: string,
+  resourceId: string,
   etag: string | null,
   signal: AbortSignal
 ) => Promise<ProgressQueryResult>;
@@ -155,21 +151,21 @@ function encodeKeyPart(value: string) {
   return `${value.length}:${value}`;
 }
 
-export function preferenceKey(userId: string, workId: string) {
-  return `${encodeURIComponent(userId)}::${encodeURIComponent(workId)}`;
+export function preferenceKey(userId: string, bookId: string) {
+  return `${encodeURIComponent(userId)}::${encodeURIComponent(bookId)}`;
 }
 
 export function exactProgressKey(identity: ExactProgressIdentity) {
-  return [identity.serverIdentity, identity.userId, identity.clientId, identity.workId, identity.volumeId]
+  return [identity.serverIdentity, identity.userId, identity.clientId, identity.bookId, identity.resourceId]
     .map(encodeKeyPart).join('|');
 }
 
-export function syncStateKey(identity: Pick<ExactProgressIdentity, 'serverIdentity' | 'userId' | 'clientId' | 'workId' | 'volumeId'>) {
-  return [identity.serverIdentity, identity.userId, identity.clientId, identity.workId, identity.volumeId]
+export function syncStateKey(identity: Pick<ExactProgressIdentity, 'serverIdentity' | 'userId' | 'clientId' | 'bookId' | 'resourceId'>) {
+  return [identity.serverIdentity, identity.userId, identity.clientId, identity.bookId, identity.resourceId]
     .map(encodeKeyPart).join('|');
 }
 
-/** Progress belongs to work + volume. */
+/** Progress belongs to a book and one readable resource. */
 export function progressLocationsMatch(expected: PublicationLocation, actual: PublicationLocation) {
   return comparePublicationLocations(expected, actual).precision === 'exact';
 }

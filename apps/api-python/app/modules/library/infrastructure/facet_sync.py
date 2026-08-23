@@ -2,26 +2,31 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
 
-from sqlalchemy import String, and_, column, delete, select, update, values
+from sqlalchemy import String, and_, column, delete, select, values
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.library import LibraryFacet, LibraryWork, LibraryWorkFacet
-from app.modules.library.application.facet_sync import (
-    PreparedWorkFacet,
-    WorkFacetProjection,
+from app.models import (
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
+    LibraryFacet,
 )
-from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION
+from app.modules.library.application.facet_sync import (
+    BookFacetProjection,
+    PreparedBookFacet,
+)
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedWorkFacetWrite:
+class PreparedBookFacetWrite:
     statements: tuple[Executable, ...]
 
 
@@ -30,47 +35,65 @@ def _facet_id(kind: str, normalized_name: str) -> str:
     return f"facet_{digest}"
 
 
-def load_work_facet_projections(
-    db: Session, work_ids: tuple[str, ...]
-) -> tuple[WorkFacetProjection, ...]:
-    if not work_ids:
+def load_book_facet_projections(
+    db: Session, book_ids: tuple[str, ...]
+) -> tuple[BookFacetProjection, ...]:
+    if not book_ids:
         return ()
+    book_rows = db.execute(
+        select(
+            LibraryBook.id,
+            LibraryBookMetadata.author,
+            LibraryBookMetadata.series_name,
+        )
+        .select_from(LibraryBook)
+        .outerjoin(
+            LibraryBookMetadata,
+            LibraryBookMetadata.book_id == LibraryBook.id,
+        )
+        .where(LibraryBook.id.in_(book_ids))
+    ).all()
+    tag_rows = db.execute(
+        select(LibraryBookFacet.book_id, LibraryFacet.name)
+        .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+        .where(
+            LibraryBookFacet.book_id.in_(book_ids),
+            LibraryFacet.kind == "TAG",
+        )
+        .order_by(LibraryBookFacet.book_id.asc(), LibraryBookFacet.sort_order.asc())
+    ).all()
+    tags_by_book: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
+    for row in tag_rows:
+        tags_by_book.setdefault(str(row.book_id), []).append(str(row.name))
     return tuple(
-        WorkFacetProjection(
-            work_id=str(row.id),
+        BookFacetProjection(
+            book_id=str(row.id),
             author=str(row.author) if row.author is not None else None,
-            tags_source=str(row.tags) if row.tags is not None else "[]",
-            series_name=(
-                str(row.series_name) if row.series_name is not None else None
+            tags_source=json.dumps(
+                tags_by_book.get(str(row.id), []), ensure_ascii=False
             ),
+            series_name=(str(row.series_name) if row.series_name is not None else None),
         )
-        for row in db.execute(
-            select(
-                LibraryWork.id,
-                LibraryWork.author,
-                LibraryWork.tags,
-                LibraryWork.series_name,
-            ).where(LibraryWork.id.in_(work_ids))
-        )
+        for row in book_rows
     )
 
 
-def prepare_work_facet_write(
-    prepared_works: tuple[PreparedWorkFacet, ...],
+def prepare_book_facet_write(
+    prepared_books: tuple[PreparedBookFacet, ...],
     *,
     now: datetime,
-) -> PreparedWorkFacetWrite:
+) -> PreparedBookFacetWrite:
     """Construct every bind row and typed statement before the first DML."""
 
-    unique_works = tuple(
-        {work.work_id: work for work in prepared_works if work.work_id}.values()
+    unique_books = tuple(
+        {book.book_id: book for book in prepared_books if book.book_id}.values()
     )
-    if not unique_works:
-        return PreparedWorkFacetWrite(())
+    if not unique_books:
+        return PreparedBookFacetWrite(())
 
     facets: dict[tuple[str, str], tuple[str, str]] = {}
-    for work in unique_works:
-        for facet in work.facets:
+    for book in unique_books:
+        for facet in book.facets:
             key = (facet.kind, facet.normalized_name)
             facets.setdefault(key, (facet.name, _facet_id(*key)))
 
@@ -95,20 +118,20 @@ def prepare_work_facet_write(
         for chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7)
     )
 
-    work_ids = tuple(work.work_id for work in unique_works)
-    delete_statement = delete(LibraryWorkFacet).where(
-        LibraryWorkFacet.work_id.in_(work_ids)
+    book_ids = tuple(book.book_id for book in unique_books)
+    delete_statement = delete(LibraryBookFacet).where(
+        LibraryBookFacet.book_id.in_(book_ids)
     )
     link_rows = tuple(
         (
-            work.work_id,
+            book.book_id,
             facet.kind,
             facet.normalized_name,
             facet.sort_order,
             now,
         )
-        for work in unique_works
-        for facet in work.facets
+        for book in unique_books
+        for facet in book.facets
     )
     link_statements: list[Executable] = []
     for index, chunk in enumerate(
@@ -116,62 +139,51 @@ def prepare_work_facet_write(
     ):
         candidates = (
             values(
-                column("work_id", String()),
+                column("book_id", String()),
                 column("kind", String()),
                 column("normalized_name", String()),
                 column("sort_order"),
-                column("created_at", LibraryWorkFacet.__table__.c.createdAt.type),
+                column("created_at", LibraryBookFacet.__table__.c.createdAt.type),
                 name=f"synchronous_facet_links_{index}",
             )
             .data(list(chunk))
             .cte()
         )
         link_statements.append(
-            sqlite_insert(LibraryWorkFacet)
+            sqlite_insert(LibraryBookFacet)
             .from_select(
                 [
-                    LibraryWorkFacet.facet_id,
-                    LibraryWorkFacet.work_id,
-                    LibraryWorkFacet.sort_order,
-                    LibraryWorkFacet.created_at,
+                    LibraryBookFacet.facet_id,
+                    LibraryBookFacet.book_id,
+                    LibraryBookFacet.sort_order,
+                    LibraryBookFacet.created_at,
                 ],
                 select(
                     LibraryFacet.id,
-                    candidates.c.work_id,
+                    candidates.c.book_id,
                     candidates.c.sort_order,
                     candidates.c.created_at,
                 ).join(
                     LibraryFacet,
                     and_(
                         LibraryFacet.kind == candidates.c.kind,
-                        LibraryFacet.normalized_name
-                        == candidates.c.normalized_name,
+                        LibraryFacet.normalized_name == candidates.c.normalized_name,
                     ),
                 ),
             )
             .on_conflict_do_nothing(
                 index_elements=[
-                    LibraryWorkFacet.facet_id,
-                    LibraryWorkFacet.work_id,
+                    LibraryBookFacet.facet_id,
+                    LibraryBookFacet.book_id,
                 ]
             )
         )
 
-    version_statement = (
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(work_ids))
-        .values(
-            facet_index_version=CURRENT_FACET_INDEX_VERSION,
-            updated_at=LibraryWork.updated_at,
-        )
-    )
-    return PreparedWorkFacetWrite(
-        (*facet_statements, delete_statement, *link_statements, version_statement)
+    return PreparedBookFacetWrite(
+        (*facet_statements, delete_statement, *link_statements)
     )
 
 
-def execute_work_facet_write(
-    db: Session, prepared: PreparedWorkFacetWrite
-) -> None:
+def execute_book_facet_write(db: Session, prepared: PreparedBookFacetWrite) -> None:
     for statement in prepared.statements:
         db.execute(statement)

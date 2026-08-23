@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.modules.system.infrastructure.settings import get_setting
 
-
 SUPPORTED_LOCALES: Final[tuple[str, ...]] = ("zh-CN", "en-US")
 DEFAULT_LOCALE: Final[str] = "zh-CN"
 
 
-def normalize_locale(value: object, *, fallback: str | None = DEFAULT_LOCALE) -> str | None:
+def normalize_locale(
+    value: object, *, fallback: str | None = DEFAULT_LOCALE
+) -> str | None:
     if isinstance(value, str):
         candidate = value.strip()
         if candidate in SUPPORTED_LOCALES:

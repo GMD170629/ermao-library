@@ -87,7 +87,7 @@ struct CoverProgressView: View {
 }
 
 struct WorkGrid: View {
-    let works: [WorkCard]
+    let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
     let cache: LibraryCacheStore
@@ -119,7 +119,7 @@ struct WorkGrid: View {
                             .appTextStyle(.label)
                             .lineLimit(1)
                             .foregroundStyle(theme.textPrimary)
-                        Text(work.author)
+                        Text(work.author ?? "—")
                             .appTextStyle(.caption)
                             .lineLimit(1)
                             .foregroundStyle(theme.textSecondary)
@@ -137,22 +137,22 @@ struct WorkGrid: View {
         }
     }
 
-    private func accessibilityLabel(for work: WorkCard) -> String {
+    private func accessibilityLabel(for work: BookCard) -> String {
         if let progress = work.progress, progress > 0 {
             return String(
-                format: String(localized: "library.work.accessibility.progress"),
+                format: String(localized: "library.book.accessibility.progress"),
                 locale: .current,
                 work.title,
-                work.author,
+                work.author ?? "—",
                 Int(progress)
             )
         }
-        return "\(work.title), \(work.author)"
+        return "\(work.title), \(work.author ?? "—")"
     }
 }
 
 struct WorkList: View {
-    let works: [WorkCard]
+    let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
     let cache: LibraryCacheStore
@@ -176,7 +176,7 @@ struct WorkList: View {
                         .frame(width: 56)
                         VStack(alignment: .leading, spacing: .spaceHalf) {
                             Text(work.title).appTextStyle(.headline).lineLimit(2)
-                            Text(work.author)
+                            Text(work.author ?? "—")
                                 .appTextStyle(.label)
                                 .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)

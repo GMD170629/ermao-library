@@ -69,60 +69,60 @@ class DownloadActionsViewModel(
         context.namespace.userId,
         context.namespace.authorizationVersion,
     )
-    private val mutableRecordsByVolume = MutableStateFlow<Map<String, AndroidDownloadRecord>>(emptyMap())
-    val recordsByVolume: StateFlow<Map<String, AndroidDownloadRecord>> = mutableRecordsByVolume.asStateFlow()
-    private val mutableFailureByVolume = MutableStateFlow<Map<String, String>>(emptyMap())
-    val failureByVolume: StateFlow<Map<String, String>> = mutableFailureByVolume.asStateFlow()
+    private val mutableRecordsByResource = MutableStateFlow<Map<String, AndroidDownloadRecord>>(emptyMap())
+    val recordsByResource: StateFlow<Map<String, AndroidDownloadRecord>> = mutableRecordsByResource.asStateFlow()
+    private val mutableFailureByResource = MutableStateFlow<Map<String, String>>(emptyMap())
+    val failureByResource: StateFlow<Map<String, String>> = mutableFailureByResource.asStateFlow()
     private val activeTransfers = mutableMapOf<String, Job>()
     private val activeReaderChecks = mutableMapOf<String, Job>()
 
     init {
         viewModelScope.launch {
             androidCatalog.observe(namespace).collect { records ->
-                mutableRecordsByVolume.value = records
-                    .groupBy(AndroidDownloadRecord::volumeId)
-                    .mapValues { (_, versions) -> versions.maxBy(AndroidDownloadRecord::updatedAtEpochMillis) }
+                mutableRecordsByResource.value = records
+                    .groupBy(AndroidDownloadRecord::resourceId)
+                    .mapValues { (_, assets) -> assets.maxBy(AndroidDownloadRecord::updatedAtEpochMillis) }
             }
         }
         viewModelScope.launch { recoverInterruptedTransfers() }
     }
 
-    fun requestDownload(volumeId: String) {
-        if (volumeId.isBlank() || activeTransfers[volumeId]?.isActive == true) return
-        mutableFailureByVolume.value -= volumeId
+    fun requestDownload(resourceId: String) {
+        if (resourceId.isBlank() || activeTransfers[resourceId]?.isActive == true) return
+        mutableFailureByResource.value -= resourceId
         val job = viewModelScope.launch {
-            val descriptor = when (val bootstrap = gateway.load(context, volumeId)) {
+            val descriptor = when (val bootstrap = gateway.load(context, resourceId)) {
                 is DownloadBootstrapSuccess -> bootstrap.bootstrap.descriptor
                 is DownloadBootstrapFailure -> {
-                    saveBootstrapFailure(volumeId, bootstrap.error.code)
+                    saveBootstrapFailure(resourceId, bootstrap.error.code)
                     return@launch
                 }
             }
-            transfer(volumeId, descriptor)
+            transfer(resourceId, descriptor)
         }
-        activeTransfers[volumeId] = job
-        job.invokeOnCompletion { activeTransfers.remove(volumeId, job) }
+        activeTransfers[resourceId] = job
+        job.invokeOnCompletion { activeTransfers.remove(resourceId, job) }
     }
 
     fun requestReaderAccess(
-        volumeId: String,
+        resourceId: String,
         isOnline: Boolean = true,
         onOutcome: (AndroidReaderAccessOutcome) -> Unit,
     ) {
-        if (volumeId.isBlank() || activeReaderChecks[volumeId]?.isActive == true) return
-        mutableFailureByVolume.value -= volumeId
+        if (resourceId.isBlank() || activeReaderChecks[resourceId]?.isActive == true) return
+        mutableFailureByResource.value -= resourceId
         val job = viewModelScope.launch {
             sharedCatalog.listArtifacts(context.namespace)
-                .filter { it.identity.volumeId == volumeId }
+                .filter { it.identity.resourceId == resourceId }
                 .maxByOrNull { it.completedAtEpochMillis }
                 ?.let { artifact ->
                     onOutcome(artifact.toReaderAccessOutcome())
                     return@launch
                 }
-            val descriptor = when (val bootstrap = gateway.load(context, volumeId)) {
+            val descriptor = when (val bootstrap = gateway.load(context, resourceId)) {
                 is DownloadBootstrapSuccess -> bootstrap.bootstrap.descriptor
                 is DownloadBootstrapFailure -> {
-                    saveBootstrapFailure(volumeId, bootstrap.error.code)
+                    saveBootstrapFailure(resourceId, bootstrap.error.code)
                     onOutcome(AndroidReaderAccessOutcome.Unavailable(bootstrap.error.code))
                     return@launch
                 }
@@ -130,7 +130,7 @@ class DownloadActionsViewModel(
             when (val decision = runtime.readerAccess(
                 ReaderAccessRequest(
                     namespace = context.namespace,
-                    volumeId = descriptor.identity.volumeId,
+                    resourceId = descriptor.identity.resourceId,
                     readerType = descriptor.readerType,
                     isOnline = isOnline,
                 ),
@@ -147,8 +147,8 @@ class DownloadActionsViewModel(
                 }
             }
         }
-        activeReaderChecks[volumeId] = job
-        job.invokeOnCompletion { activeReaderChecks.remove(volumeId, job) }
+        activeReaderChecks[resourceId] = job
+        job.invokeOnCompletion { activeReaderChecks.remove(resourceId, job) }
     }
 
     private fun CompletedDownloadArtifact.toReaderAccessOutcome() = AndroidReaderAccessOutcome.LocalArtifact(
@@ -158,7 +158,7 @@ class DownloadActionsViewModel(
         expectedBytes = verifiedBytes,
     )
 
-    private suspend fun transfer(volumeId: String, descriptor: DownloadDescriptor) {
+    private suspend fun transfer(resourceId: String, descriptor: DownloadDescriptor) {
         var task: DownloadTask? = null
         var progressJob: Job? = null
         var progressUpdates: Channel<Long>? = null
@@ -241,13 +241,13 @@ class DownloadActionsViewModel(
                         }
                     }
                 } else {
-                    saveBootstrapFailure(volumeId, "DOWNLOAD_FAILED")
+                    saveBootstrapFailure(resourceId, "DOWNLOAD_FAILED")
                 }
             }
     }
 
-    fun cancelDownload(volumeId: String) {
-        activeTransfers[volumeId]?.cancel()
+    fun cancelDownload(resourceId: String) {
+        activeTransfers[resourceId]?.cancel()
     }
 
     fun cancelAll() {
@@ -283,8 +283,8 @@ class DownloadActionsViewModel(
             }
     }
 
-    private suspend fun saveBootstrapFailure(volumeId: String, code: String) {
-        mutableFailureByVolume.value += volumeId to code
+    private suspend fun saveBootstrapFailure(resourceId: String, code: String) {
+        mutableFailureByResource.value += resourceId to code
     }
 
     companion object {

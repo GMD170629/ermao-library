@@ -18,38 +18,38 @@ class FakeBookshelfItemQueries(BookshelfItemQueryPort):
         self,
         *,
         context: AuthorizationContext,
-        work_ids: tuple[str, ...],
+        book_ids: tuple[str, ...],
     ) -> tuple[BookshelfItemSummary, ...]:
-        self.received_ids = work_ids
+        self.received_ids = book_ids
         return tuple(
             BookshelfItemSummary(
-                id=work_id,
-                title=work_id,
+                id=book_id,
+                title=book_id,
                 author="Author",
                 cover_path=None,
                 updated_at=datetime(2026, 8, 10, tzinfo=UTC),
                 available_media_kinds=("EBOOK",),
                 progress=25,
             )
-            for work_id in work_ids
+            for book_id in book_ids
         )
 
 
-def test_list_bookshelf_items_normalizes_ids_without_reordering() -> None:
+def test_list_bookshelf_items_normalizes_book_ids_without_reordering() -> None:
     queries = FakeBookshelfItemQueries()
     context = AuthorizationContext(
         user_id="user-1",
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
 
     result = ListBookshelfItems(queries).execute(
         context=context,
-        work_ids=(" work-b ", "work-a", "work-b", ""),
+        book_ids=(" book-b ", "book-a", "book-b", ""),
     )
 
-    assert queries.received_ids == ("work-b", "work-a")
-    assert [item.id for item in result] == ["work-b", "work-a"]
+    assert queries.received_ids == ("book-b", "book-a")
+    assert [item.id for item in result] == ["book-b", "book-a"]

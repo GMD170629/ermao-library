@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict, cast
 
 from app.core.time import to_timestamp_ms
 
@@ -79,6 +79,6 @@ def normalize_health_run_snapshot(snapshot: dict[str, Any]) -> HealthRunSnapshot
         item = dict(raw_item)
         item["startedAt"] = to_timestamp_ms(item.get("startedAt"))
         item["finishedAt"] = to_timestamp_ms(item.get("finishedAt"))
-        normalized_items.append(item)
+        normalized_items.append(cast(HealthRunItem, item))
     normalized["items"] = normalized_items
-    return normalized
+    return cast(HealthRunSnapshot, normalized)

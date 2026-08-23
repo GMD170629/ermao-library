@@ -160,7 +160,7 @@ def parse_event_date_bounds(
 def dashboard_system_status_payload(
     *,
     health: dict[str, Any],
-    enabled_monitor_folders: list[dict[str, Any]],
+    enabled_libraries: list[dict[str, Any]],
     current_import_task: Any,
     latest_import_task: Any,
     failed_count: int,
@@ -169,16 +169,16 @@ def dashboard_system_status_payload(
     return {
         "database": checks.get("database", {"status": "unknown", "message": "待检测"}),
         "worker": (
-            {"status": "ok", "message": "正在监听监控文件夹"}
-            if enabled_monitor_folders
-            else {"status": "unknown", "message": "未启用监控文件夹"}
+            {"status": "ok", "message": "正在监听书库"}
+            if enabled_libraries
+            else {"status": "unknown", "message": "未启用书库"}
         ),
-        "enabledMonitorFolders": enabled_monitor_folders,
+        "enabledLibraries": enabled_libraries,
         "currentImportTask": current_import_task,
         "latestImportTask": latest_import_task,
         "errorFileCount": failed_count,
-        "monitorRootReadable": checks.get(
-            "monitorRootReadable",
+        "libraryRootsReadable": checks.get(
+            "libraryRootsReadable",
             {"status": "unknown", "message": "待检测"},
         ),
         "storageWritable": checks.get(

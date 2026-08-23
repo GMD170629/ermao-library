@@ -1,4 +1,4 @@
-"""Explicit application DTOs for the volume-first reader."""
+"""Explicit application DTOs for the resource-first reader."""
 
 from __future__ import annotations
 
@@ -15,32 +15,26 @@ ExactReaderLocationKind = Literal["reflowable", "comic", "pdf", "audio"]
 class ReaderAccessScope:
     is_admin: bool
     can_view_manual_imports: bool
-    monitor_folder_ids: tuple[str, ...]
+    library_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderWorkDto:
+class ReaderBookDto:
     id: str
     title: str
     author: str | None
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderMediaVersionDto:
+class ReaderResourceDto:
     id: str
-    work_id: str
-    media_kind: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReaderVolumeDto:
-    id: str
-    media_version_id: str
+    book_id: str
+    source_node_id: str
     title: str
-    volume_index: float | None
-    sort_order: int
+    media_kind: str
     format: str
-    derived_from_volume_id: str | None
+    resource_index: float | None
+    sort_order: int
     page_count: int | None
     chapter_count: int | None
     duration_ms: int | None
@@ -49,10 +43,11 @@ class ReaderVolumeDto:
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderFileDto:
+class ReaderAssetDto:
     id: str
-    volume_id: str
-    kind: str
+    resource_id: str
+    source_node_id: str
+    role: str
     mime_type: str
     size_bytes: int
     duration_ms: int | None
@@ -64,10 +59,10 @@ class ReaderFileDto:
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderUnitDto:
+class ReaderNavigationUnitDto:
     id: str
-    volume_id: str
-    file_id: str | None
+    resource_id: str
+    asset_id: str | None
     unit_type: str
     title: str
     href: str
@@ -111,7 +106,7 @@ class ReaderComicExactLocationDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderAudioExactLocationDto:
-    file_id: str
+    asset_id: str
     chapter_id: str | None
     position_millis: int
     engine_locator: ReaderEngineLocatorDto | None = None
@@ -129,7 +124,7 @@ ReaderExactLocationDto = (
 class ReaderProgressDto:
     id: str
     user_id: str
-    volume_id: str
+    resource_id: str
     reader_type: str
     percent: float
     location_json: str | None
@@ -146,7 +141,7 @@ class ReaderProgressDto:
 
 @dataclass(frozen=True, slots=True)
 class ReaderExternalProgressDto:
-    volume_id: str
+    resource_id: str
     progression: float
     modified_at: datetime
     device_id: str
@@ -165,18 +160,16 @@ class ReaderBookmarkDto:
 
 
 @dataclass(frozen=True, slots=True)
-class ReaderVolumeContextDto:
-    work: ReaderWorkDto
-    media_version: ReaderMediaVersionDto
-    volume: ReaderVolumeDto
+class ReaderResourceContextDto:
+    book: ReaderBookDto
+    resource: ReaderResourceDto
 
 
 @dataclass(frozen=True, slots=True)
 class ReaderBootstrapDto:
-    context: ReaderVolumeContextDto
-    available_volumes: tuple[ReaderVolumeDto, ...]
-    files: tuple[ReaderFileDto, ...]
-    units: tuple[ReaderUnitDto, ...]
-    progress_by_volume_id: dict[str, ReaderProgressDto]
+    context: ReaderResourceContextDto
+    available_resources: tuple[ReaderResourceDto, ...]
+    assets: tuple[ReaderAssetDto, ...]
+    units: tuple[ReaderNavigationUnitDto, ...]
+    progress_by_resource_id: dict[str, ReaderProgressDto]
     resume_location_json: str | None
-    media_completed: bool

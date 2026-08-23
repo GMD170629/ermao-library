@@ -25,15 +25,13 @@ LOGGER = logging.getLogger(__name__)
 def load_metadata_writeback_projection(
     db: Session,
     *,
-    work_id: str,
-    media_version_id: str | None = None,
-    volume_id: str | None = None,
+    book_id: str,
+    resource_id: str | None = None,
 ) -> MetadataWritebackProjection:
     return writeback_queue.load_metadata_writeback_projection(
         db,
-        work_id=work_id,
-        media_version_id=media_version_id,
-        volume_id=volume_id,
+        book_id=book_id,
+        resource_id=resource_id,
     )
 
 
@@ -44,22 +42,26 @@ def persist_metadata_writeback_intents(
     return writeback_queue.enqueue_prepared_writeback_intents(db, intents)
 
 
+def metadata_writeback_enabled(db: Session) -> bool:
+    """Return whether new metadata sidecar tasks may be scheduled."""
+
+    return writeback_queue.write_metadata_to_files_enabled(db)
+
+
 def enqueue_metadata_writeback(
     db: Session,
     *,
-    work_id: str,
-    media_version_id: str,
+    book_id: str,
+    resource_id: str,
     source: str,
     lookup_task_id: str | None = None,
-    volume_id: str | None = None,
 ) -> str | None:
     result = writeback_queue.enqueue_writeback(
         db,
-        work_id=work_id,
-        media_version_id=media_version_id,
+        book_id=book_id,
+        resource_id=resource_id,
         source=source,
         lookup_task_id=lookup_task_id,
-        volume_id=volume_id,
         max_pending_targets=get_settings().metadata_opf_queue_max_pending,
     )
     return result.operation_id
@@ -68,11 +70,10 @@ def enqueue_metadata_writeback(
 def schedule_work_metadata_writebacks(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     source: str,
     lookup_task_id: str | None = None,
-    media_version_id: str | None = None,
-    volume_id: str | None = None,
+    resource_id: str | None = None,
     settings: Settings | None = None,
 ) -> tuple[str, ...]:
     """Prepare immutable projections, then persist all queue intents together."""
@@ -82,15 +83,14 @@ def schedule_work_metadata_writebacks(
     del settings
     projection = writeback_queue.load_metadata_writeback_projection(
         db,
-        work_id=work_id,
-        media_version_id=media_version_id,
-        volume_id=volume_id,
+        book_id=book_id,
+        resource_id=resource_id,
     )
     intents = prepare_metadata_writeback_intents(
         projection,
         source=source,
         lookup_task_id=lookup_task_id,
-        volume_id=volume_id,
+        resource_id=resource_id,
     )
     return writeback_queue.enqueue_prepared_writeback_intents(db, intents)
 
@@ -105,8 +105,8 @@ def metadata_writeback_view_for_lookup_task(
     return writeback_queue.operation_view_for_lookup_task(db, lookup_task_id)
 
 
-def metadata_writeback_work_id(db: Session, operation_id: str) -> str | None:
-    return writeback_queue.operation_work_id(db, operation_id)
+def metadata_writeback_book_id(db: Session, operation_id: str) -> str | None:
+    return writeback_queue.operation_book_id(db, operation_id)
 
 
 def metadata_opf_queue_status(
@@ -272,7 +272,7 @@ def process_next_metadata_writeback(
     db: Session,
     settings: Settings,
     *,
-    owner_id: str = "metadata-writeback-compat",
+    owner_id: str = "metadata-writeback-worker",
     prefer_preparation: bool = True,
 ) -> bool:
     if prefer_preparation:

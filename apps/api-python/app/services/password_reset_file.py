@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from html import escape
 import os
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
 from app.core.config import Settings
 from app.core.i18n import DEFAULT_LOCALE, normalize_locale
-
 
 RESET_FILE_NAME = "reset-password.html"
 
@@ -20,7 +19,9 @@ def password_reset_file_path(settings: Settings) -> Path:
     return settings.resolved_storage_root / "password-reset" / RESET_FILE_NAME
 
 
-def write_password_reset_file(settings: Settings, reset_url: str, locale: str = DEFAULT_LOCALE) -> Path:
+def write_password_reset_file(
+    settings: Settings, reset_url: str, locale: str = DEFAULT_LOCALE
+) -> Path:
     target = password_reset_file_path(settings)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.tmp")

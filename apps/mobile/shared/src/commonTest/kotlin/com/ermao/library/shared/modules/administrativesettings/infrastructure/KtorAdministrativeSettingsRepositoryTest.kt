@@ -68,7 +68,7 @@ class KtorAdministrativeSettingsRepositoryTest {
                     ManagedUserRole.Member,
                     canManageSystem = true,
                     canViewManualImports = true,
-                    monitorFolderIds = listOf("folder-1"),
+                    libraryIds = listOf("folder-1"),
                     locale = ManagedLocale.EnUs,
                 ),
             ),
@@ -91,17 +91,59 @@ class KtorAdministrativeSettingsRepositoryTest {
         )
         assertEquals("""{"email":"reader@kindle.com"}""", harness.requests[1].body)
         assertTrue(harness.requests[3].body.contains("\"clearSmtpPassword\":false"))
-        assertTrue(harness.requests[5].body.contains("\"monitorFolderIds\":[\"folder-1\"]"))
+        assertTrue(harness.requests[5].body.contains("\"libraryIds\":[\"folder-1\"]"))
         assertEquals("""{"password":"next-password"}""", harness.requests[6].body)
         assertEquals("""{"confirmation":"reader@example.com"}""", harness.requests[7].body)
     }
 
     @Test
+    fun kindleTaskUsesBookResourceAssetContract() = runBlocking {
+        val harness = Harness(Response(201, KINDLE_TASK_PAYLOAD))
+
+        val result = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.createKindleTask(context(), "asset-1", "book-1"),
+        ).value
+        val task = assertIs<KindleTask>(result)
+
+        assertEquals("book-1", task.bookId)
+        assertEquals("resource-1", task.resourceId)
+        assertEquals("asset-1", task.assetId)
+        assertEquals(HttpMethod.Post, harness.requests.single().method)
+        assertEquals("/base/api/kindle-send-tasks", harness.requests.single().path)
+        assertEquals("""{"assetId":"asset-1","bookId":"book-1"}""", harness.requests.single().body)
+    }
+
+    @Test
+    fun removedImportAndOperationSurfacesAreExplicitlyUnavailable() = runBlocking {
+        val harness = Harness()
+
+        val unavailableResults = listOf(
+            harness.repository.listImportTasks(context(), ImportTaskFilter()),
+            harness.repository.listImportTaskLogs(context(), "task-1"),
+            harness.repository.retryImportTask(context(), "task-1"),
+            harness.repository.deleteImportTask(context(), "task-1"),
+            harness.repository.clearCompletedImportTasks(context()),
+            harness.repository.clearImportQueue(context()),
+            harness.repository.rescanImportFolders(context()),
+            harness.repository.scanDirectory(context(), "/books"),
+            harness.repository.listImportScanJobs(context(), null),
+            harness.repository.loadImportScanJob(context(), "scan-1"),
+            harness.repository.cancelImportScanJob(context(), "scan-1"),
+            harness.repository.listLibraryOperations(context()),
+        )
+
+        unavailableResults.forEach { result ->
+            val failure = assertIs<AdministrativeSettingsFailure>(result)
+            assertEquals(AdministrativeSettingsErrorKind.Unavailable, failure.error.kind)
+        }
+        assertTrue(harness.requests.isEmpty())
+    }
+
+    @Test
     fun nativeSystemOperationsDoNotExposeOrUseWebPages() = runBlocking {
         val harness = Harness(
-            Response(200, MONITOR_FOLDERS),
+            Response(200, LIBRARIES),
             Response(200, DIRECTORY),
-            Response(200, IMPORT_TASKS),
             Response(200, ORGANIZE_POLICY),
             Response(200, OPDS),
             Response(201, BACKUP_PAYLOAD),
@@ -111,9 +153,8 @@ class KtorAdministrativeSettingsRepositoryTest {
             Response(200, LOG_SETTINGS),
         )
 
-        assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadMonitorFolders(context()))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadLibraries(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadDirectory(context(), "/books"))
-        assertIs<AdministrativeSettingsContent<*>>(harness.repository.listImportTasks(context(), ImportTaskFilter()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadOrganizePolicy(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadOpdsSettings(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.createBackup(context()))
@@ -125,9 +166,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         val paths = harness.requests.map(CapturedRequest::path)
         assertEquals(
             listOf(
-                "/base/api/monitor-folders",
-                "/base/api/monitor-folders/tree",
-                "/base/api/import-tasks",
+                "/base/api/libraries",
+                "/base/api/libraries/tree",
                 "/base/api/organize/policy",
                 "/base/api/system-settings/opds",
                 "/base/api/backups",
@@ -145,14 +185,14 @@ class KtorAdministrativeSettingsRepositoryTest {
     @Test
     fun approvedReadSurfacesUseTheRealDetailAndHistoryEndpoints() = runBlocking {
         val harness = Harness(
-            Response(200, IMPORT_LOGS),
+            Response(200, IMPORT_TASK_DETAIL),
             Response(200, PENDING_ORGANIZE),
             Response(200, ORGANIZE_RUNS),
             Response(200, PROVIDER_PAYLOAD),
             Response(200, BACKUP_PAYLOAD),
         )
 
-        assertIs<AdministrativeSettingsContent<*>>(harness.repository.listImportTaskLogs(context(), "task-1", 2, 25))
+        assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadImportTask(context(), "task-1"))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadPendingOrganizeJobs(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.listOrganizeRuns(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadMetadataProvider(context(), "provider-1"))
@@ -160,7 +200,7 @@ class KtorAdministrativeSettingsRepositoryTest {
 
         assertEquals(
             listOf(
-                "/base/api/import-tasks/task-1/logs",
+                "/base/api/library-import-tasks/task-1",
                 "/base/api/organize/pending",
                 "/base/api/organize/runs",
                 "/base/api/metadata/providers/provider-1",
@@ -168,28 +208,40 @@ class KtorAdministrativeSettingsRepositoryTest {
             ),
             harness.requests.map(CapturedRequest::path),
         )
-        assertEquals("2", harness.requests.first().query["page"])
-        assertEquals("25", harness.requests.first().query["pageSize"])
+        assertTrue(harness.requests.first().query.isEmpty())
+    }
+
+    @Test
+    fun organizeListParsesTheBookProjectionWithoutDetailOnlyFields() = runBlocking {
+        val harness = Harness(Response(200, ORGANIZE_JOBS))
+
+        val page = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.listOrganizeJobs(context(), OrganizeJobFilter()),
+        ).value
+        val jobs = assertIs<OrganizeJobPage>(page).jobs
+
+        assertEquals("book-1", jobs.single().book.id)
+        assertEquals(null, jobs.single().resourceId)
+        assertEquals(HttpMethod.Get, harness.requests.single().method)
+        assertEquals("/base/api/organize/jobs", harness.requests.single().path)
     }
 
     @Test
     fun updateAndDeleteBodiesMatchTheWebContracts() = runBlocking {
         val harness = Harness(
-            Response(200, MONITOR_FOLDER_PAYLOAD),
-            Response(200, IMPORT_TASK_DELETED),
+            Response(200, LIBRARY_PAYLOAD),
             Response(200, BACKUP_DELETED),
         )
 
         assertIs<AdministrativeSettingsContent<*>>(
-            harness.repository.updateMonitorFolder(
+            harness.repository.updateLibrary(
                 context(),
                 "folder-1",
-                MonitorFolderDraft(
+                LibraryDraft(
                     rootPath = "/books",
                     name = "Books",
-                    shelfId = null,
+                    organizationMode = LibraryOrganizationMode.Volumes,
                     enabled = true,
-                    mediaKindPolicy = MediaKindPolicy.Mixed,
                     ignorePatterns = "*.tmp",
                     ignoreHidden = true,
                     minimumFileSizeBytes = 10240,
@@ -197,18 +249,12 @@ class KtorAdministrativeSettingsRepositoryTest {
                 ),
             ),
         )
-        assertIs<AdministrativeSettingsContent<*>>(
-            harness.repository.deleteImportTask(context(), "task-1", ImportDeleteMode.Source, deleteLibraryRecord = true),
-        )
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.deleteBackup(context(), "backup-1"))
 
-        assertEquals(HttpMethod.Put, harness.requests[0].method)
-        assertEquals("/base/api/monitor-folders/folder-1", harness.requests[0].path)
-        assertEquals(
-            """{"deleteMode":"source","deleteLibraryRecord":true}""",
-            harness.requests[1].body,
-        )
-        assertEquals("", harness.requests[2].body)
+        assertEquals(HttpMethod.Patch, harness.requests[0].method)
+        assertEquals("/base/api/libraries/folder-1", harness.requests[0].path)
+        assertTrue(harness.requests[0].body.contains("\"organizationMode\":\"VOLUMES\""))
+        assertEquals("", harness.requests[1].body)
     }
 
     @Test
@@ -263,16 +309,16 @@ class KtorAdministrativeSettingsRepositoryTest {
         val harness = Harness(
             Response(
                 200,
-                """{"ok":true,"data":{"logs":[{"id":"log-1","level":"info","message":"display"}],"page":1,"pageSize":50,"total":1,"totalPages":1}}""",
+                """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","resourceId":null,"sourceNodeId":null,"role":null,"state":"SUCCEEDED","errorSummary":null,"startedAt":null,"finishedAt":null}}}""",
             ),
         )
 
         val failure = assertIs<AdministrativeSettingsFailure>(
-            harness.repository.listImportTaskLogs(context(), "task-1"),
+            harness.repository.loadImportTask(context(), "task-1"),
         )
 
         assertEquals(AdministrativeSettingsErrorKind.Protocol, failure.error.kind)
-        assertEquals("MISSING_createdAt", failure.error.code)
+        assertEquals("INVALID_createdAt", failure.error.code)
     }
 
     @Test
@@ -340,18 +386,18 @@ class KtorAdministrativeSettingsRepositoryTest {
         val loaded = assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.loadImportPreferences(context()),
         ).value
-        assertEquals(0.5, assertIs<ImportPreferences>(loaded).stabilitySeconds)
+        assertEquals(listOf(".epub"), assertIs<ImportPreferences>(loaded).allowedExtensions)
         assertIs<AdministrativeSettingsContent<*>>(
             harness.repository.updateImportPreferences(
                 context(),
-                ImportPreferences(true, 0.5, listOf(".epub"), "*.tmp"),
+                ImportPreferences(listOf(".epub"), "*.tmp"),
             ),
         )
 
         assertEquals(HttpMethod.Put, harness.requests.last().method)
         assertEquals("/base/api/system-settings", harness.requests.last().path)
         assertEquals(
-            """{"settings":{"import.stabilityCheck.enabled":true,"import.stabilityCheck.seconds":0.5,"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}""",
+            """{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}""",
             harness.requests.last().body,
         )
     }
@@ -468,29 +514,29 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val KINDLE_SETTINGS_UPDATED = KINDLE_SETTINGS
         const val EMAIL_SETTINGS = """{"ok":true,"data":{"smtp":{"host":"smtp.example.com","port":587,"security":"starttls","username":"reader","fromEmail":"sender@example.com","fromName":"Library","maxAttachmentMb":25,"passwordConfigured":true},"kindle":{"email":"reader@kindle.com"}}}"""
         const val SMTP_TEST = """{"ok":true,"data":{"connected":true,"message":"ok"}}"""
-        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"locale":"en-US","monitorFolderIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"monitorFolderIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
+        const val USER = """{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":true,"canViewManualImports":true,"authzVersion":7,"avatarUrl":null,"locale":"en-US","libraryIds":["folder-1"],"authorization":{"isAdmin":false,"canManageSystem":true,"allLibraryScopes":false,"libraryIds":["folder-1"],"canViewManualImports":true,"authzVersion":7},"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}"""
         const val USERS = """{"ok":true,"data":{"users":[$USER]}}"""
         const val USER_PAYLOAD = """{"ok":true,"data":{"user":$USER}}"""
         const val PASSWORD_CHANGED = """{"ok":true,"data":{"passwordChanged":true,"sessionsRevoked":true}}"""
         const val DELETED_USER = """{"ok":true,"data":{"deleted":true,"userId":"user-1"}}"""
-        const val MONITOR_FOLDERS = """{"ok":true,"data":{"folders":[],"monitorRoot":"/books","lastUploadTargetPath":null,"lastDownloadTargetPath":null}}"""
-        const val MONITOR_FOLDER_PAYLOAD = """{"ok":true,"data":{"folder":{"id":"folder-1","name":"Books","rootPath":"/books","shelfId":null,"enabled":true,"mediaKindPolicy":"MIXED","ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
+        const val LIBRARIES = """{"ok":true,"data":{"libraries":[],"lastUploadTargetPath":null,"lastDownloadTargetPath":null}}"""
+        const val LIBRARY_PAYLOAD = """{"ok":true,"data":{"library":{"id":"folder-1","name":"Books","rootPath":"/books","organizationMode":"VOLUMES","enabled":true,"ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val DIRECTORY = """{"ok":true,"data":{"node":{"name":"books","path":"/books","readable":true,"error":null,"children":[]}}}"""
-        const val IMPORT_TASKS = """{"ok":true,"data":{"tasks":[],"summary":{"completed":0,"failed":0},"page":1,"pageSize":20,"total":0,"totalPages":1}}"""
-        const val IMPORT_LOGS = """{"ok":true,"data":{"logs":[{"id":"log-1","level":"info","message":"display only","createdAt":"2026-08-12T00:00:00Z"}],"page":2,"pageSize":25,"total":1,"totalPages":1}}"""
-        const val IMPORT_TASK_DELETED = """{"ok":true,"data":{"deleted":true,"id":"task-1","deleteMode":"source","deleteLibraryRecord":true,"deletedLibraryRecord":true,"deletedWorkRecord":true,"deletedLibraryDatabaseRecords":1,"libraryRecordId":"work-1","deletedFiles":1,"missingFiles":[],"failedFileDeletes":[]}}"""
+        const val IMPORT_TASK_DETAIL = """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","state":"SUCCEEDED","errorSummary":null,"createdAt":"2026-08-12T00:00:00Z","startedAt":"2026-08-12T00:00:01Z","finishedAt":"2026-08-12T00:00:02Z"}}}"""
         const val ORGANIZE_POLICY = """{"ok":true,"data":{"policy":{"id":"default","enabled":false,"scheduleMode":"MANUAL","intervalMinutes":60,"autoRunOnNew":false,"autoRunOnNewSince":null,"rules":{"unrecognized":true,"missingMetadata":true},"writeMetadataToFiles":false,"preferLocalMetadata":true,"localMetadataPriority":["SIDECAR_OPF","EMBEDDED","PATH"],"lastScheduledAt":null,"nextRunAt":null,"updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val PENDING_ORGANIZE = """{"ok":true,"data":{"jobs":[],"books":[],"total":0}}"""
-        const val ORGANIZE_RUNS = """{"ok":true,"data":{"runs":[{"id":"run-1","trigger":"MANUAL","scope":{"workIds":[],"rules":{"unrecognized":true,"missingMetadata":true}},"status":"COMPLETED","queuedCount":1,"completedCount":1,"reviewCount":0,"failedCount":0,"startedAt":"2026-08-12T00:00:00Z","finishedAt":"2026-08-12T00:01:00Z","createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z"}]}}"""
+        const val ORGANIZE_JOBS = """{"ok":true,"data":{"jobs":[{"id":"job-1","trigger":"SCHEDULE","statusCategory":"WAITING","issueCodes":[],"reasonCodes":["MISSING_METADATA"],"metadataSources":[],"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z","book":{"id":"book-1","title":"Book","author":"Author","availableMediaKinds":["EBOOK"]}}],"page":1,"pageSize":20,"total":1,"totalPages":1,"statusCounts":{"SUCCESS":0,"FAILED":0,"RECOGNIZING":0,"WAITING":1},"providerNames":{}}}"""
+        const val ORGANIZE_RUNS = """{"ok":true,"data":{"runs":[{"id":"run-1","trigger":"MANUAL","scope":{"bookIds":[],"rules":{"unrecognized":true,"missingMetadata":true}},"status":"COMPLETED","queuedCount":1,"completedCount":1,"reviewCount":0,"failedCount":0,"startedAt":"2026-08-12T00:00:00Z","finishedAt":"2026-08-12T00:01:00Z","createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z"}]}}"""
         const val PROVIDER_PAYLOAD = """{"ok":true,"data":{"provider":{"id":"provider-1","sourceId":null,"name":"Provider","version":"1","description":"Metadata provider","mode":"REMOTE","mediaKinds":["EBOOK"],"fields":["title"],"capabilities":["search"],"automaticRateLimit":null,"configFields":[],"config":{},"configuredSecrets":{},"enabled":true,"priority":1,"lastTestAt":null,"lastTestStatus":null,"lastError":null}}}"""
         const val OPDS = """{"ok":true,"data":{"enabled":false,"configured":false,"publicBaseUrl":null,"catalogUrl":null}}"""
         const val BACKUP_PAYLOAD = """{"ok":true,"data":{"backup":{"id":"backup-1","kind":"full","name":"backup.zip","filename":"backup.zip","sizeBytes":42,"createdAt":"2026-08-12T00:00:00Z","counts":{"works":1}}}}"""
         const val BACKUP_RESTORED = """{"ok":true,"data":{"id":"backup-1","restored":true,"restoredAt":"2026-08-12T00:00:00Z","counts":{"works":1},"restoredCounts":{"works":1},"actualCounts":{"works":1}}}"""
         const val BACKUP_DELETED = """{"ok":true,"data":{"deleted":true,"id":"backup-1"}}"""
-        const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.stabilityCheck.enabled":true,"import.stabilityCheck.seconds":0.5,"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
+        const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
         const val QUEUE_OPERATION = """{"ok":true,"data":{"operation":{"id":"operation-1","queueName":"import","action":"restart","status":"requested","actorUserId":"user-1","messageCode":"queue.restart.requested","requestedAt":"2026-08-12T00:00:00Z","startedAt":null,"finishedAt":null,"updatedAt":"2026-08-12T00:00:00Z"},"created":true}}"""
         const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""
         const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"minBytes":1048576,"maxBytes":104857600}}"""
+        const val KINDLE_TASK_PAYLOAD = """{"ok":true,"data":{"task":{"id":"task-1","userId":"user-1","bookId":"book-1","resourceId":"resource-1","assetId":"asset-1","bookTitle":"Book","resourceTitle":"EPUB","fileName":"book.epub","format":"EPUB","mimeType":"application/epub+zip","sizeBytes":42,"senderEmail":"sender@example.com","recipientEmail":"reader@kindle.com","subject":"Book","smtpHost":"smtp.example.com","smtpPort":587,"smtpSecurity":"starttls","smtpUsername":"reader","messageId":null,"status":"queued","attemptCount":0,"nextAttemptAt":null,"errorMessage":null,"startedAt":null,"sentAt":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z","canCancel":true,"canRetry":false,"canDelete":false}}}"""
     }
 }

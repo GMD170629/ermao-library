@@ -23,11 +23,11 @@ data class KindleTaskFilter(
 
 data class KindleTask(
     val id: String,
-    val workId: String?,
-    val volumeId: String?,
-    val fileId: String?,
+    val bookId: String?,
+    val resourceId: String?,
+    val assetId: String?,
     val bookTitle: String,
-    val volumeTitle: String?,
+    val resourceTitle: String?,
     val fileName: String,
     val format: String,
     val mimeType: String,
@@ -114,7 +114,7 @@ data class ManagedUser(
     val status: ManagedUserStatus,
     val canManageSystem: Boolean,
     val canViewManualImports: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val locale: ManagedLocale,
     val authorizationVersion: Long,
     val avatarUrl: String?,
@@ -129,7 +129,7 @@ data class CreateManagedUser(
     val role: ManagedUserRole,
     val canManageSystem: Boolean,
     val canViewManualImports: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val locale: ManagedLocale,
 )
 
@@ -140,7 +140,7 @@ data class UpdateManagedUser(
     val status: ManagedUserStatus,
     val canManageSystem: Boolean,
     val canViewManualImports: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val locale: ManagedLocale,
 )
 

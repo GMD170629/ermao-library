@@ -1,7 +1,7 @@
 package com.ermao.library.shared.modules.reader.infrastructure
 
-import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiClient
+import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
@@ -13,11 +13,15 @@ import com.ermao.library.shared.modules.reader.application.ReaderBootstrap
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
+import com.ermao.library.shared.modules.reader.application.ReaderComicAccess
+import com.ermao.library.shared.modules.reader.application.ReaderComicPage
+import com.ermao.library.shared.modules.reader.application.ReaderNavigationUnit
+import com.ermao.library.shared.modules.reader.application.ReaderPdfPage
 import com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
 import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
-import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
+import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -27,6 +31,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
+/** Resource-first Reader v4 gateway. It deliberately rejects the retired Work/Version/Volume wire. */
 class KtorReaderBootstrapGateway internal constructor(
     private val createClient: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
     private val json: Json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = true },
@@ -40,7 +45,7 @@ class KtorReaderBootstrapGateway internal constructor(
             when (val result = client.execute(
                 ApiRequest(
                     ApiMethod.Get,
-                    "/api/reader/v4/volumes/${encodePathSegment(request.volumeId)}/bootstrap",
+                    "/api/reader/v4/resources/${encodePathSegment(request.resourceId)}/bootstrap",
                     JsonObject.serializer(),
                 ),
             )) {
@@ -73,7 +78,7 @@ class KtorReaderBootstrapGateway internal constructor(
         if (bootstrap.readerType != "comic") return ComicManifestLoad.Content(null)
         val access = bootstrap.publication
             ?: return ComicManifestLoad.Failure("READER_COMIC_MANIFEST_INVALID", false)
-        val expectedPath = "/api/reader/v4/volumes/${encodePathSegment(bootstrap.volume.id)}/comic/manifest"
+        val expectedPath = "/api/reader/v4/resources/${encodePathSegment(bootstrap.resource.id)}/comic/manifest"
         if (access.kind != "comic" || access.manifestUrl != expectedPath) {
             return ComicManifestLoad.Failure("READER_COMIC_MANIFEST_INVALID", false)
         }
@@ -146,32 +151,34 @@ class KtorReaderBootstrapGateway internal constructor(
     ): ReaderBootstrapResult {
         val exactSourceFormat = ReaderSourceFormat.fromWireValue(sourceFormat)
         if (schemaVersion != READER_SERVER_SCHEMA_VERSION || exactSourceFormat == null ||
-            readerType != exactSourceFormat.readerType
+            readerType != exactSourceFormat.readerFormat.wireReaderType
         ) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_UNSUPPORTED", recoverable = false)
         }
         if (userId != request.namespace.userId) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_USER_MISMATCH", recoverable = false)
         }
-        if (volume.id != request.volumeId || mediaVersion.workId != book.id) {
+        if (resource.id != request.resourceId || resource.bookId != book.id) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
         }
-        if (!volume.format.equals(exactSourceFormat.wireValue, ignoreCase = true)) {
+        if (!resource.format.equals(exactSourceFormat.wireValue, ignoreCase = true) ||
+            !resource.readerType.equals(readerType, ignoreCase = true)
+        ) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", recoverable = false)
         }
-        if (fileUrl != "/api/volumes/${volume.id}/file") {
+        if (availableResources.any { it.bookId != book.id } ||
+            assets.any { it.resourceId != resource.id } ||
+            units.any { it.assetId != null && assets.none { asset -> asset.id == it.assetId } }
+        ) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
         }
-        val publicationFile = files
-            .sortedWith(compareBy<ReaderBootstrapFileWire>({ it.sortOrder }, { it.id }))
-            .firstOrNull { file ->
-            file.id.isNotBlank() &&
-                (file.kind.equals(exactSourceFormat.fileKind, ignoreCase = true) ||
-                    exactSourceFormat.isComic && file.kind.equals("COMIC", ignoreCase = true)) &&
-                exactSourceFormat.acceptsMimeType(file.mimeType) &&
-                file.url.startsWith("/api/") && !file.url.contains('#') &&
-                file.sizeBytes > 0
-        } ?: return ReaderBootstrapResult.Failure("READER_PUBLICATION_FILE_MISSING", recoverable = false)
+        val orderedAssets = assets.sortedWith(compareBy<ReaderBootstrapAssetWire>({ it.sortOrder }, { it.id }))
+        val primaryAsset = orderedAssets.firstOrNull { it.role.equals("PRIMARY", ignoreCase = true) }
+            ?: orderedAssets.firstOrNull()
+            ?: return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_MISSING", recoverable = false)
+        if (primaryAsset.sizeBytes <= 0 || !primaryAsset.url.isSafeReaderMediaApiPath()) {
+            return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_INVALID", recoverable = false)
+        }
         val orderedUnits = units.asSequence()
             .filter(ReaderBootstrapUnitWire::isStructurallyValid)
             .sortedBy { requireNotNull(it.index) }
@@ -181,8 +188,8 @@ class KtorReaderBootstrapGateway internal constructor(
         val target = try {
             ReaderProgressSyncTarget(
                 namespace = request.namespace,
-                workId = book.id,
-                volumeId = volume.id,
+                bookId = book.id,
+                resourceId = resource.id,
                 sourceFormat = exactSourceFormat.readerFormat,
             )
         } catch (_: IllegalArgumentException) {
@@ -192,17 +199,17 @@ class KtorReaderBootstrapGateway internal constructor(
             val artifact = access.downloadArtifact
                 ?: return ReaderBootstrapResult.Failure("READER_COMIC_ARCHIVE_INVALID", false)
             if (access.kind != "comic" || access.positionsUrl != null ||
-                access.manifestUrl != "/api/reader/v4/volumes/${volume.id}/comic/manifest" ||
-                access.pageUrlTemplate != "/api/reader/v4/volumes/${volume.id}/comic/pages/{pageIndex}" ||
+                access.manifestUrl != "/api/reader/v4/resources/${resource.id}/comic/manifest" ||
+                access.pageUrlTemplate != "/api/reader/v4/resources/${resource.id}/comic/pages/{pageIndex}" ||
                 access.imageVariants != listOf("original", "data-saver") ||
-                artifact.url != "/api/reader/v4/volumes/${volume.id}/comic/archive" ||
+                artifact.url != "/api/reader/v4/resources/${resource.id}/comic/archive" ||
                 artifact.sourceFormat != exactSourceFormat.wireValue ||
                 artifact.sizeBytes <= 0 ||
                 !exactSourceFormat.acceptsMimeType(artifact.mimeType)
             ) {
                 return ReaderBootstrapResult.Failure("READER_COMIC_ARCHIVE_INVALID", false)
             }
-            com.ermao.library.shared.modules.reader.application.ReaderComicAccess(
+            ReaderComicAccess(
                 manifestApiPath = access.manifestUrl,
                 pageApiPathTemplate = access.pageUrlTemplate,
                 imageVariants = access.imageVariants.toSet(),
@@ -214,14 +221,14 @@ class KtorReaderBootstrapGateway internal constructor(
             try {
                 require(
                     manifest.schemaVersion == 1 && manifest.kind == "comic" &&
-                        manifest.volumeId == volume.id &&
+                        manifest.resourceId == resource.id &&
                         manifest.sourceFormat == exactSourceFormat.wireValue &&
                         manifest.pageCount == manifest.readingOrder.size && manifest.pageCount > 0
                 )
                 manifest.readingOrder.mapIndexed { index, page ->
                     require(page.pageIndex == index && page.resourceHref == "pages/$index")
                     val unitTitle = orderedUnits.firstOrNull { it.pageIndexOrNull() == index }?.title
-                    com.ermao.library.shared.modules.reader.application.ReaderComicPage(
+                    ReaderComicPage(
                         pageIndex = index,
                         resourceHref = page.resourceHref,
                         mediaType = page.mediaType,
@@ -238,41 +245,48 @@ class KtorReaderBootstrapGateway internal constructor(
         } else emptyList()
         val pdfPages = if (exactSourceFormat == ReaderSourceFormat.Pdf) {
             orderedUnits.mapIndexed { index, unit ->
-                com.ermao.library.shared.modules.reader.application.ReaderPdfPage(
+                ReaderPdfPage(
                     pageIndex = index,
-                    title = requireNotNull(unit.title).takeIf(String::isNotBlank) ?: "${index + 1}",
+                    title = unit.title?.trim().orEmpty().ifEmpty { "${index + 1}" },
                 )
             }
         } else emptyList()
         val remoteSnapshot = progressSnapshot?.let { snapshot -> runCatching {
             val snapshotSchema = (snapshot["schemaVersion"] as? JsonPrimitive)?.longOrNull
             require(snapshotSchema == READER_SERVER_SCHEMA_VERSION.toLong())
-            progressMapper.decodeSnapshot(snapshot, volume.id)
+            progressMapper.decodeSnapshot(snapshot, resource.id)
         }.getOrNull() }
-        val comicArtifact = publication?.downloadArtifact?.takeIf { exactSourceFormat.isComic }
+        // The mobile Reader/download sink consumes the original primary Asset. A comic
+        // archive is only an online Reader capability and is never an offline source.
+        val apiPath = primaryAsset.url
+        val mimeType = primaryAsset.mimeType.lowercase()
+        val expectedSizeBytes = primaryAsset.sizeBytes
+        if (!exactSourceFormat.acceptsMimeType(mimeType) || expectedSizeBytes <= 0) {
+            return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_INVALID", false)
+        }
         return ReaderBootstrapResult.Content(
             ReaderBootstrap(
                 target = target,
                 publication = ReaderPublicationDownload(
                     profile = request.profile,
-                    sourceId = volume.id,
-                    displayTitle = volume.title.ifBlank { book.title },
-                    workId = book.id,
-                    volumeId = volume.id,
-                    apiPath = comicArtifact?.url ?: fileUrl,
+                    resourceId = resource.id,
+                    displayTitle = resource.title.ifBlank { book.title },
+                    bookId = book.id,
+                    assetId = primaryAsset.id,
+                    apiPath = apiPath,
                     originalSourceFormat = exactSourceFormat,
                     sourceFormat = exactSourceFormat,
-                    mimeType = comicArtifact?.mimeType ?: publicationFile.mimeType.lowercase(),
-                    expectedSizeBytes = comicArtifact?.sizeBytes ?: publicationFile.sizeBytes,
+                    mimeType = mimeType,
+                    expectedSizeBytes = expectedSizeBytes,
                 ),
                 remoteSnapshot = remoteSnapshot,
                 units = orderedUnits.map { unit ->
-                    com.ermao.library.shared.modules.reader.application.ReaderNavigationUnit(
+                    ReaderNavigationUnit(
                         id = requireNotNull(unit.id),
                         index = requireNotNull(unit.index),
                         title = requireNotNull(unit.title).trim().ifEmpty { requireNotNull(unit.id) },
                         href = unit.href?.trim()?.takeIf(String::isNotEmpty),
-                        fileId = unit.fileId?.trim()?.takeIf(String::isNotEmpty),
+                        assetId = unit.assetId?.trim()?.takeIf(String::isNotEmpty),
                         startMs = unit.startMs,
                         endMs = unit.endMs,
                         durationMs = unit.durationMs,
@@ -281,7 +295,7 @@ class KtorReaderBootstrapGateway internal constructor(
                 comicPages = comicPages,
                 comicAccess = comicAccess,
                 pdfPages = pdfPages,
-                pageCount = volume.pageCount,
+                pageCount = resource.pageCount,
             ),
         )
     }
@@ -301,11 +315,7 @@ class KtorReaderBootstrapGateway internal constructor(
             val unsigned = byte.toInt() and 0xff
             val character = unsigned.toChar()
             if (character.isLetterOrDigit() || character in setOf('-', '_', '.', '~')) append(character)
-            else {
-                append('%')
-                append(HEX[unsigned ushr 4])
-                append(HEX[unsigned and 0x0f])
-            }
+            else append('%').append(HEX[unsigned ushr 4]).append(HEX[unsigned and 0x0f])
         }
     }
 
@@ -316,16 +326,21 @@ class KtorReaderBootstrapGateway internal constructor(
     }
 }
 
-private val ReaderSourceFormat.readerType: String
-    get() = when (readerFormat) {
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Epub,
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Mobi,
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Text,
-        -> "reflowable"
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Comic -> "comic"
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Pdf -> "pdf"
-        com.ermao.library.shared.modules.reader.domain.ReaderFormat.Audio -> "audio"
+private val ReaderFormat.wireReaderType: String
+    get() = when (this) {
+        ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text -> "reflowable"
+        ReaderFormat.Comic -> "comic"
+        ReaderFormat.Pdf -> "pdf"
+        ReaderFormat.Audio -> "audio"
     }
+
+private fun String.isSafeReaderMediaApiPath(): Boolean =
+    startsWith("/api/") && !contains('#') && !contains('?') && !contains("//") &&
+        split('/').none { it == "." || it == ".." } &&
+        (matches(Regex("^/api/assets/[^/?#]+$")) ||
+            matches(Regex("^/api/resources/[^/?#]+/asset$")))
+
+private fun ReaderSourceFormat.readerTypeWire(): String = readerFormat.wireReaderType
 
 @Serializable
 private data class ReaderBootstrapWire(
@@ -334,15 +349,50 @@ private data class ReaderBootstrapWire(
     val readerType: String,
     val sourceFormat: String? = null,
     val book: ReaderBootstrapBookWire,
-    val mediaVersion: ReaderBootstrapMediaVersionWire,
-    val volume: ReaderBootstrapVolumeWire,
-    val availableVolumes: List<JsonObject>,
-    val files: List<ReaderBootstrapFileWire>,
+    val resource: ReaderBootstrapResourceWire,
+    val availableResources: List<ReaderBootstrapResourceWire>,
+    val assets: List<ReaderBootstrapAssetWire>,
     val units: List<ReaderBootstrapUnitWire>,
-    val fileUrl: String,
+    val resourceUrl: String,
     val capabilities: JsonObject,
     val publication: ReaderPublicationAccessWire? = null,
     val progressSnapshot: JsonObject? = null,
+)
+
+@Serializable
+private data class ReaderBootstrapResourceWire(
+    val id: String,
+    val bookId: String,
+    val sourceNodeId: String,
+    val title: String,
+    val resourceIndex: Double? = null,
+    val sortOrder: Int,
+    val format: String,
+    val mediaKind: String,
+    val readerType: String,
+    val pageCount: Int? = null,
+    val chapterCount: Int? = null,
+    val durationMs: Long? = null,
+    val trackCount: Int? = null,
+    val progress: Double = 0.0,
+    val resourceCompleted: Boolean = false,
+    val lastReadAt: String? = null,
+)
+
+@Serializable
+private data class ReaderBootstrapAssetWire(
+    val id: String,
+    val resourceId: String,
+    val sourceNodeId: String,
+    val role: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val durationMs: Long? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
+    val sortOrder: Int,
+    val url: String,
+    val codec: String? = null,
 )
 
 @Serializable
@@ -351,7 +401,7 @@ private data class ReaderBootstrapUnitWire(
     val index: Int? = null,
     val title: String? = null,
     val href: String? = null,
-    val fileId: String? = null,
+    val assetId: String? = null,
     val startMs: Long? = null,
     val endMs: Long? = null,
     val durationMs: Long? = null,
@@ -362,14 +412,6 @@ private data class ReaderBootstrapUnitWire(
             startMs?.let { it >= 0 } != false &&
             endMs?.let { it >= 0 } != false &&
             durationMs?.let { it >= 0 } != false
-
-    fun pageNumberOrNull(): Int? {
-        val value = metadata["pageNumber"] ?: return null
-        val primitive = value as? JsonPrimitive
-            ?: throw IllegalArgumentException("Reader PDF page number must be an integer")
-        return primitive.takeUnless(JsonPrimitive::isString)?.intOrNull
-            ?: throw IllegalArgumentException("Reader PDF page number must be an integer")
-    }
 
     fun pageIndexOrNull(): Int? {
         val value = metadata["pageIndex"] ?: return null
@@ -402,7 +444,7 @@ private data class ReaderComicDownloadArtifactWire(
 private data class ReaderComicManifestWire(
     val schemaVersion: Int,
     val kind: String,
-    val volumeId: String,
+    val resourceId: String,
     val sourceFormat: String,
     val pageCount: Int,
     val readingOrder: List<ReaderComicManifestPageWire>,
@@ -425,29 +467,9 @@ private sealed interface ComicManifestLoad {
 }
 
 @Serializable
-private data class ReaderBootstrapBookWire(val id: String, val title: String, val author: String? = null, val coverUrl: String? = null)
-
-@Serializable
-private data class ReaderBootstrapMediaVersionWire(val id: String, val workId: String, val mediaKind: String, val completed: Boolean)
-
-@Serializable
-private data class ReaderBootstrapVolumeWire(
+private data class ReaderBootstrapBookWire(
     val id: String,
     val title: String,
-    val format: String,
-    val pageCount: Int? = null,
-)
-
-@Serializable
-private data class ReaderBootstrapFileWire(
-    val id: String,
-    val kind: String,
-    val mimeType: String,
-    val sizeBytes: Long,
-    val url: String,
-    val durationMs: Long? = null,
-    val discNumber: Int? = null,
-    val trackNumber: Int? = null,
-    val sortOrder: Int,
-    val codec: String? = null,
+    val author: String? = null,
+    val coverUrl: String? = null,
 )

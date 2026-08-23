@@ -105,42 +105,6 @@ struct RecognitionPolicyView: View {
     private func save(_ value: RecognitionPolicy) { Task { let result = await store.performValue(id: "save-recognition-policy") { try await store.client.saveRecognitionPolicy(value) }; if case let .success(updated) = result { policy = updated; state = .loaded(updated) } } }
 }
 
-struct DuplicateCategoryView: View {
-    enum Tab: Hashable { case duplicates, categories }
-    @ObservedObject var store: AdministrativeSettingsStore
-    @State private var tab: Tab = .duplicates
-    @State private var state: AdministrativeLoadState<[DuplicateGroup]> = .idle
-    @State private var mergeGroup: DuplicateGroup?
-    @State private var canonicalID: String?
-    @Environment(\.administrativeCopy) private var copy
-    @Environment(\.appTheme) private var theme
-    @Environment(\.administrativeNavigate) private var navigate
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker(copy[.duplicatesTitle], selection: $tab) { Text(copy[.duplicatesTab]).tag(Tab.duplicates); Text(copy[.categoriesTab]).tag(Tab.categories) }.pickerStyle(.segmented).padding()
-            if tab == .categories { CategoryGovernanceView(store: store) } else { duplicates }
-        }.navigationTitle(copy[.duplicatesTitle]).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Button { navigate(.libraryOperations) } label: { Image(systemName: "clock.arrow.circlepath") }.accessibilityLabel(copy[.operationHistory]) } }.sheet(item: $mergeGroup) { group in mergeSheet(group) }.task { await loadAsync() }.onDisappear { store.cancelPendingRequests() }.administrativeNotice(store: store)
-    }
-    private var duplicates: some View {
-        AdministrativeStateView(state: state, retry: load) { groups in
-            List(groups) { group in
-                DisclosureGroup { ForEach(group.works) { work in HStack { VStack(alignment: .leading) { Text(work.title); if let author = work.author { Text(author).foregroundStyle(theme.textSecondary) } }; Spacer(); Text(work.confidence, format: .percent.precision(.fractionLength(0))).foregroundStyle(theme.textSecondary) } }; Button(copy[.merge]) { canonicalID = group.works.first?.id; mergeGroup = group } } label: { Text("\(group.works.first?.title ?? copy[.unknown]) · \(group.works.count)") }
-            }.administrativeListSurface().overlay { if groups.isEmpty { AdministrativeEmptyView(title: copy[.empty], systemImage: "square.3.layers.3d") } }
-        }
-    }
-    private func mergeSheet(_ group: DuplicateGroup) -> some View {
-        NavigationStack {
-            Form {
-                Section(copy[.canonicalWork]) { ForEach(group.works) { work in Button { canonicalID = work.id } label: { HStack { Image(systemName: canonicalID == work.id ? "largecircle.fill.circle" : "circle"); Text(work.title); Spacer() } } } }
-                Section { Label(copy[.mergeWarning], systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-            }.administrativeListSurface().navigationTitle(copy[.mergeWorksTitle]).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button(copy[.cancel]) { mergeGroup = nil } }; ToolbarItem(placement: .confirmationAction) { Button(copy[.mergeWorks], action: merge).disabled(canonicalID == nil) } }
-        }.environment(\.administrativeCopy, copy).tint(theme.actionAccent)
-    }
-    private func load() { Task { await loadAsync() } }; private func loadAsync() async { state = .loading; state = await store.load(scope: "duplicate-groups") { try await store.client.loadDuplicateGroups() } }
-    private func merge() { guard let group = mergeGroup, let canonicalID else { return }; let request = MergeDuplicateRequest(groupID: group.id, canonicalWorkID: canonicalID); Task { let result = await store.performValue(id: "merge-duplicates") { try await store.client.mergeDuplicateWorks(request) }; if case let .success(operationID) = result { mergeGroup = nil; store.replaceNotice(AdministrativeNotice(style: .success, message: "\(copy[.saved]) · \(operationID)")); await loadAsync() } } }
-}
-
 struct LibraryOperationsView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<[LibraryOperation]> = .idle
@@ -185,7 +149,7 @@ struct CategoryGovernanceView: View {
             Picker(copy[.categoryGovernanceTitle], selection: $kind) { Text(copy[.author]).tag(CategoryKind.author); Text(copy[.tag]).tag(CategoryKind.tag); Text(copy[.series]).tag(CategoryKind.series) }.pickerStyle(.segmented).padding(.horizontal)
             AdministrativeStateView(state: state, retry: load) { categories in
                 List(categories) { category in
-                    HStack { Button { if selected.contains(category.id) { selected.remove(category.id) } else { selected.insert(category.id) } } label: { Image(systemName: selected.contains(category.id) ? "checkmark.square.fill" : "square") }; VStack(alignment: .leading) { Text(category.name); if !category.aliases.isEmpty { Text(category.aliases.joined(separator: ", ")).font(.caption).foregroundStyle(theme.textSecondary) } }; Spacer(); Text("\(category.workCount)").foregroundStyle(theme.textSecondary); Menu { Button(copy[.renameCategory]) { renamedValue = category.name; renameCategory = category }; Button(copy[.deleteCategory], role: .destructive) { deleteCategory = category } } label: { Image(systemName: "ellipsis") } }
+                    HStack { Button { if selected.contains(category.id) { selected.remove(category.id) } else { selected.insert(category.id) } } label: { Image(systemName: selected.contains(category.id) ? "checkmark.square.fill" : "square") }; VStack(alignment: .leading) { Text(category.name); if !category.aliases.isEmpty { Text(category.aliases.joined(separator: ", ")).font(.caption).foregroundStyle(theme.textSecondary) } }; Spacer(); Text("\(category.bookCount)").foregroundStyle(theme.textSecondary); Menu { Button(copy[.renameCategory]) { renamedValue = category.name; renameCategory = category }; Button(copy[.deleteCategory], role: .destructive) { deleteCategory = category } } label: { Image(systemName: "ellipsis") } }
                 }.administrativeListSurface().safeAreaInset(edge: .bottom) { if selected.count > 1 { AdministrativeBottomAction(title: "\(copy[.merge]) · \(selected.count)") { targetID = selected.first; mergeShown = true } } }
             }
         }.searchable(text: $query, prompt: copy[.search]).onSubmit(of: .search, load).onChange(of: kind) { _ in selected.removeAll(); load() }

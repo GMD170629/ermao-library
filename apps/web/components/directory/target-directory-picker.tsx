@@ -6,12 +6,12 @@ import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useExpressionI18n } from '@/i18n/provider';
 import {
-  enabledMonitorRootPaths,
+  enabledLibraryRootPaths,
   isAllowedTargetPath,
   isDirectoryInside
 } from './target-directory-policy';
 
-type MonitorFolder = {
+type Library = {
   id: string;
   name: string;
   rootPath: string;
@@ -32,12 +32,10 @@ type DirectoryNode = {
 
 type DirectoryTreePayload = {
   node: DirectoryNode;
-  monitorRoot?: string | null;
 };
 
-type MonitorFoldersPayload = {
-  folders: MonitorFolder[];
-  monitorRoot?: string | null;
+type LibrariesPayload = {
+  libraries: Library[];
   lastUploadTargetPath?: string | null;
   lastDownloadTargetPath?: string | null;
 };
@@ -47,8 +45,8 @@ export type TargetDirectoryStatus = {
   label: string;
 };
 
-function autoImportFor(path: string, folders: MonitorFolder[]) {
-  return folders.some((folder) => folder.enabled && isDirectoryInside(folder.rootPath, path));
+function autoImportFor(path: string, libraries: Library[]) {
+  return libraries.some((library) => library.enabled && isDirectoryInside(library.rootPath, path));
 }
 
 export function TargetDirectoryPicker({
@@ -58,8 +56,8 @@ export function TargetDirectoryPicker({
   label,
   requiredMessage,
   showRequiredState = true,
-  processingMode = 'monitor',
-  restrictToEnabledMonitorFolders = false,
+  processingMode = 'library',
+  restrictToEnabledLibraries = false,
   onStatusChange,
   className
 }: {
@@ -69,15 +67,15 @@ export function TargetDirectoryPicker({
   label: string;
   requiredMessage: string;
   showRequiredState?: boolean;
-  processingMode?: 'monitor' | 'queue';
-  restrictToEnabledMonitorFolders?: boolean;
+  processingMode?: 'library' | 'queue';
+  restrictToEnabledLibraries?: boolean;
   onStatusChange?: (status: TargetDirectoryStatus) => void;
   className?: string;
 }) {
   const { t: i18nExpression } = useExpressionI18n();
   const [open, setOpen] = useState(false);
-  const [monitorRoot, setMonitorRoot] = useState('');
-  const [folders, setFolders] = useState<MonitorFolder[]>([]);
+  const [directoryRoot, setDirectoryRoot] = useState('');
+  const [libraries, setLibraries] = useState<Library[]>([]);
   const [nodes, setNodes] = useState<Record<string, DirectoryNode>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingPath, setLoadingPath] = useState('');
@@ -90,17 +88,17 @@ export function TargetDirectoryPicker({
     try {
       const params = new URLSearchParams();
       if (path) params.set('path', path);
-      if (restrictToEnabledMonitorFolders) params.set('purpose', 'upload');
+      if (restrictToEnabledLibraries) params.set('purpose', 'upload');
       const query = params.size > 0 ? `?${params.toString()}` : '';
-      const response = await fetch(`/api/monitor-folders/tree${query}`);
+      const response = await fetch(`/api/libraries/tree${query}`);
       const payload = (await response.json()) as { ok: boolean; data?: DirectoryTreePayload; error?: { message: string } };
       if (!payload.ok || !payload.data?.node) {
         setTreeError(payload.error?.message ?? '读取目录树失败');
         return null;
       }
       const node = payload.data.node;
-      if (!restrictToEnabledMonitorFolders) {
-        setMonitorRoot(payload.data.monitorRoot || node.path);
+      if (!restrictToEnabledLibraries) {
+        setDirectoryRoot(node.path);
       }
       setNodes((current) => ({ ...current, [node.path]: node }));
       return node;
@@ -110,21 +108,21 @@ export function TargetDirectoryPicker({
     } finally {
       setLoadingPath('');
     }
-  }, [restrictToEnabledMonitorFolders]);
+  }, [restrictToEnabledLibraries]);
 
   useEffect(() => {
     let active = true;
     async function loadInitialState() {
       try {
-        const response = await fetch(`/api/monitor-folders${restrictToEnabledMonitorFolders ? '?purpose=upload' : ''}`);
-        const payload = (await response.json()) as { ok: boolean; data?: MonitorFoldersPayload; error?: { message: string } };
+        const response = await fetch(`/api/libraries${restrictToEnabledLibraries ? '?purpose=upload' : ''}`);
+        const payload = (await response.json()) as { ok: boolean; data?: LibrariesPayload; error?: { message: string } };
         if (!active) return;
         if (payload.ok) {
-          const nextFolders = payload.data?.folders ?? [];
-          setFolders(nextFolders);
+          const nextLibraries = payload.data?.libraries ?? [];
+          setLibraries(nextLibraries);
           const lastPath = memory === 'upload' ? payload.data?.lastUploadTargetPath : payload.data?.lastDownloadTargetPath;
-          if (restrictToEnabledMonitorFolders) {
-            const allowedRoots = enabledMonitorRootPaths(nextFolders);
+          if (restrictToEnabledLibraries) {
+            const allowedRoots = enabledLibraryRootPaths(nextLibraries);
             await Promise.all(allowedRoots.map((rootPath) => loadNode(rootPath)));
             if (!active) return;
             if (lastPath && isAllowedTargetPath(lastPath, allowedRoots)) {
@@ -141,7 +139,7 @@ export function TargetDirectoryPicker({
             const lastNode = await loadNode(lastPath);
             if (active && lastNode) onChange(lastNode.path);
           } else if (rootNode) {
-            setMonitorRoot(payload.data?.monitorRoot || rootNode.path);
+            setDirectoryRoot(rootNode.path);
           }
         } else {
           setTreeError(payload.error?.message ?? '读取目录失败');
@@ -154,7 +152,7 @@ export function TargetDirectoryPicker({
     return () => {
       active = false;
     };
-  }, [loadNode, memory, onChange, restrictToEnabledMonitorFolders]);
+  }, [loadNode, memory, onChange, restrictToEnabledLibraries]);
 
   useEffect(() => {
     if (!open) return;
@@ -167,18 +165,18 @@ export function TargetDirectoryPicker({
 
   useEffect(() => {
     if (!onStatusChange) return;
-    const autoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, folders) : false;
+    const autoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, libraries) : false;
     onStatusChange({
       autoImport,
       label: value
           ? processingMode === 'queue'
             ? '上传文件会由后台自动处理并导入书库'
             : autoImport
-            ? '已启用监控，保存后会自动识别'
-            : '该目录未启用监控，文件将只保存不入库'
+            ? '保存到书库后会由扫描器自动识别'
+            : '该目录不属于已启用的书库，文件将只保存不入库'
         : requiredMessage
     });
-  }, [folders, onStatusChange, processingMode, requiredMessage, value]);
+  }, [libraries, onStatusChange, processingMode, requiredMessage, value]);
 
   async function toggleDirectory(path: string) {
     const nextExpanded = !expanded[path];
@@ -187,17 +185,17 @@ export function TargetDirectoryPicker({
   }
 
   function selectPath(path: string) {
-    if (restrictToEnabledMonitorFolders && !isAllowedTargetPath(path, allowedRootPaths)) return;
+    if (restrictToEnabledLibraries && !isAllowedTargetPath(path, allowedRootPaths)) return;
     onChange(path);
     setOpen(false);
   }
 
-  const allowedRootPaths = restrictToEnabledMonitorFolders ? enabledMonitorRootPaths(folders) : [];
-  const rootNode = monitorRoot ? nodes[monitorRoot] : Object.values(nodes)[0];
-  const rootNodes = restrictToEnabledMonitorFolders
+  const allowedRootPaths = restrictToEnabledLibraries ? enabledLibraryRootPaths(libraries) : [];
+  const rootNode = directoryRoot ? nodes[directoryRoot] : Object.values(nodes)[0];
+  const rootNodes = restrictToEnabledLibraries
     ? allowedRootPaths.map((rootPath) => nodes[rootPath]).filter((node): node is DirectoryNode => Boolean(node))
     : rootNode ? [rootNode] : [];
-  const selectedAutoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, folders) : false;
+  const selectedAutoImport = processingMode === 'queue' ? Boolean(value) : value ? autoImportFor(value, libraries) : false;
 
   return (
     <div ref={rootRef} className={cn('relative', className)}>
@@ -222,25 +220,25 @@ export function TargetDirectoryPicker({
           ? processingMode === 'queue'
             ? i18nExpression("上传文件会由后台自动处理并导入书库")
             : selectedAutoImport
-              ? i18nExpression("已启用监控，保存后会自动识别")
-              : i18nExpression("该目录未启用监控，文件将只保存不入库")
+              ? i18nExpression("保存到书库后会由扫描器自动识别")
+              : i18nExpression("该目录不属于已启用的书库，文件将只保存不入库")
           : requiredMessage}
       </div>
       {open ? (
         <div className="absolute left-0 right-0 top-full z-50 mt-2 rounded-2xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-xl shadow-slate-200/60">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-medium text-slate-950">{restrictToEnabledMonitorFolders ? <I18nText>已启用的监控文件夹</I18nText> : <I18nText>可访问目录</I18nText>}</div>
-              <div className="truncate text-xs text-slate-500">{restrictToEnabledMonitorFolders ? i18nExpression('可选择监控文件夹及其任意子文件夹') : monitorRoot || i18nExpression("读取中")}</div>
+              <div className="font-medium text-slate-950">{restrictToEnabledLibraries ? <I18nText>已启用的书库</I18nText> : <I18nText>可访问目录</I18nText>}</div>
+              <div className="truncate text-xs text-slate-500">{restrictToEnabledLibraries ? i18nExpression('可选择书库及其任意子文件夹') : directoryRoot || i18nExpression("读取中")}</div>
             </div>
             <button
               type="button"
               onClick={() => {
-                if (restrictToEnabledMonitorFolders) {
+                if (restrictToEnabledLibraries) {
                   void Promise.all(allowedRootPaths.map((rootPath) => loadNode(rootPath)));
                   return;
                 }
-                void loadNode(value || monitorRoot || undefined);
+                void loadNode(value || directoryRoot || undefined);
               }}
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
@@ -255,7 +253,7 @@ export function TargetDirectoryPicker({
                   node={node}
                   level={0}
                   selectedPath={value}
-                  folders={folders}
+                  folders={libraries}
                   allowedRootPaths={allowedRootPaths}
                   nodes={nodes}
                   expanded={expanded}
@@ -265,7 +263,7 @@ export function TargetDirectoryPicker({
                 />
               ))
             ) : (
-              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : restrictToEnabledMonitorFolders ? i18nExpression('暂无已启用的监控文件夹') : i18nExpression("暂无可选目录")}</div>
+              <div className="px-3 py-2 text-slate-500">{loadingPath ? i18nExpression("正在读取目录...") : restrictToEnabledLibraries ? i18nExpression('暂无已启用的书库') : i18nExpression("暂无可选目录")}</div>
             )}
           </div>
           {treeError ? <div className="mt-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{treeError}</div> : null}
@@ -290,7 +288,7 @@ function TargetDirectoryNodeRow({
   node: DirectoryNode;
   level: number;
   selectedPath: string;
-  folders: MonitorFolder[];
+  folders: Library[];
   allowedRootPaths: string[];
   nodes: Record<string, DirectoryNode>;
   expanded: Record<string, boolean>;

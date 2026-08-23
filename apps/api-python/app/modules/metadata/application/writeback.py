@@ -11,28 +11,29 @@ NULL_SOURCE_REVISION = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
-class MetadataWritebackFileProjection:
+class MetadataWritebackAssetProjection:
     id: str
-    volume_id: str
-    path: str
+    resource_id: str
+    relative_path: str
     size_bytes: int
     mtime_ms: int
 
 
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackImportProjection:
-    volume_id: str
+    resource_id: str
     source_path: str
     asset_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class MetadataWritebackVolumeProjection:
+class MetadataWritebackResourceProjection:
     id: str
-    media_version_id: str
+    resource_id: str
+    source_node_id: str
     title: str
     description: str | None
-    volume_index: float | None
+    resource_index: float | None
     narrator: str | None
     abridged: bool | None
     language: str | None
@@ -45,7 +46,7 @@ class MetadataWritebackVolumeProjection:
 
 @dataclass(frozen=True, slots=True)
 class MetadataWritebackProjection:
-    work_id: str
+    book_id: str
     title: str
     author: str | None
     description: str | None
@@ -54,9 +55,9 @@ class MetadataWritebackProjection:
     series_index: float | None
     cover_path: str | None
     source_revision: datetime | None
-    media_version_ids: tuple[str, ...]
-    volumes: tuple[MetadataWritebackVolumeProjection, ...]
-    files: tuple[MetadataWritebackFileProjection, ...]
+    resource_ids: tuple[str, ...]
+    resources: tuple[MetadataWritebackResourceProjection, ...]
+    assets: tuple[MetadataWritebackAssetProjection, ...]
     imports: tuple[MetadataWritebackImportProjection, ...]
 
 
@@ -64,10 +65,11 @@ class MetadataWritebackProjection:
 class PreparedWritebackIntent:
     operation_id: str
     preparation_id: str
-    work_id: str
-    media_version_id: str
+    book_id: str
+    source_node_id: str
+    resource_id: str | None
     lookup_task_id: str | None
-    volume_id: str | None
+    asset_id: str | None
     source: str
     idempotency_key: str
     source_revision: str
@@ -95,74 +97,76 @@ def prepare_metadata_writeback_intents(
     *,
     source: str,
     lookup_task_id: str | None = None,
-    volume_id: str | None = None,
+    resource_id: str | None = None,
 ) -> tuple[PreparedWritebackIntent, ...]:
     """Purely normalize one immutable projection into durable queue intents."""
 
-    files_by_volume: dict[str, list[dict[str, object]]] = {}
-    for file in projection.files:
-        files_by_volume.setdefault(file.volume_id, []).append(
+    assets_by_resource: dict[str, list[dict[str, object]]] = {}
+    for asset in projection.assets:
+        assets_by_resource.setdefault(asset.resource_id, []).append(
             {
-                "id": file.id,
-                "path": file.path,
-                "size": file.size_bytes,
-                "mtimeMs": file.mtime_ms,
+                "id": asset.id,
+                "relativePath": asset.relative_path,
+                "size": asset.size_bytes,
+                "mtimeMs": asset.mtime_ms,
             }
         )
-    imports_by_volume: dict[str, list[dict[str, object]]] = {}
+    imports_by_resource: dict[str, list[dict[str, object]]] = {}
     for imported in projection.imports:
-        imports_by_volume.setdefault(imported.volume_id, []).append(
+        imports_by_resource.setdefault(imported.resource_id, []).append(
             {
                 "sourcePath": imported.source_path,
                 "assetPaths": list(imported.asset_paths),
             }
         )
-    volumes_by_media: dict[str, list[dict[str, object]]] = {}
-    for volume in projection.volumes:
-        volumes_by_media.setdefault(volume.media_version_id, []).append(
+    resources_by_book: dict[str, list[dict[str, object]]] = {}
+    source_node_ids_by_resource: dict[str, str] = {}
+    for resource in projection.resources:
+        source_node_ids_by_resource[resource.resource_id] = resource.source_node_id
+        resources_by_book.setdefault(resource.resource_id, []).append(
             {
-                "volumeId": volume.id,
+                "resourceId": resource.id,
                 "payload": {
                     "title": projection.title,
-                    "volumeTitle": volume.title,
+                    "resourceTitle": resource.title,
                     "authors": _authors(projection.author),
-                    "description": projection.description or volume.description,
+                    "description": projection.description or resource.description,
                     "subjects": _tags(projection.tags_json),
                     "seriesName": projection.series_name,
                     "seriesIndex": projection.series_index,
-                    "volumeIndex": volume.volume_index,
-                    "narrators": _authors(volume.narrator),
-                    "abridged": volume.abridged,
-                    "language": volume.language,
-                    "publisher": volume.publisher,
+                    "resourceIndex": resource.resource_index,
+                    "narrators": _authors(resource.narrator),
+                    "abridged": resource.abridged,
+                    "language": resource.language,
+                    "publisher": resource.publisher,
                     "publishedAt": (
-                        volume.published_at.isoformat()
-                        if volume.published_at
+                        resource.published_at.isoformat()
+                        if resource.published_at
                         else None
                     ),
-                    "identifier": volume.identifier,
-                    "isbn": volume.isbn,
-                    "coverPath": volume.cover_path or projection.cover_path,
+                    "identifier": resource.identifier,
+                    "isbn": resource.isbn,
+                    "coverPath": resource.cover_path or projection.cover_path,
                 },
-                "files": files_by_volume.get(volume.id, []),
-                "importTasks": imports_by_volume.get(volume.id, []),
+                "assets": assets_by_resource.get(resource.id, []),
+                "importTasks": imports_by_resource.get(resource.id, []),
             }
         )
 
     revision = (projection.source_revision or NULL_SOURCE_REVISION).isoformat()
     intents: list[PreparedWritebackIntent] = []
-    for media_version_id in projection.media_version_ids:
+    for current_resource_id in projection.resource_ids:
         snapshot_json = json.dumps(
-            {"volumes": volumes_by_media.get(media_version_id, [])},
+            {"resources": resources_by_book.get(current_resource_id, [])},
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
         key_input = "\0".join(
             (
-                projection.work_id,
-                media_version_id,
-                volume_id or "",
+                projection.book_id,
+                current_resource_id,
+                current_resource_id or "",
                 lookup_task_id or "",
                 source,
                 revision,
@@ -174,10 +178,11 @@ def prepare_metadata_writeback_intents(
             PreparedWritebackIntent(
                 operation_id=f"metadata_writeback_{digest}",
                 preparation_id=f"metadata_writeback_preparation_{digest}",
-                work_id=projection.work_id,
-                media_version_id=media_version_id,
+                book_id=projection.book_id,
+                source_node_id=source_node_ids_by_resource[current_resource_id],
+                asset_id=resource_id,
                 lookup_task_id=lookup_task_id,
-                volume_id=volume_id,
+                resource_id=current_resource_id,
                 source=source,
                 idempotency_key=digest,
                 source_revision=revision,
@@ -187,11 +192,62 @@ def prepare_metadata_writeback_intents(
     return tuple(intents)
 
 
+def prepare_source_node_metadata_writeback_intent(
+    *,
+    book_id: str,
+    source_node_id: str,
+    source_directory: str,
+    title: str,
+    description: str | None,
+    cover_path: str | None,
+    source_revision: datetime,
+    source: str = "MANUAL",
+) -> PreparedWritebackIntent:
+    """Create one immutable sidecar-OPF intent for a Book directory node."""
+
+    revision = source_revision.isoformat()
+    snapshot_json = json.dumps(
+        {
+            "resources": [
+                {
+                    "resourceId": source_node_id,
+                    "payload": {
+                        "title": title.strip(),
+                        "description": (description or "").strip() or None,
+                        "coverPath": cover_path,
+                    },
+                    "assets": [],
+                    "importTasks": [{"sourcePath": source_directory}],
+                }
+            ]
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    key_input = f"{book_id}\0{source_node_id}\0{source}\0{revision}\0{snapshot_json}"
+    digest = hashlib.sha256(key_input.encode()).hexdigest()
+    return PreparedWritebackIntent(
+        operation_id=f"metadata_writeback_{digest}",
+        preparation_id=f"metadata_writeback_preparation_{digest}",
+        book_id=book_id,
+        source_node_id=source_node_id,
+        resource_id=None,
+        lookup_task_id=None,
+        asset_id=None,
+        source=source,
+        idempotency_key=digest,
+        source_revision=revision,
+        snapshot_json=snapshot_json,
+    )
+
+
 __all__ = [
-    "MetadataWritebackFileProjection",
+    "MetadataWritebackAssetProjection",
     "MetadataWritebackImportProjection",
     "MetadataWritebackProjection",
-    "MetadataWritebackVolumeProjection",
+    "MetadataWritebackResourceProjection",
     "PreparedWritebackIntent",
     "prepare_metadata_writeback_intents",
+    "prepare_source_node_metadata_writeback_intent",
 ]

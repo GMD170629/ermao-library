@@ -18,7 +18,6 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case organizeCandidates
     case organizeRuns
     case recognitionPolicy
-    case duplicateWorks
     case libraryOperations
     case categoryGovernance
     case metadataProviders
@@ -94,11 +93,10 @@ enum AdministrativeLoadState<Value: Equatable & Sendable>: Equatable, Sendable {
 
 struct AdministrativeManagementSummary: Equatable, Sendable {
     let librarySourceCount: Int
-    let monitoredSourceCount: Int
+    let enabledLibraryCount: Int
     let activeImportCount: Int
-    let automaticImportEnabled: Bool
+    let importFormatCount: Int
     let pendingOrganizeCount: Int
-    let duplicateGroupCount: Int
     let availableProviderCount: Int
     let providerCount: Int
     let userCount: Int
@@ -178,7 +176,7 @@ struct AdministrativeUser: Identifiable, Equatable, Sendable {
     var role: UserRole
     var enabled: Bool
     var canManageSystem: Bool
-    var monitorFolderIDs: Set<String>
+    var libraryIDs: Set<String>
     var canViewManualImports: Bool
     var locale: AdministrativeSettingsLocale
 }
@@ -219,14 +217,7 @@ struct AdministrativeLibraryScope: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let serverPath: String
-    let workCount: Int
-}
-
-enum MonitorInterval: String, CaseIterable, Hashable, Sendable {
-    case realtime
-    case fiveMinutes
-    case hourly
-    case manual
+    let bookCount: Int
 }
 
 enum MediaKind: String, CaseIterable, Hashable, Sendable {
@@ -235,12 +226,18 @@ enum MediaKind: String, CaseIterable, Hashable, Sendable {
     case audiobook
 }
 
+enum LibraryOrganizationMode: String, CaseIterable, Hashable, Sendable {
+    case flat
+    case volumes
+    case audiobook
+}
+
 struct LibrarySource: Identifiable, Equatable, Sendable {
     let id: String
     var displayName: String
     var serverPath: String
     var enabled: Bool
-    var mediaKindPolicy: MediaKind?
+    var organizationMode: LibraryOrganizationMode
     var ignorePatterns: String
     var ignoreHidden: Bool
     var minimumFileSizeBytes: Int64
@@ -348,8 +345,6 @@ enum MetadataLanguage: String, CaseIterable, Hashable, Sendable {
 }
 
 struct ImportPreferences: Equatable, Sendable {
-    var stabilityCheckEnabled: Bool
-    var stabilitySeconds: Double
     var allowedExtensions: [String]
     var ignorePatterns: String
 }
@@ -416,24 +411,6 @@ struct RecognitionPolicy: Equatable, Sendable {
     let opfQueueTotal: Int
 }
 
-struct DuplicateWork: Identifiable, Equatable, Sendable {
-    let id: String
-    let title: String
-    let author: String?
-    let fileCount: Int
-    let confidence: Double
-}
-
-struct DuplicateGroup: Identifiable, Equatable, Sendable {
-    let id: String
-    let works: [DuplicateWork]
-}
-
-struct MergeDuplicateRequest: Equatable, Sendable {
-    let groupID: String
-    let canonicalWorkID: String
-}
-
 struct LibraryOperation: Identifiable, Equatable, Sendable {
     let id: String
     let action: String
@@ -454,7 +431,7 @@ struct GovernedCategory: Identifiable, Equatable, Sendable {
     let kind: CategoryKind
     let name: String
     let aliases: [String]
-    let workCount: Int
+    let bookCount: Int
 }
 
 struct MergeCategoryRequest: Equatable, Sendable {
@@ -521,9 +498,9 @@ struct BackupRecord: Identifiable, Equatable, Sendable {
     let kind: String
     let sizeBytes: Int64
     let createdAt: Date
-    let workCount: Int
+    let bookCount: Int
     let progressCount: Int
-    let directoryCount: Int
+    let libraryCount: Int
 }
 
 enum AdministrativeWorkDetailSection: String, CaseIterable, Hashable, Sendable {

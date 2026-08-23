@@ -4,12 +4,12 @@ from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderExternalProgressDto,
 )
-from app.modules.reader.application.volume_reader import (
+from app.modules.reader.application.resource_reader import (
     ReaderProgressDateConflict,
-    ReaderVolumeFormatUnsupported,
-    ReaderVolumeNotFound,
+    ReaderResourceFormatUnsupported,
+    ReaderResourceNotFound,
+    ResourceReaderService,
     SaveExternalProgressCommand,
-    VolumeReaderService,
 )
 from app.modules.reader.domain.progress import (
     normalize_reader_href,
@@ -21,11 +21,11 @@ from app.modules.reader.domain.progress import (
     reader_unit_index,
     reader_unit_index_at_position,
 )
-from app.modules.reader.domain.volume_progress import (
+from app.modules.reader.domain.resource_progress import (
     MediaKind,
-    VolumeReadingState,
-    choose_continue_volume_id,
-    completed_for_available_volumes,
+    ResourceReadingState,
+    choose_continue_resource_id,
+    completed_for_available_resources,
 )
 
 __all__ = [
@@ -33,13 +33,13 @@ __all__ = [
     "ReaderAccessScope",
     "ReaderExternalProgressDto",
     "ReaderProgressDateConflict",
-    "ReaderVolumeFormatUnsupported",
-    "ReaderVolumeNotFound",
+    "ReaderResourceFormatUnsupported",
+    "ReaderResourceNotFound",
+    "ResourceReaderService",
+    "ResourceReadingState",
     "SaveExternalProgressCommand",
-    "VolumeReaderService",
-    "VolumeReadingState",
-    "choose_continue_volume_id",
-    "completed_for_available_volumes",
+    "choose_continue_resource_id",
+    "completed_for_available_resources",
     "normalize_reader_href",
     "number_or_none",
     "progress_location",

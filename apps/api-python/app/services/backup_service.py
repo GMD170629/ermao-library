@@ -26,6 +26,7 @@ from app.db.runner import head_revision
 from app.db.sqlite import create_sqlite_engine
 from app.modules.backup.application.restore import (
     ApplyValidatedBackupRestore,
+    BackupRecordValidationError,
     PreparedRestorePlan,
 )
 from app.modules.backup.infrastructure.persistence import (
@@ -41,78 +42,47 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("users", "User"),
     ("userPreferences", "UserPreference"),
     ("shelves", "Shelf"),
-    ("monitorFolders", "MonitorFolder"),
-    ("userMonitorFolderAccess", "UserMonitorFolderAccess"),
-    ("works", "LibraryWork"),
-    ("mediaVersions", "LibraryMediaVersion"),
-    ("volumes", "LibraryVolume"),
-    ("files", "LibraryFile"),
-    ("readingUnits", "LibraryReadingUnit"),
-    ("metadataItems", "LibraryMetadata"),
+    ("shelfCollectionMemberships", "ShelfCollectionMembership"),
+    ("libraries", "Library"),
+    ("sourceNodes", "LibrarySourceNode"),
+    ("sourceNodeMetadata", "LibrarySourceNodeMetadata"),
+    ("sourceNodeInterpretations", "LibrarySourceNodeInterpretation"),
+    ("userLibraryAccess", "UserLibraryAccess"),
+    ("books", "LibraryBook"),
+    ("bookMetadata", "LibraryBookMetadata"),
+    ("resources", "LibraryReadableResource"),
+    ("resourceMetadata", "LibraryReadableResourceMetadata"),
+    ("assets", "LibraryResourceAsset"),
+    ("resourceAssetMetadata", "LibraryResourceAssetMetadata"),
+    ("navigationUnits", "ReadableResourceNavigationUnit"),
     ("facets", "LibraryFacet"),
-    ("workFacets", "LibraryWorkFacet"),
-    ("volumeFacets", "LibraryVolumeFacet"),
-    ("shelfWorks", "ShelfWork"),
-    ("readingProgresses", "LibraryReadingProgress"),
-    ("userMediaHistories", "UserMediaHistory"),
-    ("workDetailPreferences", "WorkDetailPreference"),
-    ("importTasks", "ImportTask"),
-    ("importAssets", "ImportAsset"),
-    ("bookConversionTasks", "BookConversionTask"),
-    ("importLogs", "ImportLog"),
+    ("bookFacets", "LibraryBookFacet"),
+    ("resourceFacets", "LibraryReadableResourceFacet"),
+    ("shelfBooks", "ShelfBook"),
+    ("readerProgress", "ReaderResourceProgress"),
+    ("bookPreferences", "BookDetailPreference"),
+    ("importTasks", "LibraryImportTask"),
     ("organizeJobs", "OrganizeJob"),
+    ("organizeRuns", "OrganizeRun"),
     ("metadataSuggestions", "MetadataSuggestion"),
-    ("duplicateCandidates", "DuplicateCandidate"),
     ("metadataLookupTasks", "MetadataLookupTask"),
     ("externalMetadataCache", "ExternalMetadataCache"),
-    ("bookIdentityCache", "BookIdentityCache"),
     ("readerPreferences", "ReaderPreference"),
     ("readerBookPreferences", "ReaderBookPreference"),
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
-    ("mediaVersionMigrationEvents", "MediaVersionMigrationEvent"),
+    ("readerProgressMutations", "ReaderProgressMutation"),
+    ("libraryOperations", "LibraryOperation"),
     ("sources", "Source"),
     ("metadataProviderPipelines", "MetadataProviderPipeline"),
     ("systemSettings", "SystemSetting"),
 ]
+BACKUP_FORMAT_VERSION = 4
 
-RESTORE_ORDER = [
-    "MetadataProviderPipeline",
-    "Source",
-    "ReaderBookmark",
-    "MediaVersionMigrationEvent",
-    "UserMonitorFolderAccess",
-    "UserPreference",
-    "BookIdentityCache",
-    "ExternalMetadataCache",
-    "MetadataLookupTask",
-    "DuplicateCandidate",
-    "MetadataSuggestion",
-    "OrganizeJob",
-    "SystemSetting",
-    "ReaderBookPreference",
-    "ReaderProgressCursor",
-    "ReaderPreference",
-    "WorkDetailPreference",
-    "UserMediaHistory",
-    "ImportLog",
-    "BookConversionTask",
-    "ImportTask",
-    "ImportAsset",
-    "LibraryReadingProgress",
-    "ShelfWork",
-    "Shelf",
-    "LibraryMetadata",
-    "LibraryReadingUnit",
-    "LibraryFile",
-    "LibraryVolumeFacet",
-    "LibraryWorkFacet",
-    "LibraryFacet",
-    "LibraryVolume",
-    "LibraryMediaVersion",
-    "LibraryWork",
-    "MonitorFolder",
-]
+# The persistence adapter derives the actual order from ORM foreign keys.  This
+# list deliberately contains every exported table so the delete side clears
+# the same complete scope before inserting the parent-before-child projection.
+RESTORE_ORDER = [table_name for _export_key, table_name in BACKUP_TABLES]
 
 
 @dataclass(frozen=True)
@@ -167,35 +137,40 @@ def counts_for_export(
     return {
         "users": len(database_export.get("users", [])),
         "userPreferences": len(database_export.get("userPreferences", [])),
-        "monitorFolders": len(database_export.get("monitorFolders", [])),
-        "userMonitorFolderAccess": len(
-            database_export.get("userMonitorFolderAccess", [])
-        ),
-        "works": len(database_export.get("works", [])),
-        "mediaVersions": len(database_export.get("mediaVersions", [])),
-        "volumes": len(database_export.get("volumes", [])),
-        "files": len(database_export.get("files", [])),
-        "readingUnits": len(database_export.get("readingUnits", [])),
-        "metadataItems": len(database_export.get("metadataItems", [])),
+        "libraries": len(database_export.get("libraries", [])),
+        "userLibraryAccess": len(database_export.get("userLibraryAccess", [])),
+        "books": len(database_export.get("books", [])),
+        "bookMetadata": len(database_export.get("bookMetadata", [])),
+        "resources": len(database_export.get("resources", [])),
+        "resourceMetadata": len(database_export.get("resourceMetadata", [])),
+        "assets": len(database_export.get("assets", [])),
+        "navigationUnits": len(database_export.get("navigationUnits", [])),
         "facets": len(database_export.get("facets", [])),
-        "workFacets": len(database_export.get("workFacets", [])),
-        "volumeFacets": len(database_export.get("volumeFacets", [])),
+        "bookFacets": len(database_export.get("bookFacets", [])),
+        "resourceFacets": len(database_export.get("resourceFacets", [])),
         "shelves": len(database_export.get("shelves", [])),
-        "shelfWorks": len(database_export.get("shelfWorks", [])),
-        "readingProgresses": len(database_export.get("readingProgresses", [])),
-        "userMediaHistories": len(database_export.get("userMediaHistories", [])),
-        "workDetailPreferences": len(database_export.get("workDetailPreferences", [])),
+        "shelfBooks": len(database_export.get("shelfBooks", [])),
+        "readerProgress": len(database_export.get("readerProgress", [])),
+        "bookPreferences": len(database_export.get("bookPreferences", [])),
         "importTasks": len(database_export.get("importTasks", [])),
-        "importAssets": len(database_export.get("importAssets", [])),
-        "bookConversionTasks": len(database_export.get("bookConversionTasks", [])),
-        "importLogs": len(database_export.get("importLogs", [])),
         "readerPreferences": len(database_export.get("readerPreferences", [])),
         "readerBookPreferences": len(database_export.get("readerBookPreferences", [])),
         "readerProgressCursors": len(database_export.get("readerProgressCursors", [])),
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
-        "mediaVersionMigrationEvents": len(
-            database_export.get("mediaVersionMigrationEvents", [])
+        "readerProgressMutations": len(
+            database_export.get("readerProgressMutations", [])
         ),
+        "sourceNodes": len(database_export.get("sourceNodes", [])),
+        "sourceNodeMetadata": len(database_export.get("sourceNodeMetadata", [])),
+        "sourceNodeInterpretations": len(
+            database_export.get("sourceNodeInterpretations", [])
+        ),
+        "resourceAssetMetadata": len(database_export.get("resourceAssetMetadata", [])),
+        "shelfCollectionMemberships": len(
+            database_export.get("shelfCollectionMemberships", [])
+        ),
+        "organizeRuns": len(database_export.get("organizeRuns", [])),
+        "libraryOperations": len(database_export.get("libraryOperations", [])),
         "sources": len(database_export.get("sources", [])),
         "metadataProviderPipelines": len(
             database_export.get("metadataProviderPipelines", [])
@@ -241,46 +216,46 @@ def create_backup(
     db.close()
     database_export["coverIndex"] = [
         {
-            "workId": work.get("id"),
-            "coverPath": work.get("coverPath"),
-            "coverStatus": work.get("coverStatus"),
+            "bookId": book.get("id"),
+            "coverPath": book.get("coverPath"),
+            "coverStatus": book.get("coverStatus"),
         }
-        for work in database_export.get("works", [])
+        for book in database_export.get("books", [])
     ]
     counts = counts_for_export(database_export)
-    counts["libraryFiles"] = 0
+    counts["managedAssets"] = len(database_export.get("assets", []))
     metadata = {
         "id": backup_id_value,
         "kind": kind,
         "app": "ermao-books",
-        "version": 3,
+        "version": BACKUP_FORMAT_VERSION,
         "databaseRevision": database_revision,
         "createdAt": created_at.isoformat(),
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
         "scope": [
-            "database-v3",
+            "database-v4",
             "system-settings",
             "library-metadata",
             "reading-metadata",
             "tags",
-            "volume-progress",
-            "monitor-folder-settings",
+            "resource-progress",
+            "library-settings",
             "multi-user-authorization",
             "user-preferences",
             "reader-bookmarks",
             "cover-cache-index",
         ],
         "excludes": [
-            "reader-content-files",
+            "reader-content-assets",
             "publication-render-cache",
-            "cover-image-files",
-            "library-files/",
+            "cover-image-assets",
+            "managed-assets/",
         ],
         "counts": counts,
     }
     settings_export = {
-        "monitorFolders": database_export.get("monitorFolders", []),
+        "libraries": database_export.get("libraries", []),
         "systemSettings": database_export.get("systemSettings", []),
         "storageRoot": str(settings.resolved_storage_root),
         "backupRoot": str(backup_dir(settings)),
@@ -344,14 +319,20 @@ def delete_backup_file(settings: Settings, backup_id_value: str) -> bool:
 
 
 def parse_backup(path: Path) -> tuple[dict[str, Any], dict[str, object]]:
-    with zipfile.ZipFile(path) as archive:
-        metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
-        database_export = json.loads(
-            archive.read("database-export.json").decode("utf-8")
-        )
+    try:
+        with zipfile.ZipFile(path) as archive:
+            metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
+            database_export = json.loads(
+                archive.read("database-export.json").decode("utf-8")
+            )
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile) as exc:
+        raise BackupFormatError("BACKUP_FORMAT_INVALID") from exc
     if not isinstance(metadata, dict) or not isinstance(database_export, dict):
         raise BackupFormatError("BACKUP_FORMAT_INVALID")
-    if metadata.get("app") != "ermao-books" or metadata.get("version") != 3:
+    if (
+        metadata.get("app") != "ermao-books"
+        or metadata.get("version") != BACKUP_FORMAT_VERSION
+    ):
         raise ValueError("BACKUP_REVISION_UNSUPPORTED")
     return metadata, database_export
 
@@ -360,27 +341,19 @@ def _calibrate_runtime_rows(
     table_name: str,
     records: tuple[dict[str, object], ...],
 ) -> tuple[dict[str, object], ...]:
-    """Release restored in-flight leases without creating OPF history work."""
+    """Release restored metadata and organize jobs without creating history."""
 
     result: list[dict[str, object]] = []
     for source_record in records:
         record = dict(source_record)
         status = record.get("status")
-        if table_name == "ImportTask" and status == "PARSING":
-            record.update(
-                status="PENDING",
-                leaseOwner=None,
-                leaseExpiresAt=None,
-            )
-        elif table_name == "MetadataLookupTask" and status == "RUNNING":
+        if table_name == "MetadataLookupTask" and status == "RUNNING":
             record.update(
                 status="PENDING",
                 leaseOwnerId=None,
                 leaseExpiresAt=None,
                 startedAt=None,
             )
-        elif table_name == "BookConversionTask" and status == "RUNNING":
-            record.update(status="QUEUED", startedAt=None)
         elif table_name == "OrganizeJob" and status == "RUNNING":
             record.update(status="PENDING", startedAt=None)
         result.append(record)
@@ -421,10 +394,15 @@ def _validate_restore_against_temporary_database(
         try:
             bootstrap_database(validation_engine, validation_settings)
             with Session(validation_engine) as validation_db:
-                ApplyValidatedBackupRestore(
-                    SqlAlchemyBackupRestoreWriter(validation_db),
-                    validation_db,
-                ).execute(plan)
+                try:
+                    ApplyValidatedBackupRestore(
+                        SqlAlchemyBackupRestoreWriter(validation_db),
+                        validation_db,
+                    ).execute(plan)
+                except BackupRecordValidationError:
+                    raise
+                except Exception as exc:
+                    raise BackupRecordValidationError("BACKUP_CONTENT_INVALID") from exc
         finally:
             validation_engine.dispose()
 

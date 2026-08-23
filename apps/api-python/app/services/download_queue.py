@@ -9,11 +9,10 @@ from uuid import uuid4
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.bootstrap.download import enqueue_download_import_command
+from app.bootstrap.download import continue_download_import_command
 from app.core.config import Settings
 from app.modules.download.infrastructure.tasks import (
-    has_table,
-    list_enabled_monitor_folders,
+    list_enabled_libraries,
     next_queued_download_task,
 )
 from app.modules.imports.public import is_supported_import_filename
@@ -96,17 +95,23 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
         downloaded_path = Path(str(result.task.get("filePath") or "")).expanduser()
         if downloaded_path.is_file() and is_supported_import_filename(downloaded_path):
             try:
-                monitor_folder_id = _monitor_folder_id(db, downloaded_path)
+                library_id = _library_id(db, downloaded_path)
                 db.close()
-                import_task = enqueue_download_import_command(
+                if library_id is None:
+                    print(
+                        f"[download-queue] downloaded {task['id']} "
+                        "but file is outside enabled libraries; import skipped",
+                        flush=True,
+                    )
+                    return True
+                import_result = continue_download_import_command(
                     db,
                     task_id=str(task["id"]),
-                    source_path=str(downloaded_path),
-                    original_name=downloaded_path.name,
-                    monitor_folder_id=monitor_folder_id,
+                    library_id=library_id,
                 )
                 print(
-                    f"[download-queue] downloaded {task['id']} and queued import {import_task.id}",
+                    f"[download-queue] downloaded {task['id']} and continued library import "
+                    f"{import_result.task_id or 'already active'}",
                     flush=True,
                 )
             except Exception as exc:  # noqa: BLE001 - import handoff containment.
@@ -117,11 +122,8 @@ def process_next_download_task(db: Session, settings: Settings) -> bool:
     return True
 
 
-def _monitor_folder_id(db: Session, path: Path) -> str | None:
-    if not has_table(db, "MonitorFolder"):
-        db.close()
-        return None
-    folders = list_enabled_monitor_folders(db)
+def _library_id(db: Session, path: Path) -> str | None:
+    folders = list_enabled_libraries(db)
     db.close()
     resolved = path.resolve()
     matches: list[tuple[int, str]] = []

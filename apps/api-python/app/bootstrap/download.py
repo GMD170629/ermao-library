@@ -7,18 +7,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.bootstrap.imports import (
-    execute_import_enqueue_write,
-    load_import_enqueue_command_projection,
-    prepare_import_enqueue_command,
-    prepare_import_enqueue_write,
-)
+from app.bootstrap.readable_resource_pipeline import continue_library_import
 from app.bootstrap.system import (
     prepare_settings_write,
     write_prepared_settings,
     write_prepared_system_events,
 )
 from app.models.common import db_timestamp
+from app.models.library import Library
 from app.modules.download.application.dto import (
     CreateDownloadTask,
     DownloadTaskDTO,
@@ -35,19 +31,28 @@ from app.modules.download.infrastructure.download_http import (
     write_prepared_download_task_create,
 )
 from app.modules.download.infrastructure.tasks import (
-    entity_as_legacy_dict,
+    entity_record,
     execute_download_task_row_update,
     prepare_claim_download_task,
     prepare_download_task_state_update,
     prepare_mark_download_task_importing,
 )
+from app.modules.download.infrastructure.tasks import (
+    list_enabled_libraries as _list_enabled_libraries,
+)
 from app.modules.download.public import DownloadWriteTransaction
-from app.modules.imports.application.dto import ImportTaskDTO
+from app.modules.imports.application.readable_resource.continue_import import (
+    ContinueImportResult,
+)
 from app.modules.system.domain.events import PreparedSystemEvent
 
 
 def list_download_tasks(db: Session, *, limit: int = 1000) -> list[DownloadTaskDTO]:
     return SqlAlchemyDownloadTaskRepository(db).list_recent(limit=limit)
+
+
+def list_enabled_libraries(db: Session) -> list[dict[str, Any]]:
+    return _list_enabled_libraries(db)
 
 
 def get_download_task(db: Session, task_id: str) -> DownloadTaskDTO | None:
@@ -161,7 +166,7 @@ def claim_download_task_command(
     statement = prepare_claim_download_task(task_id, now=timestamp)
     with DownloadWriteTransaction(db):
         task = execute_download_task_row_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def finalize_download_task_command(
@@ -175,52 +180,41 @@ def finalize_download_task_command(
     with DownloadWriteTransaction(db):
         task = execute_download_task_row_update(db, statement)
         write_prepared_system_events(db, (event,))
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
-def enqueue_download_import_command(
+def continue_download_import_command(
     db: Session,
     *,
     task_id: str,
-    source_path: str,
-    original_name: str,
-    monitor_folder_id: str | None,
-) -> ImportTaskDTO:
-    enqueue_command = prepare_import_enqueue_command(
-        source_path,
-        origin="DOWNLOAD",
-        original_name=original_name,
-        monitor_folder_id=monitor_folder_id,
-        message="下载完成，等待后台导入",
-    )
-    projection = load_import_enqueue_command_projection(db, enqueue_command)
-    db.close()
-    prepared_at = db_timestamp()
-    prepared_enqueue = prepare_import_enqueue_write(
-        enqueue_command,
-        projection,
-        available_at=prepared_at,
-    )
+    library_id: str | None,
+) -> ContinueImportResult:
+    if library_id is None:
+        raise ValueError("downloaded file is not owned by a library")
+    library = db.get(Library, library_id)
+    if library is None or not library.enabled:
+        raise ValueError("download target library is unavailable")
     mark_importing_statement = prepare_mark_download_task_importing(
         task_id,
-        updated_at=prepared_at,
+        updated_at=db_timestamp(),
     )
+    result = continue_library_import(db, library_id)
     with DownloadWriteTransaction(db):
-        execute_import_enqueue_write(db, prepared_enqueue)
         db.execute(mark_importing_statement)
-    return prepared_enqueue.task
+    return result
 
 
 __all__ = [
+    "claim_download_task_command",
+    "continue_download_import_command",
     "create_download_task",
     "create_download_task_command",
     "delete_download_task",
     "delete_download_task_command",
+    "finalize_download_task_command",
     "get_download_task",
     "list_download_tasks",
-    "claim_download_task_command",
-    "finalize_download_task_command",
-    "enqueue_download_import_command",
+    "list_enabled_libraries",
     "update_download_task",
     "update_download_task_command",
     "write_download_task",

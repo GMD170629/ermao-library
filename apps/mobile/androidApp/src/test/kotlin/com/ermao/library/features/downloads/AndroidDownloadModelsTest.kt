@@ -12,73 +12,89 @@ class AndroidDownloadModelsTest {
     private val namespace = AndroidDownloadNamespace("server", "user", 3)
 
     @Test
-    fun searchReturnsOnlyCompletedVerifiedExistingDownloadsGroupedByWork() {
+    fun searchReturnsOnlyCompletedVerifiedExistingDownloadsGroupedByBook() {
         val records = listOf(
-            record("task-1", "work-1", "三体", "刘慈欣", "第一卷", "/files/one", completed = true),
-            record("task-2", "work-1", "三体", "刘慈欣", "第二卷", "/files/two", completed = true),
-            record("task-3", "work-2", "流浪地球", "刘慈欣", "上册", "/files/missing", completed = true),
-            record("task-4", "work-3", "Incomplete", "Author", "Volume", null, completed = false),
+            record("task-1", "book-1", "三体", "刘慈欣", "第一卷", "/files/one", completed = true),
+            record("task-2", "book-1", "三体", "刘慈欣", "第二卷", "/files/two", completed = true),
+            record("task-3", "book-2", "流浪地球", "刘慈欣", "上册", "/files/missing", completed = true),
+            record("task-4", "book-3", "Incomplete", "Author", "Resource", null, completed = false),
         )
 
         val result = groupReadableDownloads(records, "刘慈欣") { it.localReference != "/files/missing" }
 
         assertEquals(1, result.size)
-        assertEquals("work-1", result.single().workId)
-        assertEquals(listOf("第一卷", "第二卷"), result.single().volumes.map(AndroidDownloadRecord::volumeTitle))
+        assertEquals("book-1", result.single().bookId)
+        assertEquals(listOf("第一卷", "第二卷"), result.single().resources.map { it.title })
     }
 
     @Test
-    fun completedWorkPreservesMediaVersionThenVolumeHierarchy() {
+    fun completedBookPreservesResourceOrderAndGroupsMultipleAssets() {
         val records = listOf(
-            record("task-2", "work-1", "Book", "Author", "Volume 2", "two.bin", completed = true).copy(
-                mediaVersionId = "media-ebook",
-                mediaKind = "EBOOK",
-                volumeSortOrder = 2,
+            record("task-2", "book-1", "Book", "Author", "Resource 2", "two.bin", completed = true).copy(
+                resourceSortOrder = 2,
+                assetId = "asset-2",
             ),
-            record("task-1", "work-1", "Book", "Author", "Volume 1", "one.bin", completed = true).copy(
-                mediaVersionId = "media-ebook",
-                mediaKind = "EBOOK",
-                volumeSortOrder = 1,
+            record("task-1", "book-1", "Book", "Author", "Resource 1", "one.bin", completed = true).copy(
+                resourceSortOrder = 1,
+                assetId = "asset-1",
             ),
-            record("task-3", "work-1", "Book", "Author", "Comic", "comic.bin", completed = true).copy(
-                mediaVersionId = "media-comic",
-                mediaKind = "COMIC",
+            record("task-1b", "book-1", "Book", "Author", "Resource 1", "one-track.bin", completed = true).copy(
+                resourceId = "resource-task-1",
+                resourceSortOrder = 1,
+                assetId = "asset-1b",
             ),
         )
 
-        val work = groupReadableDownloads(records, "") { true }.single()
+        val book = groupReadableDownloads(records, "") { true }.single()
 
-        assertEquals(listOf("media-ebook", "media-comic"), work.mediaVersions.map { it.mediaVersionId })
-        assertEquals(listOf("Volume 1", "Volume 2"), work.mediaVersions.first().volumes.map { it.volumeTitle })
+        assertEquals(listOf("resource-task-1", "resource-task-1", "resource-task-2"), book.resources.flatMap { resource ->
+            resource.artifacts.map { it.resourceId }
+        })
+        assertEquals(listOf("Resource 1", "Resource 2"), book.resources.map { it.title })
+        assertEquals(listOf("asset-1", "asset-1b"), book.resources.first().artifacts.map { it.assetId })
+    }
+
+    @Test
+    fun rehomedResourceGroupsUnderTargetBook() {
+        val moved = record("task-1", "book-source", "Source", "Author", "Resource", "one.bin", completed = true).copy(
+            bookId = "book-target",
+            bookTitle = "Target",
+        )
+
+        val book = groupReadableDownloads(listOf(moved), "") { true }.single()
+
+        assertEquals("book-target", book.bookId)
+        assertEquals(listOf("resource-task-1"), book.resources.map { it.resourceId })
     }
 
     @Test
     fun catalogRecordCannotClaimCompletedWithoutVerifiedLocalReference() {
         assertFailsWith<IllegalArgumentException> {
-            record("task", "work", "Title", "Author", "Volume", null, completed = true)
+            record("task", "book", "Title", "Author", "Resource", null, completed = true)
         }
     }
 
     private fun record(
         taskId: String,
-        workId: String,
+        bookId: String,
         title: String,
         author: String,
-        volume: String,
+        resource: String,
         localReference: String?,
         completed: Boolean,
     ) = AndroidDownloadRecord(
         taskId = taskId,
         namespace = namespace,
-        workId = workId,
-        workTitle = title,
+        bookId = bookId,
+        bookTitle = title,
         author = author,
-        coverUrl = "/api/works/$workId/cover",
-        volumeId = "$taskId-volume",
-        volumeTitle = volume,
+        coverUrl = "/api/books/$bookId/cover",
+        resourceId = "resource-$taskId",
+        resourceTitle = resource,
         format = "EPUB",
         readerType = "reflowable",
-        sourceApiPath = "/api/volumes/$taskId-volume/file",
+        assetId = "asset-$taskId",
+        sourceApiPath = "/api/resources/resource-$taskId/asset",
         sourceMimeType = "application/epub+zip",
         expectedBytes = 20,
         transferredBytes = if (completed) 20 else 0,

@@ -14,34 +14,34 @@ export type ResolvedReaderPreferences = {
 export class ReaderPreferenceRepository {
   constructor(private readonly storage: ReaderStorage) {}
 
-  async resolve(userId: string, workId: string, serverDefault: unknown): Promise<ResolvedReaderPreferences> {
-    const local = await this.storage.getPreference(userId, workId);
+  async resolve(userId: string, bookId: string, serverDefault: unknown): Promise<ResolvedReaderPreferences> {
+    const local = await this.storage.getPreference(userId, bookId);
     if (local) return { preferences: normalizeReaderPreferences(local.preferences), source: 'local' };
     return { preferences: inheritReaderPreferences(serverDefault), source: 'inherited' };
   }
 
-  async save(userId: string, workId: string, value: ReaderPreferences, inheritedDefault?: unknown) {
+  async save(userId: string, bookId: string, value: ReaderPreferences, inheritedDefault?: unknown) {
     const base = inheritReaderPreferences(inheritedDefault);
     const preferences = normalizeReaderPreferences(value, base);
-    const snapshot = await this.storage.putPreference(userId, workId, preferences);
-    emitReaderDebug('info', '已保存本书本机阅读偏好', { workId, schemaVersion: snapshot.schemaVersion });
+    const snapshot = await this.storage.putPreference(userId, bookId, preferences);
+    emitReaderDebug('info', '已保存本书本机阅读偏好', { bookId, schemaVersion: snapshot.schemaVersion });
     return snapshot;
   }
 
   async update(
     userId: string,
-    workId: string,
+    bookId: string,
     serverDefault: unknown,
     update: (current: ReaderPreferences) => unknown
   ) {
-    const current = await this.resolve(userId, workId, serverDefault);
+    const current = await this.resolve(userId, bookId, serverDefault);
     const next = normalizeReaderPreferences(update(current.preferences), current.preferences);
-    return this.save(userId, workId, next, serverDefault);
+    return this.save(userId, bookId, next, serverDefault);
   }
 
-  async reset(userId: string, workId: string, serverDefault: unknown) {
-    await this.storage.deletePreference(userId, workId);
-    emitReaderDebug('info', '已恢复本书当前设备默认阅读偏好', { workId });
+  async reset(userId: string, bookId: string, serverDefault: unknown) {
+    await this.storage.deletePreference(userId, bookId);
+    emitReaderDebug('info', '已恢复本书当前设备默认阅读偏好', { bookId });
     return inheritReaderPreferences(serverDefault);
   }
 }

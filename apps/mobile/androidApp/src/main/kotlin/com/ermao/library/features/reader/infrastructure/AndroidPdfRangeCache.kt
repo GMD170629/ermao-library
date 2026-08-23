@@ -92,16 +92,19 @@ internal class AndroidPdfRangeCache(private val rootDirectory: File) {
         }
     }
 
-    /** Authorization/user switches invalidate every other private Range namespace. */
+    /** Authorization/user switches invalidate old generations for this account only. */
     suspend fun activateNamespace(namespace: ReaderSyncNamespace): Unit = withContext(Dispatchers.IO) {
         synchronized(lock) {
+            val accountDirectory = File(root(), sha256(readerAccountStorageKey(namespace)))
             val activeName = sha256(namespace.stableKey)
-            root().listFiles()?.forEach { candidate ->
+            accountDirectory.mkdirs()
+            accountDirectory.listFiles()?.forEach { candidate ->
                 if (candidate.isDirectory && candidate.name != activeName) {
                     removeHotChunks(candidate)
                     candidate.deleteRecursively()
                 }
             }
+            namespaceDirectory(namespace).mkdirs()
         }
     }
 
@@ -205,13 +208,16 @@ internal class AndroidPdfRangeCache(private val rootDirectory: File) {
     }
 
     private fun documentDirectory(identity: PdfRangeCacheIdentity): File =
-        File(namespaceDirectory(identity), sha256(identity.volumeId))
+        File(namespaceDirectory(identity), sha256(identity.resourceId))
 
     private fun namespaceDirectory(identity: PdfRangeCacheIdentity): File =
         namespaceDirectory(identity.namespace)
 
     private fun namespaceDirectory(namespace: ReaderSyncNamespace): File =
-        File(root(), sha256(namespace.stableKey))
+        File(
+            File(root(), sha256(readerAccountStorageKey(namespace))),
+            sha256(namespace.stableKey),
+        )
 
     private fun root(): File {
         rootDirectory.mkdirs()

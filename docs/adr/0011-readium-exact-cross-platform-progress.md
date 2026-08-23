@@ -1,6 +1,6 @@
 # ADR 0011: Cross-format exact Reader progress
 
-Status: Accepted; Android conformance and six-direction physical-device evidence remain release gates
+Status: Superseded in Mobile identity and persistence terms by ADR 0020; exact-location semantics remain accepted
 Date: 2026-08-14
 
 ## Context

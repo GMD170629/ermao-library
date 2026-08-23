@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 test('an uninitialized installation opens the account setup wizard', async ({ page }) => {
+  let createdLibraries = 0;
+  const activatedLibraries: string[] = [];
+  const removedLibraries: string[] = [];
+  const consoleErrors: string[] = [];
   await page.route('**/api/auth/setup/status', async (route) => {
     await route.fulfill({ json: { ok: true, data: { initialized: false } } });
   });
@@ -23,32 +27,53 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
       }
     });
   });
-  await page.route('**/api/monitor-folders', async (route) => {
+  await page.route('**/api/libraries', async (route) => {
     if (route.request().method() === 'GET') {
-      await route.fulfill({ json: { ok: true, data: { folders: [], monitorRoot: '/monitor' } } });
+      await route.fulfill({ json: { ok: true, data: { libraries: [] } } });
       return;
     }
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toEqual({
-      name: '我的书库',
-      rootPath: '/monitor',
-      enabled: true,
+      name: createdLibraries === 0 ? '电子书' : '漫画合集',
+      rootPath: createdLibraries === 0 ? '/library' : '/comics',
+      organizationMode: createdLibraries === 0 ? 'FLAT' : 'VOLUMES',
+      enabled: false,
       ignorePatterns: '',
       ignoreHidden: true,
       minFileSizeBytes: 0
     });
-    await route.fulfill({ status: 201, json: { ok: true, data: { folder: { id: 'folder-1', name: '我的书库', rootPath: '/monitor', enabled: true } } } });
+    createdLibraries += 1;
+    const index = createdLibraries;
+    await route.fulfill({ status: 201, json: { ok: true, data: { library: { id: `folder-${index}`, name: index === 1 ? '电子书' : '漫画合集', rootPath: index === 1 ? '/library' : '/comics', organizationMode: index === 1 ? 'FLAT' : 'VOLUMES', enabled: false } } } });
   });
-  await page.route('**/api/monitor-folders/tree**', async (route) => {
+  await page.route('**/api/libraries/folder-*', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      removedLibraries.push(route.request().url());
+      await route.fulfill({ json: { ok: true, data: { deleted: true } } });
+      return;
+    }
+    expect(route.request().method()).toBe('PATCH');
+    expect(route.request().postDataJSON()).toEqual({ enabled: true });
+    activatedLibraries.push(route.request().url());
+    await route.fulfill({ json: { ok: true, data: { library: {} } } });
+  });
+  await page.route('**/api/libraries/tree**', async (route) => {
     const requestedPath = new URL(route.request().url()).searchParams.get('path');
+    if (requestedPath === '/missing/path') {
+      await route.fulfill({ status: 404, json: { ok: false, error: { message: '路径不存在' } } });
+      return;
+    }
+    if (requestedPath === '/home') {
+      await route.fulfill({ json: { ok: true, data: { node: { name: 'home', path: '/home', readable: true, error: null, children: [{ name: 'liumianti', path: '/home/liumianti', readable: true }, { name: 'liufeng', path: '/home/liufeng', readable: true }, { name: 'Android', path: '/home/Android', readable: true }] } } } });
+      return;
+    }
     await route.fulfill({
       json: {
         ok: true,
         data: {
-          node: requestedPath === '/monitor'
-            ? { name: 'monitor', path: '/monitor', readable: true, error: null, children: [] }
-            : { name: '/', path: '/', readable: true, error: null, children: [{ name: 'monitor', path: '/monitor', readable: true }] },
-          monitorRoot: null
+          node: requestedPath === '/library' || requestedPath === '/comics'
+            ? { name: requestedPath.slice(1), path: requestedPath, readable: true, error: null, children: [] }
+            : { name: '/', path: '/', readable: true, error: null, children: [{ name: 'home', path: '/home', readable: true }, { name: 'library', path: '/library', readable: true }, { name: 'comics', path: '/comics', readable: true }] },
         }
       }
     });
@@ -69,21 +94,86 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByLabel('登录密码').fill('initial-password-123');
   await page.getByLabel('确认密码').fill('initial-password-123');
   await page.getByRole('button', { name: '创建账户' }).click();
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
 
-  await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
-  await folderPath.fill('/monitor');
-  await page.getByRole('button', { name: '展开文件夹路径树' }).click();
+  await expect(page.getByRole('heading', { name: '添加多个书库' })).toBeVisible();
+  const emptyLibraryList = page.getByRole('region', { name: '书库清单' });
+  const initialAddButton = emptyLibraryList.getByRole('button', { name: /添加书库/ });
+  const emptyListBox = await emptyLibraryList.boundingBox();
+  const initialAddButtonBox = await initialAddButton.boundingBox();
+  expect(initialAddButtonBox?.width).toBeGreaterThanOrEqual(176);
+  expect(initialAddButtonBox?.height).toBeGreaterThanOrEqual(176);
+  expect(Math.abs((initialAddButtonBox?.x ?? 0) + (initialAddButtonBox?.width ?? 0) / 2 - ((emptyListBox?.x ?? 0) + (emptyListBox?.width ?? 0) / 2))).toBeLessThan(2);
+  await initialAddButton.click();
+  const addDialog = page.getByRole('dialog', { name: '新增书库' });
+  await expect(addDialog).toBeVisible();
+  await expect(addDialog.getByText(/快速检查/)).toHaveCount(0);
+  await expect(page.getByText('识别说明')).toHaveCount(0);
+  await expect(addDialog.getByRole('radio', { checked: true })).toHaveCount(0);
+  await expect(addDialog).toHaveCSS('overflow-y', 'visible');
+  await page.getByLabel('书库名称').fill('电子书');
+  const folderPath = page.getByRole('combobox', { name: '书库路径' });
+  await folderPath.fill('/home/liu');
+  await expect(page.locator('[data-directory-path="/home"]')).toHaveAttribute('aria-selected', 'false');
+  await expect(page.locator('[data-directory-path="/home/liumianti"]')).toBeVisible();
+  await expect(page.locator('[data-directory-path="/home/liufeng"]')).toBeVisible();
+  await expect(page.locator('[data-directory-path="/home/Android"]')).toHaveCount(0);
+  await folderPath.fill('/missing/path');
+  await expect(addDialog.getByText('路径不存在')).toBeVisible();
+  consoleErrors.length = 0;
+  await folderPath.fill('/library');
   const directoryTree = page.getByRole('tree');
-  await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'monitor', exact: true }).click();
-  await expect(folderPath).toHaveValue('/monitor');
-  await page.getByRole('button', { name: '添加并继续' }).click();
+  const selectedLibrary = page.locator('[data-directory-path="/library"]');
+  await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');
+  await expect(selectedLibrary).toBeInViewport();
+  const treeBox = await directoryTree.boundingBox();
+  const selectedLibraryBox = await selectedLibrary.boundingBox();
+  expect((selectedLibraryBox?.y ?? 0) - (treeBox?.y ?? 0)).toBeLessThan(20);
+  const dialogBox = await addDialog.boundingBox();
+  const treePanelBox = await directoryTree.locator('..').boundingBox();
+  expect((treePanelBox?.y ?? 0) + (treePanelBox?.height ?? 0)).toBeLessThanOrEqual((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0) + 1);
+  await page.getByRole('button', { name: '收起文件夹路径树' }).click();
+  await addDialog.getByRole('button', { name: '添加', exact: true }).click();
+  await expect(addDialog.getByRole('alert')).toHaveText('请选择文件组织方式');
+  const organizationModes = page.getByRole('radiogroup', { name: '组织方式' });
+  const modeBoxes = await Promise.all(['单本', '按目录归组'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
+  expect(modeBoxes[0]?.y).toBe(modeBoxes[1]?.y);
+  await page.getByRole('button', { name: '展开文件夹路径树' }).click();
+  await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');
+  await expect(selectedLibrary).toBeInViewport();
+  await page.getByRole('button', { name: '收起文件夹路径树' }).click();
+  await page.getByRole('radio', { name: '单本' }).click();
+  await addDialog.getByRole('button', { name: '添加', exact: true }).click();
+
+  await expect(page.getByRole('dialog', { name: '新增书库' })).toHaveCount(0);
+  await expect(page.getByText('电子书')).toBeVisible();
+  await page.getByRole('button', { name: /添加书库/ }).click();
+  await expect(page.getByRole('dialog', { name: '新增书库' }).getByRole('radio', { checked: true })).toHaveCount(0);
+  await page.getByLabel('书库名称').fill('漫画合集');
+  await page.getByRole('combobox', { name: '书库路径' }).fill('/comics');
+  await page.getByRole('button', { name: '收起文件夹路径树' }).click();
+  await page.getByRole('radio', { name: '按目录归组' }).click();
+  await page.getByRole('dialog', { name: '新增书库' }).getByRole('button', { name: '添加', exact: true }).click();
+
+  await expect(page.getByText('漫画合集')).toBeVisible();
+  const mangaLibraryRow = page.locator('article').filter({ hasText: '漫画合集' });
+  await mangaLibraryRow.getByRole('button', { name: '移除书库' }).click();
+  expect(removedLibraries).toHaveLength(1);
+  await expect(page.getByText('漫画合集')).toHaveCount(0);
+  await page.getByRole('button', { name: /添加书库/ }).click();
+  await page.getByLabel('书库名称').fill('漫画合集');
+  await page.getByRole('combobox', { name: '书库路径' }).fill('/comics');
+  await page.getByRole('button', { name: '收起文件夹路径树' }).click();
+  await page.getByRole('radio', { name: '按目录归组' }).click();
+  await page.getByRole('dialog', { name: '新增书库' }).getByRole('button', { name: '添加', exact: true }).click();
+  await page.getByRole('button', { name: '启用并进入书库' }).click();
 
   await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toBeVisible();
-  await expect(page.getByText(/监控文件夹已启用/)).toBeVisible();
+  expect(activatedLibraries).toHaveLength(2);
+  await expect(page.getByText(/已启用 2 个书库/)).toBeVisible();
   await expect(page.getByText(/owner@example.com/)).toBeVisible();
   await expect(page.getByRole('button', { name: '进入书库' })).toBeVisible();
+  expect(consoleErrors).toEqual([]);
 });
 
 test('an initialized installation cannot reopen the setup wizard', async ({ page }) => {
@@ -103,10 +193,9 @@ test('an initialized installation cannot reopen the setup wizard', async ({ page
 test('an authenticated owner can resume unfinished library onboarding after refresh', async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem('shuku.setup.progress', JSON.stringify({
-      stage: 'folder',
+      stage: 'library',
       email: 'owner@example.com',
-      folderAdded: false,
-      folderPath: '/monitor'
+      libraries: []
     }));
   });
   await page.route('**/api/auth/setup/status', async (route) => {
@@ -118,8 +207,19 @@ test('an authenticated owner can resume unfinished library onboarding after refr
 
   await page.goto('/setup');
 
-  await expect(page.getByRole('heading', { name: '添加监控文件夹' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: '监控文件夹路径' })).toHaveValue('/monitor');
+  await expect(page.getByRole('heading', { name: '添加多个书库' })).toBeVisible();
+  const skipButton = page.getByRole('button', { name: '跳过' });
+  await expect(skipButton).toHaveCSS('text-decoration-line', 'underline');
+  await skipButton.hover();
+  await expect(skipButton).toHaveCSS('color', 'rgb(196, 61, 47)');
+  await skipButton.click();
+  const skipConfirmation = page.getByRole('alertdialog', { name: '确认跳过添加书库？' });
+  await expect(skipConfirmation).toBeVisible();
+  await skipConfirmation.getByRole('button', { name: '返回添加' }).click();
+  await expect(skipConfirmation).toHaveCount(0);
+  await page.getByRole('button', { name: /添加书库/ }).click();
+  await expect(page.getByRole('dialog', { name: '新增书库' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: '书库路径' })).toHaveValue('');
 });
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {

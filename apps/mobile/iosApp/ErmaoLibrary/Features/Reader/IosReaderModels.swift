@@ -80,7 +80,7 @@ struct IosReaderFailure: LocalizedError, Equatable, Sendable {
 }
 
 struct IosReaderProgressContract: Equatable, Sendable {
-    let sourceID: String
+    let resourceID: String
     let kind: String
     let resourceKey: String?
     let progression: Double?
@@ -93,7 +93,7 @@ struct IosReaderProgressContract: Equatable, Sendable {
     let pageIndex: Int?
     let pageProgression: Double?
     let resourceHref: String?
-    let fileID: String?
+    let assetID: String?
     let chapterID: String?
     let positionMillis: Int64?
     let updatedAtEpochMillis: Int64
@@ -126,7 +126,7 @@ enum IosReaderProgressContractDecoder {
         let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? true
         guard document.schema == "ermao.reader-progress", document.version == 6,
               ["reflow", "pdf", "comic", "audio"].contains(document.location.kind),
-              !document.sourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !document.resourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               resourceKeyIsValid,
               progressionIsValid,
               totalProgressionIsValid,
@@ -151,8 +151,8 @@ enum IosReaderProgressContractDecoder {
                   !href.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { throw IosReaderFailure(code: .locationRestoreFailed) }
         case "audio":
-            guard let fileID = document.location.fileId,
-                  !fileID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            guard let assetID = document.location.assetId,
+                  !assetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let positionMillis = document.location.positionMillis, positionMillis >= 0
             else { throw IosReaderFailure(code: .locationRestoreFailed) }
         default: throw IosReaderFailure(code: .locationRestoreFailed)
@@ -161,7 +161,7 @@ enum IosReaderProgressContractDecoder {
             try enginePayload($0, schemaVersion: document.version)
         }
         return IosReaderProgressContract(
-            sourceID: document.sourceId,
+            resourceID: document.resourceId,
             kind: document.location.kind,
             resourceKey: document.location.resourceKey,
             progression: document.location.progression,
@@ -174,7 +174,7 @@ enum IosReaderProgressContractDecoder {
             pageIndex: document.location.pageIndex,
             pageProgression: document.location.pageProgression,
             resourceHref: document.location.resourceHref,
-            fileID: document.location.fileId,
+            assetID: document.location.assetId,
             chapterID: document.location.chapterId,
             positionMillis: document.location.positionMillis,
             updatedAtEpochMillis: document.updatedAtEpochMillis,
@@ -211,7 +211,7 @@ enum IosReaderProgressContractDecoder {
     private struct Document: Decodable {
         let schema: String
         let version: Int
-        let sourceId: String
+        let resourceId: String
         let location: Location
         let updatedAtEpochMillis: Int64
         let deviceId: String
@@ -228,7 +228,7 @@ enum IosReaderProgressContractDecoder {
         let pageIndex: Int?
         let pageProgression: Double?
         let resourceHref: String?
-        let fileId: String?
+        let assetId: String?
         let chapterId: String?
         let positionMillis: Int64?
     }

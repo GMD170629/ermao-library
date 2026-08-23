@@ -49,16 +49,16 @@ _FORMAT_CAPABILITIES = {
 _KINDLE_SEND = frozenset({"EPUB", "PDF"})
 
 
-def capability_for_format(volume_format: str) -> MediaFormatCapability | None:
+def capability_for_format(resource_format: str) -> MediaFormatCapability | None:
     """Return the single authoritative Reader capability for a stored format."""
 
-    return _FORMAT_CAPABILITIES.get(volume_format.strip().upper())
+    return _FORMAT_CAPABILITIES.get(resource_format.strip().upper())
 
 
-def reader_type_for_format(volume_format: str) -> ReaderType | None:
-    capability = capability_for_format(volume_format)
+def reader_type_for_format(resource_format: str) -> ReaderType | None:
+    capability = capability_for_format(resource_format)
     return capability.reader_type if capability is not None else None
 
 
-def kindle_send_available_for_format(volume_format: str) -> bool:
-    return volume_format.strip().upper() in _KINDLE_SEND
+def kindle_send_available_for_format(resource_format: str) -> bool:
+    return resource_format.strip().upper() in _KINDLE_SEND

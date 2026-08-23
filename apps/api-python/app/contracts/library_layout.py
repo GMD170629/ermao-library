@@ -1,0 +1,17 @@
+"""Stable cross-capability contracts for library-root topology interpretation."""
+
+from app.modules.library.domain.layout import (
+    LayoutBook,
+    LayoutViolation,
+    LibraryOrganizationMode,
+    ParsedLayoutPath,
+    parse_library_file_path,
+)
+
+__all__ = [
+    "LayoutBook",
+    "LayoutViolation",
+    "LibraryOrganizationMode",
+    "ParsedLayoutPath",
+    "parse_library_file_path",
+]

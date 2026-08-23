@@ -28,12 +28,12 @@ class KtorShelfRepositoryTest {
         )
 
         val result = assertIs<ShelfResult.Content<*>>(
-            harness.repository.loadShelves(context(), "work-1"),
+            harness.repository.loadShelves(context(), "book-1"),
         ).value as List<*>
         val shelf = assertIs<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>(result.single())
 
         assertEquals("Favorites", shelf.name)
-        assertEquals(true, shelf.containsWork)
+        assertEquals(true, shelf.containsBook)
         assertEquals(
             listOf("/base/api/shelves", "/base/api/shelves/shelf-1"),
             harness.requests.map(Request::path),
@@ -42,20 +42,20 @@ class KtorShelfRepositoryTest {
 
     @Test
     fun updateUsesEstablishedBulkMembershipContract() = runBlocking {
-        val harness = Harness("""{"ok":true,"data":{"updated":1,"ids":["work-1"]}}""")
+        val harness = Harness("""{"ok":true,"data":{"updated":1,"changedValues":1,"operation":{"id":"op-1"}}}""")
 
         assertIs<ShelfResult.Content<*>>(
             harness.repository.updateMembership(
                 context(),
-                ShelfMembershipChange("work-1", "shelf-1", ShelfMembership.Add),
+                ShelfMembershipChange("book-1", "shelf-1", ShelfMembership.Add),
             ),
         )
 
         val request = harness.requests.single()
         assertEquals(HttpMethod.Post, request.method)
-        assertEquals("/base/api/works/bulk", request.path)
+        assertEquals("/base/api/library/operations/books/shelf-membership", request.path)
         assertEquals(
-            """{"action":"shelf_membership","ids":["work-1"],"shelfId":"shelf-1","membership":"ADD"}""",
+            """{"ids":["book-1"],"shelfId":"shelf-1","membership":"ADD"}""",
             request.body,
         )
     }
@@ -97,6 +97,6 @@ class KtorShelfRepositoryTest {
 
     private companion object {
         const val SHELVES = """{"ok":true,"data":{"shelves":[{"id":"shelf-1","name":"Favorites","kind":"STATIC"},{"id":"smart-1","name":"Smart","kind":"SMART"}]}}"""
-        const val STATIC_DETAIL = """{"ok":true,"data":{"shelf":{"id":"shelf-1","name":"Favorites","kind":"STATIC","bookIds":["work-1"]}}}"""
+        const val STATIC_DETAIL = """{"ok":true,"data":{"shelf":{"id":"shelf-1","name":"Favorites","kind":"STATIC","bookIds":["book-1"]}}}"""
     }
 }

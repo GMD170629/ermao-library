@@ -4,36 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from app.contracts.http import HttpContractModel, MessageError, SuccessEnvelope
-from app.contracts.http_errors import (
-    BasicBadRequestError as BasicBadRequestError,
-)
-from app.contracts.http_errors import (
-    BasicConflictError as BasicConflictError,
-)
-from app.contracts.http_errors import (
-    BasicForbiddenError as BasicForbiddenError,
-)
-from app.contracts.http_errors import (
-    BasicInternalError as BasicInternalError,
-)
-from app.contracts.http_errors import (
-    BasicNotFoundError as BasicNotFoundError,
-)
-from app.contracts.http_errors import (
-    BasicUnauthorizedError as BasicUnauthorizedError,
-)
-from app.contracts.http_errors import (
-    HttpContractError,
-)
-from app.contracts.http_errors import (
-    PayloadTooLargeError as PayloadTooLargeError,
-)
-from app.contracts.http_errors import (
-    SessionUnauthorizedError as SessionUnauthorizedError,
-)
 from fastapi.responses import FileResponse
 from pydantic import EmailStr, Field
+
+from app.contracts.http import HttpContractModel, MessageError, SuccessEnvelope
+from app.contracts.http_errors import HttpContractError
 
 
 class AuthUser(HttpContractModel):
@@ -56,7 +31,7 @@ class AuthorizationView(HttpContractModel):
     is_admin: bool = Field(alias="isAdmin")
     can_manage_system: bool = Field(alias="canManageSystem")
     all_library_scopes: bool = Field(alias="allLibraryScopes")
-    monitor_folder_ids: list[str] = Field(alias="monitorFolderIds")
+    library_ids: list[str] = Field(alias="libraryIds")
     can_view_manual_imports: bool = Field(alias="canViewManualImports")
     authz_version: int = Field(alias="authzVersion")
 

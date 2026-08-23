@@ -16,13 +16,12 @@ from app.modules.kindle.infrastructure.tasks import (
     cancel_queued_kindle_task,
     create_kindle_send_task,
     delete_kindle_send_task,
-    entity_as_legacy_dict,
+    entity_record,
     execute_kindle_send_task_insert,
     execute_kindle_send_task_update,
     find_active_kindle_task,
     get_kindle_send_task,
-    get_library_file_details_for_kindle,
-    has_table,
+    get_library_asset_details_for_kindle,
     list_kindle_send_tasks,
     mark_kindle_task_failed,
     mark_kindle_task_sent,
@@ -41,9 +40,7 @@ from app.services.email_settings import (
 )
 
 
-def record_kindle_event_command(
-    db: Session, event: PreparedSystemEvent
-) -> None:
+def record_kindle_event_command(db: Session, event: PreparedSystemEvent) -> None:
     with KindleWriteTransaction(db):
         write_prepared_system_events(db, (event,))
 
@@ -59,9 +56,7 @@ def update_email_settings_command(
         write_prepared_system_events(db, (event,))
 
 
-def update_kindle_recipient_command(
-    db: Session, *, user_id: str, email: str
-) -> None:
+def update_kindle_recipient_command(db: Session, *, user_id: str, email: str) -> None:
     statement = prepare_user_preference_write(user_id, "kindle.email", email)
     with KindleWriteTransaction(db):
         write_prepared_user_preference(db, statement)
@@ -116,13 +111,11 @@ def delete_kindle_send_task_command(
 def claim_kindle_send_task_command(
     db: Session, task_id: str, *, timestamp: datetime
 ) -> dict[str, Any] | None:
-    if not has_table(db, "KindleSendTask"):
-        return None
     db.close()
     statement = prepare_claim_kindle_send_task(task_id, now=timestamp)
     with KindleWriteTransaction(db):
         task = execute_kindle_send_task_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def update_kindle_send_snapshot_command(
@@ -149,7 +142,7 @@ def update_kindle_send_snapshot_command(
     )
     with KindleWriteTransaction(db):
         task = execute_kindle_send_task_update(db, statement)
-    return entity_as_legacy_dict(task) if task is not None else None
+    return entity_record(task) if task is not None else None
 
 
 def schedule_kindle_retry_command(
@@ -181,9 +174,7 @@ def fail_kindle_send_task_command(
     event: PreparedSystemEvent,
 ) -> None:
     with KindleWriteTransaction(db):
-        mark_kindle_task_failed(
-            db, task_id, error_message=error_message, now=timestamp
-        )
+        mark_kindle_task_failed(db, task_id, error_message=error_message, now=timestamp)
         write_prepared_system_events(db, (event,))
 
 
@@ -216,9 +207,10 @@ def recover_interrupted_kindle_tasks_command(
         )
         write_prepared_system_events(db, events)
 
+
 __all__ = [
-    "cancel_queued_kindle_task",
     "cancel_kindle_send_task_command",
+    "cancel_queued_kindle_task",
     "claim_kindle_send_task_command",
     "complete_kindle_send_task_command",
     "create_kindle_send_task",
@@ -228,15 +220,14 @@ __all__ = [
     "fail_kindle_send_task_command",
     "find_active_kindle_task",
     "get_kindle_send_task",
-    "get_library_file_details_for_kindle",
-    "has_table",
+    "get_library_asset_details_for_kindle",
     "list_kindle_send_tasks",
     "record_kindle_event_command",
     "recover_interrupted_kindle_tasks_command",
-    "retry_kindle_task",
     "retry_kindle_send_task_command",
+    "retry_kindle_task",
     "schedule_kindle_retry_command",
-    "update_kindle_recipient_command",
     "update_email_settings_command",
+    "update_kindle_recipient_command",
     "update_kindle_send_snapshot_command",
 ]

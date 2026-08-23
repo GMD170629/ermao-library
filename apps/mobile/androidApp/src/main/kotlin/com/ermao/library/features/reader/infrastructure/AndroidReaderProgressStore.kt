@@ -1,9 +1,12 @@
+@file:Suppress("PARAMETER_NAME_CHANGED_ON_OVERRIDE")
+
 package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressJson
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -14,13 +17,19 @@ import kotlinx.coroutines.withContext
 
 internal class AndroidReaderProgressStore(
     context: Context,
+    private val namespace: ReaderSyncNamespace? = null,
     private val codec: ReaderProgressJson = ReaderProgressJson(),
 ) : ReaderProgressStore {
-    private val progressRoot = File(context.filesDir, PROGRESS_DIRECTORY)
+    private val progressRoot = namespace?.let { value ->
+        File(
+            File(File(context.filesDir, PROGRESS_DIRECTORY), sha256(readerAccountStorageKey(value))),
+            sha256(value.stableKey),
+        )
+    } ?: File(File(context.filesDir, PROGRESS_DIRECTORY), "unscoped")
 
-    override suspend fun load(sourceId: String): ReaderProgress? = withContext(Dispatchers.IO) {
-        require(sourceId.isNotBlank()) { "Reader source id is blank" }
-        val file = progressFile(sourceId)
+    override suspend fun load(resourceId: String): ReaderProgress? = withContext(Dispatchers.IO) {
+        require(resourceId.isNotBlank()) { "Reader resource id is blank" }
+        val file = progressFile(resourceId)
         if (!file.exists()) return@withContext null
         require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "Reader progress path is invalid" }
         val progress = try {
@@ -30,14 +39,14 @@ internal class AndroidReaderProgressStore(
             return@withContext null
         }
         progress.also {
-            require(progress.sourceId == sourceId) { "Reader progress identity does not match its storage key" }
+            require(progress.resourceId == resourceId) { "Reader progress identity does not match its storage key" }
         }
     }
 
     override suspend fun save(progress: ReaderProgress): Unit = withContext(Dispatchers.IO) {
         progressRoot.mkdirs()
         require(progressRoot.isDirectory) { "Reader progress root is unavailable" }
-        val target = progressFile(progress.sourceId)
+        val target = progressFile(progress.resourceId)
         val temporary = File(progressRoot, ".${target.name}.${System.nanoTime()}.tmp")
         try {
             FileOutputStream(temporary).use { output ->
@@ -59,15 +68,26 @@ internal class AndroidReaderProgressStore(
         }
     }
 
-    override suspend fun delete(sourceId: String): Unit = withContext(Dispatchers.IO) {
-        require(sourceId.isNotBlank()) { "Reader source id is blank" }
-        Files.deleteIfExists(progressFile(sourceId).toPath())
+    override suspend fun delete(resourceId: String): Unit = withContext(Dispatchers.IO) {
+        require(resourceId.isNotBlank()) { "Reader resource id is blank" }
+        Files.deleteIfExists(progressFile(resourceId).toPath())
     }
 
-    private fun progressFile(sourceId: String): File = File(progressRoot, sha256(sourceId) + JSON_SUFFIX)
+    private fun progressFile(resourceId: String): File = File(progressRoot, sha256(resourceId) + JSON_SUFFIX)
 
-    private companion object {
-        const val PROGRESS_DIRECTORY = "reader-progress"
+    companion object {
+        const val PROGRESS_DIRECTORY = "reader-progress-v3"
         const val JSON_SUFFIX = ".json"
+
+        internal suspend fun clearNamespace(context: Context, namespace: ReaderSyncNamespace) =
+            withContext(Dispatchers.IO) {
+                val directory = File(
+                    File(context.filesDir, PROGRESS_DIRECTORY),
+                    sha256(readerAccountStorageKey(namespace)),
+                )
+                if (directory.exists()) {
+                    check(directory.deleteRecursively()) { "Unable to clear Reader progress namespace" }
+                }
+            }
     }
 }

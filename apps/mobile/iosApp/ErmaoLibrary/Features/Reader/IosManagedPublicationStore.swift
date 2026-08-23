@@ -3,12 +3,12 @@ import Foundation
 @preconcurrency import ErmaoShared
 
 struct IosManagedPublication: Sendable, Equatable {
-    let sourceID: String
+    let resourceID: String
     let displayTitle: String
     let fileURL: URL
     let byteCount: Int64
-    let workID: String?
-    let volumeID: String?
+    let bookID: String?
+    let namespace: String?
     let sourceFormat: ErmaoShared.ReaderSourceFormat
 }
 
@@ -42,18 +42,18 @@ actor IosManagedPublicationStore {
 
     func importEPUB(
         from sourceURL: URL,
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
-        workID: String? = nil,
-        volumeID: String? = nil,
+        bookID: String? = nil,
+        namespace: String? = nil,
     ) async throws -> IosManagedPublication {
         try await importPublication(
             from: sourceURL,
-            sourceID: sourceID,
+            resourceID: resourceID,
             displayTitle: displayTitle,
             sourceFormat: .epub,
-            workID: workID,
-            volumeID: volumeID,
+            bookID: bookID,
+            namespace: namespace,
             parserVersion: Self.parserVersion,
             normalizationVersion: Self.normalizationVersion
         )
@@ -61,15 +61,15 @@ actor IosManagedPublicationStore {
 
     func importPublication(
         from sourceURL: URL,
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
-        workID: String? = nil,
-        volumeID: String? = nil,
+        bookID: String? = nil,
+        namespace: String? = nil,
         parserVersion: String,
         normalizationVersion: String
     ) async throws -> IosManagedPublication {
-        guard !sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+        guard !resourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !displayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               Self.pathExtension(for: sourceFormat) == sourceURL.pathExtension.lowercased(),
               !parserVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -85,7 +85,7 @@ actor IosManagedPublicationStore {
             throw IosReaderFailure(code: .outOfMemoryRisk)
         }
 
-        let key = opaqueKey(sourceID)
+        let key = opaqueKey(resourceID)
         let destination = root.appendingPathComponent(key)
             .appendingPathExtension(Self.pathExtension(for: sourceFormat))
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
@@ -122,11 +122,11 @@ actor IosManagedPublicationStore {
             normalizationVersion: normalizationVersion
         )
         let metadata = Metadata(
-            sourceID: sourceID,
+            resourceID: resourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
-            workID: workID,
-            volumeID: volumeID,
+            bookID: bookID,
+            namespace: namespace,
             sourceFormat: sourceFormat.wireValue
         )
         try installPublication(
@@ -136,22 +136,22 @@ actor IosManagedPublicationStore {
             metadataURL: metadataURL
         )
         return IosManagedPublication(
-            sourceID: sourceID,
+            resourceID: resourceID,
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
-            workID: workID,
-            volumeID: volumeID,
+            bookID: bookID,
+            namespace: namespace,
             sourceFormat: sourceFormat
         )
     }
 
-    func prepareDownload(sourceID: String, expectedSize: Int64) throws -> URL {
-        guard !sourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    func prepareDownload(resourceID: String, expectedSize: Int64, namespace _: String? = nil) throws -> URL {
+        guard !resourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw IosReaderFailure(code: .resourceMissing)
         }
         _ = expectedSize
-        let key = opaqueKey(sourceID)
+        let key = opaqueKey(resourceID)
         let staging = root.appendingPathComponent(".\(key).\(UUID().uuidString).partial")
         try requireContained(staging)
         guard fileManager.createFile(
@@ -164,15 +164,15 @@ actor IosManagedPublicationStore {
 
     func commitDownload(
         staging: URL,
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
         byteCount: Int64,
         expectedSize: Int64,
         parserVersion: String,
         normalizationVersion: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
-        workID: String,
-        volumeID: String,
+        bookID: String,
+        namespace: String? = nil,
         validateWithReaderParser: Bool = false
     ) async throws -> IosManagedPublication {
         try requireContained(staging)
@@ -193,18 +193,18 @@ actor IosManagedPublicationStore {
             validateWithReaderParser: validateWithReaderParser
         )
 
-        let key = opaqueKey(sourceID)
+        let key = opaqueKey(resourceID)
         let destination = root.appendingPathComponent(key)
             .appendingPathExtension(Self.pathExtension(for: sourceFormat))
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         try requireContained(destination)
         try requireContained(metadataURL)
         let metadata = Metadata(
-            sourceID: sourceID,
+            resourceID: resourceID,
             displayTitle: displayTitle,
             byteCount: byteCount,
-            workID: workID,
-            volumeID: volumeID,
+            bookID: bookID,
+            namespace: namespace,
             sourceFormat: sourceFormat.wireValue
         )
         try installPublication(
@@ -214,12 +214,12 @@ actor IosManagedPublicationStore {
             metadataURL: metadataURL
         )
         return IosManagedPublication(
-            sourceID: sourceID,
+            resourceID: resourceID,
             displayTitle: displayTitle,
             fileURL: destination,
             byteCount: byteCount,
-            workID: workID,
-            volumeID: volumeID,
+            bookID: bookID,
+            namespace: namespace,
             sourceFormat: sourceFormat
         )
     }
@@ -231,8 +231,8 @@ actor IosManagedPublicationStore {
         }
     }
 
-    func resolve(sourceID: String) throws -> IosManagedPublication {
-        let key = opaqueKey(sourceID)
+    func resolve(resourceID: String, namespace: String? = nil) throws -> IosManagedPublication {
+        let key = opaqueKey(resourceID)
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         try requireContained(metadataURL)
         let metadataValues = try metadataURL.resourceValues(
@@ -244,8 +244,11 @@ actor IosManagedPublicationStore {
             throw IosReaderFailure(code: .corruptFile)
         }
         let metadata = try JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL))
-        guard metadata.sourceID == sourceID else {
+        guard metadata.resourceID == resourceID else {
             throw IosReaderFailure(code: .corruptFile)
+        }
+        guard namespace == nil || metadata.namespace == namespace else {
+            throw IosReaderFailure(code: .resourceMissing)
         }
         guard let sourceFormat = Self.sourceFormat(metadata.sourceFormat) else {
             throw IosReaderFailure(code: .corruptFile)
@@ -262,18 +265,26 @@ actor IosManagedPublicationStore {
         }
         let byteCount = Int64(values.fileSize ?? 0)
         return IosManagedPublication(
-            sourceID: metadata.sourceID,
+            resourceID: metadata.resourceID,
             displayTitle: metadata.displayTitle,
             fileURL: publicationURL,
             byteCount: byteCount,
-            workID: metadata.workID,
-            volumeID: metadata.volumeID,
+            bookID: metadata.bookID,
+            namespace: metadata.namespace,
             sourceFormat: sourceFormat
         )
     }
 
-    func remove(sourceID: String) throws {
-        let key = opaqueKey(sourceID)
+    func remove(resourceID: String, namespace: String? = nil) throws {
+        let key = opaqueKey(resourceID)
+        if let namespace {
+            let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
+            if let data = try? Data(contentsOf: metadataURL),
+               let metadata = try? JSONDecoder().decode(Metadata.self, from: data),
+               metadata.namespace != namespace {
+                return
+            }
+        }
         for url in [
             root.appendingPathComponent(key).appendingPathExtension("epub"),
             root.appendingPathComponent(key).appendingPathExtension("mobi"),
@@ -289,6 +300,25 @@ actor IosManagedPublicationStore {
         ] where fileManager.fileExists(atPath: url.path) {
             try requireContained(url)
             try fileManager.removeItem(at: url)
+        }
+    }
+
+    /// Remove only publications attributed to one authenticated namespace.
+    /// Metadata without a namespace is deliberately retained because it cannot
+    /// be assigned safely to the account being logged out.
+    func removeNamespace(_ namespace: String) throws {
+        guard !namespace.isEmpty,
+              fileManager.fileExists(atPath: root.path) else { return }
+        let metadataFiles = try fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension == "json" }
+        for metadataURL in metadataFiles {
+            guard let data = try? Data(contentsOf: metadataURL),
+                  let metadata = try? JSONDecoder().decode(Metadata.self, from: data),
+                  metadata.namespace == namespace else { continue }
+            try remove(resourceID: metadata.resourceID, namespace: namespace)
         }
     }
 
@@ -340,8 +370,8 @@ actor IosManagedPublicationStore {
         }
     }
 
-    private func opaqueKey(_ sourceID: String) -> String {
-        SHA256.hash(data: Data(sourceID.utf8)).map { String(format: "%02x", $0) }.joined()
+    private func opaqueKey(_ resourceID: String) -> String {
+        SHA256.hash(data: Data(resourceID.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func requireContained(_ url: URL) throws {
@@ -428,12 +458,12 @@ actor IosManagedPublicationStore {
         }
         guard validateWithReaderParser, sourceFormat == .epub || sourceFormat == .pdf else { return }
         let probe = IosManagedPublication(
-            sourceID: "reader-validation",
+            resourceID: "reader-validation",
             displayTitle: "reader-validation",
             fileURL: url,
             byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
-            workID: nil,
-            volumeID: nil,
+            bookID: nil,
+            namespace: nil,
             sourceFormat: sourceFormat
         )
         try await Task { @MainActor in
@@ -443,11 +473,11 @@ actor IosManagedPublicationStore {
     }
 
     private struct Metadata: Codable {
-        let sourceID: String
+        let resourceID: String
         let displayTitle: String
         let byteCount: Int64
-        let workID: String?
-        let volumeID: String?
+        let bookID: String?
+        let namespace: String?
         let sourceFormat: String
     }
 

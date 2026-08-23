@@ -672,7 +672,7 @@ def test_password_reset_writes_local_file_is_hashed_single_use_and_revokes_sessi
 ):
     user = _create_user(db_session)
     _login(client)
-    test_settings.resolved_monitor_root.mkdir(parents=True)
+    test_settings.resolved_library_root.mkdir(parents=True)
     db_session.execute(
         text(
             "INSERT INTO `SystemSetting` (`key`, `value`, `createdAt`, `updatedAt`) "

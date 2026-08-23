@@ -123,7 +123,7 @@ flowchart LR
 
 负责：
 
-- 一个可命名用户用例的编排，例如 `ImportBook`、`MergeWorks`、`SaveReaderProgress`；
+- 一个可命名用户用例的编排，例如 `ImportBook`、`UpdateWorkMetadata`、`SaveReaderProgress`；
 - 授权后的业务动作、事务范围和副作用顺序；
 - 调用领域规则和端口；
 - 把领域结果转换为用例 DTO。
@@ -447,9 +447,9 @@ packages/
 
 1. system health / settings 等读取面；**已完成（B-1）**：`app/modules/system/` 承接 SystemSetting KV、SystemEvent、健康检查/运行记录与队列运行时 ORM；旧 `services/health*.py` / `system_events.py` / `queue_runtime.py` 为兼容 re-export。
 2. metadata / sources；**已完成核心（B-2）**：Source 外部来源能力已退役并保持空列表/410/404 兼容契约，不再读取历史来源数据；provider registry、lookup queue 持久化均在 `app/modules/metadata/infrastructure/`（ORM）。
-3. library 查询与 facets；**已完成核心（B-3）**：facets、merge/rename/split/delete/undo/duplicate_groups、`smart_shelf_work_ids`、作品投影、文件/封面/存储、普通写操作与结构操作已迁入命名 ORM adapter；compat 通用数据库 helper 与 `select_compat.py` 已删除。
-4. organize；**进行中（B-4 评审面已迁）**：`OrganizePolicy`、scheduler 入队/cancel/recognize/delete，以及 `organize_service` 的 suggestion/duplicate apply、merge、external cache、job/work context 持久化均已迁入 `app/modules/organize/infrastructure/`（及 metadata `external_cache`）；compat organize jobs list/detail 已走 `job_queries` ORM。
-5. upload / imports / monitor folders；**已完成核心（B-5）**：worker 与 compat import-tasks/monitor-folders HTTP 已走 `app/modules/imports/infrastructure/` ORM（含 `import_http`）。
+3. library 查询与 facets；**已完成核心（B-3）**：facets、分类元数据操作与 undo、`smart_shelf_work_ids`、作品投影、文件/封面/存储及非结构写操作已迁入命名 ORM adapter；Work/Version/Volume 的合并、拆分、移动、删除等结构操作已按 ADR 0017 退役，compat 通用数据库 helper 与 `select_compat.py` 已删除。
+4. organize；**进行中（B-4 评审面已迁）**：`OrganizePolicy`、scheduler 入队/cancel/recognize/delete，以及 `organize_service` 的元数据 suggestion apply、external cache、job/work context 持久化均已迁入 `app/modules/organize/infrastructure/`（及 metadata `external_cache`）；旧结构归组/合并能力已按 ADR 0017 退役，compat organize jobs list/detail 已走 `job_queries` ORM。
+5. upload / imports / library roots；**已完成核心（B-5）**：worker、import-tasks 与 `/api/libraries` HTTP 已走 `app/modules/imports/` 的 application/infrastructure 边界；定时或手动根目录扫描按 ADR 0017 物化目录拓扑。
 6. files / media streaming；**已完成核心（B-6）**：页面索引已下沉 `app/modules/media/`，`reader_v2` 不再依赖 compat 私有符号。
 
 另：书架 CRUD 已迁入 `app/modules/shelf/`；download HTTP 已接入 application DTO、repository port 与 composition root；source HTTP 保留已退役契约；`app/`（排除 migrations）目标为无运行时 `execute(text)`。

@@ -82,10 +82,27 @@ function boolean(value: unknown, fallback: boolean) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function normalizeEpubPageTurnAnimation(value: unknown, fallback: 'slide' | 'off'): 'slide' | 'off' {
-  // 'kindle' is a migration-only alias from the V2 preference schema.
-  if (value === 'kindle') return 'slide';
-  return choice(value, ['slide', 'off'], fallback);
+function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], section: string) {
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    throw new TypeError(`Unsupported reader preference fields in ${section}`);
+  }
+}
+
+function normalizePageTurnAnimation(value: unknown, fallback: 'slide' | 'off'): 'slide' | 'off' {
+  if (value === undefined) return fallback;
+  if (value === 'slide' || value === 'off') return value;
+  throw new TypeError('Unsupported EPUB page-turn animation');
+}
+
+function normalizeComicFlow(value: unknown, fallback: 'paginated' | 'scrolled'): 'paginated' | 'scrolled' {
+  if (value === undefined) return fallback;
+  if (value === 'paginated' || value === 'scrolled') return value;
+  throw new TypeError('Unsupported comic reader flow');
+}
+
+function normalizePdfFlow(value: unknown): 'paged' {
+  if (value === undefined || value === 'paged') return 'paged';
+  throw new TypeError('Unsupported PDF reader flow');
 }
 
 function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences {
@@ -104,13 +121,13 @@ function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences
   };
 }
 
-/**
- * Normalizes V3, the V2 nested document, and the old flat settings object.
- * The returned value is always a complete snapshot; callers never merge partial
- * local settings at read time. Legacy 'kindle' values are canonicalized to 'slide'.
- */
+/** Normalizes a partial current V4 preference snapshot into a complete value. */
 export function normalizeReaderPreferences(value: unknown, base: Readonly<ReaderPreferences> = DEFAULT_READER_PREFERENCES): ReaderPreferences {
   const source = record(value);
+  if (source.schemaVersion !== undefined && source.schemaVersion !== READER_SCHEMA_VERSION) {
+    throw new TypeError('Reader preferences must use schema version 4');
+  }
+  assertOnlyKeys(source, ['schemaVersion', 'appearance', 'display', 'interaction', 'epub', 'comic', 'pdf'], 'root');
   const appearance = record(source.appearance);
   const interaction = record(source.interaction);
   const display = record(source.display);
@@ -119,17 +136,20 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
   const epubOptimization = record(epub.optimization);
   const comic = record(source.comic);
   const pdf = record(source.pdf);
+  assertOnlyKeys(appearance, ['theme', 'themeMode'], 'appearance');
+  assertOnlyKeys(display, ['progressStyle', 'showClock'], 'display');
+  assertOnlyKeys(interaction, ['tapZones', 'swipePageTurn', 'keyboardPageTurn', 'volumeKeyPageTurn', 'keepScreenAwake'], 'interaction');
+  assertOnlyKeys(epub, ['fontSize', 'lineHeight', 'pageWidth', 'fontFamily', 'fontWeight', 'letterSpacing', 'pageMargin', 'spreadMode', 'pageTurnAnimation', 'flow', 'typography', 'optimization'], 'epub');
+  assertOnlyKeys(epubTypography, ['paragraphIndent', 'paragraphSpacing', 'textAlign', 'preservePublisherStyles', 'allowPublisherColors', 'allowPublisherFonts'], 'epub.typography');
+  assertOnlyKeys(epubOptimization, ['enabled', 'deduplicateIndent', 'indentUnindented'], 'epub.optimization');
+  assertOnlyKeys(comic, ['direction', 'spreadMode', 'pageTurnAnimation', 'imageFit', 'imageVariant', 'zoom', 'pageWidth', 'flow', 'coverSingle', 'pageGap'], 'comic');
+  assertOnlyKeys(pdf, ['zoom', 'pageWidth', 'fit', 'flow', 'rotation', 'cropMargins'], 'pdf');
   const fallback = clonePreferences(base);
-
-  const legacyTheme = source.theme;
-  const legacyPageTurnAnimation = source.ebookPageTurnAnimation;
-  const legacyComicDirection = source.comicDirection;
-  const legacyComicMode = source.comicMode;
 
   return {
     schemaVersion: READER_SCHEMA_VERSION,
     appearance: {
-      theme: choice<ReaderTheme>(appearance.theme ?? legacyTheme, ['day', 'warm', 'green', 'night', 'black'], fallback.appearance.theme),
+      theme: choice<ReaderTheme>(appearance.theme, ['day', 'warm', 'green', 'night', 'black'], fallback.appearance.theme),
       themeMode: choice(appearance.themeMode, ['manual', 'system'], fallback.appearance.themeMode)
     },
     display: {
@@ -144,15 +164,15 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       keepScreenAwake: boolean(interaction.keepScreenAwake, fallback.interaction.keepScreenAwake)
     },
     epub: {
-      fontSize: clamp(epub.fontSize ?? source.fontSize, 14, 30, fallback.epub.fontSize),
-      lineHeight: clamp(epub.lineHeight ?? source.lineHeight, 1.4, 2.4, fallback.epub.lineHeight, 1),
-      pageWidth: clamp(epub.pageWidth ?? source.pageWidth, 600, 1350, fallback.epub.pageWidth),
-      fontFamily: choice<ReaderFontFamily>(epub.fontFamily ?? source.fontFamily, ['pingfang', 'heiti', 'songti', 'yahei', 'kaiti'], fallback.epub.fontFamily),
+      fontSize: clamp(epub.fontSize, 14, 30, fallback.epub.fontSize),
+      lineHeight: clamp(epub.lineHeight, 1.4, 2.4, fallback.epub.lineHeight, 1),
+      pageWidth: clamp(epub.pageWidth, 600, 1350, fallback.epub.pageWidth),
+      fontFamily: choice<ReaderFontFamily>(epub.fontFamily, ['pingfang', 'heiti', 'songti', 'yahei', 'kaiti'], fallback.epub.fontFamily),
       fontWeight: choice(epub.fontWeight, [400, 500, 700] as const, fallback.epub.fontWeight),
       letterSpacing: choice(epub.letterSpacing, [-0.02, 0, 0.04, 0.08] as const, fallback.epub.letterSpacing),
       pageMargin: choice(epub.pageMargin, ['narrow', 'standard', 'wide'], fallback.epub.pageMargin),
       spreadMode: choice(epub.spreadMode, ['auto', 'single', 'double'], fallback.epub.spreadMode),
-      pageTurnAnimation: normalizeEpubPageTurnAnimation(epub.pageTurnAnimation ?? legacyPageTurnAnimation, fallback.epub.pageTurnAnimation),
+      pageTurnAnimation: normalizePageTurnAnimation(epub.pageTurnAnimation, fallback.epub.pageTurnAnimation),
       flow: choice(epub.flow, ['paginated', 'scrolled'], fallback.epub.flow),
       typography: {
         paragraphIndent: clamp(epubTypography.paragraphIndent, 0, 4, fallback.epub.typography.paragraphIndent, 1),
@@ -169,32 +189,22 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       }
     },
     comic: {
-      direction: choice(comic.direction ?? legacyComicDirection, ['ltr', 'rtl'], fallback.comic.direction),
-      spreadMode: choice(
-        comic.spreadMode ?? comic.mode ?? legacyComicMode,
-        ['single', 'double'],
-        fallback.comic.spreadMode
-      ),
+      direction: choice(comic.direction, ['ltr', 'rtl'], fallback.comic.direction),
+      spreadMode: choice(comic.spreadMode, ['single', 'double'], fallback.comic.spreadMode),
       pageTurnAnimation: choice(comic.pageTurnAnimation, ['slide', 'off'], fallback.comic.pageTurnAnimation),
-      imageFit: choice(comic.imageFit ?? source.imageFit, ['width', 'height', 'contain', 'original'], fallback.comic.imageFit),
-      imageVariant: choice(comic.imageVariant ?? source.imageVariant, ['original', 'data-saver'], fallback.comic.imageVariant),
-      zoom: clamp(comic.zoom ?? source.zoom, 0.6, 2.4, fallback.comic.zoom, 1),
+      imageFit: choice(comic.imageFit, ['width', 'height', 'contain', 'original'], fallback.comic.imageFit),
+      imageVariant: choice(comic.imageVariant, ['original', 'data-saver'], fallback.comic.imageVariant),
+      zoom: clamp(comic.zoom, 0.6, 2.4, fallback.comic.zoom, 1),
       pageWidth: clamp(comic.pageWidth, 600, 1350, fallback.comic.pageWidth),
-      flow: comic.flow === 'vertical' || comic.flow === 'scrolled'
-        ? 'scrolled'
-        : comic.flow === 'paged' || comic.flow === 'paginated'
-          ? 'paginated'
-          : fallback.comic.flow,
+      flow: normalizeComicFlow(comic.flow, fallback.comic.flow),
       coverSingle: boolean(comic.coverSingle, fallback.comic.coverSingle),
       pageGap: choice(comic.pageGap, [0, 8, 16, 24] as const, fallback.comic.pageGap)
     },
     pdf: {
-      zoom: clamp(pdf.zoom ?? source.zoom, 0.6, 2.4, fallback.pdf.zoom, 1),
+      zoom: clamp(pdf.zoom, 0.6, 2.4, fallback.pdf.zoom, 1),
       pageWidth: clamp(pdf.pageWidth, 600, 1350, fallback.pdf.pageWidth),
       fit: choice(pdf.fit, ['width', 'page'], fallback.pdf.fit),
-      // PDF continuous rendering remains a recognized wire type for backward
-      // compatibility, but is temporarily unavailable in the application.
-      flow: 'paged',
+      flow: normalizePdfFlow(pdf.flow),
       rotation: choice(pdf.rotation, [0, 90, 180, 270] as const, fallback.pdf.rotation),
       cropMargins: choice(pdf.cropMargins, ['off', 'auto'], fallback.pdf.cropMargins)
     }

@@ -22,7 +22,7 @@ shutdown() {
 trap shutdown INT TERM EXIT
 
 export STORAGE_ROOT="${STORAGE_ROOT:-$ROOT_DIR/storage}"
-mkdir -p "$STORAGE_ROOT/database" "$STORAGE_ROOT/covers" "$STORAGE_ROOT/indexes" "$STORAGE_ROOT/conversions" "$STORAGE_ROOT/temp/conversions" "$STORAGE_ROOT/logs" "$STORAGE_ROOT/secrets"
+mkdir -p "$STORAGE_ROOT/database" "$STORAGE_ROOT/covers" "$STORAGE_ROOT/indexes" "$STORAGE_ROOT/logs" "$STORAGE_ROOT/secrets"
 
 if [ -z "${SESSION_SECRET:-}" ]; then
   secret_file="$STORAGE_ROOT/secrets/session-secret"
@@ -40,7 +40,7 @@ fi
 
 (
   cd "$PYTHON_API_DIR"
-  python -m app.bootstrap.startup_data_migrations
+  python -m app.bootstrap.prestart
 )
 
 (

@@ -228,8 +228,8 @@ final class MobiPublicationFactoryTests: XCTestCase {
             parserVersion: IosMobiBook.parserIdentifier,
             normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier,
             sourceFormat: .epub,
-            workID: "work-azw3",
-            volumeID: "volume-azw3"
+            bookID: "work-azw3",
+            resourceID: "volume-azw3"
         )
         XCTAssertEqual(imported.sourceFormat, .epub)
         XCTAssertEqual(imported.fileURL.pathExtension, "epub")

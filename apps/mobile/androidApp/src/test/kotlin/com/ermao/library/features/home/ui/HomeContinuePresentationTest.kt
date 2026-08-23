@@ -16,43 +16,43 @@ class HomeContinuePresentationTest {
     }
 
     @Test
-    fun positionTakesPriorityAndAnEquivalentVolumeTitleIsNotRepeated() {
+    fun positionTakesPriorityAndAnEquivalentResourceTitleIsNotRepeated() {
         assertEquals(
             "Chapter 12",
             selectContinuePositionLabel(
-                workTitle = "A Very Long Work Title",
+                bookTitle = "A Very Long Book Title",
                 positionLabel = " Chapter 12 ",
-                volumeTitle = "Volume 2",
+                resourceTitle = "Resource 2",
             ),
         )
         assertNull(
             selectContinuePositionLabel(
-                workTitle = "A Very Long Work Title",
+                bookTitle = "A Very Long Book Title",
                 positionLabel = null,
-                volumeTitle = "  A Very Long Work Title  ",
+                resourceTitle = "  A Very Long Book Title  ",
             ),
         )
         assertEquals(
-            "Volume 2",
+            "Resource 2",
             selectContinuePositionLabel(
-                workTitle = "A Very Long Work Title",
+                bookTitle = "A Very Long Book Title",
                 positionLabel = null,
-                volumeTitle = "Volume 2",
+                resourceTitle = "Resource 2",
             ),
         )
         assertEquals(
             "01",
             selectContinuePositionLabel(
-                workTitle = "A Very Long Work Title",
-                positionLabel = "A Very Long Work Title 01",
-                volumeTitle = null,
+                bookTitle = "A Very Long Book Title",
+                positionLabel = "A Very Long Book Title 01",
+                resourceTitle = null,
             ),
         )
         assertNull(
             selectContinuePositionLabel(
-                workTitle = "A Very Long Work Title",
-                positionLabel = " A Very Long Work Title ",
-                volumeTitle = null,
+                bookTitle = "A Very Long Book Title",
+                positionLabel = " A Very Long Book Title ",
+                resourceTitle = null,
             ),
         )
     }

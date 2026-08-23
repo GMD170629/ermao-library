@@ -1,14 +1,15 @@
 package com.ermao.library.shared.modules.library
 
-import com.ermao.library.shared.modules.library.domain.WorkDetail
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
-import com.ermao.library.shared.modules.library.domain.MediaKind
-import com.ermao.library.shared.modules.library.infrastructure.WorkDetailPayloadWire
-import com.ermao.library.shared.modules.library.infrastructure.WorkDetailSummaryPayloadWire
-import com.ermao.library.shared.modules.library.infrastructure.WorkSummaryWire
-import com.ermao.library.shared.modules.library.infrastructure.toDomain
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
+import com.ermao.library.shared.modules.library.domain.BookDetail
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
+import com.ermao.library.shared.modules.library.domain.MediaKind
+import com.ermao.library.shared.modules.library.infrastructure.BookDetailPayloadWire
+import com.ermao.library.shared.modules.library.infrastructure.BookPayloadWire
+import com.ermao.library.shared.modules.library.infrastructure.BookSummaryWire
+import com.ermao.library.shared.modules.library.infrastructure.toBookDetailSummary
+import com.ermao.library.shared.modules.library.infrastructure.toDomain
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -16,11 +17,11 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 
 /** Stable capability boundary; platform code does not import library infrastructure mappers directly. */
 object LibraryContract {
-    fun workSummary(wire: WorkSummaryWire): WorkSummary = wire.toDomain()
+    fun bookSummary(wire: BookSummaryWire): BookSummary = wire.toDomain()
 
-    fun workDetailSummary(wire: WorkDetailSummaryPayloadWire): WorkDetailSummary = wire.toDomain()
+    fun bookDetailSummary(wire: BookPayloadWire): BookDetailSummary = wire.toDomain()
 
-    fun workDetail(wire: WorkDetailPayloadWire): WorkDetail = wire.toDomain()
+    fun bookDetail(wire: BookDetailPayloadWire): BookDetail = wire.toDomain()
 }
 
 /** Swift-friendly construction boundary; invalid or mismatched contexts are rejected. */
@@ -48,7 +49,6 @@ fun createContentRequestContext(
     )
 }
 
-/** Swift cannot safely construct Kotlin inline value classes through erased `Any` collections. */
 fun createLibraryFilters(
     mediaKindWireValues: List<String>,
     readingStatuses: Set<ReadingStatus>,

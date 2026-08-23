@@ -12,12 +12,12 @@ internal fun visualFixtureCaptureSurface(
     scenario: VisualFixtureScenario,
 ): VisualFixtureCaptureSurface = when (scenario) {
     VisualFixtureScenario.HomeDefault,
-    VisualFixtureScenario.LibraryWorks,
+    VisualFixtureScenario.LibraryBooks,
     VisualFixtureScenario.LibraryFilter,
-    VisualFixtureScenario.WorkAbout,
-    VisualFixtureScenario.WorkVolumes,
-    VisualFixtureScenario.WorkSingleEbook,
-    VisualFixtureScenario.WorkActions,
+    VisualFixtureScenario.BookAbout,
+    VisualFixtureScenario.BookResources,
+    VisualFixtureScenario.BookSingleEbook,
+    VisualFixtureScenario.BookActions,
     -> VisualFixtureCaptureSurface.WholeDisplay
 }
 

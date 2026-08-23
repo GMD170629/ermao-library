@@ -145,11 +145,6 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.RecognitionPolicy
     }
 
-    data class MergeDuplicates(val groupId: String, val canonicalWorkId: String) : AdministrativeCommand {
-        override val operation = AdministrativeOperation.MergeDuplicates
-        override val ownerRoute = AdministrativeSettingsRoute.Duplicates
-    }
-
     data class MergeCategories(val kind: CategoryKind, val targetId: String, val sourceIds: Set<String>) : AdministrativeCommand {
         override val operation = AdministrativeOperation.MergeCategories
         override val ownerRoute = AdministrativeSettingsRoute.CategoryGovernance(kind)
@@ -279,8 +274,8 @@ data class LibrarySourceDraft(
     val id: String?,
     val displayName: String,
     val directory: NativeDirectorySelection,
-    val monitoring: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
+    val enabled: Boolean,
+    val organizationMode: LibraryOrganizationMode,
     val ignorePatterns: String,
     val ignoreHidden: Boolean,
     val minimumFileSizeBytes: Long,
@@ -331,7 +326,6 @@ internal fun AdministrativeSettingsRoute.requiredCapability(): AdministrativeCap
     AdministrativeSettingsRoute.OrganizeCandidates,
     AdministrativeSettingsRoute.OrganizeRuns,
     AdministrativeSettingsRoute.RecognitionPolicy,
-    AdministrativeSettingsRoute.Duplicates,
     AdministrativeSettingsRoute.LibraryOperations,
     is AdministrativeSettingsRoute.CategoryGovernance,
     -> AdministrativeCapability.ManageOrganization
@@ -377,7 +371,6 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     is AdministrativeCommand.StartRecognition,
     is AdministrativeCommand.DeleteOrganizeTask,
     is AdministrativeCommand.SaveRecognitionPolicy,
-    is AdministrativeCommand.MergeDuplicates,
     is AdministrativeCommand.MergeCategories,
     is AdministrativeCommand.RenameCategory,
     is AdministrativeCommand.DeleteCategory,

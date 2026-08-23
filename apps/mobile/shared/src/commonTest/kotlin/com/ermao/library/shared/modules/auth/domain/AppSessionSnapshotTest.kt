@@ -52,7 +52,7 @@ class AppSessionSnapshotTest {
         assertEquals(false, snapshot.allLibraryScopes)
         assertEquals(true, snapshot.canViewManualImports)
         assertEquals(7, snapshot.authorizationVersion)
-        assertEquals(listOf("folder-a", "folder-b"), snapshot.monitorFolderIds)
+        assertEquals(listOf("folder-a", "folder-b"), snapshot.libraryIds)
     }
 
     private fun profile(): ServerProfile {
@@ -84,7 +84,7 @@ class AppSessionSnapshotTest {
         isAdmin = true,
         canManageSystem = true,
         allLibraryScopes = false,
-        monitorFolderIds = setOf("folder-b", "folder-a"),
+        libraryIds = setOf("folder-b", "folder-a"),
         canViewManualImports = true,
         authorizationVersion = 7,
     )

@@ -8,13 +8,13 @@ from collections.abc import Callable
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.authorization import AuthorizationContext, work_visibility_predicate
-from app.models.library import LibraryWork
-from app.models.shelf import Shelf, ShelfWork
+from app.core.authorization import AuthorizationContext, book_visibility_predicate
+from app.models import LibraryBook
+from app.models.shelf import Shelf, ShelfBook
 from app.modules.shelf.application.catalog import (
     CatalogShelf,
+    CatalogShelfBookPage,
     CatalogShelfPage,
-    CatalogShelfWorkPage,
 )
 
 
@@ -24,10 +24,10 @@ class SqlAlchemyCatalogShelfQueries:
     def __init__(
         self,
         db: Session,
-        smart_work_ids: Callable[[object, str], list[str]] | None = None,
+        smart_book_ids: Callable[[object, str], list[str]] | None = None,
     ) -> None:
         self._db = db
-        self._smart_work_ids = smart_work_ids
+        self._smart_book_ids = smart_book_ids
 
     def list_shelves(
         self,
@@ -72,14 +72,14 @@ class SqlAlchemyCatalogShelfQueries:
             updated_at=max((shelf.updated_at for shelf in shelves), default=None),
         )
 
-    def list_shelf_work_ids(
+    def list_shelf_book_ids(
         self,
         *,
         context: AuthorizationContext,
         shelf_id: str,
         page: int,
         page_size: int,
-    ) -> CatalogShelfWorkPage | None:
+    ) -> CatalogShelfBookPage | None:
         shelf = self._db.scalar(
             select(Shelf).where(
                 Shelf.id == shelf_id,
@@ -92,48 +92,48 @@ class SqlAlchemyCatalogShelfQueries:
         if shelf.kind == "SMART":
             try:
                 rules: object = json.loads(shelf.rules_json)
-                work_ids = (
-                    self._smart_work_ids(rules, context.user_id)
-                    if self._smart_work_ids is not None
+                book_ids = (
+                    self._smart_book_ids(rules, context.user_id)
+                    if self._smart_book_ids is not None
                     else []
                 )
             except (TypeError, ValueError, json.JSONDecodeError):
-                work_ids = []
+                book_ids = []
             start = (page - 1) * page_size
-            selected_ids = tuple(work_ids[start : start + page_size])
+            selected_ids = tuple(book_ids[start : start + page_size])
             catalog_shelf = CatalogShelf(
                 id=shelf.id,
                 name=shelf.name,
                 description=shelf.description,
                 updated_at=shelf.updated_at,
             )
-            return CatalogShelfWorkPage(
+            return CatalogShelfBookPage(
                 shelf=catalog_shelf,
-                work_ids=selected_ids,
-                total=len(work_ids),
+                book_ids=selected_ids,
+                total=len(book_ids),
                 page=page,
                 page_size=page_size,
                 updated_at=shelf.updated_at,
             )
-        work_filters = (
-            ShelfWork.shelf_id == shelf.id,
-            LibraryWork.hidden.is_(False),
-            work_visibility_predicate(context),
+        book_filters = (
+            ShelfBook.shelf_id == shelf.id,
+            LibraryBook.visibility_state == "VISIBLE",
+            book_visibility_predicate(context),
         )
         total = int(
             self._db.scalar(
                 select(func.count())
-                .select_from(ShelfWork)
-                .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
-                .where(*work_filters)
+                .select_from(ShelfBook)
+                .join(LibraryBook, LibraryBook.id == ShelfBook.book_id)
+                .where(*book_filters)
             )
             or 0
         )
         rows = self._db.execute(
-            select(ShelfWork.work_id, ShelfWork.created_at)
-            .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
-            .where(*work_filters)
-            .order_by(ShelfWork.created_at.asc(), ShelfWork.work_id.asc())
+            select(ShelfBook.book_id, ShelfBook.created_at)
+            .join(LibraryBook, LibraryBook.id == ShelfBook.book_id)
+            .where(*book_filters)
+            .order_by(ShelfBook.created_at.asc(), ShelfBook.book_id.asc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
@@ -143,9 +143,9 @@ class SqlAlchemyCatalogShelfQueries:
             description=shelf.description,
             updated_at=shelf.updated_at,
         )
-        return CatalogShelfWorkPage(
+        return CatalogShelfBookPage(
             shelf=catalog_shelf,
-            work_ids=tuple(str(row.work_id) for row in rows),
+            book_ids=tuple(str(row.book_id) for row in rows),
             total=total,
             page=page,
             page_size=page_size,

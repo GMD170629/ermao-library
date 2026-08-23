@@ -60,9 +60,6 @@ sealed interface AdministrativeSettingsRoute : NavKey {
     data object RecognitionPolicy : AdministrativeSettingsRoute
 
     @Serializable
-    data object Duplicates : AdministrativeSettingsRoute
-
-    @Serializable
     data object LibraryOperations : AdministrativeSettingsRoute
 
     @Serializable
@@ -279,7 +276,6 @@ data class AccessSource(
 )
 
 data class LibrarySourcesSnapshot(
-    val monitorRoot: String?,
     val sources: List<LibrarySource>,
 ) : AdministrativePageSnapshot
 
@@ -287,12 +283,12 @@ data class LibrarySource(
     val id: String,
     val name: String,
     val path: String,
-    val monitoring: Boolean,
-    val mediaKindPolicy: MediaKindPolicy,
+    val enabled: Boolean,
+    val organizationMode: LibraryOrganizationMode,
     val description: String?,
 )
 
-enum class MediaKindPolicy { Mixed, Ebook, Comic, Audiobook }
+enum class LibraryOrganizationMode { Flat, Volumes, Audiobook }
 
 data class LibrarySourceEditorSnapshot(
     val source: LibrarySource?,
@@ -378,8 +374,6 @@ data class ImportScanJobSummary(
 }
 
 data class ImportPreferencesSnapshot(
-    val stabilityCheckEnabled: Boolean,
-    val stabilitySeconds: Double,
     val allowedExtensions: List<String>,
     val ignorePatterns: String,
 ) : AdministrativePageSnapshot
@@ -440,10 +434,6 @@ data class RecognitionPolicySnapshot(
 
 enum class MetadataSource { Opf, Embedded, PathAndFileName, Provider }
 
-data class DuplicatesSnapshot(
-    val groups: List<DuplicateGroup>,
-) : AdministrativePageSnapshot
-
 data class LibraryOperationsSnapshot(
     val operations: List<LibraryOperationSummary>,
 ) : AdministrativePageSnapshot
@@ -456,20 +446,6 @@ data class LibraryOperationSummary(
     val createdAtLabel: String?,
     val expiresAtLabel: String?,
     val undoAvailable: Boolean,
-)
-
-data class DuplicateGroup(
-    val id: String,
-    val title: String,
-    val author: String,
-    val confidencePercent: Int,
-    val versions: List<DuplicateVersion>,
-)
-
-data class DuplicateVersion(
-    val workId: String,
-    val title: String,
-    val subtitle: String,
 )
 
 data class CategoryGovernanceSnapshot(
@@ -660,7 +636,6 @@ enum class AdministrativeOperation {
     StartRecognition,
     CancelOrganizeTask,
     SaveRecognitionPolicy,
-    MergeDuplicates,
     MergeCategories,
     RenameCategory,
     DeleteCategory,

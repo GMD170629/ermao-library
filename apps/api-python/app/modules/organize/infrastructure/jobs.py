@@ -7,14 +7,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import case, delete, func, insert, inspect, select, update
+from sqlalchemy import case, delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
-from app.models.library import LibraryWork
+from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
-    DuplicateCandidate,
     MetadataLookupTask,
     MetadataProviderExecution,
     MetadataSuggestion,
@@ -23,7 +22,7 @@ from app.models.organize import (
 )
 from app.modules.organize.application.dto import PreparedOrganizeJobEnqueue
 from app.modules.organize.infrastructure.eligibility import UNRESOLVED_JOB_STATUSES
-from app.modules.organize.infrastructure.runs import job_entity_as_legacy_dict
+from app.modules.organize.infrastructure.runs import job_entity_record
 
 ACTIVE_LOOKUP_STATUSES = ("PENDING", "RUNNING")
 
@@ -34,7 +33,7 @@ class PreparedOrganizeRunWrite:
     job_statement: Executable | None
     task_rows_by_job_id: dict[str, dict[str, object]]
     task_insert_statement: Executable
-    work_statement: Executable | None
+    book_statement: Executable | None
     finalize_statement: Executable
 
 
@@ -69,9 +68,8 @@ def prepare_organize_run_write(
         {
             "id": plan.job_id,
             "run_id": run_id,
-            "work_id": plan.work_id,
-            "volume_id": plan.volume_id,
-            "media_version_id": plan.media_version_id,
+            "book_id": plan.book_id,
+            "resource_id": plan.resource_id,
             "import_task_id": None,
             "trigger": trigger,
             "status": "LOOKUP_PENDING",
@@ -90,19 +88,18 @@ def prepare_organize_run_write(
         sqlite_insert(OrganizeJob)
         .values(list(job_rows))
         .on_conflict_do_nothing(
-            index_elements=[OrganizeJob.work_id],
+            index_elements=[OrganizeJob.book_id],
             index_where=OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
         )
         .returning(OrganizeJob.id)
         if job_rows
         else None
     )
-    task_rows_by_job_id = {
+    task_rows_by_job_id: dict[str, dict[str, object]] = {
         plan.job_id: {
             "id": plan.task_id,
-            "work_id": plan.work_id,
-            "volume_id": plan.volume_id,
-            "media_version_id": plan.media_version_id,
+            "book_id": plan.book_id,
+            "resource_id": plan.resource_id,
             "import_task_id": None,
             "organize_job_id": plan.job_id,
             "status": "PENDING",
@@ -114,13 +111,11 @@ def prepare_organize_run_write(
         }
         for plan in job_plans
     }
-    work_ids_for_run = select(OrganizeJob.work_id).where(
-        OrganizeJob.run_id == run_id
-    )
-    work_statement = (
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(work_ids_for_run))
-        .values(organize_status="LOOKUP_PENDING", updated_at=timestamp)
+    book_ids_for_run = select(OrganizeJob.book_id).where(OrganizeJob.run_id == run_id)
+    book_statement = (
+        update(LibraryBook)
+        .where(LibraryBook.id.in_(book_ids_for_run))
+        .values(curation_state="LOOKUP_PENDING", updated_at=timestamp)
         if job_plans
         else None
     )
@@ -145,7 +140,7 @@ def prepare_organize_run_write(
         job_statement=job_statement,
         task_rows_by_job_id=task_rows_by_job_id,
         task_insert_statement=insert(MetadataLookupTask),
-        work_statement=work_statement,
+        book_statement=book_statement,
         finalize_statement=finalize_statement,
     )
 
@@ -165,8 +160,8 @@ def execute_organize_run_write(
     )
     if task_rows:
         db.execute(prepared.task_insert_statement, list(task_rows))
-    if prepared.work_statement is not None:
-        db.execute(prepared.work_statement)
+    if prepared.book_statement is not None:
+        db.execute(prepared.book_statement)
     db.execute(prepared.finalize_statement)
     return len(inserted_job_ids)
 
@@ -174,18 +169,16 @@ def execute_organize_run_write(
 def prepare_lookup_task_row(
     *,
     task_id: str,
-    work_id: str,
-    volume_id: str | None,
-    media_version_id: str | None,
+    book_id: str,
+    resource_id: str | None,
     job_id: str,
     provider_order: tuple[str, ...],
     timestamp: datetime,
 ) -> dict[str, object]:
     return {
         "id": task_id,
-        "work_id": work_id,
-        "volume_id": volume_id,
-        "media_version_id": media_version_id,
+        "book_id": book_id,
+        "resource_id": resource_id,
         "import_task_id": None,
         "organize_job_id": job_id,
         "status": "PENDING",
@@ -204,25 +197,17 @@ def insert_prepared_lookup_task(
     db.execute(insert(MetadataLookupTask), [prepared_row])
 
 
-def _has_table(db: Session, table: str) -> bool:
-    # Use the session connection. inspect(engine) on StaticPool :memory:
-    # can checkout the shared connection and roll back in-flight writes.
-    return inspect(db.connection()).has_table(table)
-
-
-def mark_work_organize_status(
-    db: Session, *, work_id: str, status: str, now: Any
+def mark_book_curation_state(
+    db: Session, *, book_id: str, status: str, now: Any
 ) -> None:
     db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id == work_id)
-        .values(organize_status=status, updated_at=now)
+        update(LibraryBook)
+        .where(LibraryBook.id == book_id)
+        .values(curation_state=status, updated_at=now)
     )
 
 
 def cancel_lookup_tasks_for_job(db: Session, *, job_id: str, now: Any) -> None:
-    if not _has_table(db, "MetadataLookupTask"):
-        return
     db.execute(
         update(MetadataLookupTask)
         .where(
@@ -241,37 +226,39 @@ def cancel_job(db: Session, *, job_id: str, now: Any) -> None:
     )
 
 
-def get_work_row(db: Session, work_id: str) -> dict[str, Any] | None:
-    from app.modules.organize.infrastructure.eligibility import (
-        work_entity_as_legacy_dict,
-    )
+def get_book_row(db: Session, book_id: str) -> dict[str, Any] | None:
+    row = db.execute(
+        select(LibraryBook, LibraryBookMetadata)
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .where(LibraryBook.id == book_id)
+    ).first()
+    if row is None:
+        return None
+    from app.modules.organize.infrastructure.eligibility import book_entity_record
 
-    entity = db.get(LibraryWork, work_id)
-    return work_entity_as_legacy_dict(entity) if entity is not None else None
+    return book_entity_record(row[0], row[1])
 
 
-def get_unresolved_job_for_work(
+def get_unresolved_job_for_book(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     exclude_job_id: str,
 ) -> dict[str, Any] | None:
     entity = db.scalars(
         select(OrganizeJob)
         .where(
-            OrganizeJob.work_id == work_id,
+            OrganizeJob.book_id == book_id,
             OrganizeJob.id != exclude_job_id,
             OrganizeJob.status.in_(UNRESOLVED_JOB_STATUSES),
         )
         .order_by(OrganizeJob.updated_at.desc(), OrganizeJob.created_at.desc())
         .limit(1)
     ).first()
-    return job_entity_as_legacy_dict(entity) if entity is not None else None
+    return job_entity_record(entity) if entity is not None else None
 
 
 def list_lookup_task_ids_for_job(db: Session, job_id: str) -> list[str]:
-    if not _has_table(db, "MetadataLookupTask"):
-        return []
     return list(
         db.scalars(
             select(MetadataLookupTask.id).where(
@@ -284,42 +271,21 @@ def list_lookup_task_ids_for_job(db: Session, job_id: str) -> list[str]:
 def clear_job_recognition_artifacts(
     db: Session, *, job_id: str, task_ids: list[str]
 ) -> None:
-    present = {
-        name
-        for name in (
-            "MetadataProviderExecution",
-            "MetadataSuggestion",
-            "DuplicateCandidate",
-            "MetadataLookupTask",
+    db.execute(
+        delete(MetadataProviderExecution).where(
+            MetadataProviderExecution.job_id == job_id
         )
-        if _has_table(db, name)
-    }
-    if "MetadataProviderExecution" in present:
+    )
+    if task_ids:
         db.execute(
             delete(MetadataProviderExecution).where(
-                MetadataProviderExecution.job_id == job_id
+                MetadataProviderExecution.lookup_task_id.in_(task_ids)
             )
         )
-        if task_ids:
-            db.execute(
-                delete(MetadataProviderExecution).where(
-                    MetadataProviderExecution.lookup_task_id.in_(task_ids)
-                )
-            )
-    if "MetadataSuggestion" in present:
-        db.execute(
-            delete(MetadataSuggestion).where(MetadataSuggestion.job_id == job_id)
-        )
-    if "DuplicateCandidate" in present:
-        db.execute(
-            delete(DuplicateCandidate).where(DuplicateCandidate.job_id == job_id)
-        )
-    if "MetadataLookupTask" in present:
-        db.execute(
-            delete(MetadataLookupTask).where(
-                MetadataLookupTask.organize_job_id == job_id
-            )
-        )
+    db.execute(delete(MetadataSuggestion).where(MetadataSuggestion.job_id == job_id))
+    db.execute(
+        delete(MetadataLookupTask).where(MetadataLookupTask.organize_job_id == job_id)
+    )
 
 
 def reset_job_for_recognition(
@@ -345,8 +311,6 @@ def reset_job_for_recognition(
 
 
 def reopen_run(db: Session, *, run_id: str, now: Any) -> None:
-    if not _has_table(db, "OrganizeRun"):
-        return
     db.execute(
         update(OrganizeRun)
         .where(OrganizeRun.id == run_id)
@@ -359,22 +323,22 @@ def delete_job_graph(db: Session, *, job_id: str, task_ids: list[str]) -> None:
     db.execute(delete(OrganizeJob).where(OrganizeJob.id == job_id))
 
 
-def latest_job_status_for_work(db: Session, work_id: str) -> str | None:
+def latest_job_status_for_book(db: Session, book_id: str) -> str | None:
     return db.scalar(
         select(OrganizeJob.status)
-        .where(OrganizeJob.work_id == work_id)
+        .where(OrganizeJob.book_id == book_id)
         .order_by(OrganizeJob.created_at.desc())
         .limit(1)
     )
 
 
-def latest_job_status_for_work_excluding(
-    db: Session, work_id: str, excluded_job_id: str
+def latest_job_status_for_book_excluding(
+    db: Session, book_id: str, excluded_job_id: str
 ) -> str | None:
     return db.scalar(
         select(OrganizeJob.status)
         .where(
-            OrganizeJob.work_id == work_id,
+            OrganizeJob.book_id == book_id,
             OrganizeJob.id != excluded_job_id,
         )
         .order_by(OrganizeJob.created_at.desc())
@@ -382,16 +346,17 @@ def latest_job_status_for_work_excluding(
     )
 
 
-def work_is_organized(db: Session, work_id: str) -> bool:
-    return bool(
-        db.scalar(select(LibraryWork.organized).where(LibraryWork.id == work_id))
+def book_is_curated(db: Session, book_id: str) -> bool:
+    state = db.scalar(
+        select(LibraryBook.curation_state).where(LibraryBook.id == book_id)
     )
+    return str(state or "") not in {"", "PENDING", "UNASSESSED", "DISMISSED"}
 
 
-def finish_unresolved_jobs_for_work(
+def finish_unresolved_jobs_for_book(
     db: Session,
     *,
-    work_id: str,
+    book_id: str,
     now: Any,
 ) -> list[str]:
     statuses = ("PENDING", "REVIEWING", "FAILED")
@@ -399,7 +364,7 @@ def finish_unresolved_jobs_for_work(
         str(job_id)
         for job_id in db.scalars(
             select(OrganizeJob.id).where(
-                OrganizeJob.work_id == work_id,
+                OrganizeJob.book_id == book_id,
                 OrganizeJob.status.in_(statuses),
             )
         ).all()
@@ -418,9 +383,7 @@ def finish_unresolved_jobs_for_work(
     return job_ids
 
 
-def prepare_refresh_run_queue_count(
-    *, run_id: str, now: datetime
-) -> Executable:
+def prepare_refresh_run_queue_count(*, run_id: str, now: datetime) -> Executable:
     queued_count = (
         select(func.count())
         .select_from(OrganizeJob)

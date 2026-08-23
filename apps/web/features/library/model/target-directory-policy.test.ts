@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  enabledMonitorRootPaths,
+  enabledLibraryRootPaths,
   isAllowedTargetPath,
   isDirectoryInside
 } from '../../../components/directory/target-directory-policy';
 
-test('allows a monitored root and any nested directory', () => {
+test('allows a library root and any nested directory', () => {
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox'), true);
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox/fiction/fantasy'), true);
 });
 
-test('does not confuse a sibling with a monitored descendant', () => {
+test('does not confuse a sibling with a library descendant', () => {
   assert.equal(isDirectoryInside('/library/inbox', '/library/inbox-other'), false);
   assert.equal(isDirectoryInside('/library/inbox', '/library'), false);
 });
 
-test('only enabled monitor folders become upload roots', () => {
-  const roots = enabledMonitorRootPaths([
+test('only enabled libraries become upload roots', () => {
+  const roots = enabledLibraryRootPaths([
     { rootPath: '/library/enabled/', enabled: true },
     { rootPath: '/library/disabled', enabled: false }
   ]);

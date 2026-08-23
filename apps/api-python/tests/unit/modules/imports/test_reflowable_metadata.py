@@ -4,32 +4,9 @@ import base64
 import struct
 from pathlib import Path
 
-from app.modules.imports.application.reflowable_types import EmbeddedBookCover
-from app.modules.imports.infrastructure.reflowable_cover import (
-    publish_reflowable_cover,
-)
 from app.modules.imports.infrastructure.reflowable_metadata import (
     inspect_reflowable_book,
 )
-
-
-def test_reflowable_covers_are_isolated_by_volume(tmp_path: Path) -> None:
-    cover = EmbeddedBookCover(
-        content=b"cover-bytes",
-        media_type="image/jpeg",
-        extension=".jpg",
-    )
-
-    first = publish_reflowable_cover(
-        tmp_path, "work", "media-version", "volume-1", cover
-    )
-    second = publish_reflowable_cover(
-        tmp_path, "work", "media-version", "volume-2", cover
-    )
-
-    assert first != second
-    assert Path(str(first)).parent.name == "volume-1"
-    assert Path(str(second)).parent.name == "volume-2"
 
 
 def test_txt_inspection_reads_metadata_without_generating_navigation(

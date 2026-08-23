@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
+import math
 import mimetypes
 import re
 import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
-from typing import BinaryIO, Self, cast
+from pathlib import Path, PurePosixPath
+from typing import Any, BinaryIO, Literal, Self, TypeAlias, cast
+from xml.etree import ElementTree
 
-import rarfile
+# rarfile has no published typing metadata; ComicArchive is the typed adapter boundary.
+import rarfile  # type: ignore[import-untyped]
 
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
     ComicInfoMetadata,
+    ComicPageInspection,
 )
 from app.modules.imports.application.errors import (
     ComicArchiveBackendUnavailableError,
@@ -24,16 +28,91 @@ from app.modules.imports.application.errors import (
     ComicArchiveInvalidError,
     ComicArchiveMultiVolumeError,
 )
-from app.modules.imports.application.import_support import (
-    IMAGE_EXTS,
-    _first_text,
-    _ignored_entry,
-    _natural_key,
-    _safe_entry_name,
-    _split_tags,
-    _title_from_file,
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+_NUMBER = r"(?P<value>\d+(?:\.\d+)?)"
+_ORDINAL_PREFIX = chr(0x7B2C)
+_RESOURCE_UNITS = "".join(
+    chr(codepoint) for codepoint in (0x5377, 0x518C, 0x90E8, 0x96C6)
 )
-from app.modules.imports.domain.volume_index import parse_structured_volume_index
+_STRUCTURED_RESOURCE_PATTERNS = (
+    re.compile(rf"^{_NUMBER}$", re.IGNORECASE),
+    re.compile(rf"^{_NUMBER}\s*(?:of|/)\s*\d+(?:\.\d+)?$", re.IGNORECASE),
+    re.compile(rf"^(?:vol(?:ume)?\.?|book)\s*{_NUMBER}$", re.IGNORECASE),
+    re.compile(
+        rf"^{re.escape(_ORDINAL_PREFIX)}\s*{_NUMBER}\s*[{re.escape(_RESOURCE_UNITS)}]$",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _title_from_file(path: Path) -> str:
+    return re.sub(r"[_-]+", " ", path.stem).strip() or path.name
+
+
+def _safe_entry_name(name: str) -> bool:
+    normalized = str(PurePosixPath(name.replace("\\", "/")))
+    return bool(
+        name
+        and not name.startswith("/")
+        and not re.match(r"^[a-zA-Z]:", name)
+        and not normalized.startswith("../")
+        and "/../" not in normalized
+    )
+
+
+def _ignored_entry(name: str) -> bool:
+    parts = name.split("/")
+    last = parts[-1]
+    return (
+        "__MACOSX" in parts
+        or last in {".DS_Store", "Thumbs.db"}
+        or last.startswith("._")
+        or any(part.startswith(".") for part in parts)
+    )
+
+
+def _natural_key(value: str) -> list[Any]:
+    return [
+        int(part) if part.isdigit() else part.lower()
+        for part in re.split(r"(\d+)", value)
+    ]
+
+
+def _split_tags(value: str | None) -> list[str]:
+    return [tag.strip() for tag in re.split(r"[,，;]", value or "") if tag.strip()]
+
+
+def _first_text(xml: str, tag: str) -> str | None:
+    match = re.search(
+        rf"<(?:[\w]+:)?{re.escape(tag)}\b[^>]*>([\s\S]*?)</(?:[\w]+:)?{re.escape(tag)}>",
+        xml,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    value = re.sub(r"<!\[CDATA\[([\s\S]*?)\]\]>", r"\1", match.group(1))
+    value = re.sub(r"<[^>]+>", " ", value)
+    try:
+        value = ElementTree.fromstring(f"<x>{value}</x>").text or value
+    except ElementTree.ParseError:
+        pass
+    return re.sub(r"\s+", " ", value).strip() or None
+
+
+def _parse_resource_index(value: object | None) -> float | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    for pattern in _STRUCTURED_RESOURCE_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if match is None:
+            continue
+        parsed = float(match.group("value"))
+        return parsed if math.isfinite(parsed) and parsed >= 0 else None
+    return None
+
 
 MAX_COMIC_INFO_BYTES = 1024 * 1024
 MAX_CBZ_ENTRIES = 10_000
@@ -56,7 +135,7 @@ class ComicArchiveEntry:
         return self.directory
 
 
-ArchiveImplementation = zipfile.ZipFile | rarfile.RarFile
+ArchiveImplementation: TypeAlias = zipfile.ZipFile | rarfile.RarFile
 
 
 class ComicArchiveStream:
@@ -152,7 +231,7 @@ class ComicArchive:
             raise KeyError(name) from exc
 
     def open(
-        self, entry: str | ComicArchiveEntry, mode: str = "r"
+        self, entry: str | ComicArchiveEntry, mode: Literal["r"] = "r"
     ) -> ComicArchiveStream:
         name = entry.filename if isinstance(entry, ComicArchiveEntry) else entry
         try:
@@ -199,7 +278,9 @@ def inspect_comic_archive(
         if fmt == "cbz":
             _validate_cbz_entries(all_entries)
         entries = [
-            info for info in all_entries if not info.is_dir() and _safe_entry_name(info.filename)
+            info
+            for info in all_entries
+            if not info.is_dir() and _safe_entry_name(info.filename)
         ]
         images = [
             info
@@ -224,7 +305,7 @@ def inspect_comic_archive(
             if comic_info_entry
             else None
         )
-        pages = [
+        pages: list[ComicPageInspection] = [
             {
                 "index": index + 1,
                 "title": f"第 {index + 1} 页",
@@ -302,9 +383,7 @@ def _validate_cbz_entries(entries: list[ComicArchiveEntry]) -> None:
         total_size += entry.file_size
         if total_size > MAX_CBZ_UNCOMPRESSED_BYTES:
             raise ComicArchiveInvalidError("CBZ archive exceeds the expansion limit")
-        unsafe_ratio = (
-            entry.file_size > 0 and entry.compressed_size == 0
-        ) or (
+        unsafe_ratio = (entry.file_size > 0 and entry.compressed_size == 0) or (
             entry.compressed_size > 0
             and entry.file_size / entry.compressed_size > MAX_CBZ_COMPRESSION_RATIO
         )
@@ -315,19 +394,14 @@ def _validate_cbz_entries(entries: list[ComicArchiveEntry]) -> None:
 def extract_comic_cover(
     storage_root: Path,
     source_path: Path,
-    work_id: str,
-    media_version_id: str,
-    volume_id: str,
+    book_id: str,
+    resource_id: str,
+    asset_id: str,
     entry_name: str,
 ) -> str:
     extension = Path(entry_name).suffix.lower() or ".jpg"
     target = (
-        storage_root
-        / "books"
-        / work_id
-        / media_version_id
-        / volume_id
-        / f"cover{extension}"
+        storage_root / "books" / book_id / resource_id / asset_id / f"cover{extension}"
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(f"{target.suffix}.part")
@@ -362,9 +436,9 @@ def _parse_comic_info(xml: str) -> ComicInfoMetadata:
         value = _first_text(xml, tag)
         if value:
             raw[tag] = value
-    volume = parse_structured_volume_index(raw.get("Volume"))
-    if volume is None:
-        volume = parse_structured_volume_index(raw.get("Number"))
+    resource_index = _parse_resource_index(raw.get("Volume"))
+    if resource_index is None:
+        resource_index = _parse_resource_index(raw.get("Number"))
     cover_match = re.search(
         r"<Page\b[^>]*(?:Type|type)=['\"](?:FrontCover|Cover)['\"][^>]*(?:Image|image)=['\"](\d+)['\"]",
         xml,
@@ -373,7 +447,7 @@ def _parse_comic_info(xml: str) -> ComicInfoMetadata:
     return {
         "title": raw.get("Title"),
         "series": raw.get("Series"),
-        "volume": volume,
+        "volume": resource_index,
         "summary": raw.get("Summary"),
         "writer": raw.get("Writer"),
         "penciller": raw.get("Penciller"),

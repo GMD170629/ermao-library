@@ -16,7 +16,7 @@ data class NormalizedTxtPublication(
 const val TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
 const val TXT_PUBLICATION_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
 
-/** Deterministic TXT -> EPUB-profile resources shared by every native platform. */
+/** Deterministic TXT -> in-memory Readium publication resources shared by every platform. */
 class TxtPublicationNormalizer {
     fun normalize(decodedText: String, publicationTitle: String): NormalizedTxtPublication {
         require(publicationTitle.isNotBlank()) { "TXT publication title is blank" }

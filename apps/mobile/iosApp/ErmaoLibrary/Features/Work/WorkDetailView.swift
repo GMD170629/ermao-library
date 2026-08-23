@@ -3,14 +3,14 @@ import UniformTypeIdentifiers
 @preconcurrency import ErmaoShared
 
 struct WorkReaderSelection: Equatable, Sendable {
-    let workID: String
-    let volumeID: String
+    let bookID: String
+    let resourceID: String
     let displayTitle: String
 }
 
 private enum WorkControlTarget: Equatable {
     case book
-    case volume(String)
+    case resource(String)
 }
 
 private struct WorkControlAction: Identifiable {
@@ -32,11 +32,10 @@ struct WorkDetailView: View {
     let openDownloads: () -> Void
     let openReader: (ReaderHandoff) -> Void
     let prepareReader: (ReaderPreparationRequest) -> Void
-    let onWorkDeleted: () -> Void
     let managementRepository: (any ErmaoShared.WorkManagementRepository)?
     let canManageSystem: Bool
 
-    @StateObject private var store: WorkDetailStore
+    @StateObject private var store: BookDetailStore
     @State private var showsShelfPicker = false
     @State private var shelves: [ShelfOption] = []
     @State private var selectedShelfIDs: Set<String> = []
@@ -47,7 +46,7 @@ struct WorkDetailView: View {
     @State private var unavailableFeature: UnavailableWorkFeature?
     @State private var readerAccessErrorCode: String?
     @State private var managementStore: WorkManagementStore?
-    @State private var managedVolumeID: String?
+    @State private var managedResourceID: String?
     @State private var managementTask: WorkManagementTask?
     @State private var importsCover = false
     @State private var controlTarget: WorkControlTarget?
@@ -57,6 +56,11 @@ struct WorkDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
 
+    // The mobile compatibility contract currently advertises
+    // bookDetailManagement = false. Keep this explicit until that capability
+    // is negotiated; an admin authorization alone must not open CRUD UI.
+    private let bookDetailManagementEnabled = false
+
     init(
         context: ContentRequestContext,
         client: any ContentClient,
@@ -65,13 +69,12 @@ struct WorkDetailView: View {
         downloads: DownloadCenterStore,
         managementRepository: (any ErmaoShared.WorkManagementRepository)? = nil,
         canManageSystem: Bool = false,
-        workID: String,
+        bookID: String,
         onUnauthorized: @escaping @MainActor () -> Void,
         openFacet: @escaping (FacetKind, String) -> Void,
         openDownloads: @escaping () -> Void,
         openReader: @escaping (ReaderHandoff) -> Void,
-        prepareReader: @escaping (ReaderPreparationRequest) -> Void,
-        onWorkDeleted: @escaping () -> Void = {}
+        prepareReader: @escaping (ReaderPreparationRequest) -> Void
     ) {
         self.context = context
         self.client = client
@@ -84,19 +87,18 @@ struct WorkDetailView: View {
         self.openDownloads = openDownloads
         self.openReader = openReader
         self.prepareReader = prepareReader
-        self.onWorkDeleted = onWorkDeleted
         _store = StateObject(
-            wrappedValue: WorkDetailStore(
+            wrappedValue: BookDetailStore(
                 context: context,
                 client: client,
                 cache: cache,
-                workID: workID,
+                bookID: bookID,
                 onUnauthorized: onUnauthorized
             )
         )
         _managementStore = State(
             initialValue: managementRepository.flatMap { repository in
-                WorkManagementStore(repository: repository, context: context, workID: workID)
+                WorkManagementStore(repository: repository, context: context, bookID: bookID)
             }
         )
     }
@@ -127,7 +129,16 @@ struct WorkDetailView: View {
             guard let data = try? Data(contentsOf: url), data.count <= 10 * 1024 * 1024 else { return }
             let mime = url.pathExtension.lowercased() == "png" ? "image/png"
                 : url.pathExtension.lowercased() == "webp" ? "image/webp" : "image/jpeg"
-            managementStore?.uploadCover(data: data, mimeType: mime, fileName: url.lastPathComponent)
+            guard let detail = currentDetail,
+                  let resource = selectedResource(detail) else { return }
+            managementStore?.uploadCover(
+                data: data,
+                mimeType: mime,
+                fileName: url.lastPathComponent,
+                sourceNodeID: resource.sourceNodeID,
+                title: detail.book.title,
+                description: detail.description
+            )
         }
         .confirmationDialog(
             "work.unavailable.title",
@@ -186,7 +197,7 @@ struct WorkDetailView: View {
         }
     }
 
-    private func readyContent(_ detail: WorkDetailContent) -> some View {
+    private func readyContent(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             hero(detail)
                 .padding(.top, .spaceHalf)
@@ -205,7 +216,7 @@ struct WorkDetailView: View {
     }
 
     @ViewBuilder
-    private func hero(_ detail: WorkDetailContent) -> some View {
+    private func hero(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .center, spacing: .space1Half) {
             cover(detail).frame(width: dynamicTypeSize.isAccessibilitySize ? 124 : 132)
             identity(detail)
@@ -213,10 +224,10 @@ struct WorkDetailView: View {
         }
     }
 
-    private func cover(_ detail: WorkDetailContent) -> some View {
+    private func cover(_ detail: BookDetailContent) -> some View {
         BookCoverView(
-            reference: detail.work.cover,
-            title: detail.work.title,
+            reference: detail.book.cover,
+            title: detail.book.title,
             context: context,
             client: client,
             cache: cache,
@@ -224,9 +235,9 @@ struct WorkDetailView: View {
         )
     }
 
-    private func identity(_ detail: WorkDetailContent) -> some View {
+    private func identity(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .center, spacing: .spaceHalf) {
-            Text(detail.work.title)
+            Text(detail.book.title)
                 .appTextStyle(.title)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -244,31 +255,25 @@ struct WorkDetailView: View {
         }
     }
 
-    private func identityChips(_ detail: WorkDetailContent) -> [String] {
+    private func identityChips(_ detail: BookDetailContent) -> [String] {
         detail.tags.reduce(into: []) { result, value in
             guard !result.contains(where: { $0.caseInsensitiveCompare(value) == .orderedSame }) else { return }
             result.append(value)
         }
     }
 
-    private func creatorSeriesLine(_ detail: WorkDetailContent) -> some View {
+    private func creatorSeriesLine(_ detail: BookDetailContent) -> some View {
         HStack(spacing: .spaceHalf) {
             if let author = detail.authorFacets.first {
                 facetButton(author, kind: .author)
             } else {
-                Text(detail.work.author)
+                Text(detail.book.author ?? "—")
                     .appTextStyle(.body)
                     .foregroundStyle(theme.textSecondary)
             }
             if let series = detail.seriesFacet {
                 Text("/").foregroundStyle(theme.textTertiary)
                 facetButton(series, kind: .series)
-            }
-            if let mediaKind = detail.selectedMediaKind {
-                Text("/").foregroundStyle(theme.textTertiary)
-                Text(mediaKind.title)
-                    .appTextStyle(.body)
-                    .foregroundStyle(theme.textSecondary)
             }
         }
         .lineLimit(1)
@@ -294,8 +299,8 @@ struct WorkDetailView: View {
     }
 
     @ViewBuilder
-    private func progressSummary(_ detail: WorkDetailContent) -> some View {
-        let progress = detail.work.progress ?? detail.volumes.compactMap(\.progress).max()
+    private func progressSummary(_ detail: BookDetailContent) -> some View {
+        let progress = detail.book.progress ?? detail.resources.compactMap(\.progress).max()
         if let progress, progress > 0 {
             VStack(alignment: .leading, spacing: .space1) {
                 HStack(alignment: .firstTextBaseline, spacing: .spaceHalf) {
@@ -321,8 +326,8 @@ struct WorkDetailView: View {
         }
     }
 
-    private func readerAction(_ detail: WorkDetailContent) -> some View {
-        let selected = selectedVolume(detail)
+    private func readerAction(_ detail: BookDetailContent) -> some View {
+        let selected = selectedResource(detail)
         return VStack(spacing: .space1) {
             PrimaryActionButton(
                 detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
@@ -332,15 +337,15 @@ struct WorkDetailView: View {
             )
             HStack(spacing: 0) {
                 quickAction("work.action.download", systemImage: "icloud.and.arrow.down") {
-                    enqueueSelectedVolume()
+                    enqueueSelectedResource()
                 }
                 Menu {
                     ForEach(LibraryReadingStatus.manualChoices, id: \.self) { status in
                         Button(status.title) {
                             if let managementStore,
                                let sharedStatus = status.sharedValue,
-                               let volumeID = selected?.id {
-                                managementStore.setReadingStatus(volumeID: volumeID, status: sharedStatus)
+                               let resourceID = selected?.id {
+                                managementStore.setReadingStatus(resourceID: resourceID, status: sharedStatus)
                             } else {
                                 unavailableFeature = .readingStatus
                             }
@@ -397,7 +402,7 @@ struct WorkDetailView: View {
     }
 
     @ViewBuilder
-    private func aboutSection(_ detail: WorkDetailContent) -> some View {
+    private func aboutSection(_ detail: BookDetailContent) -> some View {
         if let description = normalizedDescription(detail) {
             VStack(alignment: .leading, spacing: .space1Half) {
                 Text("work.description.title").appTextStyle(.sectionTitle)
@@ -433,11 +438,11 @@ struct WorkDetailView: View {
         }
     }
 
-    private func hasDescription(_ detail: WorkDetailContent) -> Bool {
+    private func hasDescription(_ detail: BookDetailContent) -> Bool {
         normalizedDescription(detail) != nil
     }
 
-    private func normalizedDescription(_ detail: WorkDetailContent) -> String? {
+    private func normalizedDescription(_ detail: BookDetailContent) -> String? {
         guard let rawValue = detail.description?.trimmingCharacters(in: .whitespacesAndNewlines),
               !rawValue.isEmpty else { return nil }
         let rendered = rawValue.data(using: .utf8).flatMap { data in
@@ -454,42 +459,24 @@ struct WorkDetailView: View {
         return value.isEmpty ? nil : value
     }
 
-    private func mediaSection(_ detail: WorkDetailContent) -> some View {
+    private func mediaSection(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .leading, spacing: .space2) {
             mediaPicker(detail)
-            volumeSection(detail)
-            if let selected = selectedVolume(detail) { selectedVolumeMetadata(selected) }
+            resourceSection(detail)
+            if let selected = selectedResource(detail) { selectedResourceMetadata(selected) }
         }
     }
 
     @ViewBuilder
-    private func mediaPicker(_ detail: WorkDetailContent) -> some View {
-        if !detail.availableMediaKinds.isEmpty {
-            HStack(spacing: .space2) {
-                Text("work.media.title").appTextStyle(.sectionTitle)
-                Spacer(minLength: .space1)
-                Picker(
-                    "work.media.title",
-                    selection: Binding(
-                        get: { detail.selectedMediaKind ?? detail.availableMediaKinds.first ?? .ebook },
-                        set: { store.load(mediaKind: $0) }
-                    )
-                ) {
-                    ForEach(detail.availableMediaKinds, id: \.self) { kind in
-                        Text(kind.title).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .tint(theme.brandAccent)
-                .frame(width: min(CGFloat(detail.availableMediaKinds.count) * 80, 240))
-            }
-        }
+    private func mediaPicker(_ detail: BookDetailContent) -> some View {
+        // Resource selection is represented directly by the resource strip.
+        // The former Work/Version picker was removed with ADR0020.
+        EmptyView()
     }
 
     @ViewBuilder
-    private func volumeSection(_ detail: WorkDetailContent) -> some View {
-        if detail.volumes.isEmpty {
+    private func resourceSection(_ detail: BookDetailContent) -> some View {
+        if detail.resources.isEmpty {
             ContentStatusView(
                 systemImage: "books.vertical",
                 title: "work.volumes.empty.title",
@@ -499,18 +486,18 @@ struct WorkDetailView: View {
             VStack(alignment: .leading, spacing: .space2) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: .space1Half) {
-                        ForEach(Array(detail.volumes.enumerated()), id: \.element.id) { position, volume in
-                            volumeCoverItem(volume, position: position, detail: detail)
+                        ForEach(Array(detail.resources.enumerated()), id: \.element.id) { position, resource in
+                            resourceCoverItem(resource, position: position, detail: detail)
                                 .frame(width: dynamicTypeSize.isAccessibilitySize ? 160 : 108)
                                 .onAppear {
-                                    if position >= detail.volumes.count - 3 { store.loadMoreVolumes() }
+                                    if position >= detail.resources.count - 3 { store.loadMoreResources() }
                                 }
                         }
-                        if store.isLoadingMoreVolumes || store.hasVolumePaginationError {
+                        if store.isLoadingMoreResources || store.hasResourcePaginationError {
                             Button {
-                                store.loadMoreVolumes()
+                                store.loadMoreResources()
                             } label: {
-                                Text(store.hasVolumePaginationError
+                                Text(store.hasResourcePaginationError
                                      ? "work.volumes.loadMore.failed"
                                      : "work.volumes.loadMore.loading")
                                     .appTextStyle(.caption)
@@ -519,7 +506,7 @@ struct WorkDetailView: View {
                                     .frame(width: 108, minHeight: .iosMinimumTouchTarget)
                             }
                             .buttonStyle(.plain)
-                            .disabled(!store.hasVolumePaginationError)
+                            .disabled(!store.hasResourcePaginationError)
                         }
                     }
                 }
@@ -527,27 +514,27 @@ struct WorkDetailView: View {
         }
     }
 
-    private func volumeCoverItem(
-        _ volume: WorkVolume,
+    private func resourceCoverItem(
+        _ resource: BookResource,
         position: Int,
-        detail: WorkDetailContent
+        detail: BookDetailContent
     ) -> some View {
-        let index = volume.displayIndex(position: position)
+        let index = resource.displayIndex(position: position)
         return VStack(alignment: .leading, spacing: .space1) {
             ZStack(alignment: .topLeading) {
                 Button {
-                    store.load(mediaKind: detail.selectedMediaKind, volumeID: volume.id)
+                    store.load(resourceID: resource.id)
                 } label: {
                     BookCoverView(
-                        reference: volume.cover,
-                        title: volume.title,
+                        reference: resource.cover,
+                        title: resource.title,
                         context: context,
                         client: client,
                         cache: cache
                     )
-                    .opacity(volume.isReadable == false ? 0.5 : 1)
+                    .opacity(resource.isReadable == false ? 0.5 : 1)
                     .overlay {
-                        if volume.isSelected {
+                        if resource.isSelected {
                             RoundedRectangle(
                                 cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverCompact),
                                 style: .continuous
@@ -556,8 +543,8 @@ struct WorkDetailView: View {
                         }
                     }
                     .overlay(alignment: .bottom) {
-                        if let progress = volume.progress, progress > 0 {
-                            VolumeCoverProgressView(progress: progress)
+                        if let progress = resource.progress, progress > 0 {
+                            ResourceCoverProgressView(progress: progress)
                                 .padding(.horizontal, .space1)
                                 .padding(.bottom, .spaceHalf)
                         }
@@ -565,13 +552,13 @@ struct WorkDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .ignore)
-                .accessibilityIdentifier("work.volume.\(volume.id)")
-                .accessibilityLabel(Text(volumeAccessibilityLabel(volume, index: index)))
-                .accessibilityValue(volumeAccessibilityValue(volume))
-                .accessibilityAddTraits(volume.isSelected ? .isSelected : [])
+                .accessibilityIdentifier("work.resource.\(resource.id)")
+                .accessibilityLabel(Text(resourceAccessibilityLabel(resource, index: index)))
+                .accessibilityValue(resourceAccessibilityValue(resource))
+                .accessibilityAddTraits(resource.isSelected ? .isSelected : [])
                 .onLongPressGesture {
                     controlAnchor = latestPointerLocation
-                    controlTarget = .volume(volume.id)
+                    controlTarget = .resource(resource.id)
                 }
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .global)
@@ -579,7 +566,7 @@ struct WorkDetailView: View {
                 )
                 .accessibilityAction(named: Text("management.volume")) {
                     controlAnchor = latestPointerLocation
-                    controlTarget = .volume(volume.id)
+                    controlTarget = .resource(resource.id)
                 }
 
                 Text(index)
@@ -597,23 +584,23 @@ struct WorkDetailView: View {
                     .accessibilityHidden(true)
 
                 Button {
-                    handleDownload(volume, detail: detail)
+                    handleDownload(resource, detail: detail)
                 } label: {
-                    Image(systemName: downloadSystemImage(volumeID: volume.id))
+                    Image(systemName: downloadSystemImage(resourceID: resource.id))
                         .font(.body.weight(.medium))
-                        .foregroundStyle(downloadForeground(volumeID: volume.id))
+                        .foregroundStyle(downloadForeground(resourceID: resource.id))
                         .frame(width: 24, height: 24)
                         .background(theme.surfaceRaised.opacity(0.92))
                         .clipShape(Circle())
                         .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
                 }
                 .buttonStyle(.plain)
-                .disabled(downloads.record(for: volume.id)?.isVerifiedOfflineCopy == true)
-                .accessibilityLabel(Text(downloadAccessibilityLabel(volumeID: volume.id)))
+                .disabled(downloads.record(for: resource.id)?.isVerifiedOfflineCopy == true)
+                .accessibilityLabel(Text(downloadAccessibilityLabel(resourceID: resource.id)))
                 .frame(maxWidth: .infinity, alignment: .topTrailing)
             }
 
-            Text(volume.title)
+            Text(resource.title)
                 .appTextStyle(.label)
                 .foregroundStyle(theme.textPrimary)
                 .lineLimit(2)
@@ -621,14 +608,14 @@ struct WorkDetailView: View {
         }
     }
 
-    private func selectedVolumeMetadata(_ volume: WorkVolume) -> some View {
+    private func selectedResourceMetadata(_ resource: BookResource) -> some View {
         let rows: [(LocalizedStringKey, String?)] = [
-            ("work.metadata.format", volume.formatLabel),
-            ("work.metadata.language", volume.language),
-            ("work.metadata.published", formattedMetadataDate(volume.publishedAt)),
-            ("work.metadata.pages", volume.pageCount.map(String.init)),
-            ("work.metadata.source", volume.metadataSource),
-            ("work.metadata.filePath", volume.files.first?.path),
+            ("work.metadata.format", resource.formatLabel),
+            ("work.metadata.language", resource.language),
+            ("work.metadata.published", formattedMetadataDate(resource.publishedAt)),
+            ("work.metadata.pages", resource.pageCount.map(String.init)),
+            ("work.metadata.source", resource.metadataSource),
+            ("work.metadata.filePath", resource.assets.first?.path),
         ]
         return VStack(alignment: .leading, spacing: 0) {
             Text("work.metadata.title").appTextStyle(.sectionTitle)
@@ -646,7 +633,7 @@ struct WorkDetailView: View {
                 Divider()
             }
         }
-        .accessibilityIdentifier("work.selectedVolume.metadata")
+        .accessibilityIdentifier("work.selectedResource.metadata")
     }
 
     private func metadataValue(_ rawValue: String?) -> String {
@@ -677,27 +664,32 @@ struct WorkDetailView: View {
         )
     }
 
-    private func volumeAccessibilityValue(_ volume: WorkVolume) -> Text {
-        if let progress = volume.progress {
+    private func resourceAccessibilityValue(_ resource: BookResource) -> Text {
+        if let progress = resource.progress {
             return Text("\(progressLabel(progress))")
         }
         return Text("work.volume.progress.notStarted")
     }
 
-    private func volumeAccessibilityLabel(_ volume: WorkVolume, index: String) -> String {
+    private func resourceAccessibilityLabel(_ resource: BookResource, index: String) -> String {
         String(
             format: String(localized: "work.volume.accessibility.label"),
             locale: .current,
             index,
-            volume.title
+            resource.title
         )
     }
 
-    private func selectedVolume(_ detail: WorkDetailContent) -> WorkVolume? {
-        detail.volumes.first(where: \.isSelected) ?? detail.volumes.first
+    private func selectedResource(_ detail: BookDetailContent) -> BookResource? {
+        detail.resources.first(where: \.isSelected) ?? detail.resources.first
     }
 
-    private var currentDetail: WorkDetailContent? {
+    private func kindleAsset(_ asset: ResourceAsset) -> Bool {
+        let path = asset.path.lowercased()
+        return path.hasSuffix(".epub") || path.hasSuffix(".pdf")
+    }
+
+    private var currentDetail: BookDetailContent? {
         guard case .ready(let detail, _) = store.state else { return nil }
         return detail
     }
@@ -739,7 +731,7 @@ struct WorkDetailView: View {
         }
     }
 
-    private func controlMenuCard(target: WorkControlTarget, detail: WorkDetailContent) -> some View {
+    private func controlMenuCard(target: WorkControlTarget, detail: BookDetailContent) -> some View {
         let actions = controlActions(target: target, detail: detail)
         let destructive = actions.first(where: \.destructive)
         let regular = actions.filter { !$0.destructive }
@@ -772,7 +764,7 @@ struct WorkDetailView: View {
         }
         .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 9)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(target == .book ? "work.book.controlMenu" : "work.volume.controlMenu")
+        .accessibilityIdentifier(target == .book ? "work.book.controlMenu" : "work.resource.controlMenu")
     }
 
     private func controlMenuRow(_ action: WorkControlAction) -> some View {
@@ -796,14 +788,14 @@ struct WorkDetailView: View {
         .opacity(action.enabled ? 1 : 0.45)
     }
 
-    private func controlMenuHeader(target: WorkControlTarget, detail: WorkDetailContent) -> some View {
-        let volume = controlVolume(target: target, detail: detail)
+    private func controlMenuHeader(target: WorkControlTarget, detail: BookDetailContent) -> some View {
+        let resource = controlResource(target: target, detail: detail)
         return HStack(spacing: .space1) {
             Group {
-                if let volume {
+                if let resource {
                     BookCoverView(
-                        reference: volume.cover,
-                        title: volume.title,
+                        reference: resource.cover,
+                        title: resource.title,
                         context: context,
                         client: client,
                         cache: cache
@@ -814,13 +806,13 @@ struct WorkDetailView: View {
             }
             .frame(width: 38)
             VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text(target == .book ? detail.work.title : (volume?.title ?? detail.work.title))
+                Text(target == .book ? detail.book.title : (resource?.title ?? detail.book.title))
                     .appTextStyle(.body)
                     .fontWeight(.semibold)
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
-                if let volume {
-                    Text("\(volume.title) · \(volume.formatLabel)")
+                if let resource {
+                    Text("\(resource.title) · \(resource.formatLabel)")
                         .appTextStyle(.caption)
                         .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
@@ -832,10 +824,10 @@ struct WorkDetailView: View {
 
     private func controlActions(
         target: WorkControlTarget,
-        detail: WorkDetailContent
+        detail: BookDetailContent
     ) -> [WorkControlAction] {
-        let volume = controlVolume(target: target, detail: detail)
-        let download = volume.flatMap { downloads.record(for: $0.id) }
+        let resource = controlResource(target: target, detail: detail)
+        let download = resource.flatMap { downloads.record(for: $0.id) }
         let activeDownload = download.map { record in
             [.queued, .downloading].contains(record.state)
         } ?? false
@@ -843,7 +835,7 @@ struct WorkDetailView: View {
             ? "downloads.remove.action"
             : activeDownload ? "work.download.pause" : "work.action.download"
         let downloadIcon = activeDownload ? "pause.circle" : "icloud.and.arrow.down"
-        let kindleEligible = volume?.files.contains(where: kindleFile) == true
+        let kindleEligible = resource?.assets.contains(where: kindleAsset) == true
         func action(
             _ id: String,
             _ title: LocalizedStringKey,
@@ -863,141 +855,102 @@ struct WorkDetailView: View {
         }
         var actions: [WorkControlAction] = []
         if target == .book {
-            if canManageSystem {
+            if bookDetailManagementEnabled && canManageSystem {
                 actions.append(action("series", "work.control.addSeries", "square.stack.3d.up") {
-                    openManagement(.addSeries, volumeID: nil)
+                    openManagement(.addSeries, resourceID: nil)
                 })
             }
             actions.append(action("shelf", "work.control.addShelf", "books.vertical") {
                 controlTarget = nil
                 openShelfPicker()
             })
-            actions.append(action("unread", "work.control.markUnread", "bookmark", enabled: volume != nil) {
-                markUnread(volume)
+            actions.append(action("unread", "work.control.markUnread", "bookmark", enabled: resource != nil) {
+                markUnread(resource)
             })
-            actions.append(action("download", downloadTitle, downloadIcon, enabled: volume != nil) {
-                handleControlDownload(volume, detail: detail)
+            actions.append(action("download", downloadTitle, downloadIcon, enabled: resource != nil) {
+                handleControlDownload(resource, detail: detail)
             })
-            if canManageSystem {
-                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editWork, volumeID: nil) })
-                actions.append(action("recognize", "work.control.recognize", "sparkles") { openManagement(.recognize, volumeID: nil) })
-                actions.append(action("uploadCover", "management.uploadCover", "photo.badge.plus") { openManagement(.cover, volumeID: nil) })
-                actions.append(action("regenerateCover", "management.regenerateCover", "wand.and.stars") { openManagement(.cover, volumeID: nil) })
-                if kindleEligible {
-                    actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume?.id) })
-                }
-                actions.append(action("delete", "work.control.delete", "trash", destructive: true) {
-                    openManagement(.deleteWork, volumeID: nil)
-                })
+            if bookDetailManagementEnabled && canManageSystem {
+                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editWork, resourceID: nil) })
+                actions.append(action("recognize", "work.control.recognize", "sparkles") { openManagement(.recognize, resourceID: nil) })
+                actions.append(action("uploadCover", "management.uploadCover", "photo.badge.plus") { openManagement(.cover, resourceID: nil) })
+                actions.append(action("regenerateCover", "management.regenerateCover", "wand.and.stars") { openManagement(.cover, resourceID: nil) })
             }
-        } else if let volume {
-            actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(volume) })
+            if canManageSystem && kindleEligible {
+                actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, resourceID: resource?.id) })
+            }
+        } else if let resource {
+            actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(resource) })
             actions.append(action("download", downloadTitle, downloadIcon) {
-                handleControlDownload(volume, detail: detail)
+                handleControlDownload(resource, detail: detail)
             })
-            if canManageSystem {
-                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editVolume, volumeID: volume.id) })
-                actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, volumeID: volume.id) })
-                actions.append(action("split", "work.control.split", "arrow.triangle.branch", enabled: !activeDownload) { openManagement(.split, volumeID: volume.id) })
-                actions.append(action("move", "work.control.move", "arrow.right", enabled: !activeDownload) { openManagement(.transfer, volumeID: volume.id) })
-                if kindleEligible {
-                    actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, volumeID: volume.id) })
-                }
-                actions.append(action("delete", "work.control.delete", "trash", enabled: !activeDownload, destructive: true) { openManagement(.deleteVolume, volumeID: volume.id) })
+            if bookDetailManagementEnabled && canManageSystem {
+                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editResource, resourceID: resource.id) })
+                actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, resourceID: resource.id) })
+            }
+            if canManageSystem && kindleEligible {
+                actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, resourceID: resource.id) })
             }
         }
         return actions
     }
 
-    private func controlVolume(target: WorkControlTarget, detail: WorkDetailContent) -> WorkVolume? {
+    private func controlResource(target: WorkControlTarget, detail: BookDetailContent) -> BookResource? {
         switch target {
-        case .book: selectedVolume(detail)
-        case .volume(let id): detail.volumes.first { $0.id == id }
+        case .book: selectedResource(detail)
+        case .resource(let id): detail.resources.first { $0.id == id }
         }
     }
 
-    private func openManagement(_ task: WorkManagementTask, volumeID: String?) {
+    private func openManagement(_ task: WorkManagementTask, resourceID: String?) {
+        guard task == .kindle || bookDetailManagementEnabled else { return }
         controlTarget = nil
-        managedVolumeID = volumeID
+        managedResourceID = resourceID
         managementTask = task
     }
 
-    private func markUnread(_ volume: WorkVolume?) {
+    private func markUnread(_ resource: BookResource?) {
         controlTarget = nil
-        guard let volume, let managementStore else {
+        guard let resource, let managementStore else {
             unavailableFeature = .readingStatus
             return
         }
-        managementStore.setReadingStatus(volumeID: volume.id, status: .unread)
+        managementStore.setReadingStatus(resourceID: resource.id, status: .unread)
     }
 
-    private func handleControlDownload(_ volume: WorkVolume?, detail: WorkDetailContent) {
+    private func handleControlDownload(_ resource: BookResource?, detail: BookDetailContent) {
         controlTarget = nil
-        guard let volume else { return }
-        if let record = downloads.record(for: volume.id), record.isVerifiedOfflineCopy {
+        guard let resource else { return }
+        if let record = downloads.record(for: resource.id), record.isVerifiedOfflineCopy {
             downloads.remove(record)
         } else {
-            handleDownload(volume, detail: detail)
+            handleDownload(resource, detail: detail)
         }
     }
 
     @ViewBuilder
     private func managementPage(task: WorkManagementTask) -> some View {
-        if let managementStore, let detail = currentDetail {
-            let volume = managedVolumeID.flatMap { id in detail.volumes.first { $0.id == id } }
+        if (task == .kindle || bookDetailManagementEnabled),
+           let managementStore,
+           let detail = currentDetail {
+            let resource = managedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
             WorkManagementView(
                 store: managementStore,
                 task: task,
                 detail: detail,
-                volume: volume,
-                downloadAction: { selectedVolume in
-                    handleDownload(selectedVolume, detail: detail)
-                    managementTask = nil
-                },
-                removeDownload: { selectedVolume in
-                    if let record = downloads.record(for: selectedVolume.id) {
-                        downloads.remove(record)
-                    }
-                    managementTask = nil
-                },
+                resource: resource,
                 chooseCover: { importsCover = true },
                 workCover: AnyView(cover(detail)),
-                downloadForVolume: { downloads.record(for: $0) },
-                onManagedVolumeChange: { managedVolumeID = $0 }
+                downloadForResource: { downloads.record(for: $0) }
             )
         }
     }
 
     private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
         guard let action, let managementStore else { return }
-        let detail = currentDetail
-        switch action {
-        case .workDeleted:
-            detail?.volumes.forEach { downloads.remove(volumeID: $0.id) }
-            onWorkDeleted()
-        case .volumeDeleted:
-            if let managedVolumeID { downloads.remove(volumeID: managedVolumeID) }
-        case .volumeReclassified, .volumeSplit, .volumeTransferred:
-            if let pending = managementStore.pendingOwnership,
-               let outcome = managementStore.lastOutcome,
-               let mediaVersionID = outcome.targetMediaVersionId {
-                downloads.rehomeCompleted(
-                    volumeID: pending.volumeID,
-                    targetWorkID: outcome.targetWorkId ?? pending.workID ?? detail?.work.id ?? "",
-                    targetWorkTitle: pending.workTitle,
-                    targetWorkAuthor: pending.workAuthor,
-                    targetMediaVersionID: mediaVersionID,
-                    targetMediaKind: pending.mediaKind
-                )
-            }
-        default: break
-        }
         managementTask = nil
-        if [.volumeReclassified, .volumeSplit, .volumeTransferred, .volumeDeleted].contains(action) {
-            managedVolumeID = nil
-        }
         managementStore.consumeCompletion()
-        if action != .workDeleted { store.load() }
+        store.load()
     }
 
     private func openShelfPicker() {
@@ -1006,7 +959,7 @@ struct WorkDetailView: View {
         shelfError = false
         Task {
             do {
-                let loaded = try await shelfClient.fetchShelves(context: context, workID: store.workIDValue)
+                let loaded = try await shelfClient.fetchShelves(context: context, bookID: store.bookIDValue)
                 shelves = loaded
                 selectedShelfIDs = Set(loaded.filter(\.containsWork).map(\.id))
                 isLoadingShelves = false
@@ -1078,10 +1031,10 @@ struct WorkDetailView: View {
         Task {
             do {
                 for shelfID in additions {
-                    try await shelfClient.updateShelf(context: context, workID: store.workIDValue, shelfID: shelfID, add: true)
+                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelfID: shelfID, add: true)
                 }
                 for shelfID in removals {
-                    try await shelfClient.updateShelf(context: context, workID: store.workIDValue, shelfID: shelfID, add: false)
+                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelfID: shelfID, add: false)
                 }
                 shelves = shelves.map { ShelfOption(id: $0.id, name: $0.name, containsWork: selectedShelfIDs.contains($0.id)) }
                 isSavingShelves = false
@@ -1093,50 +1046,48 @@ struct WorkDetailView: View {
         }
     }
 
-    private func requestReaderAccess(detail: WorkDetailContent) {
-        guard let volume = selectedVolume(detail), let mediaKind = detail.selectedMediaKind else { return }
+    private func requestReaderAccess(detail: BookDetailContent) {
+        guard let resource = selectedResource(detail) else { return }
         if let handoff = ManagedReaderAccessPolicy.verifiedLocalHandoff(
-            record: downloads.record(for: volume.id),
-            volumeID: volume.id
+            record: downloads.record(for: resource.id),
+            resourceID: resource.id
         ) {
             openReader(handoff)
             return
         }
         prepareReader(ReaderPreparationRequest(
             context: context,
-            work: detail.work,
-            volume: volume,
-            mediaKind: mediaKind
+            book: detail.book,
+            resource: resource,
+            mediaKind: resource.libraryMediaKind
         ))
     }
 
-    private func requestReaderAccessForSelectedVolume() {
+    private func requestReaderAccessForSelectedResource() {
         guard case .ready(let detail, _) = store.state else { return }
         requestReaderAccess(detail: detail)
     }
 
-    private func enqueueSelectedVolume() {
+    private func enqueueSelectedResource() {
         guard case .ready(let detail, _) = store.state,
-              let volume = selectedVolume(detail),
-              let mediaKind = detail.selectedMediaKind else { return }
-        downloads.enqueue(work: detail.work, volume: volume, mediaKind: mediaKind)
+              let resource = selectedResource(detail) else { return }
+        downloads.enqueue(book: detail.book, resource: resource, mediaKind: resource.libraryMediaKind)
     }
 
-    private func handleDownload(_ volume: WorkVolume, detail: WorkDetailContent) {
-        guard let mediaKind = detail.selectedMediaKind else { return }
-        if let record = downloads.record(for: volume.id) {
+    private func handleDownload(_ resource: BookResource, detail: BookDetailContent) {
+        if let record = downloads.record(for: resource.id) {
             switch record.state {
             case .downloading, .queued: downloads.pause(record)
             case .paused, .failedRetryable, .failedTerminal: downloads.resume(record)
             case .completed: break
             }
         } else {
-            downloads.enqueue(work: detail.work, volume: volume, mediaKind: mediaKind)
+            downloads.enqueue(book: detail.book, resource: resource, mediaKind: resource.libraryMediaKind)
         }
     }
 
-    private func downloadSystemImage(volumeID: String) -> String {
-        guard let record = downloads.record(for: volumeID) else { return "icloud.and.arrow.down" }
+    private func downloadSystemImage(resourceID: String) -> String {
+        guard let record = downloads.record(for: resourceID) else { return "icloud.and.arrow.down" }
         switch record.state {
         case .queued, .downloading: return "pause.circle"
         case .paused, .failedRetryable, .failedTerminal: return "arrow.clockwise.circle"
@@ -1145,14 +1096,14 @@ struct WorkDetailView: View {
         }
     }
 
-    private func downloadForeground(volumeID: String) -> Color {
-        downloads.record(for: volumeID)?.isVerifiedOfflineCopy == true
+    private func downloadForeground(resourceID: String) -> Color {
+        downloads.record(for: resourceID)?.isVerifiedOfflineCopy == true
             ? theme.brandAccent
             : theme.textSecondary
     }
 
-    private func downloadAccessibilityLabel(volumeID: String) -> LocalizedStringKey {
-        guard let record = downloads.record(for: volumeID) else { return "work.volume.download.action" }
+    private func downloadAccessibilityLabel(resourceID: String) -> LocalizedStringKey {
+        guard let record = downloads.record(for: resourceID) else { return "work.volume.download.action" }
         switch record.state {
         case .queued, .downloading: return "work.volume.download.pause"
         case .paused, .failedRetryable, .failedTerminal: return "work.volume.download.retry"
@@ -1170,7 +1121,7 @@ struct WorkDetailView: View {
     }
 }
 
-private struct VolumeCoverProgressView: View {
+private struct ResourceCoverProgressView: View {
     let progress: Double
     @Environment(\.appTheme) private var theme
 

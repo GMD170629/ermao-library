@@ -18,12 +18,12 @@ export function LibraryImportSettingsPage() {
   const tabs = [
     { id: 'history' as const, label: '导入记录', icon: FileClock },
     { id: 'files' as const, label: '文件管理', icon: FolderTree },
-    { id: 'folders' as const, label: '监控文件夹', icon: FolderCog },
+    { id: 'folders' as const, label: '书库', icon: FolderCog },
     { id: 'preferences' as const, label: '偏好设置', icon: SlidersHorizontal }
   ];
 
   return (
-    <SettingsCenterShell title={i18nAttribute("书库来源和导入")} description={i18nAttribute("管理监控文件夹、识别规则与最近导入活动。")}>
+    <SettingsCenterShell title={i18nAttribute("书库来源和导入")} description={i18nAttribute("管理书库、识别规则与最近导入活动。")}>
       <div>
         <div className="mb-6 flex gap-1 overflow-x-auto border-b border-[#DEDAD4]" role="tablist" aria-label={i18nAttribute("书库来源与导入")}>
           {tabs.map((tab) => {
@@ -50,7 +50,7 @@ export function LibraryImportSettingsPage() {
         <section role="tabpanel" aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
           {activeTab === 'history' ? <ImportTasksPage embedded /> : null}
           {activeTab === 'files' ? <ImportFileManager /> : null}
-          {activeTab === 'folders' ? <SettingsPage embedded initialSection={i18nAttribute("监控文件夹")} /> : null}
+          {activeTab === 'folders' ? <SettingsPage embedded initialSection={i18nAttribute("书库")} /> : null}
           {activeTab === 'preferences' ? <ImportPreferencesPanel /> : null}
         </section>
       </div>

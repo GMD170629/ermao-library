@@ -116,7 +116,7 @@ class AndroidPlatformStorageTest {
                     canManageSystem = false,
                     allLibraryScopes = true,
                     canViewManualImports = false,
-                    monitorFolderIds = emptyList(),
+                    libraryIds = emptyList(),
                     lastValidatedAtEpochMillis = 1_000,
                     avatarUrl = null,
                     locale = "en-US",

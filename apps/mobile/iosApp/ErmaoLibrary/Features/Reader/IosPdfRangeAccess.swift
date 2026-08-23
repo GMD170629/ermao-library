@@ -58,7 +58,7 @@ struct IosPdfRangeCacheIdentity: Sendable {
         namespaceKey = Self.digest(
             "\(source.namespace.serverIdentity)|\(source.namespace.userId)|\(source.namespace.authorizationVersion)"
         )
-        documentKey = Self.digest(source.volumeId)
+        documentKey = Self.digest(source.resourceId)
     }
 
     private static func digest(_ value: String) -> String {
@@ -192,7 +192,10 @@ final class IosPdfRangeCache: @unchecked Sendable {
         }
     }
 
-    static func clearAll(files: FileManager = .default) throws {
+    /// Remove the range cache for exactly one Reader namespace. The previous
+    /// logout path used `clearAll`, which could delete another account's PDF
+    /// ranges on a shared installation.
+    static func clearNamespace(_ namespace: String, files: FileManager = .default) throws {
         let caches = try files.url(
             for: .cachesDirectory,
             in: .userDomainMask,
@@ -200,7 +203,11 @@ final class IosPdfRangeCache: @unchecked Sendable {
             create: true
         )
         let root = caches.appendingPathComponent("reader/pdf-range-v1", isDirectory: true)
-        if files.fileExists(atPath: root.path) { try files.removeItem(at: root) }
+        let namespaceKey = SHA256.hash(data: Data(namespace.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let target = root.appendingPathComponent(namespaceKey, isDirectory: true)
+        if files.fileExists(atPath: target.path) { try files.removeItem(at: target) }
     }
 
     private func readChunkLocked(identity: IosPdfRangeCacheIdentity, chunkIndex: Int64) -> Data? {

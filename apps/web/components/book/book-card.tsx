@@ -1,11 +1,11 @@
 'use client';
 
-import { Check, Trash2 } from 'lucide-react';
-import type { KeyboardEvent, MouseEvent } from 'react';
+import { Check } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
 import { Progress } from '../ui/progress';
 import { Cover } from './cover';
 import type { CoverBook } from './cover';
-import { allWorkVolumes, volumeById, type WorkView } from '../../types/work';
+import { allBookResources, resourceById, type BookView } from '../../types/book';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 type CardMediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
@@ -28,16 +28,14 @@ export function BookCard({
   book,
   compact = false,
   priority = false,
-  onDelete,
   onClick,
   selectable = false,
   selected = false,
   onSelect
 }: {
-  book: WorkView & CoverBook;
+  book: BookView & CoverBook;
   compact?: boolean;
   priority?: boolean;
-  onDelete?: () => void;
   onClick?: () => void;
   selectable?: boolean;
   selected?: boolean;
@@ -45,15 +43,10 @@ export function BookCard({
 }) {
   const { t: i18nAttribute } = useAttributeI18n();
   const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
-  const continueVolume = volumeById(book, book.continueVolumeId);
-  const mediaKinds = book.mediaVersions.map((mediaVersion) => mediaVersion.mediaKind) as CardMediaKind[];
-  const hasProgress = Boolean(continueVolume && continueVolume.progress > 0 && continueVolume.progress < 100);
-  const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allWorkVolumes(book).some((volume) => volume.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
-
-  function deleteBook(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation();
-    onDelete?.();
-  }
+  const continueResource = resourceById(book, book.continueResourceId);
+  const mediaKinds = (book.availableMediaKinds ?? []) as CardMediaKind[];
+  const hasProgress = Boolean(continueResource && continueResource.progress > 0 && continueResource.progress < 100);
+  const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allBookResources(book).some((resource) => resource.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
 
   function openBook(event: KeyboardEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget || !onClick || (event.key !== 'Enter' && event.key !== ' ')) return;
@@ -82,17 +75,6 @@ export function BookCard({
           <Check size={15} aria-hidden="true" />
         </label>
       ) : null}
-      {onDelete ? (
-        <button
-          type="button"
-          onClick={deleteBook}
-          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-black/[0.06] bg-white/95 text-red-600 opacity-0 shadow-sm transition hover:bg-red-50 focus:opacity-100 group-hover:opacity-100"
-          title={i18nAttribute("删除记录")}
-          aria-label={i18nAttribute("删除 {value0}", { value0: book.title })}
-        >
-          <Trash2 size={15} />
-        </button>
-      ) : null}
       <Cover
         book={book}
         size={compact ? 'small' : 'medium'}
@@ -103,11 +85,11 @@ export function BookCard({
         <div data-i18n-skip className={compact ? 'line-clamp-1 text-[13px] font-medium text-[#24211F]' : 'line-clamp-1 text-sm font-medium text-[#24211F]'}>{book.title}</div>
         {authorLabel ? <div data-i18n-skip className="mt-0.5 line-clamp-1 text-xs text-[#89837D]">{authorLabel}</div> : null}
         <div className="mt-1 line-clamp-1 text-[11px] text-[#9A948E]">{mediaKinds.map((kind) => mediaLabels[kind]).join(' · ')}</div>
-        {continueVolume ? <div data-i18n-skip className="mt-1 line-clamp-1 text-[11px] text-[#8B857F]">{continueVolume.title}</div> : null}
-        {hasProgress && continueVolume ? (
+        {continueResource ? <div data-i18n-skip className="mt-1 line-clamp-1 text-[11px] text-[#8B857F]">{continueResource.title}</div> : null}
+        {hasProgress && continueResource ? (
           <div className="mt-1.5 flex items-center gap-2">
-            <Progress value={continueVolume.progress} className="h-1 flex-1 bg-[#E4E0DC]" />
-            <span className="shrink-0 text-[11px] tabular-nums text-[#77716B]">{Math.round(continueVolume.progress)}%</span>
+            <Progress value={continueResource.progress} className="h-1 flex-1 bg-[#E4E0DC]" />
+            <span className="shrink-0 text-[11px] tabular-nums text-[#77716B]">{Math.round(continueResource.progress)}%</span>
           </div>
         ) : readingLabel ? (
           <div className="mt-1 text-xs text-[#8B857F]">{readingLabel}</div>

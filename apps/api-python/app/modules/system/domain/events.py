@@ -36,9 +36,9 @@ class PreparedSystemEvent:
 
 
 def clamp_max_event_bytes(value: object) -> int:
-    try:
-        size = int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    if isinstance(value, (str, bytes, bytearray, int, float)):
+        size = int(value)
+    else:
         size = DEFAULT_MAX_EVENT_BYTES
     return min(MAX_MAX_EVENT_BYTES, max(MIN_MAX_EVENT_BYTES, size))
 

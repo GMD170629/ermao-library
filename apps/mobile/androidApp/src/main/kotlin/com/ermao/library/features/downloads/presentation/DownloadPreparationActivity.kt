@@ -40,7 +40,7 @@ class DownloadPreparationActivity : AppCompatActivity() {
             session.profile,
         )
         DownloadPreparationViewModel.factory(
-            volumeId = request.volumeId,
+            resourceId = request.resourceId,
             context = DownloadRequestContext(session.profile, session.identity.namespace.toDownloadNamespace()),
             catalog = application.sharedDownloadCatalog,
             sink = application.downloadFiles,
@@ -74,7 +74,7 @@ class DownloadPreparationActivity : AppCompatActivity() {
             WarmPageTheme {
                 val state by preparationViewModel.uiState.collectAsStateWithLifecycle()
                 DownloadPreparationScreen(
-                    title = request.workTitle,
+                    title = request.bookTitle,
                     author = request.author,
                     coverBytes = coverBytes,
                     state = state,
@@ -89,9 +89,10 @@ class DownloadPreparationActivity : AppCompatActivity() {
                             ReaderActivity.createManagedDownloadIntent(
                                 context = this@DownloadPreparationActivity,
                                 profileId = request.profileId,
-                                workId = request.workId,
-                                volumeId = request.volumeId,
-                                displayTitle = request.workTitle,
+                                bookId = artifact.bookId,
+                                resourceId = artifact.resourceId,
+                                assetId = artifact.assetId,
+                                displayTitle = request.bookTitle,
                                 localReference = artifact.localReference,
                                 sourceFormat = artifact.format,
                             ),
@@ -107,46 +108,46 @@ class DownloadPreparationActivity : AppCompatActivity() {
         fun createIntent(
             context: Context,
             profileId: String,
-            workId: String,
-            workTitle: String,
+            bookId: String,
+            bookTitle: String,
             author: String,
             coverApiPath: String,
-            volumeId: String,
+            resourceId: String,
         ): Intent {
-            require(profileId.isNotBlank() && workId.isNotBlank() && workTitle.isNotBlank() && volumeId.isNotBlank())
+            require(profileId.isNotBlank() && bookId.isNotBlank() && bookTitle.isNotBlank() && resourceId.isNotBlank())
             return Intent(context, DownloadPreparationActivity::class.java)
                 .putExtra(EXTRA_PROFILE_ID, profileId)
-                .putExtra(EXTRA_WORK_ID, workId)
-                .putExtra(EXTRA_WORK_TITLE, workTitle)
+                .putExtra(EXTRA_BOOK_ID, bookId)
+                .putExtra(EXTRA_BOOK_TITLE, bookTitle)
                 .putExtra(EXTRA_AUTHOR, author)
                 .putExtra(EXTRA_COVER_API_PATH, coverApiPath)
-                .putExtra(EXTRA_VOLUME_ID, volumeId)
+                .putExtra(EXTRA_RESOURCE_ID, resourceId)
                 .addFlags(if (context is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
         private const val EXTRA_PROFILE_ID = "download.profile_id"
-        private const val EXTRA_WORK_ID = "download.work_id"
-        private const val EXTRA_WORK_TITLE = "download.work_title"
+        private const val EXTRA_BOOK_ID = "download.book_id"
+        private const val EXTRA_BOOK_TITLE = "download.book_title"
         private const val EXTRA_AUTHOR = "download.author"
         private const val EXTRA_COVER_API_PATH = "download.cover_api_path"
-        private const val EXTRA_VOLUME_ID = "download.volume_id"
+        private const val EXTRA_RESOURCE_ID = "download.resource_id"
     }
 
     private fun Intent.toRequest() = Request(
         profileId = checkNotNull(getStringExtra(EXTRA_PROFILE_ID)),
-        workId = checkNotNull(getStringExtra(EXTRA_WORK_ID)),
-        workTitle = checkNotNull(getStringExtra(EXTRA_WORK_TITLE)),
+        bookId = checkNotNull(getStringExtra(EXTRA_BOOK_ID)),
+        bookTitle = checkNotNull(getStringExtra(EXTRA_BOOK_TITLE)),
         author = getStringExtra(EXTRA_AUTHOR).orEmpty(),
         coverApiPath = checkNotNull(getStringExtra(EXTRA_COVER_API_PATH)),
-        volumeId = checkNotNull(getStringExtra(EXTRA_VOLUME_ID)),
+        resourceId = checkNotNull(getStringExtra(EXTRA_RESOURCE_ID)),
     )
 
     private data class Request(
         val profileId: String,
-        val workId: String,
-        val workTitle: String,
+        val bookId: String,
+        val bookTitle: String,
         val author: String,
         val coverApiPath: String,
-        val volumeId: String,
+        val resourceId: String,
     )
 }

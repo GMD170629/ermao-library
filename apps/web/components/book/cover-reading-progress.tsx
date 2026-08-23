@@ -23,7 +23,7 @@ export function CoverReadingProgress({
   surface
 }: {
   progress: number;
-  surface: 'bookshelf' | 'volume';
+  surface: 'bookshelf' | 'resource';
 }) {
   const state = coverReadingProgressState(progress);
   if (!state.visible) return null;
@@ -34,8 +34,8 @@ export function CoverReadingProgress({
       data-cover-reading-progress="true"
       data-bookshelf-progress={isBookshelf ? 'true' : undefined}
       data-bookshelf-progress-state={isBookshelf ? (state.finished ? 'finished' : 'reading') : undefined}
-      data-volume-progress={!isBookshelf ? 'true' : undefined}
-      data-volume-progress-state={!isBookshelf ? (state.finished ? 'finished' : 'reading') : undefined}
+      data-resource-progress={!isBookshelf ? 'true' : undefined}
+      data-resource-progress-state={!isBookshelf ? (state.finished ? 'finished' : 'reading') : undefined}
       aria-hidden="true"
       className="pointer-events-none absolute inset-x-2 bottom-1.5 z-10 block h-[2px] rounded-full bg-[#8B837B]/30"
     >
@@ -46,7 +46,7 @@ export function CoverReadingProgress({
       {state.finished ? (
         <span
           data-bookshelf-progress-complete={isBookshelf ? 'true' : undefined}
-          data-volume-progress-complete={!isBookshelf ? 'true' : undefined}
+          data-resource-progress-complete={!isBookshelf ? 'true' : undefined}
           className="absolute right-0 top-1/2 flex h-[11px] w-[11px] -translate-y-1/2 items-center justify-center rounded-full bg-[#FF4F2A] text-white"
         >
           <Check size={7} strokeWidth={3} />

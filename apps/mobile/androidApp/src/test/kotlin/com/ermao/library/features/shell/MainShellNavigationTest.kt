@@ -8,11 +8,11 @@ import org.junit.Test
 class MainShellNavigationTest {
     @Test
     fun viewShelvesActionSelectsTheShelvesRootWithoutResettingOtherTabs() {
-        val homeBackStack = mutableListOf<NavKey>(HomeRoot, WorkDetailRoute("home-work"))
-        val libraryBackStack = mutableListOf<NavKey>(LibraryRoot, WorkDetailRoute("library-work"))
+        val homeBackStack = mutableListOf<NavKey>(HomeRoot, BookDetailRoute("home-work"))
+        val libraryBackStack = mutableListOf<NavKey>(LibraryRoot, BookDetailRoute("library-work"))
         val shelvesBackStack = mutableListOf<NavKey>(
             ShelvesRoot,
-            WorkDetailRoute("shelf-work"),
+            BookDetailRoute("shelf-work"),
             FacetRoute(kind = "Authors", facetId = "author-1"),
         )
         var selectedTab = TabId.Library
@@ -24,7 +24,7 @@ class MainShellNavigationTest {
 
         assertEquals(TabId.Shelves, selectedTab)
         assertEquals(listOf<NavKey>(ShelvesRoot), shelvesBackStack)
-        assertEquals(listOf<NavKey>(HomeRoot, WorkDetailRoute("home-work")), homeBackStack)
-        assertEquals(listOf<NavKey>(LibraryRoot, WorkDetailRoute("library-work")), libraryBackStack)
+        assertEquals(listOf<NavKey>(HomeRoot, BookDetailRoute("home-work")), homeBackStack)
+        assertEquals(listOf<NavKey>(LibraryRoot, BookDetailRoute("library-work")), libraryBackStack)
     }
 }

@@ -19,7 +19,7 @@ from app.modules.library.application.filter_options import (
 )
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
-    resolve_monitor_folder_roots,
+    resolve_library_roots,
 )
 
 
@@ -105,7 +105,7 @@ def _authorization_context_for_user(
         is_admin=True,
         can_manage_system=True,
         can_view_manual_imports=True,
-        monitor_folder_ids=(),
+        library_ids=(),
         authz_version=1,
     )
 
@@ -126,14 +126,14 @@ def compile_filter_predicate(
         return None, str(exc)
     context = _authorization_context_for_user(db, user_id)
     try:
-        monitor_folder_roots = resolve_monitor_folder_roots(db, expression, context)
+        library_roots = resolve_library_roots(db, expression, context)
         return (
             compile_filter_expression(
                 expression,
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=shelf_owner_user_id,
-                monitor_folder_roots=monitor_folder_roots,
+                library_roots=library_roots,
             ),
             None,
         )

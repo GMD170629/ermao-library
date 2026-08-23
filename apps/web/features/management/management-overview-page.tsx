@@ -10,25 +10,7 @@ import { useI18n } from '../../i18n/provider';
 import { ManagementNav } from './management-nav';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-
-type SystemEvent = {
-  id: string;
-  level: string;
-  source: string;
-  action: string;
-  message: string;
-  createdAt: string;
-};
-
-type OverviewPayload = {
-  ok: boolean;
-  data?: {
-    cards: Record<string, number>;
-    checks: Record<string, { status: string; message: string }>;
-    recentEvents: SystemEvent[];
-  };
-  error?: { message: string };
-};
+import { fetchManagementOverview, type ManagementOverview } from './api/overview';
 
 function formatBytes(value: number) {
   if (!value) return '0 B';
@@ -58,17 +40,14 @@ function eventTone(level: string): BadgeTone {
 export function ManagementOverviewPage() {
   const { t: i18nAttribute } = useAttributeI18n();
   const { locale } = useI18n();
-  const [payload, setPayload] = useState<OverviewPayload['data'] | null>(null);
+  const [payload, setPayload] = useState<ManagementOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch('/api/management/overview');
-      const data = (await response.json()) as OverviewPayload;
-      if (!data.ok) throw new Error(data.error?.message ?? '读取管理概览失败');
-      setPayload(data.data ?? null);
+      setPayload(await fetchManagementOverview());
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '读取管理概览失败');
@@ -92,7 +71,7 @@ export function ManagementOverviewPage() {
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
           { label: '失败导入', value: cards.failedImports ?? 0, href: '/import-tasks', icon: AlertTriangle, tone: (cards.failedImports ?? 0) > 0 ? 'red' : 'green' },
-          { label: '待整理作品', value: cards.pendingOrganize ?? 0, href: '/organize/pending', icon: Settings2, tone: (cards.pendingOrganize ?? 0) > 0 ? 'amber' : 'green' }
+          { label: '待整理图书', value: cards.pendingOrganize ?? 0, href: '/organize/pending', icon: Settings2, tone: (cards.pendingOrganize ?? 0) > 0 ? 'amber' : 'green' }
         ].map(({ label, value, href, icon: Icon, tone }) => (
           <Link key={label} href={href} className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-100 hover:bg-blue-50/30">
             <div className="flex items-center justify-between gap-3">

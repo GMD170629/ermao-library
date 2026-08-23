@@ -20,7 +20,7 @@ test('reader fonts and large reader payloads bypass caches', () => {
   assert.match(source, /withoutBasePath\(url\.pathname\)\.startsWith\('\/api\/reader\/'\)/);
   assert.match(source, /if \(isLocalDevelopmentHost\(url\.hostname\)\) return true/);
   assert.match(source, /m4b\|m4a\|mp3\|aac\|ogg\|opus\|flac\|wav/);
-  assert.match(source, /files\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
+  assert.match(source, /assets\\\/\[\^\/\]\+\(\?:\\\/\(stream\|audio\)\)\?\$/);
 });
 
 test('PDF.js decoder WASM uses the versioned static resource cache', () => {
@@ -63,7 +63,7 @@ test('forced updates only purge versioned frontend resources and preserve reader
   assert.match(source, /event\.data\?\.type === 'PURGE_FRONTEND_RESOURCES_AND_ACTIVATE'/);
   assert.match(source, /function clearOldFrontendResourceCaches/);
   assert.match(source, /isFrontendResourceCache\(cacheName\)/);
-  assert.match(source, /migrateLegacyPrivateCaches/);
+  assert.doesNotMatch(source, /migrateLegacyPrivateCaches/);
   assert.doesNotMatch(source, /indexedDB/);
   assert.doesNotMatch(source, /keys\.filter\(\(key\) => !key\.startsWith\(VERSION\)\)/);
 });

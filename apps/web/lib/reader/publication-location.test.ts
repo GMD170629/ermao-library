@@ -18,6 +18,9 @@ test('parses every canonical publication-location morphology and rejects legacy 
   assert.deepEqual(fixtures.map((fixture) => parsePublicationLocation(fixture.locator)?.kind), [
     'reflowable', 'pdf', 'comic', 'audio'
   ]);
+  const audio = parsePublicationLocation(audioRequest.locator);
+  assert.ok(audio?.kind === 'audio');
+  assert.equal(audio.assetId, 'audio-asset-1');
   assert.equal(parsePublicationLocation({
     engine: 'readium', platform: 'web', version: 'legacy', publication: {}, payload: {}
   }), null);
@@ -46,8 +49,8 @@ test('keeps PDF locations zero-based across domain and wire data', () => {
   const pdf = parsePublicationLocation(pdfRequest.locator);
   const comic = parsePublicationLocation(comicRequest.locator);
   assert.ok(pdf?.kind === 'pdf' && comic?.kind === 'comic');
-  const pdfDomain = v4LocationToDomain(pdf, 'volume-pdf', null);
-  const comicDomain = v4LocationToDomain(comic, 'volume-comic', null);
+  const pdfDomain = v4LocationToDomain(pdf, 'resource-pdf', null);
+  const comicDomain = v4LocationToDomain(comic, 'resource-comic', null);
   assert.equal(pdfDomain?.kind === 'pdf' ? pdfDomain.pageIndex : null, pdf.pageIndex);
   assert.equal(comicDomain?.kind === 'comic' ? comicDomain.pageIndex : null, comic.pageIndex + 1);
   assert.deepEqual(pdfDomain ? publicationLocationFromDomain(pdfDomain) : null, pdf);

@@ -5,13 +5,14 @@ import com.ermao.library.shared.modules.library.FacetPage
 import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.domain.AppliedFacet
+import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.MediaKind
 import kotlinx.serialization.Serializable
 
 @Serializable
-internal data class WorkPageWire(
-    val books: List<WorkSummaryWire>,
+internal data class BookPageWire(
+    val books: List<BookSummaryWire>,
     val page: Int,
     val pageSize: Int,
     val total: Int,
@@ -20,25 +21,25 @@ internal data class WorkPageWire(
 )
 
 @Serializable
-internal data class WorksWire(val books: List<WorkSummaryWire>)
+internal data class BooksWire(val books: List<BookSummaryWire>)
 
 @Serializable
 internal data class ContinueReadingPayloadWire(val item: ContinueReadingWire? = null)
 
 @Serializable
 internal data class ContinueReadingWire(
-    val workId: String,
+    val bookId: String,
     val title: String,
-    val author: String,
+    val author: String? = null,
     val coverUrl: String,
     val mediaKind: String,
-    val volumeFormat: String,
+    val resourceFormat: String,
     val readerType: String,
-    val resumeVolumeId: String? = null,
+    val resumeResourceId: String? = null,
     val progress: Double,
     val chapter: String? = null,
     val lastReadAt: String? = null,
-    val volumeTitle: String? = null,
+    val resourceTitle: String? = null,
     val narrator: String? = null,
 )
 
@@ -58,32 +59,45 @@ internal data class GroupingWire(
     val name: String,
     val bookCount: Int,
     val updatedAt: String,
-    val representativeWorks: List<GroupingRepresentativeWorkWire> = emptyList(),
+    val representativeBooks: List<GroupingRepresentativeBookWire> = emptyList(),
 )
 
 @Serializable
-internal data class GroupingRepresentativeWorkWire(
+internal data class GroupingRepresentativeBookWire(
     val id: String,
     val title: String,
-    val author: String,
+    val author: String? = null,
     val coverUrl: String,
+    val updatedAt: String,
 )
 
-internal fun WorkPageWire.toPage(): LibraryPage<com.ermao.library.shared.modules.library.domain.WorkSummary> =
-    LibraryPage(books.map(WorkSummaryWire::toDomain), page, pageSize, total, totalPages)
+@Serializable
+data class BookSummaryWire(
+    val id: String,
+    val title: String,
+    val author: String? = null,
+    val coverUrl: String,
+    val availableMediaKinds: List<String>,
+    val progress: Double,
+)
 
-internal fun WorkPageWire.toFacetPage(): FacetPage? = appliedFacet?.let { facet ->
-    FacetPage(facet = facet.toDomain(), works = toPage())
-}
+internal fun BookPageWire.toPage(): LibraryPage<BookSummary> =
+    LibraryPage(books.map(BookSummaryWire::toDomain), page, pageSize, total, totalPages)
+
+internal fun BookPageWire.toFacetPage(queryKind: FacetKind, facetId: String): FacetPage = FacetPage(
+    facet = appliedFacet?.toDomain()
+        ?: AppliedFacet(facetId, queryKind, facetId),
+    books = toPage(),
+)
 
 internal fun GroupingPageWire.toPage(): LibraryPage<GroupingSummary> = LibraryPage(
     groups.map { group ->
         GroupingSummary(
-            group.id.also { require(it.isNotBlank()) },
-            group.name.also { require(it.isNotBlank()) },
-            group.bookCount.also { require(it >= 0) },
-            group.updatedAt,
-            group.representativeWorks.take(3).map(GroupingRepresentativeWorkWire::toDomain),
+            id = group.id.also { require(it.isNotBlank()) },
+            name = group.name.also { require(it.isNotBlank()) },
+            bookCount = group.bookCount.also { require(it >= 0) },
+            updatedAt = group.updatedAt,
+            representativeBooks = group.representativeBooks.take(3).map(GroupingRepresentativeBookWire::toDomain),
         )
     },
     page,
@@ -92,30 +106,56 @@ internal fun GroupingPageWire.toPage(): LibraryPage<GroupingSummary> = LibraryPa
     totalPages,
 )
 
-private fun GroupingRepresentativeWorkWire.toDomain() =
-    com.ermao.library.shared.modules.library.domain.WorkSummary(
-        id = id.also { require(it.isNotBlank()) },
-        title = title,
-        author = author,
-        coverUrl = coverUrl,
-        availableMediaKinds = emptyList(),
-        progress = 0.0,
-    )
+private fun GroupingRepresentativeBookWire.toDomain() = BookSummary(
+    id = id.also { require(it.isNotBlank()) },
+    title = title,
+    author = author,
+    coverUrl = coverUrl,
+    availableMediaKinds = emptyList(),
+    progress = 0.0,
+)
 
 internal fun ContinueReadingWire.toDomain(): ContinueReadingItem = ContinueReadingItem(
-    workId = workId.also { require(it.isNotBlank()) },
+    bookId = bookId.also { require(it.isNotBlank()) },
     title = title,
     author = author,
     coverUrl = coverUrl,
     mediaKind = MediaKind(mediaKind),
-    resumeVolumeId = resumeVolumeId,
+    resourceFormat = resourceFormat,
+    readerType = readerType,
+    resumeResourceId = resumeResourceId,
     progress = progress.also { require(it in 0.0..100.0) },
+    chapter = chapter,
     lastReadAt = lastReadAt,
-    volumeTitle = volumeTitle,
+    resourceTitle = resourceTitle,
     narrator = narrator,
+)
+
+internal fun BookSummaryWire.toDomain(): BookSummary {
+    require(id.isNotBlank() && progress in 0.0..100.0)
+    return BookSummary(
+        id = id,
+        title = title,
+        author = author,
+        coverUrl = coverUrl,
+        availableMediaKinds = availableMediaKinds.map(::MediaKind),
+        progress = progress,
+    )
+}
+
+internal fun FacetReferenceWire.toDomain(): AppliedFacet = AppliedFacet(
+    id = id.also { require(it.isNotBlank()) },
+    kind = when (kind.uppercase()) {
+        "SERIES" -> FacetKind.Series
+        "AUTHOR" -> FacetKind.Author
+        "TAG" -> FacetKind.Tag
+        else -> error("Unsupported facet kind")
+    },
+    name = name.also { require(it.isNotBlank()) },
 )
 
 internal fun facetKindWire(kind: FacetKind): String = when (kind) {
     FacetKind.Series -> "SERIES"
     FacetKind.Author -> "AUTHOR"
+    FacetKind.Tag -> "TAG"
 }

@@ -1,4 +1,4 @@
-"""ORM persistence for work and volume facets."""
+"""ORM persistence for Book and ReadableResource facets."""
 
 from __future__ import annotations
 
@@ -8,20 +8,21 @@ from collections.abc import Iterable
 from hashlib import sha1
 from typing import Any
 
-from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_, update
+from sqlalchemy import case, delete, distinct, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, aliased
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import to_timestamp_ms
-from app.models.common import db_timestamp
-from app.models.library import (
+from app.models import (
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
     LibraryFacet,
-    LibraryWork,
-    LibraryWorkFacet,
 )
-from app.modules.library.domain.facets import CURRENT_FACET_INDEX_VERSION, FACET_KINDS
-from app.services.book_identity import UNKNOWN_AUTHOR, normalize_identity_part
+from app.models.common import db_timestamp
+from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
+from app.modules.library.domain.facets import FACET_KINDS, normalize_facet_name
 
 
 def parse_json(value: Any, fallback: Any) -> Any:
@@ -34,7 +35,7 @@ def parse_json(value: Any, fallback: Any) -> Any:
 
 
 def normalized_name(value: Any) -> str:
-    return normalize_identity_part(str(value or "").strip())
+    return normalize_facet_name(str(value or "").strip())
 
 
 def unique_names(values: Iterable[Any]) -> list[str]:
@@ -52,14 +53,14 @@ def unique_names(values: Iterable[Any]) -> list[str]:
 
 def split_authors(value: Any) -> list[str]:
     text_value = str(value or "").strip()
-    if not text_value or text_value == UNKNOWN_AUTHOR:
+    if not text_value or text_value == UNKNOWN_AUTHOR_PLACEHOLDER:
         return []
     return unique_names(
         re.split(r"\s*(?:,|，|;|；|、|/|&|\band\b)\s*", text_value, flags=re.IGNORECASE)
     )
 
 
-def work_tags(value: Any) -> list[str]:
+def book_tags(value: Any) -> list[str]:
     parsed = parse_json(value, [])
     if isinstance(parsed, list):
         return unique_names(parsed)
@@ -125,48 +126,62 @@ def _facet_public_dict(facet: LibraryFacet, book_count: int) -> dict[str, Any]:
     }
 
 
-def sync_work_facets(db: Session, work_id: str) -> None:
-    """Synchronize persisted facets for one work after a runtime library change."""
+def sync_book_facets(db: Session, book_id: str) -> None:
+    """Synchronize persisted facets for one Book after a library change."""
 
-    sync_works_facets(db, (work_id,))
+    sync_books_facets(db, (book_id,))
 
 
-def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
-    """Synchronize facets for a prepared work set with bounded collection SQL."""
+def sync_books_facets(db: Session, book_ids: Iterable[str]) -> None:
+    """Synchronize facets for a prepared Book set with bounded collection SQL."""
 
-    unique_work_ids = tuple(dict.fromkeys(work_id for work_id in work_ids if work_id))
-    if not unique_work_ids:
+    unique_book_ids = tuple(dict.fromkeys(book_id for book_id in book_ids if book_id))
+    if not unique_book_ids:
         return
 
-    works = db.execute(
+    book_rows = db.execute(
         select(
-            LibraryWork.id,
-            LibraryWork.author,
-            LibraryWork.tags,
-            LibraryWork.series_name,
-        ).where(LibraryWork.id.in_(unique_work_ids))
+            LibraryBook.id,
+            LibraryBookMetadata.author,
+            LibraryBookMetadata.series_name,
+        )
+        .outerjoin(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .where(LibraryBook.id.in_(unique_book_ids))
     ).all()
-    if not works:
+    if not book_rows:
         return
+
+    tag_rows = db.execute(
+        select(LibraryBookFacet.book_id, LibraryFacet.name)
+        .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+        .where(
+            LibraryBookFacet.book_id.in_(unique_book_ids),
+            LibraryFacet.kind == "TAG",
+        )
+        .order_by(LibraryBookFacet.book_id.asc(), LibraryBookFacet.sort_order.asc())
+    ).all()
+    tags_by_book: dict[str, list[str]] = {book_id: [] for book_id in unique_book_ids}
+    for row in tag_rows:
+        tags_by_book.setdefault(str(row.book_id), []).append(str(row.name))
 
     now = db_timestamp()
-    prepared = tuple(
+    prepared: tuple[tuple[str, tuple[tuple[str, str, str, int], ...]], ...] = tuple(
         (
-            str(work.id),
+            str(book.id),
             tuple(
                 (kind, name, normalized_name(name), sort_order)
                 for kind, names in (
-                    ("AUTHOR", split_authors(work.author)),
-                    ("TAG", work_tags(work.tags)),
-                    ("SERIES", unique_names([work.series_name])),
+                    ("AUTHOR", split_authors(book.author)),
+                    ("TAG", unique_names(tags_by_book.get(str(book.id), []))),
+                    ("SERIES", unique_names([book.series_name])),
                 )
                 for sort_order, name in enumerate(names)
             ),
         )
-        for work in works
+        for book in book_rows
     )
     facets: dict[tuple[str, str], tuple[str, str]] = {}
-    for _work_id, values in prepared:
+    for _book_id, values in prepared:
         for kind, name, normalized, _sort_order in values:
             facets.setdefault((kind, normalized), (name, _facet_id(kind, normalized)))
     facet_rows = [
@@ -181,10 +196,10 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
         }
         for (kind, normalized), (name, facet_id) in facets.items()
     ]
-    for chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7):
+    for facet_row_chunk in sqlite_parameter_chunks(facet_rows, parameters_per_row=7):
         db.execute(
             sqlite_insert(LibraryFacet)
-            .values(list(chunk))
+            .values(list(facet_row_chunk))
             .on_conflict_do_nothing(
                 index_elements=[LibraryFacet.kind, LibraryFacet.normalized_name]
             )
@@ -192,7 +207,7 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
 
     facet_ids: dict[tuple[str, str], str] = {}
     facet_keys = tuple(facets)
-    for chunk in sqlite_parameter_chunks(facet_keys, parameters_per_row=2):
+    for facet_key_chunk in sqlite_parameter_chunks(facet_keys, parameters_per_row=2):
         rows = db.execute(
             select(
                 LibraryFacet.kind,
@@ -200,7 +215,7 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
                 LibraryFacet.id,
             ).where(
                 tuple_(LibraryFacet.kind, LibraryFacet.normalized_name).in_(
-                    chunk
+                    facet_key_chunk
                 )
             )
         )
@@ -214,36 +229,25 @@ def sync_works_facets(db: Session, work_ids: Iterable[str]) -> None:
     links = [
         {
             "facet_id": facet_ids[(kind, normalized)],
-            "work_id": work_id,
+            "book_id": book_id,
             "sort_order": sort_order,
             "created_at": now,
         }
-        for work_id, values in prepared
+        for book_id, values in prepared
         for kind, _name, normalized, sort_order in values
     ]
-    persisted_work_ids = tuple(work_id for work_id, _values in prepared)
+    persisted_book_ids = tuple(book_id for book_id, _values in prepared)
     db.execute(
-        delete(LibraryWorkFacet).where(
-            LibraryWorkFacet.work_id.in_(persisted_work_ids)
-        )
+        delete(LibraryBookFacet).where(LibraryBookFacet.book_id.in_(persisted_book_ids))
     )
     for chunk in sqlite_parameter_chunks(links, parameters_per_row=4):
         db.execute(
-            sqlite_insert(LibraryWorkFacet)
+            sqlite_insert(LibraryBookFacet)
             .values(list(chunk))
             .on_conflict_do_nothing(
-                index_elements=[LibraryWorkFacet.facet_id, LibraryWorkFacet.work_id]
+                index_elements=[LibraryBookFacet.facet_id, LibraryBookFacet.book_id]
             )
         )
-
-    db.execute(
-        update(LibraryWork)
-        .where(LibraryWork.id.in_(persisted_work_ids))
-        .values(
-            facet_index_version=CURRENT_FACET_INDEX_VERSION,
-            updated_at=LibraryWork.updated_at,
-        )
-    )
 
 
 def count_categories(db: Session, kind: str, search: str = "") -> int:
@@ -279,16 +283,16 @@ def list_categories(
         distinct(
             case(
                 (
-                    func.coalesce(LibraryWork.hidden, 0) == 0,
-                    LibraryWorkFacet.work_id,
+                    LibraryBook.visibility_state == "VISIBLE",
+                    LibraryBookFacet.book_id,
                 ),
             )
         )
     ).label("bookCount")
     statement = (
         select(LibraryFacet, book_count)
-        .outerjoin(LibraryWorkFacet, LibraryWorkFacet.facet_id == LibraryFacet.id)
-        .outerjoin(LibraryWork, LibraryWork.id == LibraryWorkFacet.work_id)
+        .outerjoin(LibraryBookFacet, LibraryBookFacet.facet_id == LibraryFacet.id)
+        .outerjoin(LibraryBook, LibraryBook.id == LibraryBookFacet.book_id)
         .where(LibraryFacet.kind == normalized_kind)
         .group_by(LibraryFacet.id)
         .order_by(book_count.desc(), LibraryFacet.name.collate("NOCASE").asc())
@@ -320,12 +324,12 @@ def list_categories_page(
     if page <= 0 or page_size <= 0:
         raise ValueError("分页参数无效")
 
-    count_link = aliased(LibraryWorkFacet)
-    count_work = aliased(LibraryWork)
-    visible_work = exists(
-        select(count_work.id).where(
-            count_work.id == count_link.work_id,
-            func.coalesce(count_work.hidden, 0) == 0,
+    count_link = aliased(LibraryBookFacet)
+    count_book = aliased(LibraryBook)
+    visible_book = exists(
+        select(count_book.id).where(
+            count_book.id == count_link.book_id,
+            count_book.visibility_state == "VISIBLE",
         )
     )
     book_count = (
@@ -333,7 +337,7 @@ def list_categories_page(
         .select_from(count_link)
         .where(
             count_link.facet_id == LibraryFacet.id,
-            visible_work,
+            visible_book,
         )
         .correlate(LibraryFacet)
         .scalar_subquery()
@@ -357,9 +361,11 @@ def list_categories_page(
     )
 
     def fetch(target_page: int) -> list[Any]:
-        return db.execute(
-            base_statement.limit(page_size).offset((target_page - 1) * page_size)
-        ).all()
+        return list(
+            db.execute(
+                base_statement.limit(page_size).offset((target_page - 1) * page_size)
+            ).all()
+        )
 
     rows = fetch(page)
     if rows:

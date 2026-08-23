@@ -20,7 +20,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     @Published var controlsVisible = false
     @Published private(set) var preferences: IosReaderPreferences
 
-    let sourceID: String
+    let resourceID: String
     let displayTitle: String
     let pages: [IosCbzPage]
 
@@ -29,7 +29,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private let progressCoordination: IosReaderProgressSessionCoordination?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
-    private let workID: String
+    private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private let deviceIdentity: IosReaderDeviceIdentity
     private let remoteSource: ErmaoShared.RemoteComicReaderSource?
@@ -44,7 +44,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private var didOpen = false
 
     init(
-        sourceID: String,
+        resourceID: String,
         displayTitle: String,
         pages: [IosCbzPage],
         preferences: IosReaderPreferences,
@@ -54,13 +54,13 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
         namespaceKey: String,
-        workID: String,
+        bookID: String,
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void,
         deviceIdentity: IosReaderDeviceIdentity,
         remoteSource: ErmaoShared.RemoteComicReaderSource? = nil,
         comicPageServer: (any ErmaoShared.ComicPageServerPort)? = nil
     ) {
-        self.sourceID = sourceID
+        self.resourceID = resourceID
         self.displayTitle = displayTitle
         self.pages = pages
         self.preferences = preferences
@@ -70,7 +70,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
         self.namespaceKey = namespaceKey
-        self.workID = workID
+        self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
         self.deviceIdentity = deviceIdentity
         self.remoteSource = remoteSource
@@ -100,21 +100,23 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                 )
                 openedSource = remoteSource
             } else {
-                let managed = try await managedStore.resolve(sourceID: sourceID)
+                let managed = try await managedStore.resolve(
+                    resourceID: resourceID,
+                    namespace: namespaceKey
+                )
                 guard managed.sourceFormat == .cbz || managed.sourceFormat == .zip else {
                     throw IosReaderFailure(code: .comicArchiveFormatUnsupported)
                 }
                 opened = try await IosCbzPublicationFactory().open(managed, pageTitleHints: pages)
                 openedSource = ErmaoShared.LocalReaderSource(
-                    sourceId: managed.sourceID,
+                    resourceId: managed.resourceID,
                     displayTitle: managed.displayTitle,
                     format: managed.sourceFormat.readerFormat,
-                    workId: managed.workID,
-                    volumeId: managed.volumeID,
+                    bookId: managed.bookID,
                     sourceFormat: managed.sourceFormat
                 )
             }
-            let local = try? await progressStore.load(sourceId: sourceID)
+            let local = try? await progressStore.load(resourceId: resourceID)
             let initialPage = restorePage(
                 local: local,
                 remote: remoteSnapshot,
@@ -344,8 +346,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         remoteProgressSnapshot = progressCoordination?.remoteSnapshot
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
-            workId: workID,
-            volumeId: sourceID,
+            bookId: bookID,
+            resourceId: resourceID,
             percent: percent,
             progress: progress,
             chapterTitle: nil
@@ -361,7 +363,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
         let percent = pages.count <= 1 ? 100 : Double(page.pageIndex) / Double(pages.count - 1) * 100
         return ErmaoShared.ReaderProgress(
-            sourceId: sourceID,
+            resourceId: resourceID,
             location: location,
             updatedAtEpochMillis: timestamp,
             deviceId: deviceIdentity.stableDeviceId(),

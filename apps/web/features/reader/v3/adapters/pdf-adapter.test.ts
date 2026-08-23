@@ -37,7 +37,8 @@ function pdfRangeFixture() {
         serverIdentity: 'https://reader.test',
         userId: 'user-1',
         authorizationVersion: 1,
-        volumeId: 'volume-1',
+        resourceId: 'resource-1',
+        assetId: 'asset-1',
       },
       cache: new MemoryReaderStorage()
     },
@@ -196,8 +197,8 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
       operation: { sessionId: 'pdf-session', kind: 'bootstrap', sequence: 1 },
       signal: new AbortController().signal,
       source: {
-        volumeId: 'volume-1',
-        workId: 'work-1',
+        resourceId: 'resource-1',
+        bookId: 'book-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
         totalPages: 2
@@ -275,8 +276,8 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
       operation: { sessionId: 'pdf-continuous-session', kind: 'bootstrap', sequence: 1 },
       signal: new AbortController().signal,
       source: {
-        volumeId: 'volume-1',
-        workId: 'work-1',
+        resourceId: 'resource-1',
+        bookId: 'book-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
         totalPages: 7
@@ -430,8 +431,8 @@ test('PDF resize and preference rerenders keep the committed page visible until 
       operation: { sessionId: 'pdf-session', kind: 'bootstrap', sequence: 1 },
       signal: new AbortController().signal,
       source: {
-        volumeId: 'volume-1',
-        workId: 'work-1',
+        resourceId: 'resource-1',
+        bookId: 'book-1',
         kind: 'pdf',
         contentUrl: '/book.pdf',
         totalPages: 1

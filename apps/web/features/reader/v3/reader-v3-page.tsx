@@ -52,7 +52,7 @@ function requireReflowableSourceFormat(bootstrap: ReaderBootstrap) {
 }
 
 type OpeningContext = {
-  volumeId: string;
+  resourceId: string;
   title: string;
   author?: string;
   coverUrl?: string;
@@ -92,14 +92,14 @@ function pageReducer(state: PageState, action: PageAction): PageState {
   return { ...state, preferences: action.preferences };
 }
 
-function readOpeningContext(volumeId: string): OpeningContext | null {
+function readOpeningContext(resourceId: string): OpeningContext | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.sessionStorage.getItem(openingStorageKey);
     if (!raw) return null;
     window.sessionStorage.removeItem(openingStorageKey);
     const value = JSON.parse(raw) as OpeningContext;
-    return value.volumeId === volumeId ? value : null;
+    return value.resourceId === resourceId ? value : null;
   } catch {
     return null;
   }
@@ -250,7 +250,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, downlo
   );
 }
 
-export function ReaderV4Page({ volumeId }: { volumeId: string }) {
+export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const { t: translate, formatDateTime, formatNumber } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -266,7 +266,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const [remoteNotice, setRemoteNotice] = useState<RemoteProgressNotice | null>(null);
   const [externalNavigation, setExternalNavigation] = useState<{ id: number; location: ReaderLocation } | null>(null);
   const [systemDark, setSystemDark] = useState(false);
-  const [openingContext] = useState<OpeningContext | null>(() => readOpeningContext(volumeId));
+  const [openingContext] = useState<OpeningContext | null>(() => readOpeningContext(resourceId));
   const requestSequenceRef = useRef(0);
   const pendingLocationWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const currentExactRef = useRef<import('@shuku/reader-core').PublicationLocation | null>(null);
@@ -301,10 +301,10 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     return () => query.removeEventListener('change', update);
   }, []);
 
-  const readerHref = useCallback((nextVolumeId: string, pageIndex?: number) => {
+  const readerHref = useCallback((nextResourceId: string, pageIndex?: number) => {
     const query = new URLSearchParams();
     if (pageIndex && pageIndex > 0) query.set('page', String(pageIndex));
-    return `/reader/${nextVolumeId}${query.size ? `?${query}` : ''}`;
+    return `/reader/${nextResourceId}${query.size ? `?${query}` : ''}`;
   }, []);
 
   useEffect(() => {
@@ -320,7 +320,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     dispatch({ type: 'load', requestId });
 
     void (async () => {
-      let bootstrap = await fetchReaderBootstrap(volumeId, controller.signal);
+      let bootstrap = await fetchReaderBootstrap(resourceId, controller.signal);
       if (controller.signal.aborted) return;
       let hasDirectTarget = false;
       if (bootstrap.readerType === 'reflowable' && requestedHref) {
@@ -344,15 +344,15 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
           const progression = bootstrap.pages.length > 1 ? pageOrder / (bootstrap.pages.length - 1) : 0;
           bootstrap = {
             ...bootstrap,
-            initialLocation: { kind: 'comic', volumeId: bootstrap.volume.id, pageIndex },
+            initialLocation: { kind: 'comic', resourceId: bootstrap.resource.id, pageIndex },
             progressPercent: Math.round(progression * 100)
           };
           hasDirectTarget = true;
         } else {
-          emitReaderDebug('warning', '已忽略不属于当前漫画卷册的书签页码', { requestedPage });
+            emitReaderDebug('warning', '已忽略不属于当前漫画资源的书签页码', { requestedPage });
         }
       } else if (bootstrap.readerType === 'pdf' && requestedPage) {
-        const pageNumber = requestedPdfPage(requestedPage, bootstrap.volume.pageCount);
+        const pageNumber = requestedPdfPage(requestedPage, bootstrap.resource.pageCount);
         if (pageNumber !== null) {
           bootstrap = {
             ...bootstrap,
@@ -368,15 +368,15 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
-        workId: bootstrap.mediaVersion.workId,
-        volumeId: bootstrap.volume.id
+        bookId: bootstrap.book.id,
+        resourceId: bootstrap.resource.id
       }).catch(() => null);
       const pending = await runtime.storage.getPendingProgressForIdentity({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
-        workId: bootstrap.mediaVersion.workId,
-        volumeId: bootstrap.volume.id
+        bookId: bootstrap.book.id,
+        resourceId: bootstrap.resource.id
       }).catch(() => null);
       const pendingDecision = decidePendingVsServer({
         localExact,
@@ -403,7 +403,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       if (pendingResume && !hasDirectTarget) {
         const localLocation = v4LocationToDomain(
           pendingResume.locator,
-          bootstrap.volume.id,
+          bootstrap.resource.id,
           bootstrap.readerType === 'reflowable' ? requireReflowableSourceFormat(bootstrap) : null
         );
         bootstrap = {
@@ -412,7 +412,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
           progressPercent: pendingResume.displayPercent ?? bootstrap.progressPercent
         };
         emitReaderDebug('info', '启动时恢复尚未上传的本机精确阅读位置', {
-          volumeId: bootstrap.volume.id,
+          resourceId: bootstrap.resource.id,
           capturedAtEpochMillis: pendingResume.capturedAtEpochMillis
         });
       }
@@ -433,8 +433,8 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       }
       activateReaderUser(bootstrap.userId);
       emitReaderDebug('info', 'Reader v4 启动完成', {
-        volumeId: bootstrap.volume.id,
-        workId: bootstrap.mediaVersion.workId,
+        resourceId: bootstrap.resource.id,
+        bookId: bootstrap.book.id,
         preferences: 'device-default'
       });
       dispatch({ type: 'ready', requestId, bootstrap, preferences });
@@ -442,7 +442,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       if (controller.signal.aborted) return;
       const bootstrapMessage = reason instanceof ReaderBootstrapError
         ? ({
-            VOLUME_FORMAT_UNSUPPORTED: '当前文件格式尚未开放阅读支持',
+            RESOURCE_FORMAT_UNSUPPORTED: '当前文件格式尚未开放阅读支持',
             READER_FORMAT_MORPHOLOGY_MISMATCH: '文件格式与阅读器类型不匹配',
             PUBLICATION_PROCESSING: '内容仍在准备中，请稍后重试',
             PUBLICATION_CORRUPT: '文件已损坏，无法打开',
@@ -454,7 +454,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     });
 
     return () => controller.abort();
-  }, [requestedHref, requestedPage, retry, runtime.storage, translate, volumeId]);
+  }, [requestedHref, requestedPage, retry, runtime.storage, translate, resourceId]);
 
   const chooseStartupLocal = useCallback(async () => {
     const conflict = startupConflict;
@@ -463,7 +463,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       ? requireReflowableSourceFormat(conflict.bootstrap) : null;
     const location = v4LocationToDomain(
       conflict.localExact.locator,
-      conflict.bootstrap.volume.id,
+      conflict.bootstrap.resource.id,
       sourceFormat
     );
     await runtime.progress.continueStartupWithLocal(conflict.pending, conflict.server.revision);
@@ -499,7 +499,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
   const cancelStartupConflict = useCallback(() => {
     const conflict = startupConflict;
     if (!conflict) return;
-    router.push(`/works/${conflict.bootstrap.mediaVersion.workId}?detailTab=${conflict.bootstrap.mediaVersion.mediaKind}&volumeId=${encodeURIComponent(conflict.bootstrap.volume.id)}`);
+    router.push(`/books/${conflict.bootstrap.book.id}?resourceId=${encodeURIComponent(conflict.bootstrap.resource.id)}`);
   }, [router, startupConflict]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
@@ -514,9 +514,9 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     }
   }, [state.bootstrap]);
 
-  useEffect(() => runtime.progress.subscribeRemoteProgress((changedVolumeId, notice) => {
-    if (changedVolumeId === volumeId) setRemoteNotice(notice);
-  }), [runtime.progress, volumeId]);
+  useEffect(() => runtime.progress.subscribeRemoteProgress((changedResourceId, notice) => {
+    if (changedResourceId === resourceId) setRemoteNotice(notice);
+  }), [runtime.progress, resourceId]);
 
   useEffect(() => {
     const bootstrap = state.bootstrap;
@@ -529,7 +529,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
         : bootstrap.serverProgressSnapshot?.locator ?? null;
       currentExactRef.current = initialExact;
       runtime.progress.beginSession(
-        bootstrap.volume.id,
+        bootstrap.resource.id,
         clientId,
         bootstrap.serverProgressSnapshot,
         initialExact
@@ -537,14 +537,14 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     });
     return () => {
       active = false;
-      runtime.progress.endSession(bootstrap.volume.id);
+      runtime.progress.endSession(bootstrap.resource.id);
     };
   }, [runtime.progress, runtime.storage, state.bootstrap]);
 
   useEffect(() => {
     const bootstrap = state.bootstrap;
     if (!bootstrap || !readerReady) return undefined;
-    const check = () => { void runtime.progress.checkRemoteProgress(bootstrap.volume.id).catch(() => undefined); };
+    const check = () => { void runtime.progress.checkRemoteProgress(bootstrap.resource.id).catch(() => undefined); };
     check();
     const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
     window.addEventListener('online', check);
@@ -603,8 +603,8 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
       pendingLocationWriteRef.current = runtime.progress.acceptVerifiedRemote({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
-        workId: bootstrap.mediaVersion.workId,
-        volumeId: bootstrap.volume.id,
+        bookId: bootstrap.book.id,
+        resourceId: bootstrap.resource.id,
         pendingKey: startupCloud.pendingKey,
         snapshot: startupCloud.snapshot
       });
@@ -625,9 +625,9 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     const write = runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
-      workId: bootstrap.mediaVersion.workId,
-      volumeId: bootstrap.volume.id,
-      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.volume.id)?.revision
+      bookId: bootstrap.book.id,
+      resourceId: bootstrap.resource.id,
+      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.resource.id)?.revision
         ?? bootstrap.serverProgressSnapshot?.revision ?? 0,
       locator: exactLocation,
       displayPercent: percent
@@ -642,7 +642,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     const notice = remoteNotice;
     if (!bootstrap || !notice) return;
     const sourceFormat = bootstrap.readerType === 'reflowable' ? requireReflowableSourceFormat(bootstrap) : null;
-    const location = v4LocationToDomain(notice.locator, bootstrap.volume.id, sourceFormat);
+    const location = v4LocationToDomain(notice.locator, bootstrap.resource.id, sourceFormat);
     if (!location) return;
     const snapshot: ReaderProgressSnapshot = {
       schemaVersion: 4,
@@ -673,9 +673,9 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     pendingLocationWriteRef.current = clientIdPromise.then((clientId) => runtime.progress.acceptVerifiedRemote({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
-      workId: bootstrap.mediaVersion.workId,
-      volumeId: bootstrap.volume.id,
-      pendingKey: syncStateKey({ serverIdentity: currentReaderServerIdentity(), userId: bootstrap.userId, clientId, workId: bootstrap.mediaVersion.workId, volumeId: bootstrap.volume.id }),
+      bookId: bootstrap.book.id,
+      resourceId: bootstrap.resource.id,
+      pendingKey: syncStateKey({ serverIdentity: currentReaderServerIdentity(), userId: bootstrap.userId, clientId, bookId: bootstrap.book.id, resourceId: bootstrap.resource.id }),
       snapshot
     }));
   }, [externalNavigation, runtime.progress, runtime.storage, state.bootstrap, translate]);
@@ -730,20 +730,20 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
     <>
       {bootstrap && preferences && effectivePreferences ? (
         <ReaderEngineRuntime
-          key={`${bootstrap.volume.id}:${retry}`}
+          key={`${bootstrap.resource.id}:${retry}`}
           bootstrap={bootstrap}
           preferences={preferences}
           effectivePreferences={effectivePreferences}
           onPreferencesChange={savePreferences}
           onResetPreferences={resetPreferences}
           onLocationChange={saveLocation}
-          onBack={() => router.push(`/works/${bootstrap.mediaVersion.workId}?detailTab=${bootstrap.mediaVersion.mediaKind}&volumeId=${encodeURIComponent(bootstrap.volume.id)}`)}
+          onBack={() => router.push(`/books/${bootstrap.book.id}?resourceId=${encodeURIComponent(bootstrap.resource.id)}`)}
           onRetry={() => setRetry((value) => value + 1)}
-          onSelectVolume={(nextVolumeId, pageIndex) => router.push(readerHref(nextVolumeId, pageIndex))}
+          onSelectResource={(nextResourceId, pageIndex) => router.push(readerHref(nextResourceId, pageIndex))}
           onIndexProgress={setIndexProgress}
           onDownloadProgress={setDownloadProgress}
           onReady={() => setReaderReady(true)}
-          bookCache={runtime.storage}
+          resourceCache={runtime.storage}
           pdfRangeCache={runtime.storage}
           onStorageWarning={setStorageError}
           externalNavigation={externalNavigation}
@@ -773,7 +773,7 @@ export function ReaderV4Page({ volumeId }: { volumeId: string }) {
             </span>
           </button>
           <button type="button" className="min-h-10 shrink-0 rounded-lg px-3 text-sm font-medium" onClick={jumpToRemoteProgress}><I18nText>跳转</I18nText></button>
-          <button type="button" className="grid size-10 shrink-0 place-items-center rounded-lg text-[#746E68]" aria-label={translate('关闭其他设备阅读进度提示')} onClick={() => runtime.progress.dismissRemoteProgress(bootstrap.volume.id)}>
+          <button type="button" className="grid size-10 shrink-0 place-items-center rounded-lg text-[#746E68]" aria-label={translate('关闭其他设备阅读进度提示')} onClick={() => runtime.progress.dismissRemoteProgress(bootstrap.resource.id)}>
             <span aria-hidden="true">×</span>
           </button>
         </div>

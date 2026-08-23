@@ -56,7 +56,7 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         if let current = result as? ErmaoShared.ReaderProgressQueryResultCurrent {
             etag = current.etag
             guard let snapshot = current.snapshot else { return }
-            let local = try? await database.load(sourceId: target.volumeId)
+            let local = try? await database.load(resourceId: target.resourceId)
             _ = try? await runtime.coordinator.observeRemoteProgress(
                 snapshot: snapshot,
                 currentClientId: clientID,
@@ -100,9 +100,13 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
 /// Reader content remains usable when progress persistence or synchronization
 /// cannot be initialized. This store intentionally keeps those concerns inert.
 final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
+    func load(resourceId _: String) async throws -> ErmaoShared.ReaderProgress? { nil }
+
     func load(sourceId _: String) async throws -> ErmaoShared.ReaderProgress? { nil }
 
     func save(progress _: ErmaoShared.ReaderProgress) async throws {}
+
+    func delete(resourceId _: String) async throws {}
 
     func delete(sourceId _: String) async throws {}
 

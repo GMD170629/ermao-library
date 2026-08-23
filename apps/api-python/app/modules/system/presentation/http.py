@@ -6,19 +6,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Header, Request
 from fastapi.responses import Response
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
-from app.bootstrap.imports import import_http_store
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     clear_system_events_with_audit,
     configured_max_event_bytes,
     get_setting,
+    library_import_dashboard_snapshot,
     list_settings,
     list_system_events_page,
+    management_overview_snapshot,
     persist_opds_settings_update,
     persist_system_settings_update,
     prepare_system_event,
@@ -29,6 +29,7 @@ from app.contracts.http_errors import ErrorResponses
 from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
+from app.modules.backup.application.restore import BackupRecordValidationError
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
@@ -43,7 +44,6 @@ from app.modules.system.application.queries import (
     backup_created_payload,
     backup_detail_payload,
     dashboard_system_status_payload,
-    management_events_empty_page,
     management_events_payload,
     parse_event_date_bounds,
     prepare_system_settings_update,
@@ -59,9 +59,14 @@ from app.modules.system.presentation.schemas import (
     BackupRestoreRequest,
     BackupRestoreResponse,
     BackupsResponse,
+    ClearedEventsPayload,
     ClearedEventsResponse,
+    DashboardSystemStatusPayload,
     DashboardSystemStatusResponse,
+    ManagementEventsPayload,
     ManagementEventsResponse,
+    ManagementOverviewPayload,
+    ManagementOverviewResponse,
     OpdsSystemSettingsPayload,
     OpdsSystemSettingsResponse,
     SystemSettingsResponse,
@@ -69,6 +74,7 @@ from app.modules.system.presentation.schemas import (
     UpdateSystemSettingsRequest,
 )
 from app.schemas.responses import fail, ok
+from app.services.backup_service import BackupFormatError
 from app.services.backup_service import create_backup as create_backup_archive
 from app.services.backup_service import list_backups as list_backup_archives
 from app.services.backup_service import restore_backup as restore_backup_archive
@@ -78,13 +84,6 @@ from app.services.import_preferences import (
 )
 
 router = APIRouter(tags=["system"], route_class=TypedContractRoute)
-
-
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
 
 
 def _event_storage_snapshot(db: Session) -> dict[str, int]:
@@ -104,7 +103,7 @@ def _system_manager(db: Session, request: Request, settings: Settings):
     return require_system_manager(db, request, settings)
 
 
-@router.get("/app-config")
+@router.get("/app-config", response_model=AppConfigResponse)
 def get_public_app_config(
     http_response: Response,
     db: Annotated[Session, Depends(get_db)],
@@ -112,7 +111,7 @@ def get_public_app_config(
     current_frontend_resource_version: Annotated[
         str | None, Header(alias="X-Shuku-Frontend-Resource-Version")
     ] = None,
-) -> AppConfigResponse:
+) -> AppConfigResponse | Response:
     http_response.headers["Cache-Control"] = "private, no-store"
     return AppConfigResponse(
         data=AppConfigPayload.model_validate(
@@ -125,13 +124,13 @@ def get_public_app_config(
     )
 
 
-@router.get("/system-settings")
+@router.get("/system-settings", response_model=SystemSettingsResponse)
 def get_system_settings(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    SystemSettingsResponse,
+    SystemSettingsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -153,12 +152,12 @@ def _opds_settings_payload(db: Session) -> OpdsSystemSettingsPayload:
     )
 
 
-@router.get("/system-settings/opds")
+@router.get("/system-settings/opds", response_model=OpdsSystemSettingsResponse)
 def get_opds_system_settings(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> OpdsSystemSettingsResponse:
+) -> OpdsSystemSettingsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -171,13 +170,13 @@ def get_opds_system_settings(
     return ok(_opds_settings_payload(db))
 
 
-@router.put("/system-settings/opds")
+@router.put("/system-settings/opds", response_model=OpdsSystemSettingsResponse)
 def update_opds_system_settings(
     payload: UpdateOpdsSystemSettingsRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> OpdsSystemSettingsResponse:
+) -> OpdsSystemSettingsResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -205,7 +204,7 @@ def update_opds_system_settings(
             code="OPDS_PUBLIC_BASE_URL_INVALID",
         )
 
-    prepared_settings = {
+    prepared_settings: dict[str, object] = {
         OPDS_ENABLED_SETTING_KEY: payload.enabled,
         OPDS_PUBLIC_BASE_URL_SETTING_KEY: normalized_public_base_url,
     }
@@ -228,15 +227,15 @@ def update_opds_system_settings(
     return ok(_opds_settings_payload(db))
 
 
-@router.put("/system-settings")
-@router.patch("/system-settings")
+@router.put("/system-settings", response_model=SystemSettingsResponse)
+@router.patch("/system-settings", response_model=SystemSettingsResponse)
 def update_system_settings(
     payload: UpdateSystemSettingsRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    SystemSettingsResponse,
+    SystemSettingsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     user, auth_error = _system_manager(db, request, settings)
@@ -278,32 +277,31 @@ def update_system_settings(
     return ok(system_settings_payload(saved_with_clears))
 
 
-@router.get("/dashboard/system-status")
+@router.get("/dashboard/system-status", response_model=DashboardSystemStatusResponse)
 def dashboard_system_status(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DashboardSystemStatusResponse:
+) -> DashboardSystemStatusResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     health = run_system_health_checks(db, settings)
-    enabled = import_http_store.list_enabled_monitor_folder_rows(db)
-    current_task, latest_task, failed_count = import_http_store.import_status_snapshot(
-        db
-    )
+    snapshot = library_import_dashboard_snapshot(db)
     return DashboardSystemStatusResponse(
-        data=dashboard_system_status_payload(
-            health=health,
-            enabled_monitor_folders=enabled,
-            current_import_task=current_task,
-            latest_import_task=latest_task,
-            failed_count=failed_count,
+        data=DashboardSystemStatusPayload.model_validate(
+            dashboard_system_status_payload(
+                health=health,
+                enabled_libraries=snapshot["enabled_libraries"],
+                current_import_task=snapshot["current_task"],
+                latest_import_task=snapshot["latest_task"],
+                failed_count=snapshot["failed_count"],
+            )
         )
     )
 
 
-@router.get("/management/events")
+@router.get("/management/events", response_model=ManagementEventsResponse)
 def list_system_events(
     request: Request,
     page: int = 1,
@@ -317,7 +315,7 @@ def list_system_events(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    ManagementEventsResponse,
+    ManagementEventsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -325,10 +323,6 @@ def list_system_events(
         return auth_error
     page = max(1, page)
     page_size = min(100, max(1, pageSize))
-    if not _has_table(db, "SystemEvent"):
-        return ManagementEventsResponse(
-            data=management_events_empty_page(page, page_size)
-        )
     date_from_ms, date_to_ms = parse_event_date_bounds(dateFrom, dateTo)
     snapshot = list_system_events_page(
         db,
@@ -342,36 +336,55 @@ def list_system_events(
         date_to_ms=date_to_ms,
     )
     return ManagementEventsResponse(
-        data=management_events_payload(
-            events=snapshot.events,
-            total=snapshot.total,
-            page=snapshot.page,
-            page_size=page_size,
-            storage={
-                "deleted": 0,
-                "sizeBytes": snapshot.size_bytes,
-                "maxBytes": configured_max_event_bytes(db),
-            },
-            sources=snapshot.sources,
-            levels=snapshot.levels,
+        data=ManagementEventsPayload.model_validate(
+            management_events_payload(
+                events=snapshot.events,
+                total=snapshot.total,
+                page=snapshot.page,
+                page_size=page_size,
+                storage={
+                    "deleted": 0,
+                    "sizeBytes": snapshot.size_bytes,
+                    "maxBytes": configured_max_event_bytes(db),
+                },
+                sources=snapshot.sources,
+                levels=snapshot.levels,
+            )
         )
     )
 
 
-@router.delete("/management/events")
+@router.get("/management/overview", response_model=ManagementOverviewResponse)
+def get_management_overview(
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ManagementOverviewResponse | Response,
+    ErrorResponses(SystemManagerRequiredError),
+]:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    return ManagementOverviewResponse(
+        data=ManagementOverviewPayload.model_validate(
+            management_overview_snapshot(db, settings)
+        )
+    )
+
+
+@router.delete("/management/events", response_model=ClearedEventsResponse)
 def clear_system_events(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    ClearedEventsResponse,
+    ClearedEventsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     user, auth_error = _system_manager(db, request, settings)
     if auth_error:
         return auth_error
-    if not _has_table(db, "SystemEvent"):
-        return ClearedEventsResponse(data={"deleted": 0})
     prepared_event = prepare_system_event(
         level="info",
         source="system",
@@ -384,17 +397,19 @@ def clear_system_events(
 
     deleted = clear_system_events_with_audit(db, event=prepared_event)
     return ClearedEventsResponse(
-        data={"deleted": deleted, "storage": _event_storage_snapshot(db)}
+        data=ClearedEventsPayload.model_validate(
+            {"deleted": deleted, "storage": _event_storage_snapshot(db)}
+        )
     )
 
 
-@router.get("/backups")
+@router.get("/backups", response_model=BackupsResponse)
 def list_backups(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    BackupsResponse,
+    BackupsResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -403,14 +418,14 @@ def list_backups(
     return ok({"backups": list_backup_archives(settings)})
 
 
-@router.get("/backups/{backup_id}")
+@router.get("/backups/{backup_id}", response_model=BackupResponse)
 def get_backup(
     backup_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    BackupResponse,
+    BackupResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -422,13 +437,13 @@ def get_backup(
     return ok(backup_detail_payload(backup_id, path, list_backup_archives(settings)))
 
 
-@router.post("/backups", status_code=201)
+@router.post("/backups", status_code=201, response_model=BackupResponse)
 def create_backup(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    BackupResponse,
+    BackupResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -438,7 +453,7 @@ def create_backup(
     return ok(backup_created_payload(backup), status_code=201)
 
 
-@router.post("/backups/{backup_id}/restore")
+@router.post("/backups/{backup_id}/restore", response_model=BackupRestoreResponse)
 def restore_backup(
     backup_id: str,
     request: Request,
@@ -446,7 +461,7 @@ def restore_backup(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    BackupRestoreResponse,
+    BackupRestoreResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -457,6 +472,12 @@ def restore_backup(
         return fail("备份不存在", status_code=404)
     try:
         result = restore_backup_archive(db, settings, backup_id)
+    except (BackupFormatError, BackupRecordValidationError) as exc:
+        return fail(
+            str(exc),
+            status_code=400,
+            code="BACKUP_CONTENT_INVALID",
+        )
     except ValueError as exc:
         if str(exc) == "BACKUP_REVISION_UNSUPPORTED":
             return fail(
@@ -470,14 +491,14 @@ def restore_backup(
     return ok(result)
 
 
-@router.delete("/backups/{backup_id}")
+@router.delete("/backups/{backup_id}", response_model=BackupDeleteResponse)
 def delete_backup(
     backup_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Annotated[
-    BackupDeleteResponse,
+    BackupDeleteResponse | Response,
     ErrorResponses(SystemManagerRequiredError),
 ]:
     _user, auth_error = _system_manager(db, request, settings)
@@ -510,5 +531,5 @@ def download_backup(
         media_type="application/zip",
         name=f"{backup_id}.zip",
         route="backup-download",
-        file_id=backup_id,
+        asset_id=backup_id,
     )

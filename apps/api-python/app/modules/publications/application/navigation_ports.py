@@ -18,9 +18,9 @@ from app.modules.publications.domain.navigation import (
 
 
 class PublicationNavigationCacheReader(Protocol):
-    def find(self, *, volume_id: str) -> PublicationNavigationCacheState | None: ...
+    def find(self, *, resource_id: str) -> PublicationNavigationCacheState | None: ...
 
-    def has_materialized_projection(self, *, volume_id: str) -> bool: ...
+    def has_materialized_projection(self, *, resource_id: str) -> bool: ...
 
 
 class PublicationParserProfileResolver(Protocol):
@@ -28,15 +28,15 @@ class PublicationParserProfileResolver(Protocol):
 
 
 class PublicationNavigationWriteRepository(Protocol):
-    def invalidate_if_source_current(self, *, source: PublicationSource) -> bool: ...
+    def invalidate(self, *, resource_id: str) -> None: ...
 
-    def replace_if_source_current(
+    def replace(
         self,
         *,
         source: PublicationSource,
         identity: PublicationNavigationCacheIdentity,
         entries: tuple[PublicationNavigationEntry, ...],
-    ) -> bool: ...
+    ) -> None: ...
 
 
 class PublicationNavigationUnitOfWork(Protocol):

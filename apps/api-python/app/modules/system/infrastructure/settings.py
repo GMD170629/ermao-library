@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -118,7 +119,7 @@ def delete_setting(db: Session, key: str) -> None:
     db.execute(delete(SystemSetting).where(SystemSetting.key == key))
 
 
-def delete_settings(db: Session, keys: set[str] | list[str]) -> None:
+def delete_settings(db: Session, keys: Collection[str]) -> None:
     key_list = list(keys)
     if not key_list:
         return

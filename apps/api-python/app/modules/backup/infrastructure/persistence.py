@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import (
     Boolean,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Float,
     Integer,
     String,
+    Table,
     Text,
     delete,
     insert,
@@ -19,106 +21,148 @@ from sqlalchemy import (
 )
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Mapper, Session
+from sqlalchemy.sql.dml import Delete, Insert
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
+from app.db.base import Base
 from app.models import (
-    BookConversionTask,
-    BookIdentityCache,
-    DuplicateCandidate,
+    BookDetailPreference,
     ExternalMetadataCache,
-    ImportAsset,
-    ImportLog,
-    ImportTask,
+    Library,
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
     LibraryFacet,
-    LibraryFile,
-    LibraryMediaVersion,
-    LibraryMetadata,
-    LibraryReadingProgress,
-    LibraryReadingUnit,
-    LibraryVolume,
-    LibraryVolumeFacet,
-    LibraryWork,
-    LibraryWorkFacet,
-    MediaVersionMigrationEvent,
+    LibraryImportTask,
+    LibraryOperation,
+    LibraryReadableResource,
+    LibraryReadableResourceFacet,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+    LibrarySourceNodeInterpretation,
+    LibrarySourceNodeMetadata,
     MetadataLookupTask,
     MetadataProviderPipeline,
     MetadataSuggestion,
-    MonitorFolder,
     OrganizeJob,
+    OrganizeRun,
+    ReadableResourceNavigationUnit,
     ReaderBookmark,
     ReaderBookPreference,
     ReaderPreference,
     ReaderProgressCursor,
+    ReaderProgressMutation,
+    ReaderResourceProgress,
     Shelf,
-    ShelfWork,
+    ShelfBook,
     Source,
     SystemSetting,
     User,
-    UserMediaHistory,
-    UserMonitorFolderAccess,
+    UserLibraryAccess,
     UserPreference,
-    WorkDetailPreference,
 )
 from app.models.common import db_timestamp
 from app.modules.backup.application.restore import (
     BackupRecordValidationError,
     PreparedRestorePlan,
 )
+from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
-def _legacy_column_to_attr(model: type) -> dict[str, str]:
-    mapper = sa_inspect(model)
+def _legacy_column_to_attr(model: type[Base]) -> dict[str, str]:
+    mapper = cast(Mapper[Any], sa_inspect(model))
     return {prop.columns[0].name: prop.key for prop in mapper.column_attrs}
 
 
-TABLE_MODELS: dict[str, type] = {
+TABLE_MODELS: dict[str, type[Base]] = {
     "User": User,
     "UserPreference": UserPreference,
     "Shelf": Shelf,
-    "MonitorFolder": MonitorFolder,
-    "UserMonitorFolderAccess": UserMonitorFolderAccess,
-    "LibraryWork": LibraryWork,
-    "LibraryMediaVersion": LibraryMediaVersion,
-    "LibraryVolume": LibraryVolume,
-    "LibraryFile": LibraryFile,
-    "LibraryReadingUnit": LibraryReadingUnit,
-    "LibraryMetadata": LibraryMetadata,
+    "ShelfCollectionMembership": ShelfCollectionMembership,
+    "Library": Library,
+    "UserLibraryAccess": UserLibraryAccess,
+    "LibraryBook": LibraryBook,
+    "LibraryReadableResource": LibraryReadableResource,
+    "LibraryResourceAsset": LibraryResourceAsset,
+    "LibraryResourceAssetMetadata": LibraryResourceAssetMetadata,
+    "LibrarySourceNode": LibrarySourceNode,
+    "LibrarySourceNodeMetadata": LibrarySourceNodeMetadata,
+    "LibrarySourceNodeInterpretation": LibrarySourceNodeInterpretation,
+    "LibraryBookMetadata": LibraryBookMetadata,
+    "LibraryReadableResourceMetadata": LibraryReadableResourceMetadata,
     "LibraryFacet": LibraryFacet,
-    "LibraryWorkFacet": LibraryWorkFacet,
-    "LibraryVolumeFacet": LibraryVolumeFacet,
-    "ShelfWork": ShelfWork,
-    "LibraryReadingProgress": LibraryReadingProgress,
-    "UserMediaHistory": UserMediaHistory,
-    "WorkDetailPreference": WorkDetailPreference,
-    "ImportTask": ImportTask,
-    "ImportAsset": ImportAsset,
-    "BookConversionTask": BookConversionTask,
-    "ImportLog": ImportLog,
+    "LibraryBookFacet": LibraryBookFacet,
+    "LibraryReadableResourceFacet": LibraryReadableResourceFacet,
+    "ShelfBook": ShelfBook,
+    "ReaderResourceProgress": ReaderResourceProgress,
+    "BookDetailPreference": BookDetailPreference,
+    "ReadableResourceNavigationUnit": ReadableResourceNavigationUnit,
+    "LibraryImportTask": LibraryImportTask,
     "OrganizeJob": OrganizeJob,
+    "OrganizeRun": OrganizeRun,
     "MetadataSuggestion": MetadataSuggestion,
-    "DuplicateCandidate": DuplicateCandidate,
     "MetadataLookupTask": MetadataLookupTask,
     "ExternalMetadataCache": ExternalMetadataCache,
-    "BookIdentityCache": BookIdentityCache,
     "ReaderPreference": ReaderPreference,
     "ReaderBookPreference": ReaderBookPreference,
     "ReaderProgressCursor": ReaderProgressCursor,
     "ReaderBookmark": ReaderBookmark,
-    "MediaVersionMigrationEvent": MediaVersionMigrationEvent,
+    "ReaderProgressMutation": ReaderProgressMutation,
+    "LibraryOperation": LibraryOperation,
     "Source": Source,
     "MetadataProviderPipeline": MetadataProviderPipeline,
     "SystemSetting": SystemSetting,
 }
 
 
-def model_columns(model: type) -> set[str]:
+def table_dependency_order(table_names: Iterable[str]) -> tuple[str, ...]:
+    """Return a stable parent-before-child order for the selected ORM tables.
+
+    SQLAlchemy's metadata is the source of truth for ownership.  Keeping the
+    order derived from foreign keys prevents a newly-added child table from
+    silently being inserted before its parent in a backup restore.  Self
+    references (the SourceNode parent tree) are resolved at row level by
+    ``_row_dependency_order`` below.
+    """
+
+    ordered_names = tuple(dict.fromkeys(table_names))
+    selected = set(ordered_names)
+    dependencies: dict[str, set[str]] = {name: set() for name in ordered_names}
+    for table_name in ordered_names:
+        model = TABLE_MODELS.get(table_name)
+        if model is None:
+            continue
+        table = cast(Table, model.__table__)
+        for constraint in table.foreign_key_constraints:
+            parent_table = constraint.referred_table.name
+            if parent_table in selected and parent_table != table_name:
+                dependencies[table_name].add(parent_table)
+
+    result: list[str] = []
+    remaining = set(ordered_names)
+    while remaining:
+        ready = [
+            name
+            for name in ordered_names
+            if name in remaining and not (dependencies[name] & remaining)
+        ]
+        if not ready:
+            raise BackupRecordValidationError("BACKUP_TABLE_DEPENDENCY_CYCLE")
+        result.extend(ready)
+        remaining.difference_update(ready)
+    return tuple(result)
+
+
+def model_columns(model: type[Base]) -> set[str]:
     return {column.name for column in model.__table__.columns}
 
 
 def _entity_to_export_record(entity: object) -> dict[str, Any]:
-    mapper = sa_inspect(entity).mapper
+    mapper = cast(Mapper[Any], sa_inspect(type(entity)))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
@@ -135,7 +179,9 @@ def fetch_table(db: Session, table: str) -> list[dict[str, Any]]:
     return [_entity_to_export_record(entity) for entity in db.scalars(stmt).all()]
 
 
-def _legacy_to_model_values(model: type, record: dict[str, Any]) -> dict[str, Any]:
+def _legacy_to_model_values(
+    model: type[Base], record: dict[str, Any]
+) -> dict[str, Any]:
     allowed = model_columns(model)
     name_to_attr = _legacy_column_to_attr(model)
     return {
@@ -175,6 +221,10 @@ def _converted_column_value(column: Any, value: object) -> object:
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             )
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
+            raise BackupRecordValidationError(
+                f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
+            )
         try:
             return int(value)
         except (TypeError, ValueError) as exc:
@@ -183,6 +233,10 @@ def _converted_column_value(column: Any, value: object) -> object:
             ) from exc
     if isinstance(column_type, Float):
         if isinstance(value, bool):
+            raise BackupRecordValidationError(
+                f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
+            )
+        if not isinstance(value, (str, bytes, bytearray, int, float)):
             raise BackupRecordValidationError(
                 f"BACKUP_FIELD_TYPE_INVALID:{column.table.name}.{column.name}"
             )
@@ -223,45 +277,89 @@ def prepare_table_records(
     return tuple(prepared)
 
 
+def _row_dependency_order(
+    table_name: str,
+    records: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    """Order rows with a same-table parent FK before their children."""
+
+    if table_name != "LibrarySourceNode" or not records:
+        return records
+    records_by_id = {
+        record.get("id"): record for record in records if record.get("id") is not None
+    }
+    ordered: list[dict[str, object]] = []
+    visiting: set[object] = set()
+    visited: set[object] = set()
+
+    def visit(record_id: object) -> None:
+        if record_id in visited or record_id is None:
+            return
+        if record_id in visiting:
+            raise BackupRecordValidationError(
+                "BACKUP_ROW_DEPENDENCY_CYCLE:LibrarySourceNode"
+            )
+        record = records_by_id.get(record_id)
+        if record is None:
+            return
+        visiting.add(record_id)
+        visit(record.get("parentId"))
+        visiting.remove(record_id)
+        visited.add(record_id)
+        ordered.append(record)
+
+    for record in records:
+        visit(record.get("id"))
+    return tuple(ordered)
+
+
 def validate_restore_relationships(
     records_by_table: dict[str, tuple[dict[str, object], ...]],
 ) -> None:
     """Reject duplicate identities and dangling exported foreign keys in memory."""
 
-    referenced_columns = {
-        (foreign_key.column.table.name, foreign_key.column.name)
-        for model in TABLE_MODELS.values()
-        for foreign_key in model.__table__.foreign_keys
-    }
-    values_by_column: dict[tuple[str, str], set[object]] = defaultdict(set)
     for table_name, records in records_by_table.items():
-        model = TABLE_MODELS[table_name]
+        model = TABLE_MODELS.get(table_name)
+        if model is None:
+            raise BackupRecordValidationError(f"BACKUP_TABLE_UNKNOWN:{table_name}")
         primary_keys = tuple(column.name for column in model.__table__.primary_key)
         seen_primary_keys: set[tuple[object, ...]] = set()
         for record in records:
             primary_key = tuple(record.get(name) for name in primary_keys)
             if primary_keys and primary_key in seen_primary_keys:
-                raise ValueError(f"BACKUP_DUPLICATE_PRIMARY_KEY:{table_name}")
+                raise BackupRecordValidationError(
+                    f"BACKUP_DUPLICATE_PRIMARY_KEY:{table_name}"
+                )
             if primary_keys:
                 seen_primary_keys.add(primary_key)
-            for name, value in record.items():
-                if value is not None and (table_name, name) in referenced_columns:
-                    values_by_column[(table_name, name)].add(value)
 
-    exported_tables = set(records_by_table)
     for table_name, records in records_by_table.items():
         model = TABLE_MODELS[table_name]
-        for foreign_key in model.__table__.foreign_keys:
-            target_table = foreign_key.column.table.name
-            if target_table not in exported_tables:
-                continue
-            target_values = values_by_column[(target_table, foreign_key.column.name)]
+        table = cast(Table, model.__table__)
+        for constraint in table.foreign_key_constraints:
+            target_table = constraint.referred_table.name
+            target_records = records_by_table.get(target_table, ())
+            target_columns = tuple(
+                element.column.name for element in constraint.elements
+            )
+            target_values = {
+                tuple(record.get(column_name) for column_name in target_columns)
+                for record in target_records
+            }
+            local_columns = tuple(
+                element.parent.name for element in constraint.elements
+            )
             for record in records:
-                value = record.get(foreign_key.parent.name)
-                if value is not None and value not in target_values:
-                    raise ValueError(
-                        "BACKUP_FOREIGN_KEY_INVALID:"
-                        f"{table_name}.{foreign_key.parent.name}"
+                values = tuple(record.get(column_name) for column_name in local_columns)
+                # SQLite follows normal nullable-FK semantics for a composite
+                # key: a NULL component means the relationship is not
+                # asserted.  The SourceNode parent-pair CHECK constraint is
+                # still enforced by the validation database before restore.
+                if any(value is None for value in values):
+                    continue
+                if values not in target_values:
+                    raise BackupRecordValidationError(
+                        f"BACKUP_FOREIGN_KEY_INVALID:{table_name}.{local_columns[0]}"
                     )
 
 
@@ -283,16 +381,25 @@ def prepare_restore_plan(
 ) -> PreparedRestorePlan:
     """Construct all typed SQL and chunks before the writer slot is acquired."""
 
+    insertion_by_table = {
+        table_name: export_key for export_key, table_name in insertion_order
+    }
+    insertion_tables = table_dependency_order(insertion_by_table)
+    delete_tables = tuple(reversed(table_dependency_order(delete_order)))
+
     statements: list[Any] = []
-    for table_name in delete_order:
+    for table_name in delete_tables:
         model = TABLE_MODELS.get(table_name)
         if model is not None:
             statements.append(delete(model))
 
     restored_counts: dict[str, int] = {}
-    for export_key, table_name in insertion_order:
+    for table_name in insertion_tables:
+        export_key = insertion_by_table[table_name]
         model = TABLE_MODELS.get(table_name)
-        records = records_by_table.get(table_name, ())
+        records = _row_dependency_order(
+            table_name, records_by_table.get(table_name, ())
+        )
         restored_counts[export_key] = len(records)
         if model is None:
             continue
@@ -330,7 +437,9 @@ def prepare_maintenance_state_plan(
     setting_value: str | None,
 ) -> PreparedRestorePlan:
     if setting_value is None:
-        statement = delete(SystemSetting).where(SystemSetting.key == setting_key)
+        statement: Delete | Insert = delete(SystemSetting).where(
+            SystemSetting.key == setting_key
+        )
     else:
         timestamp = db_timestamp()
         statement = (

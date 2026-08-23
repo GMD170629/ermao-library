@@ -1,11 +1,13 @@
 import logging
 from collections.abc import Callable, Generator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import ExceptionHandler
 
 from app.api.error_handlers import (
     request_validation_error_handler,
@@ -14,9 +16,7 @@ from app.api.error_handlers import (
 from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
 from app.bootstrap.opds import build_opds_router
-from app.bootstrap.startup_data_migrations import (
-    verify_startup_data_migrations_complete,
-)
+from app.bootstrap.prestart import verify_current_schema
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
@@ -44,42 +44,47 @@ LOGGER = logging.getLogger(__name__)
 
 SYSTEM_MANAGER_PREFIXES = (
     "/api/management",
-    "/api/monitor-folders",
+    "/api/libraries",
     "/api/system-settings",
     "/api/metadata/providers",
-    "/api/sources",
-    "/api/source-search-records",
     "/api/download-tasks",
-    "/api/import-tasks",
     "/api/organize",
     "/api/backups",
     "/api/tracking",
     "/api/email-settings",
     "/api/system/health/",
-    "/api/system/queues",
-    "/api/system/queue-operations",
     "/api/system/log-settings",
 )
 
 
 def _requires_system_manager(path: str, method: str) -> bool:
+    if method in {"GET", "HEAD"} and (
+        path.startswith("/api/library-import-tasks/")
+        or (path.startswith("/api/libraries/") and path.endswith("/import-tasks"))
+    ):
+        return False
     if path in {"/api/dashboard/system-status", "/api/system/health"}:
         return True
     if path == "/api/metadata/cover-proxy":
         return True
     if path.startswith(SYSTEM_MANAGER_PREFIXES):
         return True
+    if (
+        method == "POST"
+        and path.startswith("/api/library/operations/")
+        and path.endswith("/undo")
+    ):
+        return False
     if path.startswith("/api/library/") and path not in {
         "/api/library/facets",
+        "/api/library/groupings",
         "/api/library/filter-schema",
         "/api/library/filter-options",
+        "/api/library/operations/books/reading-status",
+        "/api/library/operations/books/shelf-membership",
     }:
         return True
-    if path in {
-        "/api/works/import",
-        "/api/works/bulk/cover",
-        "/api/works/bulk/find-replace/preview",
-    }:
+    if path == "/api/books/import":
         return True
     return method != "GET" and path.startswith("/api/metadata/")
 
@@ -120,7 +125,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
-            verify_startup_data_migrations_complete(engine, SessionLocal)
+            verify_current_schema(engine)
         download_queue_worker = start_download_queue_worker(
             background_runtime_factory,
             settings,
@@ -165,8 +170,16 @@ def create_app(
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan
     )
-    app.add_exception_handler(HttpContractError, typed_http_error_handler)
-    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+    # Starlette types handlers against ``Exception`` while dispatching the
+    # registered exception class guarantees the narrower concrete type.
+    app.add_exception_handler(
+        HttpContractError,
+        cast(ExceptionHandler, typed_http_error_handler),
+    )
+    app.add_exception_handler(
+        RequestValidationError,
+        cast(ExceptionHandler, request_validation_error_handler),
+    )
     app.state.session_factory = runtime_factory
     app.state.close_factory_sessions = True
     if session_factory is not None:

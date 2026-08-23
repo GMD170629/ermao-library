@@ -1,5 +1,17 @@
-"""Public application and domain contracts for the library capability."""
+"""Stable public contracts for the Book/ReadableResource capability."""
 
+from app.modules.library.application.book_covers import (
+    BookCoverCandidate,
+    BookCoverQueryPort,
+    BookCoverSource,
+    ResolveBookCoverCandidates,
+)
+from app.modules.library.application.book_list import (
+    BookListProjection,
+    BookListQuery,
+    BookListResult,
+    parse_media_kinds,
+)
 from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
     BookshelfItemSummary,
@@ -7,29 +19,28 @@ from app.modules.library.application.bookshelf import (
 )
 from app.modules.library.application.catalog import (
     CATALOG_FACET_KINDS,
+    CatalogAsset,
+    CatalogBook,
+    CatalogBookFacet,
+    CatalogBookFilter,
+    CatalogBookPage,
     CatalogFacet,
     CatalogFacetPage,
-    CatalogFile,
     CatalogQueryPort,
-    CatalogVolume,
-    CatalogWork,
-    CatalogWorkFacet,
-    CatalogWorkFilter,
-    CatalogWorkPage,
-    GetCatalogWork,
+    CatalogResource,
+    GetCatalogBook,
+    ListCatalogBooks,
     ListCatalogFacets,
-    ListCatalogWorks,
 )
-from app.modules.library.application.dto import MoveVolumeResult
 from app.modules.library.application.facet_references import (
+    BookFacetReferences,
     LibraryFacetReference,
     LibraryFacetReferenceQueryPort,
-    WorkFacetReferences,
 )
 from app.modules.library.application.facet_sync import (
-    PreparedWorkFacet,
-    WorkFacetProjection,
-    prepare_work_facet,
+    BookFacetProjection,
+    PreparedBookFacet,
+    prepare_book_facet,
 )
 from app.modules.library.application.filter_ast import (
     FilterCondition,
@@ -51,73 +62,112 @@ from app.modules.library.application.filter_options import (
 from app.modules.library.application.groupings import (
     LIBRARY_GROUPING_KINDS,
     LibraryGrouping,
+    LibraryGroupingBook,
     LibraryGroupingPage,
     LibraryGroupingQueryPort,
-    LibraryGroupingWork,
     ListLibraryGroupings,
 )
 from app.modules.library.application.queries import (
-    GetSmartShelfWorkIds,
+    GetSmartShelfBookIds,
     SmartShelfCriteria,
     SmartShelfQueryPort,
 )
-from app.modules.library.application.work_list import (
-    WorkListQuery,
-    WorkListResult,
-    parse_media_kinds,
+from app.modules.library.application.source_tree_ports import (
+    AdapterIdentity,
+    BookResourceRepositoryPort,
+    InterpretationRecord,
+    LibraryConfigPort,
+    LibrarySourceTreeConfig,
+    ObservedSourceEntry,
+    ReadableResourceRecord,
+    ResourceNavigationUnitInput,
+    SourceNodeRecord,
+    SourceNodeRepositoryPort,
+)
+from app.modules.library.domain.book_placement import (
+    BookAnchorDecision,
+    decide_book_anchor_for_resource,
+    resource_root_folder_creates_empty_book_on_discovery,
 )
 from app.modules.library.domain.facets import FACET_KINDS
-from app.modules.library.presentation.schemas import WorkView
-from app.modules.library.presentation.views import (
-    _get_work as get_work,
+from app.modules.library.domain.organization_modes import (
+    OrganizationModeViolationCode,
+    TargetLibraryOrganizationMode,
+    parse_target_organization_mode,
 )
-from app.modules.library.presentation.views import (
-    _preferred_work_cover_path as preferred_work_cover_path,
+from app.modules.library.domain.readable_resource_anchors import (
+    ReadableResourceAnchorViolationCode,
+    ReadableResourceTopologyError,
+    is_asset_path_within_resource_scope,
+    is_resource_anchor_within_book_scope,
+    is_same_or_descendant_path,
+    is_strict_descendant_path,
 )
-from app.modules.library.presentation.views import (
-    _work_view as work_view,
+from app.modules.library.domain.readable_resource_states import (
+    AssetImportState,
+    AssetRole,
+    ResourceEnablementState,
+    ResourceImportState,
+    meets_minimum_ready_assets,
+    resource_is_openable,
 )
+from app.modules.library.domain.source_nodes import (
+    InvalidSourceNodeRelativePathError,
+    SourceNodePhysicalKind,
+    SourceNodeRelativePath,
+    SourceNodeTopologyError,
+    SourceNodeViolation,
+    SourceNodeViolationCode,
+    evaluate_path_key_occupancy,
+    parse_source_node_relative_path,
+)
+from app.modules.library.presentation.schemas import BookView
 from app.modules.library.presentation.views import (
+    book_view,
     bookshelf_item_view,
     bookshelf_item_views,
-)
-from app.modules.library.presentation.work_ops import (
-    _collect_import_linked_library_scope_paths as collect_import_linked_library_scope_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _conversion_output_paths as conversion_output_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _delete_import_linked_library_scope as delete_import_linked_library_scope,
-)
-from app.modules.library.presentation.work_ops import (
-    _delete_source_paths as delete_source_paths,
-)
-from app.modules.library.presentation.work_ops import (
-    _source_delete_path as source_delete_path,
+    get_book,
+    preferred_book_cover_path,
 )
 
 __all__ = [
     "CATALOG_FACET_KINDS",
     "FACET_KINDS",
     "LIBRARY_GROUPING_KINDS",
+    "AdapterIdentity",
+    "AssetImportState",
+    "AssetRole",
+    "BookAnchorDecision",
+    "BookCoverCandidate",
+    "BookCoverQueryPort",
+    "BookCoverSource",
+    "BookFacetProjection",
+    "BookFacetReferences",
+    "BookListProjection",
+    "BookListQuery",
+    "BookListResult",
+    "BookResourceRepositoryPort",
+    "BookView",
     "BookshelfItemQueryPort",
     "BookshelfItemSummary",
+    "CatalogAsset",
+    "CatalogBook",
+    "CatalogBookFacet",
+    "CatalogBookFilter",
+    "CatalogBookPage",
     "CatalogFacet",
     "CatalogFacetPage",
-    "CatalogFile",
     "CatalogQueryPort",
-    "CatalogVolume",
-    "CatalogWork",
-    "CatalogWorkFacet",
-    "CatalogWorkFilter",
-    "CatalogWorkPage",
+    "CatalogResource",
     "FilterCondition",
     "FilterExpression",
-    "GetCatalogWork",
+    "GetCatalogBook",
     "GetLibraryFilterSchema",
-    "GetSmartShelfWorkIds",
+    "GetSmartShelfBookIds",
+    "InterpretationRecord",
     "InvalidFilterExpression",
+    "InvalidSourceNodeRelativePathError",
+    "LibraryConfigPort",
     "LibraryFacetReference",
     "LibraryFacetReferenceQueryPort",
     "LibraryFilterFieldDefinition",
@@ -128,34 +178,52 @@ __all__ = [
     "LibraryFilterSchema",
     "LibraryFilterSchemaOptions",
     "LibraryGrouping",
+    "LibraryGroupingBook",
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
-    "LibraryGroupingWork",
+    "LibrarySourceTreeConfig",
     "ListBookshelfItems",
+    "ListCatalogBooks",
     "ListCatalogFacets",
-    "ListCatalogWorks",
     "ListLibraryGroupings",
-    "MoveVolumeResult",
-    "PreparedWorkFacet",
+    "ObservedSourceEntry",
+    "OrganizationModeViolationCode",
+    "PreparedBookFacet",
+    "ReadableResourceAnchorViolationCode",
+    "ReadableResourceRecord",
+    "ReadableResourceTopologyError",
+    "ResolveBookCoverCandidates",
+    "ResourceEnablementState",
+    "ResourceImportState",
+    "ResourceNavigationUnitInput",
     "SearchLibraryFilterOptions",
     "SmartShelfCriteria",
     "SmartShelfQueryPort",
-    "WorkFacetProjection",
-    "WorkFacetReferences",
-    "WorkListQuery",
-    "WorkListResult",
-    "WorkView",
+    "SourceNodePhysicalKind",
+    "SourceNodeRecord",
+    "SourceNodeRelativePath",
+    "SourceNodeRepositoryPort",
+    "SourceNodeTopologyError",
+    "SourceNodeViolation",
+    "SourceNodeViolationCode",
+    "TargetLibraryOrganizationMode",
+    "book_view",
     "bookshelf_item_view",
     "bookshelf_item_views",
-    "collect_import_linked_library_scope_paths",
-    "conversion_output_paths",
-    "delete_import_linked_library_scope",
-    "delete_source_paths",
-    "get_work",
+    "decide_book_anchor_for_resource",
+    "evaluate_path_key_occupancy",
+    "get_book",
+    "is_asset_path_within_resource_scope",
+    "is_resource_anchor_within_book_scope",
+    "is_same_or_descendant_path",
+    "is_strict_descendant_path",
+    "meets_minimum_ready_assets",
     "parse_filter_expression",
     "parse_media_kinds",
-    "preferred_work_cover_path",
-    "prepare_work_facet",
-    "source_delete_path",
-    "work_view",
+    "parse_source_node_relative_path",
+    "parse_target_organization_mode",
+    "preferred_book_cover_path",
+    "prepare_book_facet",
+    "resource_is_openable",
+    "resource_root_folder_creates_empty_book_on_discovery",
 ]

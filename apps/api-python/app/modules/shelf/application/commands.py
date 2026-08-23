@@ -22,11 +22,11 @@ class ShelfWriteStore(Protocol):
         self, db: object, shelf_id: str, values: dict[str, Any]
     ) -> dict[str, Any] | None: ...
 
-    def replace_shelf_works(
+    def replace_shelf_books(
         self,
         db: object,
         shelf_id: str,
-        work_ids: list[str],
+        book_ids: list[str],
         *,
         now: datetime,
     ) -> None: ...
@@ -55,7 +55,7 @@ class ShelfWriteStore(Protocol):
 
     def collection_has_members(self, db: object, collection_id: str) -> bool: ...
 
-    def clear_monitor_folder_shelf_links(
+    def clear_library_shelf_links(
         self, db: object, shelf_id: str, *, now: datetime
     ) -> None: ...
 
@@ -66,7 +66,7 @@ class ShelfWriteStore(Protocol):
 class CreateShelfCommand:
     values: dict[str, Any]
     kind: ShelfKind
-    work_ids: tuple[str, ...]
+    book_ids: tuple[str, ...]
     member_shelf_ids: tuple[str, ...]
     collection_ids: tuple[str, ...]
     now: datetime
@@ -78,7 +78,7 @@ class UpdateShelfCommand:
     values: dict[str, Any]
     existing_kind: ShelfKind
     kind: ShelfKind
-    work_ids: tuple[str, ...] | None
+    book_ids: tuple[str, ...] | None
     member_shelf_ids: tuple[str, ...] | None
     collection_ids: tuple[str, ...] | None
     previous_member_shelf_ids: tuple[str, ...]
@@ -103,8 +103,8 @@ class CreateShelf:
         self._unit_of_work = unit_of_work
 
     def execute(self, command: CreateShelfCommand) -> dict[str, Any]:
-        static_work_ids = (
-            list(command.work_ids) if command.kind is ShelfKind.STATIC else None
+        static_book_ids = (
+            list(command.book_ids) if command.kind is ShelfKind.STATIC else None
         )
         collection_member_ids = (
             list(command.member_shelf_ids)
@@ -119,11 +119,11 @@ class CreateShelf:
         try:
             shelf = self._store.create_shelf(self._unit_of_work, command.values)
             shelf_id = str(shelf["id"])
-            if static_work_ids is not None:
-                self._store.replace_shelf_works(
+            if static_book_ids is not None:
+                self._store.replace_shelf_books(
                     self._unit_of_work,
                     shelf_id,
-                    static_work_ids,
+                    static_book_ids,
                     now=command.now,
                 )
             if collection_member_ids is not None:
@@ -167,9 +167,9 @@ class UpdateShelf:
         self._unit_of_work = unit_of_work
 
     def execute(self, command: UpdateShelfCommand) -> dict[str, Any] | None:
-        replacement_work_ids = (
-            list(command.work_ids)
-            if command.work_ids is not None and command.kind is ShelfKind.STATIC
+        replacement_book_ids = (
+            list(command.book_ids)
+            if command.book_ids is not None and command.kind is ShelfKind.STATIC
             else []
             if command.kind is ShelfKind.SMART
             and command.existing_kind is not ShelfKind.SMART
@@ -209,11 +209,11 @@ class UpdateShelf:
             if shelf is None:
                 self._unit_of_work.rollback()
                 return None
-            if replacement_work_ids is not None:
-                self._store.replace_shelf_works(
+            if replacement_book_ids is not None:
+                self._store.replace_shelf_books(
                     self._unit_of_work,
                     command.shelf_id,
-                    replacement_work_ids,
+                    replacement_book_ids,
                     now=command.now,
                 )
             if replacement_member_ids is not None:
@@ -263,7 +263,7 @@ class DeleteShelf:
                 command.shelf_id,
             ):
                 raise ValueError("SHELF_COLLECTION_NOT_EMPTY")
-            self._store.clear_monitor_folder_shelf_links(
+            self._store.clear_library_shelf_links(
                 self._unit_of_work,
                 command.shelf_id,
                 now=command.now,

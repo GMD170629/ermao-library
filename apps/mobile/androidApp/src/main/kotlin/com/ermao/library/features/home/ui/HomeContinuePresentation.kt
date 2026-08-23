@@ -15,21 +15,21 @@ internal sealed interface HomeLastReadPresentation {
 }
 
 internal fun selectContinuePositionLabel(
-    workTitle: String,
+    bookTitle: String,
     positionLabel: String?,
-    volumeTitle: String?,
+    resourceTitle: String?,
 ): String? {
-    return sequenceOf(positionLabel, volumeTitle).firstNotNullOfOrNull { label ->
-        label?.deduplicatedAgainst(workTitle)
+    return sequenceOf(positionLabel, resourceTitle).firstNotNullOfOrNull { label ->
+        label?.deduplicatedAgainst(bookTitle)
     }
 }
 
-private fun String.deduplicatedAgainst(workTitle: String): String? {
+private fun String.deduplicatedAgainst(bookTitle: String): String? {
     val candidate = trim().takeIf(String::isNotEmpty) ?: return null
-    if (candidate.normalizedIdentityTitle() == workTitle.normalizedIdentityTitle()) return null
-    if (!candidate.startsWith(workTitle, ignoreCase = true)) return candidate
+    if (candidate.normalizedIdentityTitle() == bookTitle.normalizedIdentityTitle()) return null
+    if (!candidate.startsWith(bookTitle, ignoreCase = true)) return candidate
     return candidate
-        .drop(workTitle.length)
+        .drop(bookTitle.length)
         .trimStart { character -> character.isWhitespace() || character in ContinueLabelSeparators }
         .takeIf(String::isNotEmpty)
 }

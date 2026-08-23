@@ -51,9 +51,9 @@ sealed interface PublicationLocation {
                     engineLocator = engineLocator,
                 ) }
                 "audio" -> root.requireOnly(
-                    "kind", "fileId", "chapterId", "positionMillis", "engineLocator", "publication",
+                    "kind", "assetId", "chapterId", "positionMillis", "engineLocator", "publication",
                 ).let { AudioPublicationLocation(
-                    fileId = root.requiredString("fileId"),
+                    assetId = root.requiredString("assetId"),
                     chapterId = root.optionalString("chapterId"),
                     positionMillis = root.requiredLong("positionMillis"),
                     engineLocator = engineLocator,
@@ -126,13 +126,13 @@ data class ComicPublicationLocation(
 }
 
 data class AudioPublicationLocation(
-    val fileId: String,
+    val assetId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
     override val engineLocator: EngineLocator? = null,
 ) : PublicationLocation {
     init {
-        require(fileId.isNotBlank()) { "Audio file id is blank" }
+        require(assetId.isNotBlank()) { "Audio asset id is blank" }
         require(chapterId == null || chapterId.isNotBlank()) { "Audio chapter id is blank" }
         require(positionMillis >= 0) { "Audio position is negative" }
     }
@@ -164,7 +164,7 @@ fun compareExactPublicationLocations(
             } else ExactLocationMatch.AnchorMismatch
         }
         is AudioPublicationLocation -> (actual as AudioPublicationLocation).let {
-            if (expected.fileId == it.fileId && expected.chapterId == it.chapterId && expected.positionMillis == it.positionMillis) {
+            if (expected.assetId == it.assetId && expected.chapterId == it.chapterId && expected.positionMillis == it.positionMillis) {
                 ExactLocationMatch.Exact
             } else ExactLocationMatch.AnchorMismatch
         }
@@ -196,7 +196,7 @@ private fun PublicationLocation.toJson(): JsonObject = buildJsonObject {
             location.engineLocator?.let { put("engineLocator", it.toJson()) }
         }
         is AudioPublicationLocation -> {
-            put("fileId", location.fileId)
+            put("assetId", location.assetId)
             location.chapterId?.let { put("chapterId", it) }
             put("positionMillis", location.positionMillis)
             location.engineLocator?.let { put("engineLocator", it.toJson()) }

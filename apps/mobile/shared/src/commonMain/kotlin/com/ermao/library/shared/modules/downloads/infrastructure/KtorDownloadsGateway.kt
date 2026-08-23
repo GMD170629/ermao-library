@@ -23,7 +23,6 @@ import com.ermao.library.shared.modules.downloads.application.DownloadTransferRe
 import com.ermao.library.shared.modules.downloads.application.DownloadsGateway
 import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
-import com.ermao.library.shared.modules.downloads.domain.DownloadMediaKind
 import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
 import com.ermao.library.shared.modules.downloads.domain.isSafeMediaApiPath
@@ -40,32 +39,33 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
+/** Foreground, app-owned download gateway backed by Reader resource bootstrap. */
 class KtorDownloadsGateway(
     private val apiClient: ApiClient,
 ) : DownloadsGateway {
     override suspend fun load(
         context: DownloadRequestContext,
-        volumeId: String,
+        resourceId: String,
     ): DownloadBootstrapResult {
-        if (volumeId.isBlank()) return bootstrapFailure("DOWNLOAD_VOLUME_ID_INVALID")
+        if (resourceId.isBlank()) return bootstrapFailure("DOWNLOAD_RESOURCE_ID_INVALID")
         return when (val response = apiClient.execute(
             ApiRequest(
                 method = ApiMethod.Get,
-                apiPath = "/api/reader/v4/volumes/${volumeId.encodePathSegment()}/bootstrap",
+                apiPath = "/api/reader/v4/resources/${resourceId.encodePathSegment()}/bootstrap",
                 responseDeserializer = JsonObject.serializer(),
             ),
         )) {
             is ApiResult.Failure -> DownloadBootstrapResult.Failure(response.error)
             is ApiResult.Success -> try {
                 DownloadBootstrapResult.Success(
-                    DownloadBootstrap(response.value.toBootstrapDescriptor(context, volumeId)),
+                    DownloadBootstrap(response.value.toBootstrapDescriptor(context, resourceId)),
                 )
             } catch (error: IllegalArgumentException) {
                 DownloadBootstrapResult.Failure(
@@ -86,7 +86,7 @@ class KtorDownloadsGateway(
         progressObserver: DownloadProgressObserver?,
     ): DownloadTransferResult {
         var session: DownloadByteSinkSession? = null
-        try {
+        return try {
             val source = request.descriptor.source
             val statement = apiClient.authenticatedHttpClient().prepareGet(
                 apiClient.resolveAuthenticatedApiPath(source.apiPath),
@@ -114,7 +114,8 @@ class KtorDownloadsGateway(
                     DownloadSinkRequest(
                         namespace = context.namespace,
                         taskId = request.taskId,
-                        volumeId = request.descriptor.identity.volumeId,
+                        resourceId = request.descriptor.identity.resourceId,
+                        assetId = request.descriptor.identity.assetId,
                         expectedTotalBytes = source.totalBytes,
                         resumeFromBytes = request.resumeFromBytes,
                     ),
@@ -152,16 +153,16 @@ class KtorDownloadsGateway(
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
             session?.abortSafely()
-            return DownloadTransferResult.Failure(AppError(AppErrorKind.Timeout, "DOWNLOAD_TIMEOUT", timeout.message))
+            DownloadTransferResult.Failure(AppError(AppErrorKind.Timeout, "DOWNLOAD_TIMEOUT", timeout.message))
         } catch (storage: PlatformStorageException) {
             session?.abortSafely()
-            return DownloadTransferResult.Failure(AppError(AppErrorKind.StorageFailure, "DOWNLOAD_STORAGE_FAILURE", storage.message))
+            DownloadTransferResult.Failure(AppError(AppErrorKind.StorageFailure, "DOWNLOAD_STORAGE_FAILURE", storage.message))
         } catch (protocol: DownloadProtocolException) {
             session?.abortSafely()
-            return DownloadTransferResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_RESPONSE_INVALID", protocol.message))
+            DownloadTransferResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_RESPONSE_INVALID", protocol.message))
         } catch (error: Throwable) {
             session?.abortSafely()
-            return DownloadTransferResult.Failure(mapTransportError(error))
+            DownloadTransferResult.Failure(mapTransportError(error))
         }
     }
 
@@ -197,90 +198,78 @@ class KtorDownloadsGateway(
 
     private fun JsonObject.toBootstrapDescriptor(
         context: DownloadRequestContext,
-        expectedVolumeId: String,
+        expectedResourceId: String,
     ): DownloadDescriptor {
         require(requiredLong("schemaVersion") == 4L) { "Unsupported Reader bootstrap schema" }
         val userId = requiredString("userId")
         require(userId == context.namespace.userId) { "Bootstrap user does not match download namespace" }
-        val work = requiredObject("book")
-        val mediaVersion = requiredObject("mediaVersion")
-        val volume = requiredObject("volume")
-        require(mediaVersion.requiredString("workId") == work.requiredString("id")) {
-            "Bootstrap media version does not match work"
-        }
-        require(volume.requiredString("id") == expectedVolumeId) { "Bootstrap volume does not match request" }
-        require(volume.requiredString("mediaVersionId") == mediaVersion.requiredString("id")) {
-            "Bootstrap volume does not match media version"
+        val book = requiredObject("book")
+        val resource = requiredObject("resource")
+        require(resource.requiredString("id") == expectedResourceId) { "Bootstrap resource does not match request" }
+        require(resource.requiredString("bookId") == book.requiredString("id")) {
+            "Bootstrap resource does not match book"
         }
         val readerType = parseDownloadReaderType(requiredString("readerType"))
-        require(parseDownloadReaderType(volume.requiredString("readerType")) == readerType) {
+        require(parseDownloadReaderType(resource.requiredString("readerType")) == readerType) {
             "Bootstrap reader type is inconsistent"
         }
-        val mediaKind = parseDownloadMediaKind(mediaVersion.requiredString("mediaKind"))
-        require(mediaKind.isCompatibleWith(readerType)) { "Bootstrap media kind is inconsistent" }
-        val files = this["files"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap files are missing")
-        val fileUrl = requiredString("fileUrl")
-        require(fileUrl.isSafeMediaApiPath()) { "Bootstrap file URL is invalid" }
-        val volumeFormat = volume.requiredString("format")
-        val sourceFiles = files.map { it as? JsonObject ?: throw IllegalArgumentException("Bootstrap file is invalid") }
-        val expectedKind = when (readerType) {
-            DownloadReaderType.Reflowable -> {
-                val sourceFormat = requiredString("sourceFormat").trim().lowercase()
-                require(sourceFormat in DOWNLOADABLE_REFLOWABLE_FORMATS) { "Unsupported reflowable source format" }
-                require(volumeFormat.equals(sourceFormat, ignoreCase = true)) {
-                    "Bootstrap source format is inconsistent"
-                }
-                sourceFormat.uppercase()
-            }
-            DownloadReaderType.Comic -> DownloadMediaKind.Comic.wireValue
-            else -> volumeFormat.uppercase()
+        val resourceFormat = resource.requiredString("format").trim().lowercase()
+        require(requiredString("sourceFormat").equals(resourceFormat, ignoreCase = true)) {
+            "Bootstrap source format is inconsistent"
         }
-        val sourceFile = sourceFiles
-            .sortedWith(compareBy<JsonObject>({ it.requiredNonNegativeInt("sortOrder") }, { it.requiredString("id") }))
-            .firstOrNull { it.requiredString("kind").equals(expectedKind, ignoreCase = true) }
-            ?: throw IllegalArgumentException("Bootstrap publication file is missing")
+        val assets = this["assets"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap assets are missing")
+        val assetObjects = assets.map { it as? JsonObject ?: throw IllegalArgumentException("Bootstrap asset is invalid") }
+            .sortedWith(compareBy<JsonObject>({ it.requiredNonNegativeInt("sortOrder") }, { it.requiredString("id") }) )
+        val primaryAsset = assetObjects.firstOrNull { it.requiredString("role").equals("PRIMARY", ignoreCase = true) }
+            ?: assetObjects.firstOrNull()
+            ?: throw IllegalArgumentException("Bootstrap publication asset is missing")
+        require(primaryAsset.requiredString("resourceId") == expectedResourceId) {
+            "Bootstrap asset does not match resource"
+        }
+        val primaryUrl = primaryAsset.requiredString("url")
+        require(primaryUrl.isSafeMediaApiPath()) { "Bootstrap asset URL is invalid" }
         val comicArtifact = if (readerType == DownloadReaderType.Comic) {
             val publication = requiredObject("publication")
-            require(publication.requiredString("kind") == "comic") { "Comic publication contract is invalid" }
+            require(publication.requiredString("kind") == "comic") { "Comic download contract is invalid" }
             publication.requiredObject("downloadArtifact").also { artifact ->
-                require(artifact.requiredString("sourceFormat").equals(volumeFormat, ignoreCase = true)) {
+                require(artifact.requiredString("url") == "/api/reader/v4/resources/$expectedResourceId/comic/archive") {
+                    "Comic download artifact URL is invalid"
+                }
+                require(artifact.requiredString("sourceFormat").equals(resourceFormat, ignoreCase = true)) {
                     "Comic download source format is inconsistent"
                 }
             }
-        } else {
-            null
-        }
-        val sourceApiPath = comicArtifact?.requiredString("url") ?: sourceFile.requiredString("url")
+        } else null
+        // Offline storage always downloads the original primary Asset. The comic archive
+        // URL is an online Reader capability only and must never become a local source.
+        val sourceApiPath = primaryUrl
         require(sourceApiPath.isSafeMediaApiPath()) { "Bootstrap publication URL is invalid" }
-        val sourceSize = comicArtifact?.requiredLong("sizeBytes") ?: sourceFile.requiredLong("sizeBytes")
-        val sourceMime = (comicArtifact?.requiredString("mimeType") ?: sourceFile.requiredString("mimeType")).lowercase()
-        if (readerType == DownloadReaderType.Reflowable) {
-            require(sourceMime in allowedReflowableMimeTypes(expectedKind)) {
-                "Bootstrap publication MIME type is inconsistent"
-            }
-        }
+        val sourceSize = primaryAsset.requiredLong("sizeBytes")
+        val sourceMime = primaryAsset.requiredString("mimeType")
+            .lowercase()
+            .substringBefore(';')
+        require(sourceSize > 0)
+        require(sourceMime in allowedMimeTypes(readerType)) { "Bootstrap asset MIME type is inconsistent" }
         return DownloadDescriptor(
             identity = DownloadIdentity(
                 namespace = context.namespace,
-                workId = work.requiredString("id"),
-                volumeId = expectedVolumeId,
+                bookId = book.requiredString("id"),
+                resourceId = expectedResourceId,
+                assetId = primaryAsset.requiredString("id"),
             ),
-            workTitle = work.requiredString("title"),
-            workAuthor = work.optionalString("author"),
-            coverApiPath = work.optionalString("coverUrl"),
-            volumeTitle = volume.requiredString("title"),
-            format = volumeFormat,
+            bookTitle = book.requiredString("title"),
+            bookAuthor = book.optionalString("author"),
+            coverApiPath = book.optionalString("coverUrl"),
+            resourceTitle = resource.requiredString("title"),
+            format = resourceFormat,
             readerType = readerType,
             source = DownloadSource(
                 apiPath = sourceApiPath,
                 mimeType = sourceMime,
                 totalBytes = sourceSize,
             ),
-            mediaVersionId = mediaVersion.requiredString("id"),
-            mediaKind = mediaKind.wireValue,
-            mediaVersionCompleted = mediaVersion.requiredBoolean("completed"),
-            volumeIndex = volume.optionalDouble("volumeIndex"),
-            volumeSortOrder = volume.requiredNonNegativeInt("sortOrder"),
+            resourceIndex = resource.optionalDouble("resourceIndex"),
+            resourceSortOrder = resource.requiredNonNegativeInt("sortOrder"),
         )
     }
 
@@ -297,10 +286,6 @@ class KtorDownloadsGateway(
         this[name]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 }
             ?: throw IllegalArgumentException("$name is missing")
 
-    private fun JsonObject.requiredBoolean(name: String): Boolean =
-        this[name]?.jsonPrimitive?.booleanOrNull
-            ?: throw IllegalArgumentException("$name is missing")
-
     private fun JsonObject.optionalDouble(name: String): Double? {
         val value = this[name] ?: return null
         if (value is kotlinx.serialization.json.JsonNull) return null
@@ -313,7 +298,7 @@ class KtorDownloadsGateway(
             ?: throw IllegalArgumentException("$name is missing")
 
     private fun String.encodePathSegment(): String = encodeToByteArray().joinToString("") { byte ->
-        val character = byte.toInt().toChar()
+        val character = (byte.toInt() and 0xff).toChar()
         if (character.isLetterOrDigit() || character in "-._~") character.toString()
         else "%" + byte.toUByte().toString(16).padStart(2, '0').uppercase()
     }
@@ -332,19 +317,41 @@ class KtorDownloadsGateway(
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
-        val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc")
+        val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc", "txt")
     }
 }
 
-private fun allowedReflowableMimeTypes(kind: String): Set<String> = when (kind) {
-    "EPUB" -> setOf("application/epub+zip", "application/octet-stream")
-    "MOBI", "PRC" -> setOf("application/x-mobipocket-ebook", "application/octet-stream")
-    "AZW", "AZW3" -> setOf(
-        "application/vnd.amazon.ebook",
+private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when (readerType) {
+    DownloadReaderType.Reflowable -> setOf(
+        "application/epub+zip",
         "application/x-mobipocket-ebook",
+        "application/vnd.amazon.ebook",
+        "text/plain",
         "application/octet-stream",
     )
-    else -> emptySet()
+    DownloadReaderType.Pdf -> setOf("application/pdf", "application/octet-stream")
+    DownloadReaderType.Comic -> setOf(
+        "application/vnd.comicbook+zip",
+        "application/x-cbz",
+        "application/zip",
+        "application/vnd.comicbook-rar",
+        "application/x-cbr",
+        "application/vnd.rar",
+        "application/octet-stream",
+    )
+    DownloadReaderType.Audio -> setOf(
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/mp4",
+        "audio/x-m4b",
+        "audio/x-m4a",
+        "audio/ogg",
+        "audio/flac",
+        "audio/opus",
+        "audio/wav",
+        "audio/x-wav",
+        "application/octet-stream",
+    )
 }
 
 fun parseDownloadReaderType(value: String): DownloadReaderType = when (value.trim().lowercase()) {
@@ -353,19 +360,4 @@ fun parseDownloadReaderType(value: String): DownloadReaderType = when (value.tri
     "comic" -> DownloadReaderType.Comic
     "audio" -> DownloadReaderType.Audio
     else -> throw IllegalArgumentException("Unsupported reader type")
-}
-
-fun parseDownloadMediaKind(value: String): DownloadMediaKind = when (value.trim().uppercase()) {
-    "EBOOK" -> DownloadMediaKind.Ebook
-    "COMIC" -> DownloadMediaKind.Comic
-    "AUDIOBOOK" -> DownloadMediaKind.Audiobook
-    else -> throw IllegalArgumentException("Unsupported media kind")
-}
-
-private fun DownloadMediaKind.isCompatibleWith(readerType: DownloadReaderType): Boolean = when (readerType) {
-    DownloadReaderType.Reflowable,
-    DownloadReaderType.Pdf,
-    -> this == DownloadMediaKind.Ebook
-    DownloadReaderType.Comic -> this == DownloadMediaKind.Comic
-    DownloadReaderType.Audio -> this == DownloadMediaKind.Audiobook
 }

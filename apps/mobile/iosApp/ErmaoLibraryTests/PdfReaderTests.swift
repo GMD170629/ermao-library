@@ -29,10 +29,10 @@ final class PdfReaderTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = IosPdfPageCountStore(defaults: defaults)
-        store.save(pageCount: 7, sourceID: "volume-pdf")
+        store.save(pageCount: 7, resourceID: "resource-pdf")
 
-        XCTAssertEqual(store.load(sourceID: "volume-pdf"), 7)
-        XCTAssertNil(store.load(sourceID: "another-volume"))
+        XCTAssertEqual(store.load(resourceID: "resource-pdf"), 7)
+        XCTAssertNil(store.load(resourceID: "another-resource"))
     }
 
     func testRangePolicyAlignsMergesAndCapsRequests() throws {
@@ -88,12 +88,12 @@ final class PdfReaderTests: XCTestCase {
             authorizationVersion: authorizationVersion
         )
         return ErmaoShared.RemoteByteRangeReaderSource(
-            sourceId: "volume-pdf",
+            resourceId: "resource-pdf",
             displayTitle: "PDF",
-            workId: "work-pdf",
-            volumeId: "volume-pdf",
+            bookId: "work-pdf",
+            assetId: "asset-pdf",
             namespace: namespace,
-            apiPath: "/api/volumes/volume-pdf/file",
+            apiPath: "/api/assets/asset-pdf",
             expectedSizeBytes: 2 * IosPdfRangePolicy.chunkBytes
         )
     }

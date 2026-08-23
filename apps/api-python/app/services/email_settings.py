@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from email_validator import EmailNotValidError, validate_email
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.modules.system.infrastructure.settings import (
@@ -58,16 +57,7 @@ class PreparedEmailSettingsUpdate:
     changed_keys: tuple[str, ...]
 
 
-def _has_settings_table(db: Session) -> bool:
-    try:
-        return "SystemSetting" in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _load_values(db: Session) -> dict[str, Any]:
-    if not _has_settings_table(db):
-        return {}
     keys = list(SETTING_KEYS.values())
     existing = existing_setting_keys(db, keys)
     if not existing:
@@ -176,8 +166,10 @@ def public_email_settings(db: Session) -> dict[str, Any]:
 
 def candidate_email_settings(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     current = get_email_settings(db, include_password=True)
-    smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
-    kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}
+    smtp_value = payload.get("smtp")
+    smtp: dict[str, Any] = smtp_value if isinstance(smtp_value, dict) else {}
+    kindle_value = payload.get("kindle")
+    kindle: dict[str, Any] = kindle_value if isinstance(kindle_value, dict) else {}
     mapping = {
         "host": smtp.get("host", current["host"]),
         "port": smtp.get("port", current["port"]),
@@ -197,11 +189,11 @@ def candidate_email_settings(db: Session, payload: dict[str, Any]) -> dict[str, 
 def prepare_email_settings_update(
     db: Session, payload: dict[str, Any]
 ) -> PreparedEmailSettingsUpdate:
-    if not _has_settings_table(db):
-        raise EmailSettingsError("系统设置表尚未初始化")
     normalized = candidate_email_settings(db, payload)
-    smtp = payload.get("smtp") if isinstance(payload.get("smtp"), dict) else {}
-    kindle = payload.get("kindle") if isinstance(payload.get("kindle"), dict) else {}
+    smtp_value = payload.get("smtp")
+    smtp: dict[str, Any] = smtp_value if isinstance(smtp_value, dict) else {}
+    kindle_value = payload.get("kindle")
+    kindle: dict[str, Any] = kindle_value if isinstance(kindle_value, dict) else {}
     supplied: dict[str, Any] = {}
     for key in (
         "host",
@@ -221,9 +213,8 @@ def prepare_email_settings_update(
 
     changed_keys = list(supplied.keys())
     clear_password = payload.get("clearSmtpPassword") is True
-    if clear_password:
-        if SMTP_PASSWORD_KEY not in changed_keys:
-            changed_keys.append(SMTP_PASSWORD_KEY)
+    if clear_password and SMTP_PASSWORD_KEY not in changed_keys:
+        changed_keys.append(SMTP_PASSWORD_KEY)
 
     return PreparedEmailSettingsUpdate(
         supplied=supplied,

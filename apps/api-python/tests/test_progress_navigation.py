@@ -1,3 +1,5 @@
+import json
+
 from app.modules.reader.public import (
     progress_navigation,
     progress_percent_with_navigation,
@@ -10,11 +12,40 @@ ANCHORED_UNITS = [
 ]
 
 
-def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
-    progress = {
-        "percent": 12,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"text/all.xhtml","type":"application/xhtml+xml","locations":{"fragments":["chapter-2"]}}}',
+def _readium_progress(
+    *,
+    href: str,
+    platform: str = "web",
+    locations: dict[str, object] | None = None,
+    media_type: str = "application/xhtml+xml",
+    percent: float = 0,
+) -> dict[str, object]:
+    return {
+        "percent": percent,
+        "locationJson": json.dumps(
+            {
+                "kind": "reflowable",
+                "engineLocator": {
+                    "engine": "readium",
+                    "platform": platform,
+                    "version": "readium-test:1",
+                    "payload": {
+                        "href": href,
+                        "type": media_type,
+                        "locations": locations or {"cssSelector": "#body"},
+                    },
+                },
+            }
+        ),
     }
+
+
+def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource():
+    progress = _readium_progress(
+        href="Text/all.xhtml",
+        locations={"fragments": ["chapter-2"]},
+        percent=12,
+    )
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 
@@ -24,10 +55,12 @@ def test_progress_navigation_preserves_exact_fragment_for_shared_xhtml_resource(
 
 
 def test_progress_navigation_projects_exact_readium_location_for_chapter_detail():
-    progress = {
-        "percent": 0.2,
-        "locationJson": '{"engine":"readium","platform":"android","version":"readium-kotlin:3.3.0","publication":{"originalFileHash":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","parser":"shuku-txt:1","normalization":"shuku-txt-v1"},"payload":{"href":"txt-section:9","type":"application/xhtml+xml","locations":{"cssSelector":"#p-9"},"text":{"highlight":"第9章"}}}',
-    }
+    progress = _readium_progress(
+        href="txt-section:9",
+        platform="android",
+        locations={"cssSelector": "#p-9", "position": 9},
+        percent=0.2,
+    )
     units = [
         {
             "id": f"unit-{index}",
@@ -49,10 +82,7 @@ def test_progress_navigation_projects_exact_readium_location_for_chapter_detail(
 
 
 def test_progress_navigation_does_not_guess_ambiguous_resource_only_href():
-    progress = {
-        "percent": 0,
-        "locationJson": '{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","publication":{"originalFileHash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
-    }
+    progress = _readium_progress(href="Text/all.xhtml", platform="ios")
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 
@@ -72,10 +102,11 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_from_unmatched_exact
         }
         for index in range(38)
     ]
-    progress = {
-        "percent": 11.201454819672687,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","parser":"libmobi:0.12@test","normalization":"ermao-mobi-core-v1+shuku-locator-dom-v2"},"payload":{"href":"missing.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#missing"}}}',
-    }
+    progress = _readium_progress(
+        href="missing.xhtml",
+        locations={"cssSelector": "#missing"},
+        percent=11.201454819672687,
+    )
 
     navigation = progress_navigation(progress, units)
 
@@ -88,7 +119,13 @@ def test_progress_navigation_does_not_estimate_mobi_chapter_from_unmatched_exact
 def test_progress_navigation_does_not_accept_non_readium_location_shape():
     progress = {
         "percent": 42.5,
-        "locationJson": '{"type":"reflowable","format":"epub","legacyRenderer":{"toc":{"navigationKey":"epub:chapter-2","index":1,"title":"Exact chapter"}}}',
+        "locationJson": json.dumps(
+            {
+                "type": "reflowable",
+                "format": "epub",
+                "legacyRenderer": {"toc": {"index": 1, "title": "Exact chapter"}},
+            }
+        ),
     }
     units = [
         {**unit, "navigationKey": f"epub:chapter-{index + 1}"}
@@ -110,7 +147,9 @@ def test_progress_navigation_ignores_removed_legacy_extra_fields():
     progress = {
         "percent": 50,
         "extra": '{"navigationKey":"epub:chapter-2","navigationFingerprint":"old"}',
-        "locationJson": '{"type":"reflowable","format":"epub","progression":0.5}',
+        "locationJson": json.dumps(
+            {"type": "reflowable", "format": "epub", "progression": 0.5}
+        ),
     }
 
     navigation = progress_navigation(progress, units)
@@ -120,10 +159,11 @@ def test_progress_navigation_ignores_removed_legacy_extra_fields():
 
 
 def test_progress_navigation_does_not_override_unmatched_href_with_percent():
-    progress = {
-        "percent": 50,
-        "locationJson": '{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","publication":{"originalFileHash":"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"payload":{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#body"}}}',
-    }
+    progress = _readium_progress(
+        href="Text/all.xhtml",
+        locations={"cssSelector": "#body"},
+        percent=50,
+    )
 
     navigation = progress_navigation(progress, ANCHORED_UNITS)
 
@@ -132,10 +172,11 @@ def test_progress_navigation_does_not_override_unmatched_href_with_percent():
 
 
 def test_progress_navigation_uses_exact_reading_order_position_for_split_resources():
-    progress = {
-        "percent": 15.2,
-        "locationJson": '{"kind":"reflowable","publication":{"originalFileHash":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","parser":"epub-package:1","normalization":"shuku-epub-locator-dom-v2"},"engineLocator":{"engine":"readium","platform":"web","version":"readium-ts:2.8.2","payload":{"href":"text/part0008_split_001.html","locations":{"position":11,"progression":0.5}}}}',
-    }
+    progress = _readium_progress(
+        href="text/part0008_split_001.html",
+        locations={"position": 11, "progression": 0.5},
+        percent=15.2,
+    )
     units = [
         {
             "href": "text/part0003.html",
@@ -165,10 +206,11 @@ def test_progress_navigation_uses_exact_reading_order_position_for_split_resourc
 
 
 def test_progress_navigation_does_not_guess_between_anchors_at_one_position():
-    progress = {
-        "percent": 15.2,
-        "locationJson": '{"engine":"readium","payload":{"href":"text/all.xhtml","locations":{"position":4}}}',
-    }
+    progress = _readium_progress(
+        href="text/all.xhtml",
+        locations={"position": 4},
+        percent=15.2,
+    )
     units = [
         {
             "href": "text/all.xhtml#one",

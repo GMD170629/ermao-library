@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.local_metadata import (
@@ -27,8 +27,6 @@ def load_raw_local_metadata_priority_projection(
 ) -> RawLocalMetadataPriorityProjection:
     """Read only the persisted JSON column for transaction-external parsing."""
 
-    if not inspect(db.connection()).has_table(OrganizePolicy.__tablename__):
-        return RawLocalMetadataPriorityProjection(available=False)
     stored = db.scalar(
         select(OrganizePolicy.local_metadata_priority_json).where(
             OrganizePolicy.id == "default"
@@ -59,3 +57,16 @@ __all__ = [
     "load_raw_local_metadata_priority_projection",
     "prepare_local_metadata_priority",
 ]
+
+
+class SqlAlchemyLocalMetadataPriority:
+    def __init__(self, db: Session) -> None:
+        self._db = db
+
+    def load(self) -> tuple[LocalMetadataSource, ...]:
+        return prepare_local_metadata_priority(
+            load_raw_local_metadata_priority_projection(self._db)
+        )
+
+
+__all__.append("SqlAlchemyLocalMetadataPriority")

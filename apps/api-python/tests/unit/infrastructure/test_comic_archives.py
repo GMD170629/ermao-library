@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,54 @@ def _write_archive(tmp_path: Path, name: str, encoded: str) -> Path:
     return archive
 
 
+class _FakeRarInfo:
+    def __init__(self, filename: str, content: bytes) -> None:
+        self.filename = filename
+        self.file_size = len(content)
+        self.CRC = 0
+        self.flag_bits = 0
+        self.external_attr = 0
+        self.compress_size = len(content)
+        self._content = content
+
+    def is_dir(self) -> bool:
+        return False
+
+
+class _FakeRarFile:
+    def __init__(self, _path: Path) -> None:
+        self._entries = {
+            name: _FakeRarInfo(name, content)
+            for name, content in {
+                "favicon-16x16.png": b"png-16",
+                "favicon-32x32.png": b"png-32",
+            }.items()
+        }
+
+    def needs_password(self) -> bool:
+        return False
+
+    def volumelist(self) -> list[str]:
+        return ["sample.rar"]
+
+    def infolist(self) -> list[_FakeRarInfo]:
+        return list(self._entries.values())
+
+    def getinfo(self, name: str) -> _FakeRarInfo:
+        return self._entries[name]
+
+    def open(self, name: str, _mode: str = "r") -> BytesIO:
+        return BytesIO(self._entries[name]._content)
+
+    def close(self) -> None:
+        return None
+
+
+def _patch_rar_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rarfile, "RarFile", _FakeRarFile)
+    monkeypatch.setattr(rarfile, "tool_setup", lambda: None)
+
+
 @pytest.mark.parametrize(
     ("name", "encoded", "expected_format"),
     [
@@ -41,11 +90,13 @@ def _write_archive(tmp_path: Path, name: str, encoded: str) -> Path:
 )
 def test_parse_comic_archive_reuses_existing_pipeline_for_rar(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     name: str,
     encoded: str,
     expected_format: str,
 ) -> None:
     archive = _write_archive(tmp_path, name, encoded)
+    _patch_rar_backend(monkeypatch)
 
     parsed = inspect_comic_archive(archive)
 
@@ -92,8 +143,10 @@ def test_comic_info_accepts_decorated_current_volume_numbers(
 def test_rar_page_stream_reuses_existing_original_range_and_data_saver_paths(
     tmp_path: Path,
     test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     archive_path = _write_archive(tmp_path, "sample.cbr", _RAR4_COMIC)
+    _patch_rar_backend(monkeypatch)
     with open_comic_archive(archive_path) as archive:
         expected = archive.read("favicon-32x32.png")
     app = FastAPI()

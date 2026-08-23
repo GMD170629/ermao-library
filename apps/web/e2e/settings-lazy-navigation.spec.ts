@@ -46,14 +46,8 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { providers: [], pipelines: [] } } });
       return;
     }
-    if (pathname.endsWith('/api/library/duplicates')) {
-      const duplicatePage = Math.max(1, Number(url.searchParams.get('page') ?? 1));
-      counts[`duplicates-page-${duplicatePage}`] = (counts[`duplicates-page-${duplicatePage}`] ?? 0) + 1;
-      await route.fulfill({ json: { ok: true, data: { groups: [], page: duplicatePage, pageSize: 20, total: 21, totalPages: 2 } } });
-      return;
-    }
-    if (pathname.endsWith('/api/library/categories')) {
-      await route.fulfill({ json: { ok: true, data: { categories: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
+    if (pathname.endsWith('/api/library/facets')) {
+      await route.fulfill({ json: { ok: true, data: { facets: [], page: 1, pageSize: 20, total: 0, totalPages: 1 } } });
       return;
     }
     if (pathname.endsWith('/api/organize/policy')) {
@@ -96,61 +90,17 @@ async function mockSettingsApi(page: Page, locale: 'zh-CN' | 'en-US' = 'zh-CN') 
       await route.fulfill({ json: { ok: true, data: { tasks: [], total: 0 } } });
       return;
     }
-    if (pathname.endsWith('/api/import-tasks/clear')) {
-      await route.fulfill({
-        status: 202,
-        json: {
-          ok: true,
-          data: {
-            created: true,
-            operation: {
-              id: 'queue-clear',
-              queueName: 'import',
-              action: 'clear',
-              status: 'requested',
-              messageCode: 'queue.clear.requested',
-              requestedAt: '2026-07-29T00:00:00Z',
-              startedAt: null,
-              finishedAt: null,
-              updatedAt: '2026-07-29T00:00:00Z'
-            }
-          }
-        }
-      });
+    if (pathname.endsWith('/api/libraries/library-1/import-tasks')) {
+      await route.fulfill({ json: { ok: true, data: { tasks: [], completed: 0, failed: 0, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
       return;
     }
-    if (pathname.endsWith('/api/system/queue-operations/queue-clear')) {
-      await route.fulfill({
-        json: {
-          ok: true,
-          data: {
-            operation: {
-              id: 'queue-clear',
-              queueName: 'import',
-              action: 'clear',
-              status: 'completed',
-              messageCode: 'queue.clear.completed',
-              requestedAt: '2026-07-29T00:00:00Z',
-              startedAt: '2026-07-29T00:00:01Z',
-              finishedAt: '2026-07-29T00:00:02Z',
-              updatedAt: '2026-07-29T00:00:02Z'
-            }
-          }
-        }
-      });
-      return;
-    }
-    if (pathname.endsWith('/api/import-tasks')) {
-      await route.fulfill({ json: { ok: true, data: { tasks: [], summary: { completed: 0, failed: 0 }, page: 1, pageSize: 10, total: 0, totalPages: 1 } } });
-      return;
-    }
-    if (pathname.endsWith('/api/monitor-folders/tree')) {
+    if (pathname.endsWith('/api/libraries/tree')) {
       const requestedPath = url.searchParams.get('path');
-      await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/monitor' ? { name: 'monitor', path: '/monitor', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'monitor', path: '/monitor', readable: true }] }, monitorRoot: null } } });
+      await route.fulfill({ json: { ok: true, data: { node: requestedPath === '/library' ? { name: 'library', path: '/library', readable: true, children: [] } : { name: '/', path: '/', readable: true, children: [{ name: 'library', path: '/library', readable: true }] } } } });
       return;
     }
-    if (pathname.endsWith('/api/monitor-folders')) {
-      await route.fulfill({ json: { ok: true, data: { folders: [] } } });
+    if (pathname.endsWith('/api/libraries')) {
+      await route.fulfill({ json: { ok: true, data: { libraries: [{ id: 'library-1', name: '主书库', rootPath: '/library', enabled: true }] } } });
       return;
     }
     if (pathname.endsWith('/api/system-settings')) {
@@ -202,19 +152,14 @@ test('settings navigation keeps session and shelves stable while tabs load on de
   const initialAuthRequests = requestCount(counts, '/api/auth/me');
   const initialShelfRequests = requestCount(counts, '/api/shelves');
   expect(requestCount(counts, '/api/metadata/providers')).toBe(0);
-  expect(requestCount(counts, '/api/library/duplicates')).toBe(0);
-  expect(requestCount(counts, '/api/library/categories')).toBe(0);
+  expect(requestCount(counts, '/api/library/facets')).toBe(0);
   expect(requestCount(counts, '/api/organize/policy')).toBe(0);
   expect(requestCount(counts, '/api/organize/candidates')).toBe(0);
 
   await page.locator('a[href="/settings/organize?tab=providers"]').click();
   await expect.poll(() => requestCount(counts, '/api/metadata/providers')).toBeGreaterThan(0);
-  await page.locator('a[href="/settings/organize?tab=duplicates"]').click();
-  await expect.poll(() => requestCount(counts, '/api/library/duplicates')).toBeGreaterThan(0);
-  await page.getByRole('button', { name: '下一页' }).click();
-  await expect.poll(() => counts['duplicates-page-2'] ?? 0).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=categories"]').click();
-  await expect.poll(() => requestCount(counts, '/api/library/categories')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/library/facets')).toBeGreaterThan(0);
   await page.locator('a[href="/settings/organize?tab=recognition"]').click();
   await expect.poll(() => requestCount(counts, '/api/organize/policy')).toBeGreaterThan(0);
   await expect.poll(() => requestCount(counts, '/api/organize/candidates')).toBeGreaterThan(0);
@@ -261,86 +206,64 @@ test('settings navigation keeps session and shelves stable while tabs load on de
 test('library import sections fetch only when their tab mounts and refresh after remount', async ({ page }) => {
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');
-  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(0);
-  const initialImportTaskRequests = requestCount(counts, '/api/import-tasks');
-  expect(requestCount(counts, '/api/monitor-folders/tree')).toBe(0);
-  expect(requestCount(counts, '/api/monitor-folders')).toBe(0);
+  await expect.poll(() => requestCount(counts, '/api/libraries/library-1/import-tasks')).toBeGreaterThan(0);
+  const initialImportTaskRequests = requestCount(counts, '/api/libraries/library-1/import-tasks');
+  expect(requestCount(counts, '/api/libraries/tree')).toBe(0);
+  expect(requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   expect(requestCount(counts, '/api/system-settings')).toBe(0);
 
   await page.getByRole('tab', { name: '文件管理' }).click();
-  await expect.poll(() => requestCount(counts, '/api/monitor-folders/tree')).toBeGreaterThan(0);
-  await page.getByRole('tab', { name: '监控文件夹' }).click();
-  await expect.poll(() => requestCount(counts, '/api/monitor-folders')).toBeGreaterThan(0);
+  await expect.poll(() => requestCount(counts, '/api/libraries/tree')).toBeGreaterThan(0);
+  await page.getByRole('tab', { name: '书库' }).click();
+  await expect.poll(() => requestCount(counts, '/api/libraries')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
   await page.getByRole('tab', { name: '导入记录' }).click();
-  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
+  await expect.poll(() => requestCount(counts, '/api/libraries/library-1/import-tasks')).toBeGreaterThan(initialImportTaskRequests);
 });
 
-test('new monitor folder shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
+test('new library shows expanded scan rules with a 10 KB minimum by default', async ({ page }) => {
   await page.goto('/settings/library');
   await page.getByRole('tab', { name: '文件管理' }).click();
-  await page.getByRole('tab', { name: '监控文件夹' }).click();
-  await page.getByRole('button', { name: '添加文件夹' }).click();
+  await page.getByRole('tab', { name: '书库' }).click();
+  await page.getByRole('button', { name: '新增书库' }).click();
 
-  const folderPath = page.getByRole('combobox', { name: '监控文件夹路径' });
-  await folderPath.fill('/monitor');
+  const folderPath = page.getByRole('combobox', { name: '书库路径' });
+  await folderPath.fill('/library');
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   const directoryTree = page.getByRole('tree');
   await expect(directoryTree.getByRole('button', { name: '/', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'monitor', exact: true }).click();
-  await expect(folderPath).toHaveValue('/monitor');
+  await page.getByRole('button', { name: 'library', exact: true }).click();
+  await expect(folderPath).toHaveValue('/library');
 
   const scanRules = page.getByRole('button', { name: /扫描规则/ });
   await expect(scanRules).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('spinbutton', { name: '最小文件大小 KB' })).toHaveValue('10');
 });
 
-test('library import queue clear confirms, polls, and refreshes only after completion', async ({ page }) => {
-  const counts = await mockSettingsApi(page);
-  await page.goto('/settings/library');
-
-  const clearButton = page.getByRole('button', { name: '清理导入队列' });
-  await clearButton.click();
-  const dialog = page.getByRole('dialog', { name: '清理导入队列？' });
-  await expect(dialog).toContainText('只删除队列记录，不会删除源文件、生成文件或已入库书籍');
-  await dialog.getByRole('button', { name: '取消' }).click();
-  expect(requestCount(counts, 'POST /api/import-tasks/clear')).toBe(0);
-
-  await clearButton.click();
-  await page.getByRole('dialog', { name: '清理导入队列？' }).getByRole('button', { name: '确认清理' }).click();
-
-  await expect.poll(() => requestCount(counts, 'POST /api/import-tasks/clear')).toBe(1);
-  await expect.poll(() => requestCount(counts, 'GET /api/system/queue-operations/queue-clear')).toBe(1);
-  await expect(page.getByText('导入队列已清理', { exact: true }).first()).toBeVisible();
-  await expect.poll(() => requestCount(counts, '/api/import-tasks')).toBeGreaterThan(1);
-});
-
-test('library import preferences save after editing the stability check time', async ({ page }) => {
+test('library import preferences save after editing ignore patterns', async ({ page }) => {
   const counts = await mockSettingsApi(page);
   await page.goto('/settings/library');
   await page.getByRole('tab', { name: '偏好设置' }).click();
   await expect.poll(() => requestCount(counts, '/api/system-settings')).toBeGreaterThan(0);
 
-  const checkTime = page.getByRole('spinbutton', { name: '检查时间' });
-  const stabilitySwitch = page.getByRole('switch', { name: '导入时检查文件稳定性' });
-  await expect(stabilitySwitch).not.toBeChecked();
-  await stabilitySwitch.click();
-  await checkTime.fill('2.0');
+  const ignorePatterns = page.locator('textarea');
+  await ignorePatterns.fill('*.tmp');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
   await page.getByRole('button', { name: '保存偏好' }).click();
 
   await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(1);
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 
-  await checkTime.fill('3.5');
+  await ignorePatterns.fill('*.part');
   await page.getByRole('button', { name: '保存偏好' }).click();
   await expect.poll(() => requestCount(counts, 'PUT /api/system-settings')).toBe(2);
+  await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 
-  await stabilitySwitch.click();
+  await ignorePatterns.fill('*.cache');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeEnabled();
   await page.getByRole('button', { name: '撤销更改' }).click();
-  await expect(stabilitySwitch).toBeChecked();
+  await expect(ignorePatterns).toHaveValue('*.part');
   await expect(page.getByRole('button', { name: '保存偏好' })).toBeDisabled();
 });
 

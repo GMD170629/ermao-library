@@ -13,7 +13,7 @@ services:
       - "${wizard_port:?Web 访问端口未配置}:3000"
     volumes:
       - "${TRIM_PKGVAR}/storage:/app/storage"
-      - "${TRIM_DATA_SHARE_PATHS}:/monitor"
+      - "${TRIM_DATA_SHARE_PATHS}:/libraries/books"
     command: ["./scripts/start-unified-app.sh"]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]

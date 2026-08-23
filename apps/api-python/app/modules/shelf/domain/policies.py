@@ -21,13 +21,13 @@ class ShelfKind(StrEnum):
 def validate_shelf_content(
     *,
     kind: ShelfKind,
-    work_ids: tuple[str, ...],
+    book_ids: tuple[str, ...],
     has_smart_rules: bool,
 ) -> None:
     if kind is not ShelfKind.COLLECTION:
         return
-    if work_ids:
-        raise ShelfCollectionPolicyError("COLLECTION_CANNOT_CONTAIN_WORKS")
+    if book_ids:
+        raise ShelfCollectionPolicyError("COLLECTION_CANNOT_CONTAIN_BOOKS")
     if has_smart_rules:
         raise ShelfCollectionPolicyError("COLLECTION_CANNOT_HAVE_RULES")
 

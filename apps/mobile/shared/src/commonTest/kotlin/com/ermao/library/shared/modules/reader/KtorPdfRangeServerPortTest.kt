@@ -33,7 +33,7 @@ class KtorPdfRangeServerPortTest {
     fun validatesHeadAndReadsOnlyAnExactPartialResponse() = runBlocking {
         val requestedBytes = byteArrayOf(4, 5, 6, 7)
         val port = port { request ->
-            assertEquals("/api/volumes/volume-1/file", request.url.encodedPath)
+            assertEquals("/api/assets/asset-1", request.url.encodedPath)
             when (request.method.value) {
                 "HEAD" -> respond(
                     content = byteArrayOf(),
@@ -115,12 +115,12 @@ class KtorPdfRangeServerPortTest {
     )
 
     private fun source() = RemoteByteRangeReaderSource(
-        sourceId = "volume-1",
+        resourceId = "resource-1",
         displayTitle = "PDF",
-        workId = "work-1",
-        volumeId = "volume-1",
+        bookId = "book-1",
+        assetId = "asset-1",
         namespace = ReaderSyncNamespace("server-1", "user-1", 3),
-        apiPath = "/api/volumes/volume-1/file",
+        apiPath = "/api/assets/asset-1",
         expectedSizeBytes = FILE_SIZE,
     )
 

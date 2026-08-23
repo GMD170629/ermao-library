@@ -8,6 +8,7 @@ from time import time_ns
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Request
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
@@ -23,7 +24,6 @@ from app.bootstrap.download import (
 from app.bootstrap.download import (
     list_download_tasks as list_download_tasks_query,
 )
-from app.bootstrap.imports import import_http_store
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
@@ -34,7 +34,6 @@ from app.modules.download.presentation.schemas import (
     DownloadTasksResponse,
     UpdateDownloadTaskRequest,
 )
-from app.modules.download.presentation.sources import router as sources_router
 from app.modules.download.public import CreateDownloadTask, UpdateDownloadTask
 from app.modules.imports.public import (
     target_directory_from_path as _target_directory_from_path,
@@ -43,23 +42,13 @@ from app.schemas.responses import fail, ok
 from app.services.download_executor import execute_download_task
 
 router = APIRouter(tags=["download"], route_class=TypedContractRoute)
-router.include_router(sources_router)
 
 
 def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
 
 
-def _has_table(db: Session, table: str) -> bool:
-    from sqlalchemy import inspect
-
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
-def _enabled_monitor_folder_for_path(
+def _enabled_library_for_path(
     folders: tuple[dict[str, Any], ...],
     target: Path,
 ) -> dict[str, Any] | None:
@@ -79,12 +68,10 @@ def _enabled_monitor_folder_for_path(
     return None
 
 
-def _load_enabled_monitor_folders(db: Session) -> tuple[dict[str, Any], ...]:
-    folders = (
-        tuple(import_http_store.list_enabled_monitor_folder_rows(db))
-        if _has_table(db, "MonitorFolder")
-        else ()
-    )
+def _load_enabled_libraries(db: Session) -> tuple[dict[str, Any], ...]:
+    from app.bootstrap.download import list_enabled_libraries
+
+    folders = tuple(list_enabled_libraries(db))
     db.close()
     return folders
 
@@ -96,7 +83,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except Exception:
+    except ValueError:
         return fallback
 
 
@@ -104,19 +91,19 @@ def _json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-@router.get("/download-tasks")
+@router.get("/download-tasks", response_model=DownloadTasksResponse)
 def list_download_tasks(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DownloadTasksResponse:
+) -> DownloadTasksResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     tasks = [
         task.to_legacy_dict() for task in list_download_tasks_query(db, limit=1000)
     ]
-    folders = _load_enabled_monitor_folders(db)
+    folders = _load_enabled_libraries(db)
     return ok(
         {
             "tasks": [
@@ -126,7 +113,7 @@ def list_download_tasks(
                         task.get("remoteRef"), task.get("remoteRef")
                     ),
                     "sourceName": None,
-                    "autoImport": _enabled_monitor_folder_for_path(
+                    "autoImport": _enabled_library_for_path(
                         folders, Path(str(task.get("savePath") or ""))
                     )
                     is not None,
@@ -137,13 +124,13 @@ def list_download_tasks(
     )
 
 
-@router.post("/download-tasks")
+@router.post("/download-tasks", response_model=DownloadTaskResponse)
 async def create_download_task(
     request: Request,
     payload: Annotated[CreateDownloadTaskRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DownloadTaskResponse:
+) -> DownloadTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -157,6 +144,10 @@ async def create_download_task(
     except ValueError as exc:
         return fail(str(exc), status_code=400)
     save_path = str(target_dir)
+    progress_value = values.get("progress")
+    progress = (
+        float(progress_value) if isinstance(progress_value, (int, float, str)) else 0.0
+    )
     command = CreateDownloadTask(
         id=f"py_{time_ns()}",
         source_id=str(values["sourceId"])
@@ -177,9 +168,7 @@ async def create_download_task(
         error_message=str(values["errorMessage"])
         if values.get("errorMessage") is not None
         else None,
-        progress=float(
-            values.get("progress") if values.get("progress") is not None else 0
-        ),
+        progress=progress,
     )
     prepared_event = prepare_system_event(
         level="info",
@@ -198,24 +187,23 @@ async def create_download_task(
         last_target_path=save_path,
         event=prepared_event,
     ).to_legacy_dict()
-    folders = _load_enabled_monitor_folders(db)
+    folders = _load_enabled_libraries(db)
     return ok(
         {
             "task": task,
-            "autoImport": _enabled_monitor_folder_for_path(folders, target_dir)
-            is not None,
+            "autoImport": _enabled_library_for_path(folders, target_dir) is not None,
         },
         status_code=201,
     )
 
 
-@router.get("/download-tasks/{task_id}")
+@router.get("/download-tasks/{task_id}", response_model=DownloadTaskResponse)
 def get_download_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DownloadTaskResponse:
+) -> DownloadTaskResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -227,13 +215,13 @@ def get_download_task(
     return ok({"task": task})
 
 
-@router.delete("/download-tasks/{task_id}")
+@router.delete("/download-tasks/{task_id}", response_model=DeletedDownloadTaskResponse)
 def delete_download_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedDownloadTaskResponse:
+) -> DeletedDownloadTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -256,14 +244,14 @@ def delete_download_task(
     return ok({"deleted": deleted, "id": task_id})
 
 
-@router.put("/download-tasks/{task_id}")
+@router.put("/download-tasks/{task_id}", response_model=DownloadTaskResponse)
 async def update_download_task(
     task_id: str,
     request: Request,
     payload: Annotated[UpdateDownloadTaskRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DownloadTaskResponse:
+) -> DownloadTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -340,16 +328,16 @@ async def update_download_task(
     return ok({"task": task})
 
 
-@router.post("/download-tasks/{task_id}/start")
-@router.post("/download-tasks/{task_id}/retry")
-@router.post("/download-tasks/{task_id}/cancel")
-@router.post("/download-tasks/{task_id}/import")
+@router.post("/download-tasks/{task_id}/start", response_model=DownloadTaskResponse)
+@router.post("/download-tasks/{task_id}/retry", response_model=DownloadTaskResponse)
+@router.post("/download-tasks/{task_id}/cancel", response_model=DownloadTaskResponse)
+@router.post("/download-tasks/{task_id}/import", response_model=DownloadTaskResponse)
 def mutate_download_task(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DownloadTaskResponse:
+) -> DownloadTaskResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -420,4 +408,4 @@ def mutate_download_task(
         )
         task = updated.to_legacy_dict() if updated is not None else task
         return ok({"task": task, "action": action})
-    return fail("下载文件会由监控文件夹自动识别入库，无需手动导入", status_code=400)
+    return fail("下载文件会由书库自动识别入库，无需手动导入", status_code=400)

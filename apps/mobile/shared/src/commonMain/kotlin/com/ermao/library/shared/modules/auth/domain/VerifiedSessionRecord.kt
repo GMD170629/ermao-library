@@ -14,7 +14,7 @@ data class VerifiedSessionRecord(
     val canManageSystem: Boolean,
     val allLibraryScopes: Boolean,
     val canViewManualImports: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val lastValidatedAtEpochMillis: Long,
     val avatarUrl: String? = null,
     val locale: String? = null,
@@ -35,7 +35,7 @@ data class VerifiedSessionRecord(
         isAdmin = isAdmin,
         canManageSystem = canManageSystem,
         allLibraryScopes = allLibraryScopes,
-        monitorFolderIds = monitorFolderIds.toSet(),
+        libraryIds = libraryIds.toSet(),
         canViewManualImports = canViewManualImports,
         authorizationVersion = authorizationVersion,
     )
@@ -59,7 +59,7 @@ data class VerifiedSessionRecord(
             canManageSystem = authorization.canManageSystem,
             allLibraryScopes = authorization.allLibraryScopes,
             canViewManualImports = authorization.canViewManualImports,
-            monitorFolderIds = authorization.monitorFolderIds.sorted(),
+            libraryIds = authorization.libraryIds.sorted(),
             lastValidatedAtEpochMillis = validatedAtEpochMillis,
         )
     }

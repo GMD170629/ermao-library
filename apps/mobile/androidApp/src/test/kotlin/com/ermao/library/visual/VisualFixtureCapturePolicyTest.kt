@@ -21,7 +21,7 @@ class VisualFixtureCapturePolicyTest {
     fun eightOverlayAndTwentyOrdinaryVariantsShareTheSameSystemBarPolicy() {
         val overlayScenarios = setOf(
             VisualFixtureScenario.LibraryFilter,
-            VisualFixtureScenario.WorkActions,
+            VisualFixtureScenario.BookActions,
         )
         val variants = VisualFixtureScenario.entries.flatMap { scenario ->
             VisualFixtureLocale.entries.flatMap { locale ->

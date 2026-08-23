@@ -9,14 +9,14 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class PreparedCoverPublication:
-    work_id: str
+    book_id: str
     temporary_path: Path
     final_path: Path
     stored_path: str
 
 
 class CoverPublicationGateway(Protocol):
-    def prepare(self, *, work_id: str, cover_url: str) -> PreparedCoverPublication:
+    def prepare(self, *, book_id: str, cover_url: str) -> PreparedCoverPublication:
         """Download and validate a cover without holding a database session."""
 
     def publish(self, prepared: PreparedCoverPublication) -> None:

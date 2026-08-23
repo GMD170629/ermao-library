@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. The system provides folder monitoring and uploads, source-format imports, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
+Ermao Books is a self-hosted digital library for individuals and families. It organizes ebooks, PDFs, comics, and audiobooks stored on a NAS, home server, or local drive. Library-root directory structure is the source of truth for works, versions, and volumes; the system provides scanning, metadata organization, online reading and listening, progress synchronization, OPDS, Send to Kindle, and data backup.
 
 The database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
 
@@ -15,11 +15,11 @@ The database, accounts, reading progress, and system settings remain on your own
 
 ### Library and Organization
 
-- Upload books or monitor multiple folders to discover and import new files automatically.
+- Configure independent library roots and scan new files in flat, volume, or audiobook layouts.
 - Search and filter by title, author, media type, format, tag, series, and reading status.
 - Organize books with custom shelves, smart shelves, reading statuses, and series.
-- Identify titles, authors, covers, chapters, and volumes automatically, with manual editing and intelligent metadata completion.
-- Detect duplicate files, alternate media editions, and consecutive volumes, with merge, split, transfer, and bulk organization actions.
+- Identify titles, authors, covers, and chapters automatically, with manual editing and metadata completion.
+- File and directory locations directly define Work, Version, and Volume; the system does not group, merge, or move structure by title similarity or metadata.
 - Review import progress and failure reasons, then retry, rescan, or clean up tasks in bulk.
 
 ### Reading and Listening
@@ -108,9 +108,10 @@ When startup finishes, open `http://your-server-address:3000`.
 | --- | --- | --- |
 | `WEB_PORT` | `3000` | Host port for Web access |
 | `PUID` / `PGID` | `1000` / `1000` | Host user and group used by the container process |
-| `STORAGE_PATH` | `./data/storage` | SQLite, derived files, covers, logs, and session secrets |
+| `STORAGE_PATH` | `./data/storage` | SQLite, covers, logs, and session secrets |
+| `LIBRARY_HOST_PATH` | `./library` | Default library root, mounted at `/libraries/books` in the container |
 
-Library directories are not configured through environment variables. Map each host library directly to its own container path, such as `/srv/books:/libraries/books` or `/srv/comics:/libraries/comics`, then select that path as a watched folder in the application path tree. Browser-upload destinations must also be writable and must be inside an enabled watched folder.
+Map each host library directly to its own container path, such as `/srv/books:/libraries/books` or `/srv/comics:/libraries/comics`, then add that path as a library root and select its organization mode. Browser-upload destinations must be writable, inside an enabled library root, and valid for that root's layout. See [Library Root Layout](docs/library-root-layout.md) for the complete contract.
 
 The user represented by `PUID` and `PGID` must be able to read and write application data and upload destinations. Read-only access is sufficient for an existing library used only for scanning and reading. Do not enter a host-only path that has not been mounted into the container.
 
@@ -128,8 +129,8 @@ Updating or recreating the container does not clear mounted data. For public Int
 ## First-Time Setup
 
 1. Open the application and follow the wizard to create the initial administrator account.
-2. Select the mounted and readable `/libraries/books` directory from the path tree, or configure it later under **Settings → Library Sources and Import**.
-3. Place books in the corresponding host directory, or upload files from **All Books**.
+2. Select the mounted and readable `/libraries/books` directory and choose a flat, volume, or audiobook layout, or configure it later under **Settings → Library Sources and Import**.
+3. Place books according to the selected layout, or upload them to a path that already satisfies that layout.
 4. Track parsing and library-ingestion progress in the import tasks, then open the library to read or listen.
 5. Configure Douban, Bangumi, or AI metadata providers under **Smart Organization** as needed.
 6. For Send to Kindle, configure SMTP and the Kindle email address under **Email and Kindle**.
@@ -186,13 +187,13 @@ flowchart LR
   G -->|"Pages and static assets"| W["Next.js :3001"]
   G -->|"/api/* and /opds/*"| A["FastAPI :8000"]
   A --> D["SQLite and persistent storage"]
-  K["Import and monitoring worker"] --> D
-  K --> L["Watched library directories"]
+  K["Library scan worker"] --> D
+  K --> L["Library roots"]
 ```
 
 - Next.js and FastAPI listen only inside the container and are routed through the gateway.
-- SQLite is currently the only database; the API initializes and upgrades the schema at startup.
-- The Python worker handles folder monitoring, import parsing, and persistent queue tasks.
+- SQLite is currently the only database; the API initializes the current schema baseline at startup.
+- The Python worker scans library roots, parses original files, and executes persistent queue tasks.
 - Original library directories and system storage are mounted separately for easier backup and migration.
 
 ## Technology Stack

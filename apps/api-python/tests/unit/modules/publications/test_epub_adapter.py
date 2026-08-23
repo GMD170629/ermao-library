@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import zipfile
 from pathlib import Path
 
@@ -16,11 +15,12 @@ from app.modules.publications.infrastructure.epub_adapter import EpubPublication
 
 def _source(path: Path) -> PublicationSource:
     return PublicationSource(
-        volume_id="epub-volume",
-        file_id="epub-file",
+        resource_id="epub-resource",
+        asset_id="epub-asset",
         source_format="epub",
         path=str(path),
-        full_hash=hashlib.sha256(path.read_bytes()).hexdigest(),
+        size_bytes=path.stat().st_size,
+        mtime_ms=int(path.stat().st_mtime * 1000),
         title="Fallback",
         author=None,
     )

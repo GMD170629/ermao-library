@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from app.modules.imports.application.audio_types import (
-    DISC_DIRECTORY_PATTERN,
     LEGACY_AUDIO_EXTS,
     MAX_AUDIO_BUNDLE_TRACKS,
     MAX_AUDIO_CHAPTERS,
@@ -27,11 +26,6 @@ from app.modules.imports.application.errors import (
     AudioTrackLimitExceededError,
 )
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
-from app.services.book_identity import (
-    UNKNOWN_AUTHOR,
-    normalize_identity_part,
-    recognize_book_identity_with_regex,
-)
 
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
@@ -50,51 +44,6 @@ MUTAGEN_TEXT_ENCODINGS = {
     2: "utf-16-be",
     3: "utf-8",
 }
-
-
-def read_audio_group_identity(path: str | Path) -> tuple[str | None, str | None]:
-    """Read only the tags needed by the watcher to prove bundle membership.
-
-    This intentionally avoids ffprobe and duration parsing: watcher events can
-    arrive while a large file is still being copied.  A missing/unreadable tag
-    is represented as ``None`` and never used as proof that unrelated files
-    belong to one book.
-    """
-
-    source = Path(path).expanduser().resolve()
-    if not source.is_file() or not is_supported_audio_file(source):
-        return None, None
-    try:
-        import mutagen  # type: ignore[import-not-found]
-
-        audio = mutagen.File(str(source), easy=False)
-    # Mutagen plugins may raise format-specific exceptions that do not share a
-    # stable public base class; this read-only probe boundary treats all as no tag evidence.
-    except Exception:  # noqa: BLE001
-        return None, None
-    if audio is None:
-        return None, None
-    values = _normalized_mutagen_tags(getattr(audio, "tags", None))
-    album = _clean_text(_first_tag(values, "album", "©alb", "talb"))
-    author = _clean_text(
-        _first_tag(
-            values,
-            "albumartist",
-            "album artist",
-            "aart",
-            "©art",
-            "artist",
-            "tpe1",
-            "tpe2",
-        )
-    )
-    return album.casefold() if album else None, author.casefold() if author else None
-
-
-def _directory_identity(path: Path) -> tuple[str, str | None, float | None]:
-    identity = recognize_book_identity_with_regex(f"{path.name}.epub")
-    author = identity.author if identity.author != UNKNOWN_AUTHOR else None
-    return identity.title.strip() or path.name, author, identity.volume_index
 
 
 class _AudioTrackCounter:
@@ -135,23 +84,11 @@ def _directory_audio_files(
     path: Path,
     counter: _AudioTrackCounter,
 ) -> list[Path]:
-    files = _direct_audio_files(path, counter)
-    for entry in _iter_directory_entries(path):
-        if not entry.is_dir(follow_symlinks=False) or not DISC_DIRECTORY_PATTERN.match(
-            entry.name.strip()
-        ):
-            continue
-        files.extend(_direct_audio_files(Path(entry.path), counter))
-    return sorted(dict.fromkeys(files), key=_natural_audio_key)
+    return sorted(_direct_audio_files(path, counter), key=_natural_audio_key)
 
 
 def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
-    """Resolve a single- or multi-volume audiobook directory.
-
-    Disc/CD directories are physical track groupings. Other child directories
-    become volumes only when the shared identity parser finds a volume number,
-    or when their normalized title contains the parent book title.
-    """
+    """Resolve direct audio files and child-volume directories without inference."""
 
     root = Path(path).expanduser().resolve()
     if root.is_file():
@@ -167,51 +104,32 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
         return None
 
     counter = _AudioTrackCounter(root)
-    root_title, root_author, _root_volume_index = _directory_identity(root)
     direct_files = _directory_audio_files(root, counter)
-    root_key = normalize_identity_part(root_title)
-    matched_volumes: list[AudioVolumeDirectory] = []
+    child_volumes: list[AudioVolumeDirectory] = []
     for entry in _iter_directory_entries(root):
         if not entry.is_dir(follow_symlinks=False):
             continue
         child = Path(entry.path)
-        if DISC_DIRECTORY_PATTERN.match(entry.name.strip()):
-            continue
-        child_title, child_author, volume_index = _directory_identity(child)
-        child_key = normalize_identity_part(child_title)
-        title_contains_parent = bool(
-            root_key and child_key and root_key != child_key and root_key in child_key
-        )
-        if volume_index is None and not title_contains_parent:
-            continue
         child_files = _directory_audio_files(child, counter)
         if not child_files:
             continue
-        matched_volumes.append(
+        child_volumes.append(
             AudioVolumeDirectory(
                 path=child.resolve(),
                 title=child.name,
-                volume_index=volume_index,
-                author=child_author,
+                volume_index=None,
+                author=None,
                 files=tuple(child_files),
             )
         )
 
-    if direct_files and matched_volumes:
+    if direct_files and child_volumes:
         raise ValueError(
             "有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试"
         )
-    if matched_volumes:
-        matched_volumes.sort(
-            key=lambda volume: (
-                volume.volume_index is None,
-                volume.volume_index
-                if volume.volume_index is not None
-                else float("inf"),
-                _natural_audio_key(volume.path),
-            )
-        )
-        volumes = tuple(matched_volumes)
+    if child_volumes:
+        child_volumes.sort(key=lambda volume: _natural_audio_key(volume.path))
+        volumes = tuple(child_volumes)
     elif direct_files:
         volumes = (
             AudioVolumeDirectory(
@@ -227,8 +145,8 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
 
     return AudioBundleStructure(
         root=root,
-        title=root_title,
-        author=root_author,
+        title=root.name,
+        author=None,
         volumes=volumes,
     )
 
@@ -236,35 +154,6 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
 def collect_audio_bundle_files(path: str | Path) -> list[Path]:
     structure = inspect_audio_bundle(path)
     return list(structure.files) if structure else []
-
-
-def audio_bundle_root(path: str | Path, monitor_root: str | Path | None = None) -> Path:
-    source = Path(path).expanduser().resolve()
-    if source.is_dir():
-        return source
-    parent = source.parent
-    if DISC_DIRECTORY_PATTERN.match(parent.name.strip()):
-        parent = parent.parent
-    configured_root = (
-        Path(monitor_root).expanduser().resolve() if monitor_root is not None else None
-    )
-    if configured_root is not None and parent == configured_root:
-        return parent
-    grandparent = parent.parent
-    if grandparent != parent and (
-        configured_root is None
-        or grandparent == configured_root
-        or configured_root in grandparent.parents
-    ):
-        root_title, _root_author, _root_volume = _directory_identity(grandparent)
-        child_title, _child_author, child_volume = _directory_identity(parent)
-        root_key = normalize_identity_part(root_title)
-        child_key = normalize_identity_part(child_title)
-        if child_volume is not None or bool(
-            root_key and child_key and root_key != child_key and root_key in child_key
-        ):
-            return grandparent
-    return parent
 
 
 def parse_audio_metadata(
@@ -318,13 +207,19 @@ def parse_audio_metadata(
             "无法读取音频时长，文件可能损坏或编码不受支持",
         )
 
+    raw_chapters = merged.get("chapters")
+    chapter_items = (
+        [item for item in raw_chapters if isinstance(item, dict)]
+        if isinstance(raw_chapters, list)
+        else []
+    )
     chapters = tuple(
         AudioChapterMetadata(
             title=str(item.get("title") or f"第 {index + 1} 章"),
             start_ms=max(0, int(item.get("start_ms") or 0)),
             end_ms=max(0, int(item.get("end_ms") or 0)),
         )
-        for index, item in enumerate(merged.get("chapters") or [])
+        for index, item in enumerate(chapter_items)
         if int(item.get("end_ms") or 0) > int(item.get("start_ms") or 0)
     )
     if len(chapters) > MAX_AUDIO_CHAPTERS:
@@ -332,6 +227,7 @@ def parse_audio_metadata(
             "AUDIO_METADATA_INVALID",
             f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常",
         )
+    raw_tags = merged.get("raw_tags")
     return AudioFileMetadata(
         path=source,
         title=_clean_text(merged.get("title")),
@@ -348,9 +244,7 @@ def parse_audio_metadata(
         series_name=_clean_text(merged.get("series_name")),
         volume_index=parse_structured_volume_index(merged.get("volume_index")),
         chapters=chapters,
-        raw_tags=merged.get("raw_tags")
-        if isinstance(merged.get("raw_tags"), dict)
-        else {},
+        raw_tags=raw_tags if isinstance(raw_tags, dict) else {},
         cover_data=merged.get("cover_data")
         if isinstance(merged.get("cover_data"), bytes)
         else None,
@@ -428,8 +322,9 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     for index, chapter in enumerate(payload.get("chapters") or []):
         if not isinstance(chapter, dict):
             continue
+        chapter_tags_value = chapter.get("tags")
         chapter_tags = (
-            chapter.get("tags") if isinstance(chapter.get("tags"), dict) else {}
+            chapter_tags_value if isinstance(chapter_tags_value, dict) else {}
         )
         start_ms = _seconds_to_ms(chapter.get("start_time"))
         end_ms = _seconds_to_ms(chapter.get("end_time"))
@@ -710,6 +605,8 @@ def _normalized_mutagen_tags(
 
 def _mutagen_declared_text_encoding(frame: Any) -> str | None:
     value = getattr(frame, "encoding", None)
+    if not isinstance(value, (str, int)):
+        return None
     try:
         return MUTAGEN_TEXT_ENCODINGS.get(int(value))
     except (TypeError, ValueError):

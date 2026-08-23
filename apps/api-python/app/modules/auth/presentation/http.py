@@ -27,7 +27,16 @@ from app.bootstrap.auth import (
     remove_password_reset_request,
 )
 from app.contracts.http import MessageError
-from app.contracts.http_errors import ErrorResponses
+from app.contracts.http_errors import (
+    BasicBadRequestError,
+    BasicConflictError,
+    BasicInternalError,
+    BasicNotFoundError,
+    BasicUnauthorizedError,
+    ErrorResponses,
+    PayloadTooLargeError,
+    SessionUnauthorizedError,
+)
 from app.core.auth import (
     delete_session_cookie,
     get_current_user,
@@ -65,11 +74,6 @@ from app.modules.auth.presentation.schemas import (
     AvatarFileResponse,
     AvatarUpdateDeferredBody,
     AvatarUpdateDeferredError,
-    BasicBadRequestError,
-    BasicConflictError,
-    BasicInternalError,
-    BasicNotFoundError,
-    BasicUnauthorizedError,
     CapabilitiesPayload,
     CapabilitiesResponse,
     LoggedOutPayload,
@@ -80,12 +84,10 @@ from app.modules.auth.presentation.schemas import (
     PasswordResetRequestPayload,
     PasswordResetRequestResponse,
     PasswordResetResponse,
-    PayloadTooLargeError,
     SessionPayload,
     SessionRefreshDeferredBody,
     SessionRefreshDeferredError,
     SessionResponse,
-    SessionUnauthorizedError,
     SetupPayload,
     SetupRequiredBody,
     SetupRequiredDetails,
@@ -251,8 +253,8 @@ def setup(
         )
     except IntegrityError:
         raise BasicConflictError(MessageError(message="系统已经完成初始化，请直接登录"))
-    user = db.get(User, user_id)
-    if user is None:
+    persisted_user = db.get(User, user_id)
+    if persisted_user is None:
         raise BasicInternalError(MessageError(message="账户创建失败"))
 
     response.headers["Cache-Control"] = "no-store"
@@ -267,7 +269,7 @@ def setup(
     set_session_cookie(response, token, user_session.expires_at, settings)
     return SetupResponse(
         data=SetupPayload.model_validate(
-            {"initialized": True, **_session_payload(db, user)}
+            {"initialized": True, **_session_payload(db, persisted_user)}
         )
     )
 

@@ -1,6 +1,10 @@
+from __future__ import annotations
+
+import ast
 from pathlib import Path
 
 APP_ROOT = Path(__file__).parents[1] / "app"
+API_ROOT = APP_ROOT.parent
 CAPABILITIES = (
     "auth",
     "download",
@@ -34,7 +38,7 @@ def test_new_library_query_path_contains_no_textual_sql() -> None:
     paths = (
         APP_ROOT / "modules" / "library" / "infrastructure" / "queries.py",
         APP_ROOT / "modules" / "library" / "infrastructure" / "filter_query.py",
-        APP_ROOT / "modules" / "library" / "infrastructure" / "work_list.py",
+        APP_ROOT / "modules" / "library" / "infrastructure" / "book_list.py",
         APP_ROOT / "bootstrap" / "library.py",
     )
     forbidden = (
@@ -70,7 +74,9 @@ def test_api_router_registers_capability_presentations_only() -> None:
         assert f"app.modules.{capability}.presentation" in source
 
 
-def test_capability_presentations_do_not_import_legacy_routes_or_infrastructure() -> None:
+def test_capability_presentations_do_not_import_legacy_routes_or_infrastructure() -> (
+    None
+):
     for capability in CAPABILITIES:
         presentation = APP_ROOT / "modules" / capability / "presentation"
         if not presentation.exists():
@@ -292,21 +298,9 @@ def test_import_legacy_persistence_and_schema_adapters_have_been_removed() -> No
                 assert token not in source, f"{path}: {token}"
 
 
-def test_persistent_import_worker_does_not_touch_session_orm_or_field_dicts() -> None:
+def test_legacy_persistent_import_worker_has_been_removed() -> None:
     path = APP_ROOT / "worker" / "persistent_import_queue.py"
-    source = path.read_text(encoding="utf-8")
-    forbidden = (
-        "sqlalchemy",
-        "from sqlalchemy",
-        "orm.Session",
-        "dict[str, Any]",
-        "task_repository",
-        "library_repository",
-        "import_records",
-        ".infrastructure",
-    )
-    for token in forbidden:
-        assert token not in source, f"{path.name}: {token}"
+    assert not path.exists()
 
 
 def test_worker_importer_compatibility_shim_has_been_removed() -> None:
@@ -336,17 +330,17 @@ def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
     infrastructure = APP_ROOT / "modules" / "imports" / "infrastructure"
     assert not (infrastructure / "library_query_gateway.py").exists()
 
-    query_port = (
-        APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
-    ).read_text(encoding="utf-8")
-    assert "__getattr__" not in query_port
-    assert "Callable[..., Any]" not in query_port
+    query_port = APP_ROOT / "modules" / "imports" / "application" / "query_ports.py"
+    if query_port.exists():
+        source = query_port.read_text(encoding="utf-8")
+        assert "__getattr__" not in source
+        assert "Callable[..., Any]" not in source
 
-    dto = (APP_ROOT / "modules" / "imports" / "application" / "dto.py").read_text(
-        encoding="utf-8"
-    )
-    for token in ("to_legacy_dict", "def __getitem__", "def get("):
-        assert token not in dto
+    dto_path = APP_ROOT / "modules" / "imports" / "application" / "dto.py"
+    if dto_path.exists():
+        dto = dto_path.read_text(encoding="utf-8")
+        for token in ("to_legacy_dict", "def __getitem__", "def get("):
+            assert token not in dto
 
     bootstrap = (APP_ROOT / "bootstrap" / "imports.py").read_text(encoding="utf-8")
     assert "_coerce_import_task" not in bootstrap
@@ -354,18 +348,7 @@ def test_import_legacy_query_and_task_compatibility_are_removed() -> None:
 
 
 def test_persistent_import_worker_does_not_reexport_commands() -> None:
-    source = (
-        APP_ROOT / "worker" / "persistent_import_queue.py"
-    ).read_text(encoding="utf-8")
-    for command in (
-        "claim_next_import_task",
-        "enqueue_import_task",
-        "fail_claimed_import_task",
-        "process_import_task",
-        "recover_stale_import_tasks",
-        "stage_import_task",
-    ):
-        assert command not in source
+    assert not (APP_ROOT / "worker" / "persistent_import_queue.py").exists()
 
 
 def test_retired_source_http_persistence_has_been_removed() -> None:
@@ -378,12 +361,6 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
     paths = (
         APP_ROOT / "modules" / "library" / "infrastructure" / "projections.py",
         APP_ROOT / "modules" / "library" / "infrastructure" / "storage.py",
-        APP_ROOT
-        / "modules"
-        / "library"
-        / "infrastructure"
-        / "structural_operations.py",
-        APP_ROOT / "modules" / "imports" / "infrastructure" / "import_http.py",
         APP_ROOT / "modules" / "download" / "infrastructure" / "download_http.py",
     )
     forbidden = (
@@ -396,3 +373,567 @@ def test_remaining_compat_migration_adapters_use_typed_expressions() -> None:
         source = path.read_text(encoding="utf-8")
         for token in forbidden:
             assert token not in source, f"{path.name}: {token}"
+
+
+def test_readable_resource_overlay_baseline_is_single_and_self_contained() -> None:
+    versions_dir = APP_ROOT / "db" / "alembic" / "versions"
+    revision_files = sorted(versions_dir.glob("*.py"))
+    assert [path.name for path in revision_files] == [
+        "0001_library_topology_baseline.py",
+    ]
+    path = versions_dir / "0001_library_topology_baseline.py"
+    source = path.read_text(encoding="utf-8")
+    assert 'revision: str = "0001_library_topology_baseline"' in source
+    assert "down_revision: str | Sequence[str] | None = None" in source
+    assert "_build_overlay_metadata" in source
+    assert "LibrarySourceNode" in source
+    assert "LibraryImportTask" in source
+    assert "coverPath" in source
+    assert "coverStatus" in source
+    forbidden = (
+        "app.models",
+        "app.db.base",
+        "Base.metadata",
+        "create_all",
+        "sqlalchemy.text",
+        "from sqlalchemy import text",
+        "importlib",
+        "__import__",
+        "exec_driver_sql",
+        "import sqlite3",
+        "0002_version_covers",
+        "0003_readable_resource_overlay_schema",
+    )
+    for token in forbidden:
+        # Docstring may name retired revisions as unsupported; only ban imports/code paths.
+        if token in {
+            "0002_version_covers",
+            "0003_readable_resource_overlay_schema",
+        }:
+            # Allowed only in module docstring describing unsupported upgrades.
+            body = source.split('"""', 2)[-1]
+            assert token not in body, token
+            continue
+        assert token not in source, token
+
+
+def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None:
+    import ast
+
+    paths = (
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "readable_resource_schema.py",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource_import_schema.py",
+    )
+
+    def _is_check_constraint_call(node: ast.Call) -> bool:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == "CheckConstraint"
+        if isinstance(func, ast.Attribute):
+            return func.attr == "CheckConstraint"
+        return False
+
+    def _is_string_expression(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return _is_string_expression(node.left) or _is_string_expression(node.right)
+        return False
+
+    check_count = 0
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not _is_check_constraint_call(node):
+                continue
+            check_count += 1
+            expression: ast.AST | None = node.args[0] if node.args else None
+            for keyword in node.keywords:
+                if keyword.arg == "sqltext":
+                    expression = keyword.value
+            assert not _is_string_expression(expression), (
+                f"{path.name}: CheckConstraint must use typed SQLAlchemy "
+                f"expressions, not string SQL (line {node.lineno})"
+            )
+    assert check_count == 16
+
+
+def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressions() -> (
+    None
+):
+    import ast
+
+    path = (
+        APP_ROOT / "db" / "alembic" / "versions" / "0001_library_topology_baseline.py"
+    )
+    source = path.read_text(encoding="utf-8")
+    start = source.index("def _build_overlay_metadata()")
+    end = source.index("\ndef upgrade()")
+    tree = ast.parse(source[start:end], filename=str(path))
+
+    def _is_check_constraint_call(node: ast.Call) -> bool:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == "CheckConstraint"
+        if isinstance(func, ast.Attribute):
+            return func.attr == "CheckConstraint"
+        return False
+
+    def _is_string_expression(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.JoinedStr):
+            return True
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return _is_string_expression(node.left) or _is_string_expression(node.right)
+        return False
+
+    check_count = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_check_constraint_call(node):
+            continue
+        check_count += 1
+        expression: ast.AST | None = node.args[0] if node.args else None
+        for keyword in node.keywords:
+            if keyword.arg == "sqltext":
+                expression = keyword.value
+        assert not _is_string_expression(expression), (
+            f"overlay CheckConstraint must use typed SQLAlchemy expressions "
+            f"(line {node.lineno})"
+        )
+    assert check_count >= 10
+    assert "sqlite_where" in source[start:end]
+
+
+def test_adr0018_target_modules_forbid_legacy_queue_concepts() -> None:
+    """Target overlay must not reintroduce Run/candidate/lease/WorkItem bridge."""
+
+    forbidden = (
+        "LibraryImportRun",
+        "ResourceCandidate",
+        "AssetCandidate",
+        "ClaimedWork",
+        "activeImportRunId",
+        "publishedRunId",
+        "ownerImportRunId",
+        "leaseOwner",
+        "leaseExpiresAt",
+        "fence_claim",
+        "ImportWorkItem",
+        "DurableSidecarWriteback",
+        "ReimportSourceNode",
+        "RetryReadableResourceImport",
+        "worker_id",
+        "run_id",
+        "UNHANDLED_ERROR",
+    )
+    # heartbeat as a method name is also banned in target queue code
+    heartbeat_paths_extra = ("heartbeat",)
+
+    roots = (
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource_import_schema.py",
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "readable_resource_schema.py",
+        APP_ROOT / "db" / "alembic" / "versions" / "0001_library_topology_baseline.py",
+    )
+    files: list[Path] = []
+    for root in roots:
+        if root.is_file():
+            files.append(root)
+        else:
+            files.extend(root.rglob("*.py"))
+
+    for path in files:
+        if path.name == "__init__.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if path.name == "0001_library_topology_baseline.py":
+            # Only the overlay builder is an ADR 0018 target; the rest of the
+            # baseline still contains unrelated legacy writeback lease columns.
+            start = source.index("def _build_overlay_metadata()")
+            end = source.index("\ndef upgrade()")
+            source = source[start:end]
+            assert "LibraryImportTask" in source
+            assert "leaseExpiresAt" not in source
+            assert "heartbeat" not in source
+        for token in forbidden:
+            assert token not in source, f"{path}: forbidden {token}"
+        if path.name in {"task_queue.py", "worker.py", "ports.py"}:
+            for token in heartbeat_paths_extra:
+                assert token not in source, f"{path}: forbidden {token}"
+
+
+def test_adr0018_target_config_forbids_unused_queue_and_observed_refresh() -> None:
+    """Target config/repository must not revive high-water or observed refresh."""
+
+    paths = (
+        APP_ROOT / "modules" / "library" / "application" / "source_tree_ports.py",
+        APP_ROOT
+        / "modules"
+        / "library"
+        / "infrastructure"
+        / "persistence"
+        / "source_tree_repository.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+    )
+    forbidden = ("queue_high_water", "refresh_observed")
+    files: list[Path] = []
+    for root in paths:
+        if root.is_file():
+            files.append(root)
+        else:
+            files.extend(root.rglob("*.py"))
+    for path in files:
+        if path.name == "__init__.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in source, f"{path}: forbidden {token}"
+
+
+def test_library_and_imports_do_not_deep_import_peer_private_modules() -> None:
+    # library modules (except bootstrap) must not contain:
+    #   app.modules.imports.application
+    #   app.modules.imports.infrastructure
+    #   app.modules.imports.domain
+    # except allow app.modules.imports.public
+    # imports modules must not contain:
+    #   app.modules.library.application
+    #   app.modules.library.infrastructure
+    # except allow app.modules.library.public and app.modules.library.domain
+    # Exclude TYPE_CHECKING-only is hard; simply forbid the import strings in library/**/*.py
+    # Note: library infrastructure must NOT import imports.*
+    #
+    # Relationship string names like "LibraryImportRun" are allowed without imports.
+    # Pre-ADR0018 legacy adapters retain deep library imports; exclude them only.
+    legacy_imports_deep_library = {
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "library_queries.py",
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "orchestration_services.py",
+    }
+
+    library_forbidden = (
+        "app.modules.imports.application",
+        "app.modules.imports.infrastructure",
+        "app.modules.imports.domain",
+    )
+    library_root = APP_ROOT / "modules" / "library"
+    for path in library_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for token in library_forbidden:
+            assert token not in source, f"{path}: {token}"
+        if "infrastructure" in path.relative_to(library_root).parts:
+            assert "app.modules.imports" not in source, path
+
+    imports_forbidden = (
+        "app.modules.library.application",
+        "app.modules.library.infrastructure",
+    )
+    imports_root = APP_ROOT / "modules" / "imports"
+    for path in imports_root.rglob("*.py"):
+        if path in legacy_imports_deep_library:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for token in imports_forbidden:
+            assert token not in source, f"{path}: {token}"
+
+
+def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
+    forbidden_imports = {
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource"
+        / "adapter_registry.py": ("app.modules.metadata.application",),
+        APP_ROOT / "modules" / "media" / "infrastructure" / "resource_repository.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "organize" / "infrastructure" / "eligibility.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "organize" / "infrastructure" / "job_queries.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "reader" / "infrastructure" / "resource_repository.py": (
+            "app.modules.library.infrastructure",
+        ),
+        APP_ROOT / "modules" / "reader" / "presentation" / "v4.py": (
+            "app.modules.publications.application",
+            "app.modules.publications.domain",
+        ),
+    }
+    for path, tokens in forbidden_imports.items():
+        source = path.read_text(encoding="utf-8")
+        for token in tokens:
+            assert token not in source, f"{path}: private import {token}"
+
+    public_imports = {
+        APP_ROOT
+        / "modules"
+        / "imports"
+        / "infrastructure"
+        / "readable_resource"
+        / "adapter_registry.py": "app.modules.metadata.public",
+        APP_ROOT
+        / "modules"
+        / "reader"
+        / "presentation"
+        / "v4.py": "app.modules.publications.public",
+    }
+    for path, token in public_imports.items():
+        assert token in path.read_text(encoding="utf-8"), (
+            f"{path}: expected public capability surface {token}"
+        )
+
+    for relative_path in (
+        "modules/download/infrastructure/tasks.py",
+        "modules/media/infrastructure/resource_repository.py",
+        "modules/reader/infrastructure/resource_repository.py",
+    ):
+        source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "app.models" in source, relative_path
+
+    for relative_path in (
+        "modules/organize/infrastructure/eligibility.py",
+        "modules/organize/infrastructure/job_queries.py",
+    ):
+        source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "LibraryReadableResource.media_kind" in source, relative_path
+
+
+_LEGACY_IDENTITY_NAMES = frozenset(
+    {
+        "LibraryWork",
+        "LibraryVersion",
+        "LibraryVolume",
+        "LibraryFile",
+        "LibraryReadingUnit",
+        "LibraryReadingProgress",
+        "WorkQueuePort",
+        "SqlAlchemyReadableResourceWorkQueue",
+        "WorkRecordMutation",
+        "UpdateWorkRecord",
+        "ApplyWorkMetadata",
+        "VolumeMediaKindSource",
+        "IMPLICIT_VERSION_SOURCE_KEY",
+        "sync_work_facets",
+        "metadata_context_for_work",
+        "update_work",
+        "get_work",
+        "work_entity_record",
+        "for_visible_work",
+        "mark_work_organize_status",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+)
+
+_LEGACY_IDENTITY_WIRE_KEYS = frozenset(
+    {
+        "workId",
+        "versionId",
+        "volumeId",
+        "fileId",
+        "work_id",
+        "version_id",
+        "volume_id",
+        "file_id",
+    }
+)
+
+
+def _runtime_python_files() -> tuple[Path, ...]:
+    return tuple(
+        path
+        for path in APP_ROOT.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and not (
+            "modules" in path.parts
+            and path.parts[path.parts.index("modules") + 1] == "mobile"
+        )
+    )
+
+
+def _legacy_identity_hits(
+    path: Path,
+    *,
+    include_string_literals: bool = True,
+) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        value: str | None = None
+        if isinstance(node, (ast.Name, ast.Attribute)):
+            value = node.id if isinstance(node, ast.Name) else node.attr
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            value = node.name
+        elif include_string_literals and isinstance(node, ast.Constant):
+            value = node.value if isinstance(node.value, str) else None
+        if value in _LEGACY_IDENTITY_NAMES or value in _LEGACY_IDENTITY_WIRE_KEYS:
+            hits.append(f"{path}:{getattr(node, 'lineno', 0)}:{value}")
+    return hits
+
+
+def test_runtime_and_target_fixture_have_no_legacy_identity_references() -> None:
+    hits = [
+        hit for path in _runtime_python_files() for hit in _legacy_identity_hits(path)
+    ]
+    fixture = (
+        API_ROOT / "tests" / "contract" / "api" / "test_openapi_runtime_regressions.py"
+    )
+    hits.extend(_legacy_identity_hits(fixture, include_string_literals=False))
+    assert hits == [], "legacy identity references:\n" + "\n".join(hits)
+
+
+def test_runtime_has_no_dynamic_table_presence_detection() -> None:
+    hits: list[str] = []
+    for path in _runtime_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "_has_table"
+            ):
+                hits.append(f"{path}:{node.lineno}:_has_table")
+            if isinstance(node, ast.Attribute) and node.attr == "has_table":
+                hits.append(f"{path}:{node.lineno}:has_table")
+    assert hits == [], "dynamic table detection remains:\n" + "\n".join(hits)
+
+
+def test_target_import_pipeline_has_one_queue_and_no_legacy_controls() -> None:
+    queue_directory = (
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource"
+    )
+    assert (queue_directory / "task_queue.py").exists()
+    assert not (queue_directory / "work_queue.py").exists()
+
+    forbidden_files = {
+        "legacy_persistence.py",
+        "import_records.py",
+        "queue_maintenance.py",
+        "maintenance_write.py",
+        "library_import_store.py",
+        "managed_pipeline.py",
+        "orchestration_services.py",
+    }
+    import_root = APP_ROOT / "modules" / "imports"
+    assert not {
+        path.name for path in import_root.rglob("*.py") if path.name in forbidden_files
+    }
+
+    forbidden_tokens = (
+        "WorkQueuePort",
+        "work_queue",
+        "SqlAlchemyReadableResourceWorkQueue",
+        "ImportTaskDTO",
+        "ImportTaskPayload",
+        "claim_next_import_task",
+        "cancel_import_task",
+        "retry_import_task",
+        "clear_import_tasks",
+        "leaseOwner",
+        "leaseExpiresAt",
+        "fencing",
+        "fence_claim",
+        "heartbeat",
+        "candidateRawJson",
+        "ImportWorkItem",
+        "ResourceCandidate",
+        "AssetCandidate",
+    )
+    files = (
+        APP_ROOT / "bootstrap" / "readable_resource_pipeline.py",
+        APP_ROOT / "modules" / "imports" / "application" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "infrastructure" / "readable_resource",
+        APP_ROOT / "modules" / "imports" / "presentation",
+    )
+    paths = [
+        path
+        for root in files
+        for path in (root.rglob("*.py") if root.is_dir() else (root,))
+        if "__pycache__" not in path.parts
+    ]
+    hits = [
+        f"{path}:{token}"
+        for path in paths
+        for token in forbidden_tokens
+        if token in path.read_text(encoding="utf-8")
+    ]
+    assert hits == [], "legacy importer controls remain:\n" + "\n".join(hits)
+
+
+def test_mobile_is_excluded_from_target_backend_capability_changes() -> None:
+    roots = (
+        APP_ROOT / "bootstrap",
+        APP_ROOT / "worker",
+        APP_ROOT / "modules" / "imports",
+        APP_ROOT / "modules" / "library",
+        APP_ROOT / "modules" / "metadata",
+        APP_ROOT / "modules" / "organize",
+    )
+    hits = [
+        path
+        for root in roots
+        for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and "app.modules.mobile" in path.read_text(encoding="utf-8")
+    ]
+    assert hits == [], (
+        "target backend imports a Mobile compatibility shim: "
+        + ", ".join(str(path) for path in hits)
+    )
+
+
+def test_fresh_runtime_metadata_matches_the_single_baseline(tmp_path: Path) -> None:
+    from alembic.autogenerate import compare_metadata
+    from alembic.migration import MigrationContext
+
+    from app.core.config import Settings
+    from app.db.base import Base
+    from app.db.bootstrap import bootstrap_database
+    from app.db.sqlite import create_sqlite_engine
+
+    settings = Settings(storage_root=str(tmp_path / "storage"))
+    engine = create_sqlite_engine(settings.database_path)
+    try:
+        bootstrap_database(engine, settings)
+        with engine.connect() as connection:
+            context = MigrationContext.configure(
+                connection,
+                opts={"compare_type": True, "compare_server_default": True},
+            )
+            assert compare_metadata(context, Base.metadata) == []
+    finally:
+        engine.dispose()

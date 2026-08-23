@@ -14,10 +14,9 @@ import com.ermao.library.shared.modules.administrativesettings.CreateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.HealthCheckStatus as SharedHealthCheckStatus
 import com.ermao.library.shared.modules.administrativesettings.HealthRun as SharedHealthRun
 import com.ermao.library.shared.modules.administrativesettings.HealthRunStatus as SharedHealthRunStatus
-import com.ermao.library.shared.modules.administrativesettings.ImportDeleteMode as SharedImportDeleteMode
 import com.ermao.library.shared.modules.administrativesettings.ImportPreferences as SharedImportPreferences
 import com.ermao.library.shared.modules.administrativesettings.ImportTaskFilter as SharedImportTaskFilter
-import com.ermao.library.shared.modules.administrativesettings.ImportTaskStatus as SharedImportTaskStatus
+import com.ermao.library.shared.modules.administrativesettings.ImportTaskState as SharedImportTaskState
 import com.ermao.library.shared.modules.administrativesettings.ImportScanStatus as SharedImportScanStatus
 import com.ermao.library.shared.modules.administrativesettings.KindleTaskFilter as SharedKindleTaskFilter
 import com.ermao.library.shared.modules.administrativesettings.KindleTaskStatus as SharedKindleTaskStatus
@@ -28,11 +27,11 @@ import com.ermao.library.shared.modules.administrativesettings.ManagedUserRole a
 import com.ermao.library.shared.modules.administrativesettings.ManagedUserStatus as SharedUserStatus
 import com.ermao.library.shared.modules.administrativesettings.ManagementEventFilter as SharedEventFilter
 import com.ermao.library.shared.modules.administrativesettings.MediaKind as SharedMediaKind
-import com.ermao.library.shared.modules.administrativesettings.MediaKindPolicy as SharedMediaKindPolicy
+import com.ermao.library.shared.modules.administrativesettings.LibraryOrganizationMode as SharedLibraryOrganizationMode
 import com.ermao.library.shared.modules.administrativesettings.MetadataPipelineEntry as SharedPipelineEntry
 import com.ermao.library.shared.modules.administrativesettings.MetadataProvider as SharedProvider
 import com.ermao.library.shared.modules.administrativesettings.MetadataProviderUpdate as SharedProviderUpdate
-import com.ermao.library.shared.modules.administrativesettings.MonitorFolderDraft as SharedFolderDraft
+import com.ermao.library.shared.modules.administrativesettings.LibraryDraft as SharedLibraryDraft
 import com.ermao.library.shared.modules.administrativesettings.OrganizeJobFilter as SharedOrganizeFilter
 import com.ermao.library.shared.modules.administrativesettings.OrganizePolicy as SharedOrganizePolicy
 import com.ermao.library.shared.modules.administrativesettings.OrganizeRules as SharedOrganizeRules
@@ -43,7 +42,6 @@ import com.ermao.library.shared.modules.administrativesettings.UpdateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTab as SharedDetailTab
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTabOrder as SharedDetailOrder
 import com.ermao.library.shared.modules.administrativesettings.domain.ProviderSettingValue as SharedProviderValue
-import kotlin.math.roundToInt
 
 class SharedAdministrativeSettingsAdapter(
     private val sharedRepository: SharedRepository,
@@ -69,8 +67,8 @@ class SharedAdministrativeSettingsAdapter(
         }
         is AdministrativeSettingsRoute.UserEdit -> loadUserEditor(route)
         is AdministrativeSettingsRoute.UserAccess -> loadUserAccess(route.userId)
-        AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadMonitorFolders(sharedContext).map { result ->
-            LibrarySourcesSnapshot(result.monitorRoot, result.folders.map { it.toLocal() })
+        AdministrativeSettingsRoute.LibrarySources -> sharedRepository.loadLibraries(sharedContext).map { result ->
+            LibrarySourcesSnapshot(result.libraries.map { it.toLocal() })
         }
         is AdministrativeSettingsRoute.LibrarySourceEdit -> loadLibrarySourceEditor(route.sourceId)
         is AdministrativeSettingsRoute.ServerDirectory -> sharedRepository.loadDirectory(sharedContext, route.path).map { node ->
@@ -78,12 +76,16 @@ class SharedAdministrativeSettingsAdapter(
         }
         AdministrativeSettingsRoute.ImportTasks -> sharedRepository.listImportTasks(sharedContext, SharedImportTaskFilter(pageSize = 100)).map { page ->
             ImportTasksSnapshot(
-                queueHealthy = page.summary.failed == 0,
-                runningCount = page.tasks.count { it.status in setOf(SharedImportTaskStatus.Pending, SharedImportTaskStatus.Parsing) },
+                queueHealthy = page.failed == 0,
+                runningCount = page.tasks.count { it.state in setOf(SharedImportTaskState.Queued, SharedImportTaskState.Running) },
                 tasks = page.tasks.map { task ->
                     ImportTask(
-                        task.id, task.originalName ?: task.requestedTitle ?: task.sourcePath.substringAfterLast('/'), task.sourcePath,
-                        task.createdAt, task.status.toLocal(), task.progress.coerceIn(0, 100) / 100f, task.errorCode,
+                        id = task.id,
+                        fileName = task.kind,
+                        sourcePath = task.sourceNodeId ?: task.resourceId ?: task.libraryId,
+                        createdAtLabel = task.createdAt,
+                        status = task.state.toLocal(),
+                        statusCode = task.errorSummary,
                     )
                 },
             )
@@ -100,7 +102,7 @@ class SharedAdministrativeSettingsAdapter(
             OrganizeQueueSnapshot(pending.total, pending.jobs.map { it.toLocal() })
         }
         AdministrativeSettingsRoute.OrganizeCandidates -> sharedRepository.loadOrganizeCandidates(sharedContext).map { candidates ->
-            OrganizeCandidatesSnapshot(candidates.works.map {
+            OrganizeCandidatesSnapshot(candidates.books.map {
                 RecognitionCandidate(it.id, it.title.orEmpty(), it.author.orEmpty(), it.metadataQuality.coerceIn(0, 100))
             })
         }
@@ -113,15 +115,6 @@ class SharedAdministrativeSettingsAdapter(
             })
         }
         AdministrativeSettingsRoute.RecognitionPolicy -> loadRecognitionPolicy()
-        AdministrativeSettingsRoute.Duplicates -> sharedRepository.listDuplicateGroups(sharedContext, 1, 100).map { page ->
-            DuplicatesSnapshot(page.groups.map { group ->
-                val first = group.works.firstOrNull()
-                DuplicateGroup(
-                    group.id, first?.title.orEmpty(), first?.author.orEmpty(), (group.confidence * 100).roundToInt(),
-                    group.works.map { DuplicateVersion(it.id, it.title, it.author) },
-                )
-            })
-        }
         AdministrativeSettingsRoute.LibraryOperations -> sharedRepository.listLibraryOperations(sharedContext).map { operations ->
             LibraryOperationsSnapshot(operations.map { it.toLocal() })
         }
@@ -147,7 +140,7 @@ class SharedAdministrativeSettingsAdapter(
                 BackupRecord(
                     archive.id, archive.fileName ?: archive.name, archive.kind.equals("automatic", true), bytesLabel(archive.sizeBytes),
                     archive.createdAt, archive.counts["works"] ?: 0, archive.counts["progress"] ?: 0,
-                    archive.counts["monitor_folders"] ?: archive.counts["sources"] ?: 0,
+                    archive.counts["libraries"] ?: archive.counts["sources"] ?: 0,
                 )
             })
         }
@@ -174,11 +167,11 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.SetUserEnabled -> updateUserEnabled(command)
         is AdministrativeCommand.DeleteUser -> deleteUser(command)
         is AdministrativeCommand.SaveLibrarySource -> saveLibrarySource(command)
-        is AdministrativeCommand.DeleteLibrarySource -> sharedRepository.deleteMonitorFolder(sharedContext, command.sourceId).receipt(command)
+        is AdministrativeCommand.DeleteLibrarySource -> sharedRepository.deleteLibrary(sharedContext, command.sourceId).receipt(command)
         is AdministrativeCommand.RescanLibrarySource -> rescanLibrarySource(command)
         is AdministrativeCommand.ScanDirectory -> sharedRepository.scanDirectory(sharedContext, command.directory.uri).receipt(command)
         is AdministrativeCommand.RetryImportTask -> sharedRepository.retryImportTask(sharedContext, command.taskId).receipt(command)
-        is AdministrativeCommand.DeleteImportTask -> sharedRepository.deleteImportTask(sharedContext, command.taskId, SharedImportDeleteMode.Record, false).receipt(command)
+        is AdministrativeCommand.DeleteImportTask -> sharedRepository.deleteImportTask(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.CancelImportScan -> sharedRepository.cancelImportScanJob(sharedContext, command.jobId).receipt(command)
         AdministrativeCommand.RescanAllSources -> sharedRepository.rescanImportFolders(sharedContext).receipt(command)
         AdministrativeCommand.ClearCompletedImports -> sharedRepository.clearCompletedImportTasks(sharedContext).receipt(command)
@@ -186,7 +179,6 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.StartRecognition -> sharedRepository.recognizeOrganizeJob(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.DeleteOrganizeTask -> sharedRepository.deleteOrganizeJob(sharedContext, command.taskId).receipt(command)
         is AdministrativeCommand.SaveRecognitionPolicy -> saveRecognitionPolicy(command)
-        is AdministrativeCommand.MergeDuplicates -> mergeDuplicates(command)
         is AdministrativeCommand.MergeCategories -> sharedRepository.mergeCategories(
             sharedContext, command.kind.toShared(), command.targetId, command.sourceIds.toList(),
         ).receipt(command)
@@ -253,7 +245,7 @@ class SharedAdministrativeSettingsAdapter(
     private suspend fun loadUserEditor(route: AdministrativeSettingsRoute.UserEdit): AdministrativeResult<AdministrativePageSnapshot> {
         if (route.userId == null) return AdministrativeResult.Content(UserEditorSnapshot(null, false, false, emptySet()))
         return sharedRepository.loadUser(sharedContext, route.userId).map { user ->
-            UserEditorSnapshot(user.toLocal(), user.canManageSystem, user.canViewManualImports, user.monitorFolderIds.toSet())
+            UserEditorSnapshot(user.toLocal(), user.canManageSystem, user.canViewManualImports, user.libraryIds.toSet())
         }
     }
 
@@ -262,17 +254,17 @@ class SharedAdministrativeSettingsAdapter(
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
-        return sharedRepository.loadMonitorFolders(sharedContext).map { folders ->
+        return sharedRepository.loadLibraries(sharedContext).map { folders ->
             UserAccessSnapshot(
                 user.toLocal(), user.role == SharedUserRole.Admin, user.canViewManualImports,
-                folders.folders.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.monitorFolderIds) },
+                folders.libraries.map { AccessSource(it.id, it.name, it.rootPath, null, it.id in user.libraryIds) },
             )
         }
     }
 
     private suspend fun loadLibrarySourceEditor(sourceId: String?): AdministrativeResult<AdministrativePageSnapshot> =
-        sharedRepository.loadMonitorFolders(sharedContext).map { result ->
-            val source = sourceId?.let { id -> result.folders.firstOrNull { it.id == id } }
+        sharedRepository.loadLibraries(sharedContext).map { result ->
+            val source = sourceId?.let { id -> result.libraries.firstOrNull { it.id == id } }
             LibrarySourceEditorSnapshot(source?.toLocal(), source?.ignorePatterns.orEmpty(), source?.ignoreHidden ?: true, source?.minimumFileSizeBytes ?: 0L)
         }
 
@@ -298,12 +290,12 @@ class SharedAdministrativeSettingsAdapter(
         return sharedRepository.listImportTaskLogs(sharedContext, taskId).map { page ->
             ImportTaskDetailSnapshot(
                 task = task.toLocal(),
-                requestedTitle = task.requestedTitle,
-                requestedAuthor = task.requestedAuthor,
-                processedAssetCount = task.processedAssetCount,
-                assetCount = task.assetCount,
-                attempts = task.attempts,
-                retryable = task.retryable,
+                requestedTitle = null,
+                requestedAuthor = null,
+                processedAssetCount = 0,
+                assetCount = 0,
+                attempts = 0,
+                retryable = false,
                 errorSummary = task.errorSummary,
                 logs = page.logs.map { ImportTaskLogEntry(it.id, it.level, it.message, it.createdAt) },
             )
@@ -372,7 +364,7 @@ class SharedAdministrativeSettingsAdapter(
             is SharedFailure -> return result.toLocalFailure()
         }
         val folderIds = if (command.allLibraries && user.role != SharedUserRole.Admin) return validationFailure("MEMBER_REQUIRES_EXPLICIT_SCOPE") else command.sourceIds.toList()
-        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(monitorFolderIds = folderIds)).receipt(command)
+        return sharedRepository.updateUser(sharedContext, user.id, user.toUpdate(libraryIds = folderIds)).receipt(command)
     }
 
     private suspend fun updateUserEnabled(command: AdministrativeCommand.SetUserEnabled): AdministrativeResult<AdministrativeCommandReceipt> {
@@ -393,16 +385,16 @@ class SharedAdministrativeSettingsAdapter(
 
     private suspend fun saveLibrarySource(command: AdministrativeCommand.SaveLibrarySource): AdministrativeResult<AdministrativeCommandReceipt> {
         val draft = command.draft.toShared()
-        return if (command.draft.id == null) sharedRepository.createMonitorFolder(sharedContext, draft).receipt(command)
-        else sharedRepository.updateMonitorFolder(sharedContext, command.draft.id, draft).receipt(command)
+        return if (command.draft.id == null) sharedRepository.createLibrary(sharedContext, draft).receipt(command)
+        else sharedRepository.updateLibrary(sharedContext, command.draft.id, draft).receipt(command)
     }
 
     private suspend fun rescanLibrarySource(command: AdministrativeCommand.RescanLibrarySource): AdministrativeResult<AdministrativeCommandReceipt> {
-        val folders = when (val result = sharedRepository.loadMonitorFolders(sharedContext)) {
+        val folders = when (val result = sharedRepository.loadLibraries(sharedContext)) {
             is SharedContent -> result.value
             is SharedFailure -> return result.toLocalFailure()
         }
-        val path = folders.folders.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("MONITOR_FOLDER_NOT_FOUND")
+        val path = folders.libraries.firstOrNull { it.id == command.sourceId }?.rootPath ?: return notFound("LIBRARY_NOT_FOUND")
         return sharedRepository.scanDirectory(sharedContext, path).receipt(command)
     }
 
@@ -423,16 +415,6 @@ class SharedAdministrativeSettingsAdapter(
             localMetadataPriority = draft.sourcePriority.mapNotNull { it.toSharedLocal() },
         )
         return sharedRepository.updateOrganizePolicy(sharedContext, updated).receipt(command)
-    }
-
-    private suspend fun mergeDuplicates(command: AdministrativeCommand.MergeDuplicates): AdministrativeResult<AdministrativeCommandReceipt> {
-        val page = when (val result = sharedRepository.listDuplicateGroups(sharedContext, 1, 100)) {
-            is SharedContent -> result.value
-            is SharedFailure -> return result.toLocalFailure()
-        }
-        val group = page.groups.firstOrNull { it.id == command.groupId } ?: return notFound("DUPLICATE_GROUP_NOT_FOUND")
-        if (group.works.none { it.id == command.canonicalWorkId }) return validationFailure("CANONICAL_WORK_NOT_IN_GROUP")
-        return sharedRepository.mergeDuplicateWorks(sharedContext, command.canonicalWorkId, group.works.map { it.id }.filter { it != command.canonicalWorkId }).receipt(command)
     }
 
     private suspend fun saveMetadataProviders(command: AdministrativeCommand.SaveMetadataProviders): AdministrativeResult<AdministrativeCommandReceipt> {
@@ -468,7 +450,7 @@ class SharedAdministrativeSettingsAdapter(
 private fun managementSnapshot(capabilities: Set<AdministrativeCapability>): ManagementSnapshot {
     val routes = listOf(
         AdministrativeSettingsRoute.LibrarySources, AdministrativeSettingsRoute.ImportTasks, AdministrativeSettingsRoute.ImportPreferences,
-        AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.RecognitionPolicy, AdministrativeSettingsRoute.Duplicates,
+        AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.RecognitionPolicy,
         AdministrativeSettingsRoute.CategoryGovernance(), AdministrativeSettingsRoute.MetadataProviders, AdministrativeSettingsRoute.Users,
         AdministrativeSettingsRoute.EmailKindle(), AdministrativeSettingsRoute.KindleQueue, AdministrativeSettingsRoute.Opds,
         AdministrativeSettingsRoute.Backups, AdministrativeSettingsRoute.DetailOrder, AdministrativeSettingsRoute.Health(), AdministrativeSettingsRoute.Logs,
@@ -493,6 +475,7 @@ private fun SharedError.toLocal() = AdministrativeFailure(
         SharedErrorKind.Forbidden -> AdministrativeErrorKind.Forbidden
         SharedErrorKind.NotFound -> AdministrativeErrorKind.NotFound
         SharedErrorKind.Conflict -> AdministrativeErrorKind.Conflict
+        SharedErrorKind.Unavailable -> AdministrativeErrorKind.Unavailable
         SharedErrorKind.RateLimited -> AdministrativeErrorKind.RateLimited
         SharedErrorKind.Server, SharedErrorKind.Transport -> AdministrativeErrorKind.Unavailable
         SharedErrorKind.Protocol -> AdministrativeErrorKind.Unknown
@@ -515,21 +498,20 @@ private fun com.ermao.library.shared.modules.administrativesettings.KindleTaskSt
     SharedKindleTaskStatus.Cancelled -> QueueStatus.Cancelled
 }
 
-private fun SharedImportTaskStatus.toLocal(): QueueStatus = when (this) {
-    SharedImportTaskStatus.Pending -> QueueStatus.Queued
-    SharedImportTaskStatus.Parsing -> QueueStatus.Running
-    SharedImportTaskStatus.Completed -> QueueStatus.Completed
-    SharedImportTaskStatus.Failed -> QueueStatus.Failed
+private fun SharedImportTaskState.toLocal(): QueueStatus = when (this) {
+    SharedImportTaskState.Queued -> QueueStatus.Queued
+    SharedImportTaskState.Running -> QueueStatus.Running
+    SharedImportTaskState.Succeeded -> QueueStatus.Completed
+    SharedImportTaskState.Failed -> QueueStatus.Failed
 }
 
 private fun com.ermao.library.shared.modules.administrativesettings.ImportTask.toLocal() = ImportTask(
     id = id,
-    fileName = originalName ?: requestedTitle ?: sourcePath.substringAfterLast('/'),
-    sourcePath = sourcePath,
+    fileName = kind,
+    sourcePath = sourceNodeId ?: resourceId ?: libraryId,
     createdAtLabel = createdAt,
-    status = status.toLocal(),
-    progress = progress.coerceIn(0, 100) / 100f,
-    statusCode = errorCode,
+    status = state.toLocal(),
+    statusCode = errorSummary,
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.ImportScanJob.toLocal() = ImportScanJobSummary(
@@ -557,7 +539,7 @@ private fun com.ermao.library.shared.modules.administrativesettings.LibraryOpera
 )
 
 private fun com.ermao.library.shared.modules.administrativesettings.OrganizeJob.toLocal() = OrganizeTask(
-    id, work.title, work.author,
+    id, book.title, book.author.orEmpty(),
     when (statusCategory) {
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Waiting -> OrganizeStatus.AwaitingRecognition
         com.ermao.library.shared.modules.administrativesettings.OrganizeStatusCategory.Recognizing -> OrganizeStatus.NeedsConfirmation
@@ -574,39 +556,37 @@ private fun AdministrativeLocale.toShared() = if (this == AdministrativeLocale.Z
 
 private fun SharedUser.toUpdate(
     status: SharedUserStatus = this.status,
-    monitorFolderIds: List<String> = this.monitorFolderIds,
-) = SharedUpdateUser(name, email, role, status, canManageSystem, canViewManualImports, monitorFolderIds, locale)
+    libraryIds: List<String> = this.libraryIds,
+) = SharedUpdateUser(name, email, role, status, canManageSystem, canViewManualImports, libraryIds, locale)
 
 private fun UserDraft.toSharedUpdate() = SharedUpdateUser(
     displayName, email, role.toShared(), if (enabled) SharedUserStatus.Active else SharedUserStatus.Disabled,
     canManageSystem, canViewManualImports, sourceIds.toList(), locale.toShared(),
 )
 
-private fun com.ermao.library.shared.modules.administrativesettings.MonitorFolder.toLocal() = LibrarySource(
-    id, name, rootPath, enabled, mediaKindPolicy.toLocal(), description,
+private fun com.ermao.library.shared.modules.administrativesettings.Library.toLocal() = LibrarySource(
+    id, name, rootPath, enabled, organizationMode.toLocal(), description,
 )
 
-private fun SharedMediaKindPolicy.toLocal() = when (this) {
-    SharedMediaKindPolicy.Mixed -> MediaKindPolicy.Mixed
-    SharedMediaKindPolicy.Ebook -> MediaKindPolicy.Ebook
-    SharedMediaKindPolicy.Comic -> MediaKindPolicy.Comic
-    SharedMediaKindPolicy.Audiobook -> MediaKindPolicy.Audiobook
+private fun SharedLibraryOrganizationMode.toLocal() = when (this) {
+    SharedLibraryOrganizationMode.Flat -> LibraryOrganizationMode.Flat
+    SharedLibraryOrganizationMode.Volumes -> LibraryOrganizationMode.Volumes
+    SharedLibraryOrganizationMode.Audiobook -> LibraryOrganizationMode.Audiobook
 }
 
-private fun MediaKindPolicy.toShared() = when (this) {
-    MediaKindPolicy.Mixed -> SharedMediaKindPolicy.Mixed
-    MediaKindPolicy.Ebook -> SharedMediaKindPolicy.Ebook
-    MediaKindPolicy.Comic -> SharedMediaKindPolicy.Comic
-    MediaKindPolicy.Audiobook -> SharedMediaKindPolicy.Audiobook
+private fun LibraryOrganizationMode.toShared() = when (this) {
+    LibraryOrganizationMode.Flat -> SharedLibraryOrganizationMode.Flat
+    LibraryOrganizationMode.Volumes -> SharedLibraryOrganizationMode.Volumes
+    LibraryOrganizationMode.Audiobook -> SharedLibraryOrganizationMode.Audiobook
 }
 
-private fun LibrarySourceDraft.toShared() = SharedFolderDraft(
-    directory.uri, displayName.ifBlank { null }, null, monitoring, mediaKindPolicy.toShared(), ignorePatterns.ifBlank { null },
+private fun LibrarySourceDraft.toShared() = SharedLibraryDraft(
+    directory.uri, displayName.ifBlank { null }, organizationMode.toShared(), enabled, ignorePatterns.ifBlank { null },
     ignoreHidden, minimumFileSizeBytes, description,
 )
 
-private fun SharedImportPreferences.toLocal() = ImportPreferencesSnapshot(stabilityCheckEnabled, stabilitySeconds, allowedExtensions, ignorePatterns)
-private fun ImportPreferencesSnapshot.toShared() = SharedImportPreferences(stabilityCheckEnabled, stabilitySeconds, allowedExtensions, ignorePatterns)
+private fun SharedImportPreferences.toLocal() = ImportPreferencesSnapshot(allowedExtensions, ignorePatterns)
+private fun ImportPreferencesSnapshot.toShared() = SharedImportPreferences(allowedExtensions, ignorePatterns)
 
 private fun SharedLocalMetadataSource.toLocal() = when (this) {
     SharedLocalMetadataSource.SidecarOpf -> MetadataSource.Opf

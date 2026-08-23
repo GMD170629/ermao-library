@@ -7,16 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.system import (
-    active_health_run_id,
     create_or_reuse_health_run,
-    create_restart_operation,
     health_run_snapshot,
     persist_log_settings_update,
     prepare_system_event,
     probe_database,
     prune_old_health_runs,
-    queue_operation_view,
-    queue_runtime_view,
     run_system_health_checks,
     start_health_run,
     system_event_storage_view,
@@ -31,24 +27,14 @@ from app.modules.system.presentation.health_schemas import (
     DatabasePingPayload,
     DatabasePingResponse,
     HealthEventStreamResponse,
-    HealthRunActiveBody,
-    HealthRunActiveError,
     HealthRunNotFoundBody,
     HealthRunNotFoundError,
     HealthRunPayload,
     HealthRunResponse,
-    ImportQueueOfflineBody,
-    ImportQueueOfflineError,
     InvalidLogMaxBytesBody,
     InvalidLogMaxBytesError,
     LogSettingsPayload,
     LogSettingsResponse,
-    QueueOperationConflictBody,
-    QueueOperationConflictError,
-    QueueOperationNotFoundBody,
-    QueueOperationNotFoundError,
-    QueueOperationPayload,
-    QueueOperationResponse,
     ServiceHealthPayload,
     ServiceHealthResponse,
     SystemHealthPayload,
@@ -235,7 +221,7 @@ def stream_health_run(
             else:
                 idle_ticks += 1
                 if idle_ticks >= 15:
-                    yield ": heartbeat\n\n"
+                    yield ": keep-alive\n\n"
                     idle_ticks = 0
             await asyncio.sleep(1)
 
@@ -243,68 +229,6 @@ def stream_health_run(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.post("/system/queues/import/restart", status_code=202)
-def restart_import_queue(
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    QueueOperationResponse,
-    ErrorResponses(
-        UnauthorizedError,
-        SystemManagerRequiredError,
-        HealthRunActiveError,
-        ImportQueueOfflineError,
-        QueueOperationConflictError,
-    ),
-]:
-    user = _system_manager(db, request, settings)
-    if active_health_run_id(db):
-        raise HealthRunActiveError(
-            HealthRunActiveBody(message="健康检查运行期间不能重启导入队列")
-        )
-    runtime = queue_runtime_view(db, "import")
-    if runtime is None or runtime.get("stale") or runtime.get("status") != "running":
-        raise ImportQueueOfflineError(
-            ImportQueueOfflineBody(message="导入工作进程当前不可用")
-        )
-    operation, created = create_restart_operation(db, user.id)
-    if operation.get("action") != "restart":
-        raise QueueOperationConflictError(
-            QueueOperationConflictBody(message="导入队列正在执行其他控制操作")
-        )
-    return QueueOperationResponse(
-        data=QueueOperationPayload.model_validate(
-            {"operation": operation, "created": created}
-        )
-    )
-
-
-@router.get("/system/queue-operations/{operation_id}")
-def get_queue_operation(
-    operation_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    QueueOperationResponse,
-    ErrorResponses(
-        UnauthorizedError,
-        SystemManagerRequiredError,
-        QueueOperationNotFoundError,
-    ),
-]:
-    _system_manager(db, request, settings)
-    operation = queue_operation_view(db, operation_id)
-    if operation is None:
-        raise QueueOperationNotFoundError(
-            QueueOperationNotFoundBody(message="队列操作不存在")
-        )
-    return QueueOperationResponse(
-        data=QueueOperationPayload.model_validate({"operation": operation})
     )
 
 

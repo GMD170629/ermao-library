@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+
 from app import main as app_main
 from app.core.auth import hash_password
-from app.db.runner import apply_schema
 from app.models.auth import User
+from tests.conftest import recreate_application_schema
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -135,7 +136,8 @@ def test_delegated_system_manager_keeps_system_management_success_contracts(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    apply_schema(db_session.get_bind())
+    db_session.rollback()
+    recreate_application_schema(db_session.get_bind())
     manager = _create_user(
         db_session,
         email="delegated-manager@example.com",
@@ -217,9 +219,7 @@ def test_system_management_openapi_documents_requests_and_forbidden_contracts(
         update_operation["requestBody"]
     )
 
-    restore_operation = document["paths"]["/api/backups/{backup_id}/restore"][
-        "post"
-    ]
+    restore_operation = document["paths"]["/api/backups/{backup_id}/restore"]["post"]
     assert "#/components/schemas/BackupRestoreRequest" in _schema_references(
         restore_operation["requestBody"]
     )

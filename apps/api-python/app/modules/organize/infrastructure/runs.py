@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import case, func, inspect, select, update
+from sqlalchemy import case, func, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.base import Executable
 
@@ -20,15 +21,7 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def has_run_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("OrganizeRun")
-
-
-def has_job_table(db: Session) -> bool:
-    return inspect(db.connection()).has_table("OrganizeJob")
-
-
-def run_entity_as_legacy_dict(entity: OrganizeRun) -> dict[str, Any]:
+def run_entity_record(entity: OrganizeRun) -> dict[str, Any]:
     """Map an ORM run to camelCase keys matching legacy raw-SQL row dicts."""
 
     return {
@@ -48,15 +41,14 @@ def run_entity_as_legacy_dict(entity: OrganizeRun) -> dict[str, Any]:
     }
 
 
-def job_entity_as_legacy_dict(entity: OrganizeJob) -> dict[str, Any]:
+def job_entity_record(entity: OrganizeJob) -> dict[str, Any]:
     """Map an ORM job to camelCase keys matching legacy raw-SQL row dicts."""
 
     return {
         "id": entity.id,
         "runId": entity.run_id,
-        "workId": entity.work_id,
-        "volumeId": entity.volume_id,
-        "mediaVersionId": entity.media_version_id,
+        "bookId": entity.book_id,
+        "resourceId": entity.resource_id,
         "importTaskId": entity.import_task_id,
         "trigger": entity.trigger,
         "status": entity.status,
@@ -83,10 +75,10 @@ def _json_dict(value: Any, fallback: dict[str, Any]) -> dict[str, Any]:
 
 def run_view(row: dict[str, Any]) -> dict[str, Any]:
     stored_scope = _json_dict(row.get("scopeJson"), {})
-    stored_work_ids = stored_scope.get("workIds")
-    work_ids = (
-        [str(work_id).strip() for work_id in stored_work_ids if str(work_id).strip()]
-        if isinstance(stored_work_ids, list)
+    stored_book_ids = stored_scope.get("bookIds")
+    book_ids = (
+        [str(book_id).strip() for book_id in stored_book_ids if str(book_id).strip()]
+        if isinstance(stored_book_ids, list)
         else []
     )
     stored_rules = stored_scope.get("rules")
@@ -95,7 +87,7 @@ def run_view(row: dict[str, Any]) -> dict[str, Any]:
         "id": row.get("id"),
         "trigger": row.get("trigger"),
         "scope": {
-            "workIds": work_ids,
+            "bookIds": book_ids,
             "rules": {
                 "unrecognized": bool(
                     rules.get("unrecognized", DEFAULT_RULES["unrecognized"])
@@ -122,12 +114,12 @@ def run_view(row: dict[str, Any]) -> dict[str, Any]:
 
 def get_run_row(db: Session, run_id: str) -> dict[str, Any] | None:
     entity = db.scalar(select(OrganizeRun).where(OrganizeRun.id == run_id))
-    return run_entity_as_legacy_dict(entity) if entity is not None else None
+    return run_entity_record(entity) if entity is not None else None
 
 
 def get_run_by_dedupe_key(db: Session, dedupe_key: str) -> dict[str, Any] | None:
     entity = db.scalar(select(OrganizeRun).where(OrganizeRun.dedupe_key == dedupe_key))
-    return run_entity_as_legacy_dict(entity) if entity is not None else None
+    return run_entity_record(entity) if entity is not None else None
 
 
 def list_run_rows(db: Session, limit: int) -> list[dict[str, Any]]:
@@ -135,12 +127,12 @@ def list_run_rows(db: Session, limit: int) -> list[dict[str, Any]]:
     rows = db.scalars(
         select(OrganizeRun).order_by(OrganizeRun.created_at.desc()).limit(bounded)
     ).all()
-    return [run_entity_as_legacy_dict(row) for row in rows]
+    return [run_entity_record(row) for row in rows]
 
 
 def get_job_row(db: Session, job_id: str) -> dict[str, Any] | None:
     entity = db.scalar(select(OrganizeJob).where(OrganizeJob.id == job_id))
-    return job_entity_as_legacy_dict(entity) if entity is not None else None
+    return job_entity_record(entity) if entity is not None else None
 
 
 def count_jobs_for_run(db: Session, run_id: str) -> int:
@@ -222,7 +214,7 @@ def prepare_sync_organize_runs(*, now: datetime) -> Executable:
 
 
 def execute_sync_organize_runs(db: Session, statement: Executable) -> int:
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)
 
 
@@ -253,13 +245,9 @@ def projected_run_view(db: Session, row: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_organize_run(db: Session, run_id: str) -> dict[str, Any] | None:
-    if not has_run_table(db):
-        return None
     row = get_run_row(db, run_id)
     return projected_run_view(db, row) if row else None
 
 
 def list_organize_runs(db: Session, limit: int = 20) -> list[dict[str, Any]]:
-    if not has_run_table(db):
-        return []
     return [projected_run_view(db, row) for row in list_run_rows(db, limit)]

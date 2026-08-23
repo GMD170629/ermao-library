@@ -1,1 +1,1 @@
-"""Import and monitor-folder capability."""
+"""Import and library capability."""

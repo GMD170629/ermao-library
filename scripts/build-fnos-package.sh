@@ -79,8 +79,8 @@ if privilege.get("join-groups"):
 with open(resource_path, encoding="utf-8") as file:
     resource = json.load(file)
 shares = resource.get("data-share", {}).get("shares", [])
-if shares != [{"name": "shuku.monitor"}]:
-    raise SystemExit("fnOS must declare the shuku.monitor shared data directory")
+if shares != [{"name": "shuku.library"}]:
+    raise SystemExit("fnOS must declare the shuku.library shared data directory")
 projects = resource.get("docker-project", {}).get("projects", [])
 if projects != [{"name": "ermao-books", "path": "docker"}]:
     raise SystemExit("fnOS Docker project resource declaration is invalid")
@@ -174,7 +174,7 @@ install_help = " ".join(
     for step in install_steps
     for item in step.get("items", [])
 )
-for required_text in ("/shuku.monitor", "/monitor", "共享数据目录"):
+for required_text in ("/shuku.library", "/libraries/books", "共享书库目录"):
     if required_text not in install_help:
         raise SystemExit(f"fnOS install guide must explain {required_text!r}")
 PY
@@ -183,7 +183,7 @@ compose="$PACKAGE_DIR/app/docker/docker-compose.yaml"
 if ! grep -Fq "image: $IMAGE_REFERENCE" "$compose" || \
    ! grep -Fq 'user: "${TRIM_UID}:${TRIM_GID}"' "$compose" || \
    ! grep -Fq '${TRIM_PKGVAR}/storage:/app/storage' "$compose" || \
-   ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/monitor' "$compose" || \
+   ! grep -Fq '${TRIM_DATA_SHARE_PATHS}:/libraries/books' "$compose" || \
    grep -Fq 'MONITOR_ROOT' "$compose"; then
   echo "fnOS Compose is missing the versioned image, package user, or required data mounts" >&2
   exit 1
@@ -241,7 +241,7 @@ storage_validation_root="$BUILD_ROOT/storage-validation"
 TRIM_PKGVAR="$storage_validation_root" \
   bash "$PACKAGE_DIR/app/docker/prepare-storage.sh"
 for storage_subdirectory in \
-  database covers indexes conversions temp/conversions logs secrets; do
+  database covers indexes logs secrets; do
   if [ ! -d "$storage_validation_root/storage/$storage_subdirectory" ]; then
     echo "fnOS storage preparation did not create $storage_subdirectory" >&2
     exit 1

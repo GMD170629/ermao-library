@@ -29,7 +29,7 @@ class ReaderServerWireMapper(
         ),
     )
 
-    internal fun decodeSnapshot(root: JsonObject, expectedSourceId: String): ReaderProgressSnapshotV4 {
+    internal fun decodeSnapshot(root: JsonObject, expectedResourceId: String): ReaderProgressSnapshotV4 {
         val schemaVersion = root.requiredLong("schemaVersion")
         if (schemaVersion != READER_SERVER_SCHEMA_VERSION.toLong()) {
             throw ReaderServerWireException("Reader progress schema is unsupported")
@@ -37,7 +37,7 @@ class ReaderServerWireMapper(
         val locator = root["locator"] as? JsonObject
             ?: throw ReaderServerWireException("Reader progress locator is missing")
         return ReaderProgressSnapshotV4(
-            sourceId = expectedSourceId,
+            resourceId = expectedResourceId,
             clientId = root.requiredString("clientId"),
             revision = root.requiredLong("revision"),
             locator = PublicationLocation.parse(locator.toString()),
@@ -49,7 +49,7 @@ class ReaderServerWireMapper(
 
     internal fun responseSerializer() = JsonObject.serializer()
 
-    fun decodeProgressState(payload: String, expectedSourceId: String): ReaderProgressSnapshotV4? {
+    fun decodeProgressState(payload: String, expectedResourceId: String): ReaderProgressSnapshotV4? {
         val root = runCatching { json.parseToJsonElement(payload).jsonObject }.getOrElse {
             throw ReaderServerWireException("Reader progress response is malformed", it)
         }
@@ -63,7 +63,7 @@ class ReaderServerWireMapper(
         return decodeSnapshot(
             snapshot as? JsonObject
                 ?: throw ReaderServerWireException("Reader progress snapshot is malformed"),
-            expectedSourceId,
+            expectedResourceId,
         )
     }
 }

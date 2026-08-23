@@ -42,7 +42,7 @@ export function parseReaderV4ProgressSnapshot(value: unknown): ReaderProgressSna
 /** Maps only an exact Readium payload. No progression or percentage fallback exists. */
 export function v4LocationToDomain(
   locator: PublicationLocation | null,
-  volumeId: string,
+  resourceId: string,
   format: ReflowableFormat | null
 ): ReaderLocation | null {
   if (!locator) return null;
@@ -50,7 +50,7 @@ export function v4LocationToDomain(
     return { kind: 'pdf', pageIndex: locator.pageIndex, pageProgression: locator.pageProgression };
   }
   if (locator.kind === 'comic') {
-    return { kind: 'comic', volumeId, pageIndex: locator.pageIndex + 1, resourceHref: locator.resourceHref };
+    return { kind: 'comic', resourceId, pageIndex: locator.pageIndex + 1, resourceHref: locator.resourceHref };
   }
   if (locator.kind !== 'reflowable' || !format) return null;
   const envelope = locator.engineLocator;

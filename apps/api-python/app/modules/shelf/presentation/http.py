@@ -5,16 +5,16 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from time import time_ns
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
-from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import bookshelf_items as get_bookshelf_items
+from app.bootstrap.library import smart_shelf_book_ids
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
@@ -23,12 +23,13 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.library.public import bookshelf_item_views, get_work
+from app.modules.library.public import bookshelf_item_views, get_book
 from app.modules.shelf.application import (
     ShelfReference,
     validate_collection_replacement,
     validate_member_replacement,
 )
+from app.modules.shelf.application.commands import ShelfWriteStore
 from app.modules.shelf.domain import (
     ShelfCollectionPolicyError,
     ShelfKind,
@@ -50,7 +51,6 @@ from app.modules.shelf.public import (
 )
 from app.schemas.responses import fail, ok
 from app.services.library_filters import normalize_filter_rules
-from app.services.library_management import smart_shelf_work_ids
 
 router = APIRouter(tags=["shelf"], route_class=TypedContractRoute)
 
@@ -79,13 +79,6 @@ def _auth(db: Session, request: Request, settings: Settings):
     return require_user(db, request, settings)
 
 
-def _has_table(db: Session, table: str) -> bool:
-    try:
-        return table in inspect(db.connection()).get_table_names()
-    except Exception:
-        return False
-
-
 def _parse_json(value: Any, fallback: Any) -> Any:
     if value is None:
         return fallback
@@ -93,7 +86,7 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return value
     try:
         return json.loads(str(value))
-    except Exception:
+    except ValueError:
         return fallback
 
 
@@ -109,16 +102,22 @@ def _validated_shelf_payload(payload: ShelfWriteRequest) -> dict[str, Any]:
     )
 
 
-def _get_work(db: Session, work_id: str) -> dict[str, Any] | None:
-    return get_work(db, work_id)
+def _shelf_write_store() -> ShelfWriteStore:
+    """Adapt the concrete persistence module to the application port."""
+
+    return cast(ShelfWriteStore, shelf_store)
 
 
-@router.get("/shelves")
+def _get_book(db: Session, book_id: str) -> dict[str, Any] | None:
+    return get_book(db, book_id)
+
+
+@router.get("/shelves", response_model=ShelvesResponse)
 def list_shelves(
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelvesResponse:
+) -> ShelvesResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -162,7 +161,7 @@ def _owned_shelf(db: Session, shelf_id: str, user_id: str) -> dict[str, Any] | N
     return shelf_store.get_owned_shelf(db, shelf_id, user_id)
 
 
-def _shelf_work_ids(
+def _shelf_book_ids(
     db: Session,
     shelf: dict[str, Any],
     user: User,
@@ -175,25 +174,25 @@ def _shelf_work_ids(
     rules = _parse_json(shelf.get("rulesJson"), {})
     if kind == "SMART" and _unsupported_rule_fields(rules):
         return []
-    work_ids = (
-        smart_shelf_work_ids(db, rules, user.id)
+    book_ids = (
+        smart_shelf_book_ids(db, rules, user_id=user.id)
         if kind == "SMART"
-        else shelf_store.list_static_shelf_work_ids(db, str(shelf["id"]))
+        else shelf_store.list_static_shelf_book_ids(db, str(shelf["id"]))
     )
-    if not work_ids:
+    if not book_ids:
         return []
     visibility = context or authorization_context(db, user)
-    return shelf_store.filter_visible_work_ids(db, work_ids, visibility)
+    return shelf_store.filter_visible_book_ids(db, book_ids, visibility)
 
 
 def _shelf_book_views(
     db: Session,
-    work_ids: list[str],
+    book_ids: list[str],
     context: AuthorizationContext,
 ) -> list[dict[str, Any]]:
     summaries = get_bookshelf_items(db).execute(
         context=context,
-        work_ids=tuple(work_ids),
+        book_ids=tuple(book_ids),
     )
     return bookshelf_item_views(summaries)
 
@@ -230,7 +229,7 @@ def _shelf_summary_view(
             "shelves": [],
         }
     if kind == "STATIC":
-        work_ids, total = shelf_store.list_static_shelf_work_page(
+        book_ids, total = shelf_store.list_static_shelf_book_page(
             db,
             str(shelf["id"]),
             context or authorization_context(db, user),
@@ -238,14 +237,14 @@ def _shelf_summary_view(
             page_size=3,
         )
     else:
-        all_work_ids = _shelf_work_ids(db, shelf, user, context=context)
-        work_ids, total = all_work_ids[:3], len(all_work_ids)
+        all_book_ids = _shelf_book_ids(db, shelf, user, context=context)
+        book_ids, total = all_book_ids[:3], len(all_book_ids)
     return {
         **_shelf_base_view(shelf),
         "bookCount": total,
         "books": _shelf_book_views(
             db,
-            work_ids,
+            book_ids,
             context or authorization_context(db, user),
         ),
         "collectionIds": collection_ids
@@ -312,19 +311,19 @@ def _shelf_detail_view(
     context = authorization_context(db, user)
     kind = str(shelf.get("kind") or "STATIC").upper()
     if kind == "STATIC" and not include_book_ids:
-        page_ids, total = shelf_store.list_static_shelf_work_page(
+        page_ids, total = shelf_store.list_static_shelf_book_page(
             db,
             str(shelf["id"]),
             context,
             page=page,
             page_size=page_size,
         )
-        work_ids: list[str] = []
+        book_ids: list[str] = []
     else:
-        work_ids = _shelf_work_ids(db, shelf, user, context=context)
-        total = len(work_ids)
+        book_ids = _shelf_book_ids(db, shelf, user, context=context)
+        total = len(book_ids)
         start = (page - 1) * page_size
-        page_ids = work_ids[start : start + page_size]
+        page_ids = book_ids[start : start + page_size]
     total_pages = max(1, (total + page_size - 1) // page_size)
     result = {
         **_shelf_base_view(shelf),
@@ -340,7 +339,7 @@ def _shelf_detail_view(
         "totalPages": total_pages,
     }
     if include_book_ids:
-        result["bookIds"] = work_ids
+        result["bookIds"] = book_ids
     return result
 
 
@@ -433,40 +432,38 @@ def _normalized_smart_shelf_rules(value: Any) -> tuple[dict[str, Any], str | Non
         return {}, dynamic_error
     if dynamic_rules["conditions"]:
         rules.update(dynamic_rules)
-    included_work_ids = [
+    included_book_ids = [
         str(item).strip()
-        for item in value.get("includedWorkIds") or []
+        for item in value.get("includedBookIds") or []
         if str(item).strip()
     ]
-    if included_work_ids:
-        rules["includedWorkIds"] = list(dict.fromkeys(included_work_ids))[:500]
+    if included_book_ids:
+        rules["includedBookIds"] = list(dict.fromkeys(included_book_ids))[:500]
     return rules, None
 
 
-def _normalized_shelf_work_ids(
+def _normalized_shelf_book_ids(
     db: Session, value: Any, user: User
 ) -> tuple[list[str], str | None]:
     if not isinstance(value, list):
         return [], "图书列表格式不正确"
-    work_ids: list[str] = []
+    book_ids: list[str] = []
     seen: set[str] = set()
     for item in value:
-        work_id = str(item or "").strip()
-        if work_id and work_id not in seen:
-            seen.add(work_id)
-            work_ids.append(work_id)
-    if not work_ids:
+        book_id = str(item or "").strip()
+        if book_id and book_id not in seen:
+            seen.add(book_id)
+            book_ids.append(book_id)
+    if not book_ids:
         return [], None
-    if not _has_table(db, "LibraryWork"):
-        return [], "选择的图书不存在，请刷新后重试"
-    visible_ids = shelf_store.filter_visible_work_ids(
+    visible_ids = shelf_store.filter_visible_book_ids(
         db,
-        work_ids,
+        book_ids,
         authorization_context(db, user),
     )
-    if len(visible_ids) != len(work_ids):
+    if len(visible_ids) != len(book_ids):
         return [], "选择的图书不存在，请刷新后重试"
-    return work_ids, None
+    return book_ids, None
 
 
 def _normalized_ids(value: object) -> list[str] | None:
@@ -559,7 +556,7 @@ def _collection_policy_response(
         "INVALID_SHELF_KIND": "书架类型无效",
         "INVALID_SHELF_KIND_TRANSITION": "合集类型创建后不能转换",
         "INVALID_COLLECTION_MEMBER": "合集只能包含当前用户的普通或智能书架",
-        "COLLECTION_CANNOT_CONTAIN_WORKS": "合集不能包含图书",
+        "COLLECTION_CANNOT_CONTAIN_BOOKS": "合集不能包含图书",
         "COLLECTION_CANNOT_HAVE_RULES": "合集不能设置智能书架规则",
         "SHELF_COLLECTION_NOT_EMPTY": "合集仍有书架，请先移除全部书架",
     }
@@ -570,7 +567,7 @@ def _collection_policy_response(
     )
 
 
-@router.get("/shelves/{shelf_id}")
+@router.get("/shelves/{shelf_id}", response_model=ShelfResponse)
 def get_shelf(
     shelf_id: str,
     request: Request,
@@ -579,7 +576,7 @@ def get_shelf(
     includeBookIds: bool = True,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -600,13 +597,13 @@ def get_shelf(
     )
 
 
-@router.post("/shelves", status_code=201)
+@router.post("/shelves", status_code=201, response_model=ShelfResponse)
 def create_shelf(
     request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -629,26 +626,26 @@ def create_shelf(
                 else "INVALID_SHELF_RULES"
             ),
         )
-    raw_work_ids = payload.get("bookIds", payload.get("workIds", []))
+    raw_book_ids = payload.get("bookIds", payload.get("bookIds", []))
     if kind is ShelfKind.COLLECTION:
-        supplied_work_ids = _normalized_ids(raw_work_ids)
+        supplied_book_ids = _normalized_ids(raw_book_ids)
         try:
             validate_shelf_content(
                 kind=kind,
-                work_ids=tuple(supplied_work_ids or ()),
+                book_ids=tuple(supplied_book_ids or ()),
                 has_smart_rules=bool(rules),
             )
         except ShelfCollectionPolicyError as error:
             return _collection_policy_response(error)
-        work_ids: list[str] = []
+        book_ids: list[str] = []
     else:
-        work_ids, work_error = _normalized_shelf_work_ids(
+        book_ids, book_error = _normalized_shelf_book_ids(
             db,
-            raw_work_ids,
+            raw_book_ids,
             user,
         )
-        if work_error:
-            return fail(work_error, status_code=400)
+        if book_error:
+            return fail(book_error, status_code=400)
     member_shelf_ids = _normalized_ids(payload.get("memberShelfIds", []))
     collection_ids = _normalized_ids(payload.get("collectionIds", []))
     if member_shelf_ids is None or collection_ids is None:
@@ -676,7 +673,7 @@ def create_shelf(
         return _collection_policy_response(error)
 
     now = _now()
-    shelf = CreateShelf(shelf_store, db).execute(
+    shelf = CreateShelf(_shelf_write_store(), db).execute(
         CreateShelfCommand(
             values={
                 "id": f"py_{time_ns()}",
@@ -690,7 +687,7 @@ def create_shelf(
                 "updatedAt": now,
             },
             kind=kind,
-            work_ids=tuple(work_ids),
+            book_ids=tuple(book_ids),
             member_shelf_ids=tuple(member_shelf_ids),
             collection_ids=tuple(collection_ids),
             now=now,
@@ -699,19 +696,19 @@ def create_shelf(
     return ok({"shelf": _shelf_detail_view(db, shelf, user)}, status_code=201)
 
 
-@router.patch("/shelves/{shelf_id}")
+@router.patch("/shelves/{shelf_id}", response_model=ShelfResponse)
 def update_shelf(
     shelf_id: str,
     request_payload: ShelfWriteRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ShelfResponse:
+) -> ShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     payload = _validated_shelf_payload(request_payload)
-    values = {
+    values: dict[str, Any] = {
         key: payload[key] for key in ("name", "description", "pinned") if key in payload
     }
     if "name" in values:
@@ -744,21 +741,21 @@ def update_shelf(
             ),
         )
     values.update({"kind": kind.value, "rulesJson": _json_text(rules)})
-    works = payload.get("bookIds", payload.get("workIds"))
-    work_ids: list[str] | None = None
-    if works is not None:
+    books = payload.get("bookIds", payload.get("bookIds"))
+    book_ids: list[str] | None = None
+    if books is not None:
         if kind is ShelfKind.COLLECTION:
-            work_ids = _normalized_ids(works)
-            if work_ids is None:
+            book_ids = _normalized_ids(books)
+            if book_ids is None:
                 return fail("图书列表格式不正确", status_code=400)
         else:
-            work_ids, work_error = _normalized_shelf_work_ids(db, works, user)
-            if work_error:
-                return fail(work_error, status_code=400)
+            book_ids, book_error = _normalized_shelf_book_ids(db, books, user)
+            if book_error:
+                return fail(book_error, status_code=400)
     try:
         validate_shelf_content(
             kind=kind,
-            work_ids=tuple(work_ids or ()),
+            book_ids=tuple(book_ids or ()),
             has_smart_rules=bool(rules),
         )
     except ShelfCollectionPolicyError as error:
@@ -818,13 +815,13 @@ def update_shelf(
         else []
     )
 
-    shelf = UpdateShelf(shelf_store, db).execute(
+    shelf = UpdateShelf(_shelf_write_store(), db).execute(
         UpdateShelfCommand(
             shelf_id=shelf_id,
             values=values,
             existing_kind=existing_kind,
             kind=kind,
-            work_ids=tuple(work_ids) if work_ids is not None else None,
+            book_ids=tuple(book_ids) if book_ids is not None else None,
             member_shelf_ids=(
                 tuple(member_shelf_ids) if member_shelf_ids is not None else None
             ),
@@ -841,13 +838,13 @@ def update_shelf(
     return ok({"shelf": _shelf_detail_view(db, shelf, user)})
 
 
-@router.delete("/shelves/{shelf_id}")
+@router.delete("/shelves/{shelf_id}", response_model=DeletedShelfResponse)
 def delete_shelf(
     shelf_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedShelfResponse:
+) -> DeletedShelfResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
@@ -863,7 +860,7 @@ def delete_shelf(
         )
 
     try:
-        deleted = DeleteShelf(shelf_store, db).execute(
+        deleted = DeleteShelf(_shelf_write_store(), db).execute(
             DeleteShelfCommand(
                 shelf_id=shelf_id,
                 is_collection=(

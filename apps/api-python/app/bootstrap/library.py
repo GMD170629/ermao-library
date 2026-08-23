@@ -1,56 +1,82 @@
+"""Composition root for Library application ports."""
+
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal
-
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.bootstrap.system import write_prepared_system_events
 from app.core.config import Settings
+from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
+from app.modules.library.application.asset_commands import DeleteResourceAsset
+from app.modules.library.application.book_commands import UpdateBook
+from app.modules.library.application.book_contents import BrowseBookContents
+from app.modules.library.application.book_list import BookListQuery, BookListResult
 from app.modules.library.application.bookshelf import ListBookshelfItems
-from app.modules.library.application.dto import MoveVolumeResult
+from app.modules.library.application.bulk_operations import (
+    ExecuteBulkFindReplace,
+    ExecuteBulkMetadata,
+    ExecuteBulkReadingStatus,
+    ExecuteBulkShelfMembership,
+    PreviewBulkFindReplace,
+)
+from app.modules.library.application.dashboard import DashboardQueries
+from app.modules.library.application.facet_sync import (
+    prepare_book_facet,
+)
 from app.modules.library.application.filter_options import (
     GetLibraryFilterSchema,
     SearchLibraryFilterOptions,
 )
 from app.modules.library.application.groupings import ListLibraryGroupings
+from app.modules.library.application.management_commands import (
+    DeleteLibraryFacet,
+    MergeLibraryFacets,
+    RenameLibraryFacet,
+    UndoLibraryOperation,
+)
 from app.modules.library.application.queries import (
-    GetSmartShelfWorkIds,
     SmartShelfCriteria,
 )
-from app.modules.library.application.work_deletion import (
-    DeleteLibraryWorks,
-    LibraryDeletionEventStore,
-    LibraryWorkDeletionResult,
-    PreparedLibraryWorkDeletion,
+from app.modules.library.application.source_node_commands import (
+    UpdateSourceNodeMetadata,
+    UpdateSourceNodePresentation,
 )
-from app.modules.library.application.work_list import WorkListQuery, WorkListResult
-from app.modules.library.application.work_merge import MergeMetadataWritebackPort
+from app.modules.library.application.source_node_metadata_recognition import (
+    RecognizeSourceNodeMetadata,
+)
+from app.modules.library.infrastructure import book_list as library_book_list
+from app.modules.library.infrastructure import books as library_books
 from app.modules.library.infrastructure import dashboard as library_dashboard
-from app.modules.library.infrastructure import deletion as library_deletion
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
-from app.modules.library.infrastructure import join_queries as library_join_queries
 from app.modules.library.infrastructure import operations as library_operation_store
 from app.modules.library.infrastructure import projections as library_projections
-from app.modules.library.infrastructure import storage as library_storage
-from app.modules.library.infrastructure import works as library_works
-from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
-from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
-from app.modules.library.infrastructure.deletion import (
-    SqlAlchemyLibraryWorkDeletionStore,
+from app.modules.library.infrastructure import (
+    request_mutations as library_request_mutations,
 )
-from app.modules.library.infrastructure.facet_references import (
-    SqlAlchemyLibraryFacetReferenceQueries,
+from app.modules.library.infrastructure import storage as library_storage
+from app.modules.library.infrastructure.asset_commands import (
+    SqlAlchemyResourceAssetMutation,
+)
+from app.modules.library.infrastructure.book_commands import SqlAlchemyBookMutation
+from app.modules.library.infrastructure.book_contents import (
+    SqlAlchemyBookContentsQueries,
+)
+from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
+from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
+from app.modules.library.infrastructure.bulk_operations import (
+    SqlAlchemyBulkBookOperations,
+)
+from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
+from app.modules.library.infrastructure.cover_publication import RemoteCoverPublication
+from app.modules.library.infrastructure.facet_management import (
+    SqlAlchemyLibraryFacetManagement,
 )
 from app.modules.library.infrastructure.facet_sync import (
-    PreparedWorkFacetWrite,
-    execute_work_facet_write,
-    load_work_facet_projections,
-    prepare_work_facet_write,
-)
-from app.modules.library.infrastructure.file_quarantine import (
-    LocalLibraryFileQuarantine,
+    PreparedBookFacetWrite,
+    execute_book_facet_write,
+    load_book_facet_projections,
+    prepare_book_facet_write,
 )
 from app.modules.library.infrastructure.filter_options import (
     SqlAlchemyLibraryFilterQueries,
@@ -58,119 +84,101 @@ from app.modules.library.infrastructure.filter_options import (
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
-from app.modules.library.infrastructure.queries import SqlAlchemyLibraryQueries
-from app.modules.library.infrastructure.request_mutations import (
-    SqlAlchemyLibraryRequestMutations,
+from app.modules.library.infrastructure.operation_management import (
+    SqlAlchemyLibraryOperationManagement,
 )
-from app.modules.library.infrastructure.request_mutations import (
-    load_metadata_apply_job_ids as _load_metadata_apply_job_ids,
+from app.modules.library.infrastructure.resource_commands import (
+    SqlAlchemyResourceMetadata,
 )
-from app.modules.library.infrastructure.structural_operations import (
-    move_volume_to_work as _move_volume_to_work,
+from app.modules.library.infrastructure.source_node_commands import (
+    SqlAlchemySourceNodeMetadata,
 )
-from app.modules.library.infrastructure.structural_operations import (
-    reorder_volume as _reorder_volume,
+from app.modules.library.infrastructure.source_node_cover import (
+    FilesystemSourceNodeCoverPublication,
 )
-from app.modules.library.infrastructure.volume_commands import SqlAlchemyVolumeStructure
-from app.modules.library.infrastructure.work_list import list_works as _list_works
-from app.modules.library.infrastructure.work_merge import SqlAlchemyWorkMergeGateway
-from app.modules.metadata.infrastructure.writeback_queue import (
-    write_metadata_to_files_enabled,
+from app.modules.library.infrastructure.source_node_metadata_recognition import (
+    ProviderSourceNodeMetadataRecognition,
 )
-from app.modules.system.public import PreparedSystemEvent
-
-__all__ = [
-    "PreparedWorkFacetWrite",
-    "bookshelf_items",
-    "delete_prepared_library_works",
-    "execute_work_facet_write",
-    "library_cover_publication",
-    "library_dashboard",
-    "library_deletion",
-    "library_facet_queries",
-    "library_facet_references",
-    "library_filter_options",
-    "library_filter_schema",
-    "library_groupings",
-    "library_join_queries",
-    "library_operation_store",
-    "library_projections",
-    "library_request_mutations",
-    "library_storage",
-    "library_works",
-    "list_works",
-    "load_metadata_apply_job_ids",
-    "load_work_facet_projections",
-    "move_volume_to_work",
-    "prepare_work_facet_write",
-    "reorder_volume",
-    "smart_shelf_work_ids",
-    "volume_structure_commands",
-    "work_merge_gateway",
-]
-
-
-class _LibraryDeletionEventAdapter(LibraryDeletionEventStore):
-    def __init__(self, db: Session) -> None:
-        self._db = db
-
-    def write(self, events: tuple[PreparedSystemEvent, ...]) -> None:
-        write_prepared_system_events(self._db, list(events))
-
-
-def delete_prepared_library_works(
-    db: Session,
-    prepared: PreparedLibraryWorkDeletion,
-) -> LibraryWorkDeletionResult:
-    return DeleteLibraryWorks(
-        SqlAlchemyLibraryWorkDeletionStore(db),
-        LocalLibraryFileQuarantine(),
-        _LibraryDeletionEventAdapter(db),
-        db,
-    ).execute(prepared)
 
 
 def bookshelf_items(db: Session) -> ListBookshelfItems:
     return ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db))
 
 
-class _MetadataWritebackAdapter(MergeMetadataWritebackPort):
-    def __init__(self, db: Session) -> None:
-        self._db = db
-
-    def enabled(self) -> bool:
-        return write_metadata_to_files_enabled(self._db)
-
-    def enqueue(
-        self, *, work_id: str, media_version_id: str
-    ) -> dict[str, object] | None:
-        # Merge persistence commits ORM changes through the global observer.
-        return None
+def library_catalog(db: Session) -> SqlAlchemyCatalogQueries:
+    return SqlAlchemyCatalogQueries(db)
 
 
-def work_merge_gateway(db: Session) -> SqlAlchemyWorkMergeGateway:
-    return SqlAlchemyWorkMergeGateway(db, _MetadataWritebackAdapter(db))
+def effective_book_cover_paths(
+    db: Session, book_ids: tuple[str, ...]
+) -> dict[str, str]:
+    return dict(SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids))
 
 
-def smart_shelf_work_ids(
+def bulk_metadata(db: Session) -> ExecuteBulkMetadata:
+    return ExecuteBulkMetadata(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_find_replace_preview(db: Session) -> PreviewBulkFindReplace:
+    return PreviewBulkFindReplace(SqlAlchemyBulkBookOperations(db))
+
+
+def bulk_find_replace(db: Session) -> ExecuteBulkFindReplace:
+    return ExecuteBulkFindReplace(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_shelf_membership(db: Session) -> ExecuteBulkShelfMembership:
+    return ExecuteBulkShelfMembership(SqlAlchemyBulkBookOperations(db), db)
+
+
+def bulk_reading_status(db: Session) -> ExecuteBulkReadingStatus:
+    return ExecuteBulkReadingStatus(SqlAlchemyBulkBookOperations(db), db)
+
+
+def merge_library_facets(db: Session) -> MergeLibraryFacets:
+    return MergeLibraryFacets(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def rename_library_facet(db: Session) -> RenameLibraryFacet:
+    return RenameLibraryFacet(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def delete_library_facet(db: Session) -> DeleteLibraryFacet:
+    return DeleteLibraryFacet(SqlAlchemyLibraryFacetManagement(db), db)
+
+
+def undo_library_operation(db: Session) -> UndoLibraryOperation:
+    return UndoLibraryOperation(SqlAlchemyLibraryOperationManagement(db), db)
+
+
+def smart_shelf_book_ids(
     db: Session,
     rules: object,
     *,
     user_id: str | None = None,
 ) -> list[str]:
-    query = GetSmartShelfWorkIds(SqlAlchemyLibraryQueries(db))
-    return query.execute(
-        SmartShelfCriteria.from_external(rules),
-        user_id=user_id,
-    )
+    criteria = SmartShelfCriteria.from_external(rules)
+    statement = select(LibraryBook.id)
+    if criteria.search:
+        from app.models import LibraryBookMetadata
 
+        term = f"%{criteria.search}%"
+        statement = statement.join(
+            LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id
+        ).where(
+            LibraryBookMetadata.title.ilike(term)
+            | LibraryBookMetadata.author.ilike(term)
+        )
+    if user_id:
+        from app.models import UserLibraryAccess
 
-def library_groupings(db: Session) -> ListLibraryGroupings:
-    return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
-
-
-def library_facet_references(db: Session) -> SqlAlchemyLibraryFacetReferenceQueries:
-    return SqlAlchemyLibraryFacetReferenceQueries(db)
+        library_ids = select(UserLibraryAccess.library_id).where(
+            UserLibraryAccess.user_id == user_id
+        )
+        statement = statement.where(LibraryBook.library_id.in_(library_ids))
+    return [
+        str(book_id) for book_id in db.scalars(statement.order_by(LibraryBook.id)).all()
+    ]
 
 
 def library_filter_schema(db: Session) -> GetLibraryFilterSchema:
@@ -181,13 +189,14 @@ def library_filter_options(db: Session) -> SearchLibraryFilterOptions:
     return SearchLibraryFilterOptions(SqlAlchemyLibraryFilterQueries(db))
 
 
-def library_request_mutations(db: Session) -> SqlAlchemyLibraryRequestMutations:
-    from app.bootstrap.metadata import persist_metadata_writeback_intents
+def library_groupings(db: Session) -> ListLibraryGroupings:
+    return ListLibraryGroupings(SqlAlchemyLibraryGroupingQueries(db))
 
-    return SqlAlchemyLibraryRequestMutations(
-        db,
-        write_events=write_prepared_system_events,
-        write_metadata=persist_metadata_writeback_intents,
+
+def dashboard_queries(db: Session) -> DashboardQueries:
+    return DashboardQueries(
+        activity=library_dashboard.SqlAlchemyDashboardActivityQueries(db),
+        bookshelf=SqlAlchemyBookshelfItemQueries(db),
     )
 
 
@@ -195,51 +204,95 @@ def library_cover_publication(settings: Settings) -> RemoteCoverPublication:
     return RemoteCoverPublication(settings.resolved_storage_root)
 
 
-def load_metadata_apply_job_ids(db: Session, work_id: str) -> tuple[str, ...]:
-    return _load_metadata_apply_job_ids(db, work_id)
+def get_book(db: Session, book_id: str) -> dict[str, object] | None:
+    return library_books.get_book(db, book_id)
 
 
-def list_works(
-    db: Session,
-    user: User,
-    query: WorkListQuery,
-) -> WorkListResult:
-    return _list_works(db, user, query)
+def update_book(db: Session) -> UpdateBook:
+    return UpdateBook(SqlAlchemyBookMutation(db), db)
 
 
-def move_volume_to_work(
-    db: Session,
-    *,
-    source_work_id: str,
-    volume_id: str,
-    target_work_id: str,
-    now: datetime,
-) -> MoveVolumeResult:
-    return _move_volume_to_work(
+def browse_book_contents(db: Session) -> BrowseBookContents:
+    return BrowseBookContents(SqlAlchemyBookContentsQueries(db))
+
+
+def update_source_node_metadata(db: Session) -> UpdateSourceNodeMetadata:
+    return UpdateSourceNodeMetadata(SqlAlchemySourceNodeMetadata(db), db)
+
+
+def update_source_node_presentation(
+    db: Session, settings: Settings
+) -> UpdateSourceNodePresentation:
+    return UpdateSourceNodePresentation(
+        SqlAlchemySourceNodeMetadata(db),
+        FilesystemSourceNodeCoverPublication(settings.resolved_storage_root),
         db,
-        source_work_id=source_work_id,
-        volume_id=volume_id,
-        target_work_id=target_work_id,
-        now=now,
     )
 
 
-def reorder_volume(
-    db: Session,
-    *,
-    volume_id: str,
-    media_version_id: str,
-    direction: Literal["up", "down"],
-    now: datetime,
-) -> bool:
-    return _reorder_volume(
-        db,
-        volume_id=volume_id,
-        media_version_id=media_version_id,
-        direction=direction,
-        now=now,
+def recognize_source_node_metadata(db: Session) -> RecognizeSourceNodeMetadata:
+    return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db))
+
+
+def delete_resource_asset(db: Session) -> DeleteResourceAsset:
+    return DeleteResourceAsset(SqlAlchemyResourceAssetMutation(db), db)
+
+
+def resource_metadata(db: Session) -> SqlAlchemyResourceMetadata:
+    return SqlAlchemyResourceMetadata(db)
+
+
+def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
+    return tuple(
+        str(task.id)
+        for task in db.scalars(
+            select(MetadataLookupTask)
+            .where(MetadataLookupTask.book_id == book_id)
+            .order_by(MetadataLookupTask.created_at.desc())
+        ).all()
     )
 
 
-def volume_structure_commands(db: Session) -> SqlAlchemyVolumeStructure:
-    return SqlAlchemyVolumeStructure(db)
+def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
+    return library_book_list.list_books(db, user, query)
+
+
+__all__ = [
+    "PreparedBookFacetWrite",
+    "bookshelf_items",
+    "browse_book_contents",
+    "bulk_find_replace",
+    "bulk_find_replace_preview",
+    "bulk_metadata",
+    "bulk_reading_status",
+    "bulk_shelf_membership",
+    "delete_library_facet",
+    "delete_resource_asset",
+    "effective_book_cover_paths",
+    "execute_book_facet_write",
+    "get_book",
+    "library_books",
+    "library_catalog",
+    "library_cover_publication",
+    "library_dashboard",
+    "library_facet_queries",
+    "library_filter_options",
+    "library_filter_schema",
+    "library_operation_store",
+    "library_projections",
+    "library_request_mutations",
+    "library_storage",
+    "list_books",
+    "load_book_facet_projections",
+    "load_metadata_apply_job_ids",
+    "merge_library_facets",
+    "prepare_book_facet",
+    "prepare_book_facet_write",
+    "recognize_source_node_metadata",
+    "rename_library_facet",
+    "resource_metadata",
+    "smart_shelf_book_ids",
+    "update_book",
+    "update_source_node_metadata",
+    "update_source_node_presentation",
+]

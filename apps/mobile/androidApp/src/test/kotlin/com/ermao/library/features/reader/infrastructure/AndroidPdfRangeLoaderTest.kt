@@ -64,8 +64,8 @@ class AndroidPdfRangeLoaderTest {
         val root = Files.createTempDirectory("shuku-pdf-range-namespace-test").toFile()
         try {
             val cache = AndroidPdfRangeCache(root)
-            val previous = PdfRangeCacheIdentity(namespace(1), "volume-1")
-            val current = PdfRangeCacheIdentity(namespace(2), "volume-1")
+            val previous = PdfRangeCacheIdentity(namespace(1), "resource-1")
+            val current = PdfRangeCacheIdentity(namespace(2), "resource-1")
             cache.writeAlignedRange(previous, 0, ByteArray(CHUNK) { 1 })
 
             cache.activateNamespace(current.namespace)
@@ -83,7 +83,7 @@ class AndroidPdfRangeLoaderTest {
     ) {
         val root = Files.createTempDirectory("shuku-pdf-range-test").toFile()
         try {
-            val identity = PdfRangeCacheIdentity(namespace(), "volume-1")
+            val identity = PdfRangeCacheIdentity(namespace(), "resource-1")
             block(AndroidPdfRangeCache(root), identity)
         } finally {
             root.deleteRecursively()
@@ -91,12 +91,12 @@ class AndroidPdfRangeLoaderTest {
     }
 
     private fun source() = RemoteByteRangeReaderSource(
-        sourceId = "volume-1",
+        resourceId = "resource-1",
         displayTitle = "PDF",
-        workId = "work-1",
-        volumeId = "volume-1",
+        bookId = "book-1",
+        assetId = "asset-1",
         namespace = namespace(),
-        apiPath = "/api/volumes/volume-1/file",
+        apiPath = "/api/resources/resource-1/asset",
         expectedSizeBytes = 12L * CHUNK,
     )
 

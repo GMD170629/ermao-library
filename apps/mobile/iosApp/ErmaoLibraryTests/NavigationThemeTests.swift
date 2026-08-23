@@ -13,7 +13,7 @@ final class NavigationThemeTests: XCTestCase {
         var paths = RootTabPaths()
         for tab in [TabPresentation.home, .library, .shelves, .me] {
             var path = paths.path(for: tab)
-            path.append(.work(workID: "detail-\(String(describing: tab))"))
+            path.append(.work(bookID: "detail-\(String(describing: tab))"))
             paths.setPath(path, for: tab)
         }
 

@@ -76,7 +76,7 @@ struct LibraryView: View {
 
     private var searchPrompt: LocalizedStringKey {
         switch store.selectedScope {
-        case .works: "library.search.works"
+        case .books: "library.search.books"
         case .series: "library.search.series"
         case .authors: "library.search.authors"
         }
@@ -90,7 +90,7 @@ struct LibraryView: View {
                 store.selectScope(scope)
             }
         )) {
-            Text("library.scope.works").tag(LibraryScope.works)
+            Text("library.scope.books").tag(LibraryScope.books)
             Text("library.scope.series").tag(LibraryScope.series)
             Text("library.scope.authors").tag(LibraryScope.authors)
         }
@@ -114,7 +114,7 @@ struct LibraryView: View {
                         .accessibilityLabel(Text("library.stale.refreshing"))
                 }
                 Spacer()
-                if store.selectedScope == .works {
+                if store.selectedScope == .books {
                     Button {
                         presentsFilter = true
                     } label: {
@@ -139,7 +139,7 @@ struct LibraryView: View {
                 }
             }
 
-            if store.selectedScope == .works, !store.current.filters.isEmpty {
+            if store.selectedScope == .books, !store.current.filters.isEmpty {
                 VStack(alignment: .leading, spacing: .spaceHalf) {
                     ForEach(activeMediaFilters, id: \.self) { mediaKind in
                         appliedFilterButton(mediaKind.localizedTitle) {
@@ -188,7 +188,7 @@ struct LibraryView: View {
 
     private var resultCountKey: String {
         switch store.selectedScope {
-        case .works: "library.results.works.format"
+        case .books: "library.results.books.format"
         case .series: "library.results.series.format"
         case .authors: "library.results.authors.format"
         }
@@ -226,8 +226,8 @@ struct LibraryView: View {
         case .empty:
             emptyResultsView
         case .ready(let items, _, _, _):
-            if store.selectedScope == .works {
-                worksContent(items.compactMap(\.work))
+            if store.selectedScope == .books {
+                worksContent(items.compactMap(\.book))
             } else {
                 groupingContent(items.compactMap(\.grouping))
             }
@@ -262,14 +262,14 @@ struct LibraryView: View {
 
     private var emptyTitle: LocalizedStringKey {
         switch store.selectedScope {
-        case .works: "library.empty.works.title"
+        case .books: "library.empty.books.title"
         case .series: "library.empty.series.title"
         case .authors: "library.empty.authors.title"
         }
     }
 
     @ViewBuilder
-    private func worksContent(_ works: [WorkCard]) -> some View {
+    private func worksContent(_ works: [BookCard]) -> some View {
         if store.current.viewMode == .list || dynamicTypeSize.isAccessibilitySize {
             WorkList(
                 works: works,
@@ -300,7 +300,7 @@ struct LibraryView: View {
                 } label: {
                     HStack(spacing: .space2) {
                         GroupingCoverStackView(
-                            works: group.representativeWorks,
+                            works: group.representativeBooks,
                             context: context,
                             client: client,
                             cache: cache,
@@ -338,22 +338,22 @@ struct LibraryView: View {
             return String(
                 format: String(localized: "library.group.workCount.format"),
                 locale: .current,
-                group.workCount
+                group.bookCount
             )
         }
-        let author = group.representativeWorks.first?.author.trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = group.representativeBooks.first?.author?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let author, !author.isEmpty {
             return String(
                 format: String(localized: "library.group.summary.format"),
                 locale: .current,
                 author,
-                group.workCount
+                group.bookCount
             )
         }
         return String(
             format: String(localized: "library.group.workCount.format"),
             locale: .current,
-            group.workCount
+            group.bookCount
         )
     }
 
@@ -364,7 +364,7 @@ struct LibraryView: View {
 
     @ToolbarContentBuilder
     private var libraryToolbar: some ToolbarContent {
-        if store.selectedScope == .works {
+        if store.selectedScope == .books {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Section("library.sort.section") {
@@ -481,7 +481,7 @@ struct WorkCollectionView: View {
             )
         case .ready(let items, _, _, _):
             WorkGrid(
-                works: items.compactMap(\.work),
+                works: items.compactMap(\.book),
                 context: context,
                 client: client,
                 cache: cache,
@@ -494,8 +494,8 @@ struct WorkCollectionView: View {
 }
 
 private extension LibraryResultItem {
-    var work: WorkCard? {
-        guard case .work(let value) = self else { return nil }
+    var book: BookCard? {
+        guard case .book(let value) = self else { return nil }
         return value
     }
 
@@ -517,7 +517,7 @@ private extension LibrarySort {
 }
 
 private struct GroupingCoverStackView: View {
-    let works: [WorkCard]
+    let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
     let cache: LibraryCacheStore

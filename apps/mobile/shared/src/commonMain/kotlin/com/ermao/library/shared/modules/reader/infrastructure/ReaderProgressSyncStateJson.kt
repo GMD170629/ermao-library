@@ -37,7 +37,7 @@ class ReaderProgressSyncStateJson(
     }
 
     private fun ReaderProgressMutation.toJson(): JsonObject = buildJsonObject {
-        put("sourceId", sourceId)
+        put("resourceId", resourceId)
         put("clientId", clientId)
         put("mutationId", mutationId)
         put("baseRevision", baseRevision)
@@ -46,7 +46,7 @@ class ReaderProgressSyncStateJson(
     }
 
     private fun JsonObject.toMutation(): ReaderProgressMutation = ReaderProgressMutation(
-        sourceId = requiredString("sourceId"),
+        resourceId = requiredString("resourceId"),
         clientId = requiredString("clientId"),
         mutationId = requiredString("mutationId"),
         baseRevision = requiredLong("baseRevision"),
@@ -56,7 +56,7 @@ class ReaderProgressSyncStateJson(
 
     companion object {
         private const val SCHEMA = "ermao.reader-progress-sync"
-        private const val VERSION = 6
+        private const val VERSION = 7
     }
 }
 

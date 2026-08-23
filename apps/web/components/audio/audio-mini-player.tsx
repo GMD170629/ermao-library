@@ -26,7 +26,7 @@ import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
 import { AUDIO_PLAYBACK_RATE_OPTIONS } from '../../lib/audio-device-preferences';
 import { withBasePath } from '../../lib/base-path';
 import { cn } from '../ui/cn';
-import { VolumeSelect } from '../ui/volume-select';
+import { ResourceSelect } from '../ui/resource-select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
@@ -42,8 +42,8 @@ export function AudioMiniPlayer() {
   const pathname = usePathname();
   const player = useAudioPlayback();
   const bootstrap = player.bootstrap;
-  const pendingSummary = player.pendingVolumeId && player.pendingSummary
-    && player.pendingVolumeId === player.pendingSummary.volumeId
+  const pendingSummary = player.pendingResourceId && player.pendingSummary
+    && player.pendingResourceId === player.pendingSummary.resourceId
     ? player.pendingSummary
     : null;
   const [openPanel, setOpenPanel] = useState<MiniPlayerPanel>(null);
@@ -64,7 +64,7 @@ export function AudioMiniPlayer() {
 
   useEffect(() => {
     setOpenPanel(null);
-  }, [bootstrap?.volume.id, pathname]);
+  }, [bootstrap?.resource.id, pathname]);
 
   useEffect(() => {
     if (!openPanel) return undefined;
@@ -103,7 +103,7 @@ export function AudioMiniPlayer() {
           play: () => player.selectChapter(chapter.id, true)
         }))
       : bootstrap.tracks.map((track, index) => ({
-          id: track.fileId,
+          id: track.assetId,
           title: track.title,
           durationMs: track.durationMs,
           active: index === player.trackIndex,
@@ -115,8 +115,8 @@ export function AudioMiniPlayer() {
   if (pendingSummary) {
     const pendingCoverUrl = pendingSummary.coverUrl
       ? withBasePath(pendingSummary.coverUrl)
-      : withBasePath(`/api/works/${encodeURIComponent(pendingSummary.workId)}/cover?size=small`);
-    const pendingHref = `/works/${encodeURIComponent(pendingSummary.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(pendingSummary.volumeId)}`;
+      : withBasePath(`/api/books/${encodeURIComponent(pendingSummary.bookId)}/cover?size=small`);
+    const pendingHref = `/books/${encodeURIComponent(pendingSummary.bookId)}?resourceId=${encodeURIComponent(pendingSummary.resourceId)}`;
     return (
       <section
         ref={rootRef}
@@ -144,7 +144,7 @@ export function AudioMiniPlayer() {
               </button>
             ) : <LoaderCircle size={22} className="shrink-0 animate-spin text-[#EF4D2F] motion-reduce:animate-none" aria-hidden="true" />}
             {bootstrap ? (
-              <button type="button" onClick={player.cancelVolumeSwitch} className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-[#625C56] hover:bg-black/[0.05]" aria-label={i18nAttribute("返回原播放")}>
+              <button type="button" onClick={player.cancelResourceSwitch} className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-[#625C56] hover:bg-black/[0.05]" aria-label={i18nAttribute("返回原播放")}>
                 <ArrowLeft size={17} aria-hidden="true" /> <span className="hidden xl:inline"><I18nText>原播放</I18nText></span>
               </button>
             ) : null}
@@ -161,8 +161,8 @@ export function AudioMiniPlayer() {
 
   const coverUrl = bootstrap.book.coverUrl
     ? withBasePath(bootstrap.book.coverUrl)
-    : withBasePath(`/api/works/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
-  const workHref = `/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`;
+    : withBasePath(`/api/books/${encodeURIComponent(bootstrap.book.id)}/cover?size=small`);
+  const bookHref = `/books/${encodeURIComponent(bootstrap.book.id)}?resourceId=${encodeURIComponent(bootstrap.resource.id)}`;
   const isPlaying = player.lifecycle === 'playing';
   const isLoading = player.lifecycle === 'loading';
   const playbackError = player.loadError ?? player.error;
@@ -206,13 +206,13 @@ export function AudioMiniPlayer() {
               <X size={17} />
             </button>
           </header>
-          {bootstrap.availableVolumes.length > 1 ? (
+          {bootstrap.availableResources.length > 1 ? (
             <div className="border-b border-black/[0.07] px-4 py-2.5">
-              <VolumeSelect
-                items={bootstrap.availableVolumes.map((volume) => ({ id: volume.id, title: volume.title }))}
-                value={bootstrap.volume.id}
-                onChange={(volumeId) => void player.loadVolume(volumeId)}
-                disabled={Boolean(player.pendingVolumeId)}
+              <ResourceSelect
+                items={bootstrap.availableResources.map((resource) => ({ id: resource.id, title: resource.title }))}
+                value={bootstrap.resource.id}
+                onChange={(resourceId) => void player.loadResource(resourceId)}
+                disabled={Boolean(player.pendingResourceId)}
                 compact
                 className="w-full"
               />
@@ -324,7 +324,7 @@ export function AudioMiniPlayer() {
 
       <div className="overflow-hidden rounded-[22px] border border-black/[0.07] bg-[#FFFEFC]/95 shadow-[0_16px_50px_rgba(65,48,38,0.17),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-xl">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 px-2.5 pt-2.5 sm:px-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:gap-x-4 md:pt-3 lg:px-4">
-          <Link href={workHref} className="flex min-h-14 min-w-0 items-center gap-2.5 rounded-[14px] p-1 text-left transition-colors duration-200 hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EF4D2F]/60" aria-label={i18nAttribute("打开《{value0}》图书详情", { value0: bootstrap.book.title })}>
+          <Link href={bookHref} className="flex min-h-14 min-w-0 items-center gap-2.5 rounded-[14px] p-1 text-left transition-colors duration-200 hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EF4D2F]/60" aria-label={i18nAttribute("打开《{value0}》图书详情", { value0: bootstrap.book.title })}>
             <span className="relative h-12 w-12 shrink-0 overflow-hidden rounded-[10px] bg-[#EEE8E1] shadow-[0_3px_10px_rgba(62,49,40,0.16)] sm:h-[52px] sm:w-[52px]">
               <Image src={coverUrl} alt={i18nAttribute("《{value0}》封面", { value0: bootstrap.book.title })} fill sizes="52px" unoptimized className="object-cover" />
             </span>

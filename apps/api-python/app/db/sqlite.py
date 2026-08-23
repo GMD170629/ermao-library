@@ -13,6 +13,10 @@ from app.db.maintenance import (
 logger = logging.getLogger(__name__)
 
 
+class SQLiteWalModeRequiredError(RuntimeError):
+    """The persistent database could not enter the required WAL mode."""
+
+
 def create_sqlite_engine(
     database_path: Path,
     *,
@@ -32,6 +36,19 @@ def create_sqlite_engine(
         try:
             cursor.execute("PRAGMA foreign_keys = ON")
             cursor.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+            # SQLite exposes journal configuration only through PRAGMA at the
+            # DBAPI connection boundary. WAL is persistent for the database,
+            # but every process verifies it instead of silently falling back
+            # to DELETE mode on an unsupported filesystem or read-only mount.
+            journal_mode_row = cursor.execute("PRAGMA journal_mode = WAL").fetchone()
+            journal_mode = (
+                str(journal_mode_row[0]).casefold() if journal_mode_row else None
+            )
+            if journal_mode != "wal":
+                raise SQLiteWalModeRequiredError(
+                    "SQLite WAL mode is required; "
+                    f"database reported {journal_mode or 'no journal mode'}"
+                )
             cursor.execute("PRAGMA synchronous = NORMAL")
         finally:
             cursor.close()

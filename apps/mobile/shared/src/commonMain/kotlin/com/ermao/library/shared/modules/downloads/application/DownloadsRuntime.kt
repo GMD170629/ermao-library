@@ -1,25 +1,25 @@
 package com.ermao.library.shared.modules.downloads.application
 
 import com.ermao.library.shared.modules.downloads.domain.CompletedDownloadArtifact
-import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
-import com.ermao.library.shared.modules.downloads.domain.DownloadedWork
+import com.ermao.library.shared.modules.downloads.domain.DownloadedBook
+import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision
 import com.ermao.library.shared.modules.downloads.domain.ReaderAccessPolicy
 import com.ermao.library.shared.modules.downloads.domain.ReaderAccessRequest
-import com.ermao.library.shared.modules.downloads.domain.completedDownloadsByWork
+import com.ermao.library.shared.modules.downloads.domain.completedDownloadsByBook
 import com.ermao.library.shared.modules.downloads.domain.transition
 
 class DownloadsRuntime(
     private val catalog: DownloadCatalogRepository,
     private val readerAccessPolicy: ReaderAccessPolicy = ReaderAccessPolicy(),
 ) {
-    suspend fun downloadedWorks(
+    suspend fun downloadedBooks(
         namespace: DownloadNamespace,
         query: String = "",
-    ): List<DownloadedWork> = completedDownloadsByWork(
+    ): List<DownloadedBook> = completedDownloadsByBook(
         namespace,
         catalog.listArtifacts(namespace),
         query,
@@ -42,44 +42,8 @@ class DownloadsRuntime(
         return next
     }
 
-    suspend fun removeArtifact(namespace: DownloadNamespace, volumeId: String) {
-        require(volumeId.isNotBlank())
-        catalog.deleteArtifact(namespace, volumeId)
-    }
-
-    /**
-     * Keeps a verified local file available when a server-side management operation moves
-     * the same volume into another work or media version. The byte reference is unchanged;
-     * only its catalog ownership is rewritten after the remote mutation succeeds.
-     */
-    suspend fun rehomeCompletedArtifact(
-        namespace: DownloadNamespace,
-        volumeId: String,
-        targetWorkId: String,
-        targetMediaVersionId: String,
-        targetMediaKind: String,
-        targetWorkTitle: String,
-        targetWorkAuthor: String?,
-        targetCoverApiPath: String?,
-    ): CompletedDownloadArtifact? {
-        require(volumeId.isNotBlank())
-        require(targetWorkId.isNotBlank())
-        require(targetMediaVersionId.isNotBlank())
-        require(targetMediaKind.isNotBlank())
-        require(targetWorkTitle.isNotBlank())
-        val current = artifact(namespace, volumeId) ?: return null
-        val moved = current.copy(
-            descriptor = current.descriptor.copy(
-                identity = DownloadIdentity(namespace, targetWorkId, volumeId),
-                workTitle = targetWorkTitle,
-                workAuthor = targetWorkAuthor,
-                coverApiPath = targetCoverApiPath,
-                mediaVersionId = targetMediaVersionId,
-                mediaKind = targetMediaKind,
-            ),
-        )
-        catalog.saveArtifact(moved)
-        return moved
+    suspend fun removeArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
+        catalog.deleteArtifact(namespace, identity)
     }
 
     suspend fun readerAccess(request: ReaderAccessRequest): ReaderAccessDecision =
@@ -87,9 +51,9 @@ class DownloadsRuntime(
 
     suspend fun artifact(
         namespace: DownloadNamespace,
-        volumeId: String,
+        resourceId: String,
     ): CompletedDownloadArtifact? = catalog.listArtifacts(namespace).firstOrNull {
-        it.identity.volumeId == volumeId
+        it.identity.resourceId == resourceId
     }
 }
 
@@ -101,11 +65,11 @@ class InMemoryDownloadCatalogRepository : DownloadCatalogRepository {
         artifacts.values.filter { it.identity.namespace == namespace }
 
     override suspend fun saveArtifact(artifact: CompletedDownloadArtifact) {
-        artifacts[artifactKey(artifact.identity.namespace, artifact.identity.volumeId)] = artifact
+        artifacts[artifactKey(artifact.identity)] = artifact
     }
 
-    override suspend fun deleteArtifact(namespace: DownloadNamespace, volumeId: String) {
-        artifacts.remove(artifactKey(namespace, volumeId))
+    override suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
+        artifacts.remove(artifactKey(identity))
     }
 
     override suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask> =
@@ -124,6 +88,6 @@ class InMemoryDownloadCatalogRepository : DownloadCatalogRepository {
         tasks.entries.removeAll { it.value.descriptor.identity.namespace == namespace }
     }
 
-    private fun artifactKey(namespace: DownloadNamespace, volumeId: String) = "${namespace.stableKey}:artifact:$volumeId"
+    private fun artifactKey(identity: DownloadIdentity) = "${identity.namespace.stableKey}:artifact:${identity.bookId}:${identity.resourceId}:${identity.assetId}"
     private fun taskKey(namespace: DownloadNamespace, taskId: String) = "${namespace.stableKey}:task:$taskId"
 }

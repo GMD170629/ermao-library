@@ -5,34 +5,34 @@ import CryptoKit
 
 struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
     let context: ContentRequestContext
-    let workID: String
-    let volumeID: String
+    let bookID: String
+    let resourceID: String
     let displayTitle: String
     let managedDownloadRecordID: String?
 
     init(
         context: ContentRequestContext,
-        workID: String,
-        volumeID: String,
+        bookID: String,
+        resourceID: String,
         displayTitle: String,
         managedDownloadRecordID: String? = nil
     ) {
         self.context = context
-        self.workID = workID
-        self.volumeID = volumeID
+        self.bookID = bookID
+        self.resourceID = resourceID
         self.displayTitle = displayTitle
         self.managedDownloadRecordID = managedDownloadRecordID
     }
 
-    var id: String { "\(context.namespaceKey)|\(volumeID)" }
+    var id: String { "\(context.namespaceKey)|\(resourceID)" }
 }
 
 struct IosReaderDownloadArtifact: Sendable {
     let fileURL: URL
-    let sourceID: String
+    let assetID: String
     let displayTitle: String
-    let workID: String
-    let volumeID: String
+    let bookID: String
+    let resourceID: String
     let sourceFormat: String
 }
 
@@ -41,7 +41,7 @@ protocol IosReaderDownloadArtifactProviding: Sendable {
     func deleteReaderArtifact(recordID: String, namespace: String) async throws
 }
 
-private struct IosReaderNavigationSnapshot: Codable {
+struct IosReaderNavigationSnapshot: Codable {
     struct Unit: Codable {
         let id: String
         let title: String
@@ -62,7 +62,7 @@ private struct IosReaderNavigationSnapshot: Codable {
     let pageCount: Int?
 }
 
-private final class IosReaderNavigationCache {
+final class IosReaderNavigationCache {
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -72,10 +72,10 @@ private final class IosReaderNavigationCache {
     func save(
         serverIdentity: String,
         userID: String,
-        volumeID: String,
+        resourceID: String,
         bootstrap: ErmaoShared.ReaderBootstrap
     ) {
-        let previous = load(serverIdentity: serverIdentity, userID: userID, volumeID: volumeID)
+        let previous = load(serverIdentity: serverIdentity, userID: userID, resourceID: resourceID)
         let units = bootstrap.units.isEmpty ? previous?.units ?? [] : bootstrap.units.prefix(20_000).map {
             IosReaderNavigationSnapshot.Unit(id: $0.id, title: $0.title, href: $0.href)
         }
@@ -100,20 +100,37 @@ private final class IosReaderNavigationCache {
             pageCount: bootstrap.pageCount?.intValue ?? previous?.pageCount
         )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        defaults.set(data, forKey: key(serverIdentity: serverIdentity, userID: userID, volumeID: volumeID))
+        defaults.set(data, forKey: key(serverIdentity: serverIdentity, userID: userID, resourceID: resourceID))
     }
 
-    func load(serverIdentity: String, userID: String, volumeID: String) -> IosReaderNavigationSnapshot? {
+    func load(serverIdentity: String, userID: String, resourceID: String) -> IosReaderNavigationSnapshot? {
         guard let data = defaults.data(
-            forKey: key(serverIdentity: serverIdentity, userID: userID, volumeID: volumeID)
+            forKey: key(serverIdentity: serverIdentity, userID: userID, resourceID: resourceID)
         ) else { return nil }
         return try? JSONDecoder().decode(IosReaderNavigationSnapshot.self, from: data)
     }
 
-    private func key(serverIdentity: String, userID: String, volumeID: String) -> String {
-        let scope = Data("\(serverIdentity)\0\(userID)\0\(volumeID)".utf8)
-        let digest = SHA256.hash(data: scope).map { String(format: "%02x", $0) }.joined()
-        return "reader.navigation.v1.\(digest)"
+    /// Navigation snapshots are private Reader state. Use the account prefix
+    /// so clearing one namespace cannot remove another account's snapshots.
+    func clear(serverIdentity: String, userID: String) {
+        let prefix = "reader.navigation.v2.\(accountDigest(serverIdentity: serverIdentity, userID: userID))."
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private func key(serverIdentity: String, userID: String, resourceID: String) -> String {
+        return "reader.navigation.v2.\(accountDigest(serverIdentity: serverIdentity, userID: userID)).\(resourceDigest(resourceID))"
+    }
+
+    private func accountDigest(serverIdentity: String, userID: String) -> String {
+        SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func resourceDigest(_ resourceID: String) -> String {
+        SHA256.hash(data: Data(resourceID.utf8))
+            .map { String(format: "%02x", $0) }.joined()
     }
 }
 
@@ -170,7 +187,7 @@ final class IosReaderComposition: ObservableObject {
             guard let artifact = try await downloadArtifacts.verifiedReaderArtifact(
                 recordID: recordID,
                 namespace: request.context.namespaceKey
-            ), artifact.sourceID == request.volumeID else {
+            ), artifact.resourceID == request.resourceID else {
                 throw IosReaderFailure(code: .resourceMissing)
             }
             launchArtifact = artifact
@@ -180,7 +197,7 @@ final class IosReaderComposition: ObservableObject {
         let bootstrapRequest = ErmaoShared.ReaderBootstrapRequest(
             profile: profile,
             namespace: namespace,
-            volumeId: request.volumeID
+            resourceId: request.resourceID
         )
         let result: ErmaoShared.ReaderBootstrapResult?
         do {
@@ -193,14 +210,14 @@ final class IosReaderComposition: ObservableObject {
             navigationCache.save(
                 serverIdentity: request.context.serverIdentity,
                 userID: request.context.userID,
-                volumeID: request.volumeID,
+                resourceID: request.resourceID,
                 bootstrap: onlineBootstrap
             )
         }
         let cachedNavigation = navigationCache.load(
             serverIdentity: request.context.serverIdentity,
             userID: request.context.userID,
-            volumeID: request.volumeID
+            resourceID: request.resourceID
         )
         let target: ErmaoShared.ReaderProgressSyncTarget
         let exactSourceFormat: ErmaoShared.ReaderSourceFormat
@@ -215,11 +232,11 @@ final class IosReaderComposition: ObservableObject {
                 do {
                     _ = try await managedStore.importPublication(
                         from: launchArtifact.fileURL,
-                        sourceID: launchArtifact.sourceID,
+                        resourceID: launchArtifact.resourceID,
                         displayTitle: launchArtifact.displayTitle,
                         sourceFormat: artifactFormat,
-                        workID: launchArtifact.workID,
-                        volumeID: launchArtifact.volumeID,
+                        bookID: launchArtifact.bookID,
+                        namespace: request.context.namespaceKey,
                         parserVersion: Self.localParserVersion(for: artifactFormat),
                         normalizationVersion: Self.localNormalizationVersion(for: artifactFormat)
                     )
@@ -232,20 +249,27 @@ final class IosReaderComposition: ObservableObject {
             if retryOpening {
                 existing = nil
             } else {
-                existing = try? await managedStore.resolve(sourceID: request.volumeID)
+                existing = try? await managedStore.resolve(
+                    resourceID: request.resourceID,
+                    namespace: request.context.namespaceKey
+                )
             }
             if reacquireDownloadedPublication ||
                 (retryOpening && onlineBootstrap.publication.originalSourceFormat.readerFormat != .comic) {
                 exactSourceFormat = onlineBootstrap.publication.sourceFormat
                 target = onlineBootstrap.target
-                source = try await download(bootstrap: onlineBootstrap, gateway: gateway)
+                source = try await download(
+                    bootstrap: onlineBootstrap,
+                    gateway: gateway,
+                    namespace: request.context.namespaceKey
+                )
             } else if let existing {
                 exactSourceFormat = existing.sourceFormat
                 source = Self.sharedSource(existing)
                 target = ErmaoShared.ReaderProgressSyncTarget(
                     namespace: namespace,
-                    workId: onlineBootstrap.target.workId,
-                    volumeId: onlineBootstrap.target.volumeId,
+                    bookId: onlineBootstrap.target.bookId,
+                    resourceId: onlineBootstrap.target.resourceId,
                     sourceFormat: exactSourceFormat.readerFormat
                 )
             } else if onlineBootstrap.publication.sourceFormat == .pdf,
@@ -253,10 +277,10 @@ final class IosReaderComposition: ObservableObject {
                 exactSourceFormat = onlineBootstrap.publication.sourceFormat
                 target = onlineBootstrap.target
                 source = ErmaoShared.RemoteByteRangeReaderSource(
-                    sourceId: onlineBootstrap.publication.sourceId,
+                    resourceId: onlineBootstrap.publication.resourceId,
                     displayTitle: onlineBootstrap.publication.displayTitle,
-                    workId: onlineBootstrap.publication.workId,
-                    volumeId: onlineBootstrap.publication.volumeId,
+                    bookId: onlineBootstrap.publication.bookId,
+                    assetId: onlineBootstrap.publication.assetId,
                     namespace: namespace,
                     apiPath: onlineBootstrap.publication.apiPath,
                     expectedSizeBytes: onlineBootstrap.publication.expectedSizeBytes
@@ -266,10 +290,10 @@ final class IosReaderComposition: ObservableObject {
                 exactSourceFormat = onlineBootstrap.publication.sourceFormat
                 target = onlineBootstrap.target
                 source = ErmaoShared.RemoteComicReaderSource(
-                    sourceId: onlineBootstrap.publication.sourceId,
+                    resourceId: onlineBootstrap.publication.resourceId,
                     displayTitle: onlineBootstrap.publication.displayTitle,
-                    workId: onlineBootstrap.publication.workId,
-                    volumeId: onlineBootstrap.publication.volumeId,
+                    bookId: onlineBootstrap.publication.bookId,
+                    assetId: onlineBootstrap.publication.assetId,
                     namespace: namespace,
                     sourceFormat: onlineBootstrap.publication.originalSourceFormat,
                     manifestApiPath: access.manifestApiPath,
@@ -287,17 +311,24 @@ final class IosReaderComposition: ObservableObject {
             } else {
                 exactSourceFormat = onlineBootstrap.publication.sourceFormat
                 target = onlineBootstrap.target
-                source = try await download(bootstrap: onlineBootstrap, gateway: gateway)
+                source = try await download(
+                    bootstrap: onlineBootstrap,
+                    gateway: gateway,
+                    namespace: request.context.namespaceKey
+                )
             }
             guard Self.hasCompleteReaderEngine(for: exactSourceFormat) else {
                 throw IosReaderFailure(code: .unsupportedFormat)
             }
         } else {
-            let existing = try await managedStore.resolve(sourceID: request.volumeID)
+            let existing = try await managedStore.resolve(
+                resourceID: request.resourceID,
+                namespace: request.context.namespaceKey
+            )
             target = ErmaoShared.ReaderProgressSyncTarget(
                 namespace: namespace,
-                workId: request.workID,
-                volumeId: request.volumeID,
+                bookId: request.bookID,
+                resourceId: request.resourceID,
                 sourceFormat: existing.sourceFormat.readerFormat
             )
             exactSourceFormat = existing.sourceFormat
@@ -308,7 +339,7 @@ final class IosReaderComposition: ObservableObject {
             source = Self.sharedSource(existing)
         }
 
-        guard source.sourceId == target.volumeId,
+        guard source.resourceId == target.resourceId,
               source.sourceFormat == exactSourceFormat,
               source.format == target.sourceFormat,
               exactSourceFormat.readerFormat == target.sourceFormat
@@ -318,8 +349,8 @@ final class IosReaderComposition: ObservableObject {
         let localIdentity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
             namespace: namespace,
             clientId: deviceIdentity.stableDeviceId(),
-            workId: target.workId,
-            volumeId: target.volumeId
+            bookId: target.bookId,
+            resourceId: target.resourceId
         )
         let progressStore: any ErmaoShared.ReaderProgressSyncingStore
         let progressCoordination: IosReaderProgressSessionCoordination?
@@ -336,7 +367,7 @@ final class IosReaderComposition: ObservableObject {
                 server: serverPort
             )
             progressStore = progressRuntime.store
-            let localProgress = try await database.load(sourceId: source.sourceId)
+            let localProgress = try await database.load(resourceId: source.resourceId)
             let durableState = try await database.loadSyncState()
             let startupDecision = ErmaoShared.PublicKt.decidePendingVsServerStartup(
                 localProgress: localProgress,
@@ -378,7 +409,7 @@ final class IosReaderComposition: ObservableObject {
         let bookmarkStore = IosReaderBookmarkStore(
             serverIdentity: request.context.serverIdentity,
             userID: request.context.userID,
-            volumeID: source.sourceId
+            resourceID: source.resourceId
         )
         let bookmarkSyncPort = IosCompositionKt.createIosReaderBookmarkSyncPort(
             cookieStore: cookieStore,
@@ -415,10 +446,14 @@ final class IosReaderComposition: ObservableObject {
                 }
                 pages = serverPages
             } else {
-                pages = try await localComicPages(sourceID: source.sourceId, serverHints: serverPages)
+                pages = try await localComicPages(
+                    resourceID: source.resourceId,
+                    namespace: request.context.namespaceKey,
+                    serverHints: serverPages
+                )
             }
             return .comic(IosComicReaderSession(
-                sourceID: source.sourceId,
+                resourceID: source.resourceId,
                 displayTitle: source.displayTitle,
                 pages: pages,
                 preferences: preferencesStore.load(),
@@ -428,7 +463,7 @@ final class IosReaderComposition: ObservableObject {
                 progressCoordination: progressCoordination,
                 remoteSnapshot: sessionRemoteSnapshot,
                 namespaceKey: request.context.namespaceKey,
-                workID: request.workID,
+                bookID: request.bookID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
                 deviceIdentity: deviceIdentity,
                 remoteSource: source as? ErmaoShared.RemoteComicReaderSource,
@@ -447,7 +482,7 @@ final class IosReaderComposition: ObservableObject {
                 cachedNavigation?.pdfPageTitles ?? []
             }
             return .pdf(IosPdfReaderSession(
-                sourceID: source.sourceId,
+                resourceID: source.resourceId,
                 displayTitle: source.displayTitle,
                 pageCountHint: onlineBootstrap?.pageCount?.intValue ?? cachedNavigation?.pageCount,
                 pageTitleHints: pageTitleHints,
@@ -468,7 +503,7 @@ final class IosReaderComposition: ObservableObject {
                 progressCoordination: progressCoordination,
                 remoteSnapshot: sessionRemoteSnapshot,
                 namespaceKey: request.context.namespaceKey,
-                workID: request.workID,
+                bookID: request.bookID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
                 deviceIdentity: deviceIdentity
             ))
@@ -483,7 +518,7 @@ final class IosReaderComposition: ObservableObject {
             } ?? []
         }
         return .reflowable(IosReflowableReaderSession(
-            sourceID: source.sourceId,
+            resourceID: source.resourceId,
             displayTitle: source.displayTitle,
             sourceFormat: exactSourceFormat,
             canonicalNavigation: navigationUnits,
@@ -496,11 +531,11 @@ final class IosReaderComposition: ObservableObject {
             bookmarkSyncPort: bookmarkSyncPort,
             bookmarkSyncTarget: ErmaoShared.ReaderBookmarkSyncTarget(
                 serverIdentity: request.context.serverIdentity,
-                volumeId: source.sourceId
+                resourceId: source.resourceId
             ),
             remoteSnapshot: sessionRemoteSnapshot,
             namespaceKey: request.context.namespaceKey,
-            workID: request.workID,
+            bookID: request.bookID,
             publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
             deviceIdentity: deviceIdentity
         ))
@@ -512,16 +547,18 @@ final class IosReaderComposition: ObservableObject {
             recordID: recordID,
             namespace: request.context.namespaceKey
         )
-        try? await managedStore.remove(sourceID: request.volumeID)
+        try? await managedStore.remove(
+            resourceID: request.resourceID,
+            namespace: request.context.namespaceKey
+        )
     }
 
     private static func sharedSource(_ existing: IosManagedPublication) -> ErmaoShared.ReaderSource {
         ErmaoShared.LocalReaderSource(
-            sourceId: existing.sourceID,
+            resourceId: existing.resourceID,
             displayTitle: existing.displayTitle,
             format: existing.sourceFormat.readerFormat,
-            workId: existing.workID,
-            volumeId: existing.volumeID,
+            bookId: existing.bookID,
             sourceFormat: existing.sourceFormat
         )
     }
@@ -557,10 +594,14 @@ final class IosReaderComposition: ObservableObject {
     }
 
     private func localComicPages(
-        sourceID: String,
+        resourceID: String,
+        namespace: String,
         serverHints: [IosCbzPage]
     ) async throws -> [IosCbzPage] {
-        let publication = try await managedStore.resolve(sourceID: sourceID)
+        let publication = try await managedStore.resolve(
+            resourceID: resourceID,
+            namespace: namespace
+        )
         do {
             let localPages = try IosCbzArchiveIndex(fileURL: publication.fileURL).pages
             return localPages.enumerated().map { index, page in
@@ -584,11 +625,15 @@ final class IosReaderComposition: ObservableObject {
 
     private func download(
         bootstrap: ErmaoShared.ReaderBootstrap,
-        gateway: ErmaoShared.ReaderServerGateway
+        gateway: ErmaoShared.ReaderServerGateway,
+        namespace: String
     ) async throws -> ErmaoShared.ReaderSource {
         let result = try await gateway.download(
             download: bootstrap.publication,
-            sinkFactory: IosPublicationDownloadSinkFactory(store: managedStore)
+            sinkFactory: IosPublicationDownloadSinkFactory(
+                store: managedStore,
+                namespace: namespace
+            )
         )
         guard let content = result as? ErmaoShared.PublicationDownloadResultContent else {
             let failure = result as? ErmaoShared.PublicationDownloadResultFailure
@@ -661,8 +706,8 @@ final class IosReaderBootstrapHost: ObservableObject {
         do {
             state = .ready(try await composition.bootstrap(IosReaderLaunchRequest(
                 context: request.context,
-                workID: request.workID,
-                volumeID: request.volumeID,
+                bookID: request.bookID,
+                resourceID: request.resourceID,
                 displayTitle: request.displayTitle
             )))
             started = true

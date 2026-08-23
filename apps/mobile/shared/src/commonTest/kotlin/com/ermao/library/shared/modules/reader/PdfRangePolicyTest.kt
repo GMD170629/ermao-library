@@ -30,7 +30,7 @@ class PdfRangePolicyTest {
     }
 
     @Test
-    fun cacheIdentityIncludesAuthorizationAndVolume() {
+    fun cacheIdentityIncludesAuthorizationAndResource() {
         val baseline = identity(authorizationVersion = 3)
         assertNotEquals(baseline.stableKey, identity(authorizationVersion = 4).stableKey)
         assertEquals(baseline.stableKey, identity(authorizationVersion = 3).stableKey)
@@ -38,6 +38,6 @@ class PdfRangePolicyTest {
 
     private fun identity(authorizationVersion: Long) = PdfRangeCacheIdentity(
         ReaderSyncNamespace("server", "user", authorizationVersion),
-        "volume",
+        "resource",
     )
 }

@@ -13,5 +13,5 @@ export interface PdfRangeCache {
     bytes: Uint8Array,
     protectedChunkKeys?: readonly string[]
   ): Promise<void>;
-  deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'volumeId'>): Promise<void>;
+  deletePdfRangeNamespace(identity: Omit<PdfRangeCacheIdentity, 'resourceId' | 'assetId'>): Promise<void>;
 }

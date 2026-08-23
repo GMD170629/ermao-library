@@ -11,11 +11,6 @@ from app.core.database_errors import (
     is_database_busy_error,
 )
 
-ACTIVE_OPERATION_STATUSES = ("requested", "waiting", "running")
-TERMINAL_OPERATION_STATUSES = ("completed", "failed")
-HEARTBEAT_BUSY_TIMEOUT_MS = 1_000
-DEFAULT_BUSY_TIMEOUT_MS = 10_000
-
 
 @dataclass(frozen=True, slots=True)
 class PreparedQueueHeartbeat:

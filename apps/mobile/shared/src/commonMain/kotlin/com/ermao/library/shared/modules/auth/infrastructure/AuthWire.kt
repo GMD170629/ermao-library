@@ -70,7 +70,7 @@ internal data class AuthorizationWire(
     val isAdmin: Boolean,
     val canManageSystem: Boolean,
     val allLibraryScopes: Boolean,
-    val monitorFolderIds: List<String>,
+    val libraryIds: List<String>,
     val canViewManualImports: Boolean,
     val authzVersion: Long,
 )
@@ -94,7 +94,7 @@ internal fun SessionWire.toDomain(profile: ServerProfile): Pair<SessionIdentity,
         isAdmin = authorization.isAdmin,
         canManageSystem = authorization.canManageSystem,
         allLibraryScopes = authorization.allLibraryScopes,
-        monitorFolderIds = authorization.monitorFolderIds.toSet(),
+        libraryIds = authorization.libraryIds.toSet(),
         canViewManualImports = authorization.canViewManualImports,
         authorizationVersion = authorization.authzVersion,
     )

@@ -123,7 +123,7 @@ class OpdsCatalogQueryDto:
 @dataclass(frozen=True, slots=True)
 class PsePageRequestDto:
     actor_id: str
-    volume_id: str
+    resource_id: str
     page_number: int
     max_width: int | None
 

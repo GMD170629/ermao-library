@@ -16,13 +16,18 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.bootstrap.auth import build_password_authenticator
-from app.bootstrap.media import media_page_index, media_resource_query, media_streaming
-from app.bootstrap.reader import reader_volume_service
+from app.bootstrap.media import (
+    effective_book_cover_query,
+    media_page_index,
+    media_resource_query,
+    media_streaming,
+)
+from app.bootstrap.reader import reader_resource_service
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
-    can_access_volume,
-    can_access_work,
+    can_access_book,
+    can_access_resource,
     read_user_preferences,
 )
 from app.core.config import Settings
@@ -37,17 +42,17 @@ from app.modules.auth.public import (
     PasswordCredentials,
 )
 from app.modules.library.application.catalog import (
+    CatalogBook,
+    CatalogBookFilter,
     CatalogFacet,
     CatalogFacetKind,
-    CatalogVolume,
-    CatalogWork,
-    CatalogWorkFilter,
-    GetCatalogWork,
+    CatalogResource,
+    GetCatalogBook,
+    ListCatalogBooks,
     ListCatalogFacets,
-    ListCatalogWorks,
 )
 from app.modules.library.application.queries import (
-    GetSmartShelfWorkIds,
+    GetSmartShelfBookIds,
     SmartShelfCriteria,
 )
 from app.modules.library.infrastructure.catalog import SqlAlchemyCatalogQueries
@@ -85,19 +90,19 @@ from app.modules.opds.domain.errors import (
 )
 from app.modules.opds.presentation.http import OpdsHttpDependencies, create_opds_router
 from app.modules.reader.application.dto import ReaderProgressDto
-from app.modules.reader.infrastructure.volume_repository import (
-    SqlAlchemyReaderVolumeRepository,
+from app.modules.reader.infrastructure.resource_repository import (
+    SqlAlchemyReaderResourceRepository,
 )
 from app.modules.reader.public import (
     ReaderAccessScope,
     ReaderExternalProgressDto,
     ReaderProgressDateConflict,
-    ReaderVolumeFormatUnsupported,
-    ReaderVolumeNotFound,
+    ReaderResourceFormatUnsupported,
+    ReaderResourceNotFound,
     SaveExternalProgressCommand,
 )
 from app.modules.shelf.application.catalog import (
-    ListCatalogShelfWorkIds,
+    ListCatalogShelfBookIds,
     ListCatalogShelves,
 )
 from app.modules.shelf.infrastructure.catalog import SqlAlchemyCatalogShelfQueries
@@ -140,7 +145,7 @@ def _reader_scope(context: AuthorizationContext) -> ReaderAccessScope:
     return ReaderAccessScope(
         is_admin=context.is_admin,
         can_view_manual_imports=context.can_view_manual_imports,
-        monitor_folder_ids=context.monitor_folder_ids,
+        library_ids=context.library_ids,
     )
 
 
@@ -294,70 +299,70 @@ class SqlAlchemyOpdsCatalog:
             ),
         )
 
-    def _work_entry(self, urls: OpdsCatalogUrls, work: CatalogWork) -> OpdsEntryDto:
+    def _book_entry(self, urls: OpdsCatalogUrls, book: CatalogBook) -> OpdsEntryDto:
         links = [
             OpdsLinkDto(
-                href=urls.url(f"/opds/v1.2/works/{quote(work.id)}"),
+                href=urls.url(f"/opds/v1.2/books/{quote(book.id)}"),
                 rel="subsection",
                 media_type=ACQUISITION_TYPE,
             )
         ]
-        if work.has_cover:
+        if book.has_cover:
             links.append(
                 OpdsLinkDto(
-                    href=urls.url(f"/opds/v1.2/works/{quote(work.id)}/cover"),
+                    href=urls.url(f"/opds/v1.2/books/{quote(book.id)}/cover"),
                     rel="http://opds-spec.org/image",
                     media_type="image/jpeg",
                 )
             )
         return OpdsEntryDto(
-            id=f"urn:shuku:work:{work.id}",
-            title=work.title,
-            updated_at=work.updated_at,
-            authors=(OpdsAuthorDto(work.author),) if work.author else (),
-            summary=work.description,
+            id=f"urn:shuku:book:{book.id}",
+            title=book.title,
+            updated_at=book.updated_at,
+            authors=(OpdsAuthorDto(book.author),) if book.author else (),
+            summary=book.description,
             links=tuple(links),
         )
 
-    def _volume_entry(
+    def _resource_entry(
         self,
         *,
         urls: OpdsCatalogUrls,
-        work: CatalogWork,
-        volume: CatalogVolume,
-        progress_by_volume: Mapping[str, ReaderProgressDto],
+        book: CatalogBook,
+        resource: CatalogResource,
+        progress_by_resource: Mapping[str, ReaderProgressDto],
         pse_media_type: str = "image/jpeg",
     ) -> OpdsEntryDto:
         links = [
             OpdsLinkDto(
-                href=urls.url(f"/opds/v1.2/volumes/{quote(volume.id)}/file"),
+                href=urls.url(f"/opds/v1.2/resources/{quote(resource.id)}/asset"),
                 rel=OPDS_ACQUISITION_REL,
-                media_type=volume.file.mime_type,
+                media_type=resource.asset.mime_type,
             ),
             OpdsLinkDto(
-                href=urls.url(f"/opds/v1.2/volumes/{quote(volume.id)}/progression"),
+                href=urls.url(f"/opds/v1.2/resources/{quote(resource.id)}/progression"),
                 rel=OPDS_PROGRESSION_REL,
                 media_type=OPDS_PROGRESSION_MEDIA_TYPE,
             ),
         ]
-        if volume.has_cover:
+        if resource.has_cover:
             links.append(
                 OpdsLinkDto(
-                    href=urls.url(f"/opds/v1.2/volumes/{quote(volume.id)}/cover"),
+                    href=urls.url(f"/opds/v1.2/resources/{quote(resource.id)}/cover"),
                     rel="http://opds-spec.org/image",
                     media_type="image/jpeg",
                 )
             )
-        progress = progress_by_volume.get(volume.id)
+        progress = progress_by_resource.get(resource.id)
         last_read = (
             _comic_page_from_progress(progress) if progress is not None else None
         )
-        if last_read is not None and volume.page_count is not None:
-            last_read = min(last_read, volume.page_count)
+        if last_read is not None and resource.page_count is not None:
+            last_read = min(last_read, resource.page_count)
         pse = (
             PseStreamDto(
                 href_template=urls.url(
-                    f"/opds/v1.2/volumes/{quote(volume.id)}/pages/"
+                    f"/opds/v1.2/resources/{quote(resource.id)}/pages/"
                     + (
                         "{pageNumber}"
                         if pse_media_type == "image/gif"
@@ -365,7 +370,7 @@ class SqlAlchemyOpdsCatalog:
                     )
                 ),
                 media_type=pse_media_type,
-                page_count=volume.page_count or 0,
+                page_count=resource.page_count or 0,
                 last_read=last_read,
                 last_read_date=(
                     progress.progressed_at
@@ -373,15 +378,15 @@ class SqlAlchemyOpdsCatalog:
                     else None
                 ),
             )
-            if volume.media_kind == "COMIC" and (volume.page_count or 0) > 0
+            if resource.media_kind == "COMIC" and (resource.page_count or 0) > 0
             else None
         )
         return OpdsEntryDto(
-            id=f"urn:shuku:volume:{volume.id}",
-            title=volume.title,
-            updated_at=volume.updated_at,
-            authors=(OpdsAuthorDto(work.author),) if work.author else (),
-            summary=volume.description or work.description,
+            id=f"urn:shuku:resource:{resource.id}",
+            title=resource.title,
+            updated_at=resource.updated_at,
+            authors=(OpdsAuthorDto(book.author),) if book.author else (),
+            summary=resource.description or book.description,
             links=tuple(links),
             pse_stream=pse,
         )
@@ -399,19 +404,19 @@ class SqlAlchemyOpdsCatalog:
                 else configured_locale(db)
             )
             library = SqlAlchemyCatalogQueries(db)
-            works = ListCatalogWorks(library)
+            books = ListCatalogBooks(library)
             facets = ListCatalogFacets(library)
-            smart_shelves = GetSmartShelfWorkIds(SqlAlchemyLibraryQueries(db))
+            smart_shelves = GetSmartShelfBookIds(SqlAlchemyLibraryQueries(db))
             shelves = SqlAlchemyCatalogShelfQueries(
                 db,
-                smart_work_ids=lambda rules, user_id: smart_shelves.execute(
+                smart_book_ids=lambda rules, user_id: smart_shelves.execute(
                     SmartShelfCriteria.from_external(rules),
                     user_id=user_id,
                 ),
             )
             if query.view == "catalog":
                 sections = (
-                    ("works", _catalog_text(locale, "全部作品", "All works")),
+                    ("books", _catalog_text(locale, "全部图书", "All books")),
                     ("recent", _catalog_text(locale, "最近添加", "Recently added")),
                     ("authors", _catalog_text(locale, "作者", "Authors")),
                     ("series", _catalog_text(locale, "系列", "Series")),
@@ -439,44 +444,44 @@ class SqlAlchemyOpdsCatalog:
                     page_size=len(entries),
                     updated_at=EPOCH,
                 )
-            if query.view == "work":
-                work = GetCatalogWork(library).execute(
-                    context=context, work_id=query.resource_id or ""
+            if query.view == "book":
+                book = GetCatalogBook(library).execute(
+                    context=context, book_id=query.resource_id or ""
                 )
-                if work is None:
+                if book is None:
                     raise OpdsPublicationNotFound
-                repository = SqlAlchemyReaderVolumeRepository(db)
+                repository = SqlAlchemyReaderResourceRepository(db)
                 progresses = repository.list_progresses(
-                    user.id, [volume.id for volume in work.volumes]
+                    user.id, [resource.id for resource in book.resources]
                 )
-                progress_by_volume = {
-                    progress.volume_id: progress for progress in progresses
+                progress_by_resource = {
+                    progress.resource_id: progress for progress in progresses
                 }
                 pse_media_types = {
-                    volume.id: self._pse_media_type(volume.id)
-                    for volume in work.volumes
-                    if volume.media_kind == "COMIC"
+                    resource.id: self._pse_media_type(resource.id)
+                    for resource in book.resources
+                    if resource.media_kind == "COMIC"
                 }
                 entries = tuple(
-                    self._volume_entry(
+                    self._resource_entry(
                         urls=urls,
-                        work=work,
-                        volume=volume,
-                        progress_by_volume=progress_by_volume,
-                        pse_media_type=pse_media_types.get(volume.id, "image/jpeg"),
+                        book=book,
+                        resource=resource,
+                        progress_by_resource=progress_by_resource,
+                        pse_media_type=pse_media_types.get(resource.id, "image/jpeg"),
                     )
-                    for volume in work.volumes
+                    for resource in book.resources
                 )
                 return self._feed(
                     urls=urls,
-                    path=f"/opds/v1.2/works/{quote(work.id)}",
-                    title=work.title,
+                    path=f"/opds/v1.2/books/{quote(book.id)}",
+                    title=book.title,
                     kind="acquisition",
                     entries=entries,
                     total=len(entries),
                     page=1,
                     page_size=max(1, len(entries)),
-                    updated_at=work.updated_at,
+                    updated_at=book.updated_at,
                 )
             if query.view in {"authors", "series", "tags"}:
                 kind = {"authors": "AUTHOR", "series": "SERIES", "tags": "TAG"}[
@@ -532,16 +537,16 @@ class SqlAlchemyOpdsCatalog:
                     page_size=shelf_result.page_size,
                     updated_at=shelf_result.updated_at,
                 )
-            work_filter, path, title, total_override = self._work_filter(
+            book_filter, path, title, total_override = self._book_filter(
                 query, context, shelves, locale
             )
-            work_result = works.execute(
+            book_result = books.execute(
                 context=context,
-                filters=work_filter,
+                filters=book_filter,
                 page=1 if query.view == "shelf" else query.page,
                 page_size=query.page_size,
             )
-            entries = tuple(self._work_entry(urls, work) for work in work_result.works)
+            entries = tuple(self._book_entry(urls, book) for book in book_result.books)
             return self._feed(
                 urls=urls,
                 path=path,
@@ -549,20 +554,20 @@ class SqlAlchemyOpdsCatalog:
                 kind="navigation",
                 entries=entries,
                 total=(
-                    total_override if total_override is not None else work_result.total
+                    total_override if total_override is not None else book_result.total
                 ),
                 page=query.page,
-                page_size=work_result.page_size,
-                updated_at=work_result.updated_at,
+                page_size=book_result.page_size,
+                updated_at=book_result.updated_at,
                 search=query.search,
             )
         finally:
             db.close()
 
-    def _pse_media_type(self, volume_id: str) -> str:
+    def _pse_media_type(self, resource_id: str) -> str:
         projection_db = self._session_factory()
         try:
-            projection = media_page_index.load_read_only(projection_db, volume_id)
+            projection = media_page_index.load_read_only(projection_db, resource_id)
         finally:
             projection_db.close()
         resolved = media_page_index.resolve_read_only(projection)
@@ -581,23 +586,23 @@ class SqlAlchemyOpdsCatalog:
             updated_at=facet.updated_at,
         )
 
-    def _work_filter(
+    def _book_filter(
         self,
         query: OpdsCatalogQueryDto,
         context: AuthorizationContext,
         shelves: SqlAlchemyCatalogShelfQueries,
         locale: str,
-    ) -> tuple[CatalogWorkFilter, str, str, int | None]:
+    ) -> tuple[CatalogBookFilter, str, str, int | None]:
         if query.view == "recent":
             return (
-                CatalogWorkFilter(sort="recent"),
+                CatalogBookFilter(sort="recent"),
                 "/opds/v1.2/recent",
                 _catalog_text(locale, "最近添加", "Recently added"),
                 None,
             )
         if query.view == "search":
             return (
-                CatalogWorkFilter(search=query.search or ""),
+                CatalogBookFilter(search=query.search or ""),
                 "/opds/v1.2/search",
                 _catalog_text(
                     locale,
@@ -607,24 +612,24 @@ class SqlAlchemyOpdsCatalog:
                 None,
             )
         facet_kind_by_view: dict[str, CatalogFacetKind] = {
-            "authors_works": "AUTHOR",
-            "series_works": "SERIES",
-            "tags_works": "TAG",
+            "authors_books": "AUTHOR",
+            "series_books": "SERIES",
+            "tags_books": "TAG",
         }
         if query.view in facet_kind_by_view:
             if not query.resource_id:
                 raise OpdsPublicationNotFound
             return (
-                CatalogWorkFilter(
+                CatalogBookFilter(
                     facet_kind=facet_kind_by_view[query.view],
                     facet_id=query.resource_id,
                 ),
-                f"/opds/v1.2/{query.view.removesuffix('_works')}/{quote(query.resource_id)}",
-                _catalog_text(locale, "作品", "Works"),
+                f"/opds/v1.2/{query.view.removesuffix('_books')}/{quote(query.resource_id)}",
+                _catalog_text(locale, "图书", "Books"),
                 None,
             )
         if query.view == "shelf":
-            shelf_page = ListCatalogShelfWorkIds(shelves).execute(
+            shelf_page = ListCatalogShelfBookIds(shelves).execute(
                 context=context,
                 shelf_id=query.resource_id or "",
                 page=query.page,
@@ -633,15 +638,15 @@ class SqlAlchemyOpdsCatalog:
             if shelf_page is None:
                 raise OpdsPublicationNotFound
             return (
-                CatalogWorkFilter(work_ids=shelf_page.work_ids),
+                CatalogBookFilter(book_ids=shelf_page.book_ids),
                 f"/opds/v1.2/shelves/{quote(shelf_page.shelf.id)}",
                 shelf_page.shelf.name,
                 shelf_page.total,
             )
         return (
-            CatalogWorkFilter(),
-            "/opds/v1.2/works",
-            _catalog_text(locale, "全部作品", "All works"),
+            CatalogBookFilter(),
+            "/opds/v1.2/books",
+            _catalog_text(locale, "全部图书", "All books"),
             None,
         )
 
@@ -652,19 +657,21 @@ class ReaderOpdsProgression:
         self._settings = settings
 
     def get_progression(
-        self, actor_id: str, volume_id: str
+        self, actor_id: str, resource_id: str
     ) -> OpdsProgressionDocumentDto | None:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
             context = authorization_context(db, user)
-            progress = reader_volume_service(db, self._settings).get_external_progress(
+            progress = reader_resource_service(
+                db, self._settings
+            ).get_external_progress(
                 user_id=user.id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=_reader_scope(context),
             )
             return _opds_progression(progress) if progress is not None else None
-        except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+        except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
             raise OpdsPublicationNotFound from error
         finally:
             db.close()
@@ -672,23 +679,23 @@ class ReaderOpdsProgression:
     def update_progression(
         self,
         actor_id: str,
-        volume_id: str,
+        resource_id: str,
         document: OpdsProgressionDocumentDto,
     ) -> OpdsProgressionUpdateResultDto:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
             context = authorization_context(db, user)
-            service = reader_volume_service(db, self._settings)
+            service = reader_resource_service(db, self._settings)
             existing = service.get_external_progress(
                 user_id=user.id,
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=_reader_scope(context),
             )
             saved = service.save_external_progress(
                 SaveExternalProgressCommand(
                     user_id=user.id,
-                    volume_id=volume_id,
+                    resource_id=resource_id,
                     access_scope=_reader_scope(context),
                     progression=document.progression,
                     modified_at=document.modified,
@@ -703,7 +710,7 @@ class ReaderOpdsProgression:
             )
         except ReaderProgressDateConflict as error:
             raise OpdsProgressionDateConflict from error
-        except (ReaderVolumeNotFound, ReaderVolumeFormatUnsupported) as error:
+        except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
             raise OpdsPublicationNotFound from error
         except ValueError as error:
             raise OpdsProgressionInvalidPayload from error
@@ -716,33 +723,45 @@ class OpdsMediaResources:
         self._session_factory = session_factory
         self._settings = settings
 
-    def work_cover(self, actor_id: str, work_id: str, request: Request) -> Response:
-        return self._cover(actor_id, request, work_id=work_id)
+    def book_cover(self, actor_id: str, book_id: str, request: Request) -> Response:
+        return self._cover(actor_id, request, book_id=book_id)
 
-    def volume_cover(self, actor_id: str, volume_id: str, request: Request) -> Response:
-        return self._cover(actor_id, request, volume_id=volume_id)
+    def resource_cover(
+        self, actor_id: str, resource_id: str, request: Request
+    ) -> Response:
+        return self._cover(actor_id, request, resource_id=resource_id)
 
     def _cover(
         self,
         actor_id: str,
         request: Request,
         *,
-        work_id: str | None = None,
-        volume_id: str | None = None,
+        book_id: str | None = None,
+        resource_id: str | None = None,
     ) -> Response:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
-            if work_id is not None and not can_access_work(db, user, work_id):
+            if book_id is not None and not can_access_book(db, user, book_id):
                 return Response(status_code=404)
-            if volume_id is not None and not can_access_volume(db, user, volume_id):
+            if resource_id is not None and not can_access_resource(
+                db, user, resource_id
+            ):
                 return Response(status_code=404)
-            path_value = media_resource_query(db).cover_path(
-                work_id=work_id, volume_id=volume_id
-            )
-            path = media_streaming.stored_path(
-                path_value, self._settings, database_backed=True
-            )
+            path = None
+            if book_id is not None:
+                for candidate in effective_book_cover_query(db).execute(book_id):
+                    candidate_path = media_streaming.stored_path(
+                        candidate.stored_path, self._settings
+                    )
+                    if candidate_path is not None and candidate_path.is_file():
+                        path = candidate_path
+                        break
+            else:
+                path_value = media_resource_query(db).cover_path(
+                    resource_id=resource_id
+                )
+                path = media_streaming.stored_path(path_value, self._settings)
             if path is None or not path.is_file():
                 return Response(status_code=404)
             return media_streaming.send_pse_page_file(
@@ -751,81 +770,85 @@ class OpdsMediaResources:
                 user.id,
                 self._settings,
                 max_width=1600,
-                file_id=work_id or volume_id or "cover",
+                asset_id=book_id or resource_id or "cover",
             )
         finally:
             db.close()
 
-    def volume_file(self, actor_id: str, volume_id: str, request: Request) -> Response:
+    def resource_asset(
+        self, actor_id: str, resource_id: str, request: Request
+    ) -> Response:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
-            if not can_access_volume(db, user, volume_id):
+            if not can_access_resource(db, user, resource_id):
                 return Response(status_code=404)
-            resource = media_resource_query(db).first_volume_file(volume_id)
+            resource = media_resource_query(db).first_resource_asset(resource_id)
             return media_streaming.send_file(
                 media_streaming.stored_path(
                     resource.path if resource else None,
                     self._settings,
-                    database_backed=True,
+                    (Path(resource.source_root),) if resource else (),
                 ),
                 request,
                 user.id,
                 media_type=resource.mime_type if resource else None,
-                name=Path(resource.path).name if resource else "file",
-                route="opds-volume-file",
-                file_id=resource.id if resource else volume_id,
+                name=Path(resource.path).name if resource else "asset",
+                route="opds-resource-asset",
+                asset_id=resource.id if resource else resource_id,
             )
         finally:
             db.close()
 
-    def volume_page(
+    def resource_page(
         self, actor_id: str, page: PsePageRequestDto, request: Request
     ) -> Response:
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
-            if not can_access_volume(db, user, page.volume_id):
+            if not can_access_resource(db, user, page.resource_id):
                 return Response(status_code=404)
             user_id = user.id
-            projection = media_page_index.load_read_only(db, page.volume_id)
+            projection = media_page_index.load_read_only(db, page.resource_id)
         finally:
             db.close()
         resolved = media_page_index.resolve_read_only(projection)
         unit = resolved.page(page.internal_page_index)
         if unit is None:
             return Response(status_code=404)
-        source = resolved.source_for(unit.file_id)
+        source = resolved.source_for(unit.asset_id)
         width = normalize_pse_max_width(page.max_width)
         output_media_type = select_pse_stream_media_type(
             tuple(str(candidate.media_type or "") for candidate in resolved.pages)
         )
         if output_media_type == "image/gif":
             width = None
-        if source is not None and source.kind == "COMIC":
+        if source is not None and source.role == "PRIMARY":
             metadata = _json_object(unit.metadata_json)
             entry_name = metadata.get("zipEntryName") or unit.href
             return media_streaming.send_pse_page_zip_entry(
                 media_streaming.stored_path(
-                    source.path, self._settings, database_backed=True
+                    source.path, self._settings, (Path(source.source_root),)
                 ),
                 str(entry_name) if entry_name else None,
                 request,
                 user_id,
                 self._settings,
                 max_width=width,
-                file_id=unit.id,
+                asset_id=unit.id,
                 output_media_type=output_media_type,
             )
         return media_streaming.send_pse_page_file(
             media_streaming.stored_path(
-                unit.href, self._settings, database_backed=True
+                unit.href if source is not None else None,
+                self._settings,
+                (Path(source.source_root),) if source is not None else (),
             ),
             request,
             user_id,
             self._settings,
             max_width=width,
-            file_id=unit.id,
+            asset_id=unit.id,
             output_media_type=output_media_type,
         )
 
@@ -874,10 +897,10 @@ def build_opds_router(
             progression=ReaderOpdsProgression(session_factory, settings),
             default_page_size=settings.opds_page_size,
             max_page_size=settings.opds_max_page_size,
-            work_cover=resources.work_cover,
-            volume_cover=resources.volume_cover,
-            volume_file=resources.volume_file,
-            volume_page=resources.volume_page,
+            book_cover=resources.book_cover,
+            resource_cover=resources.resource_cover,
+            resource_asset=resources.resource_asset,
+            resource_page=resources.resource_page,
         )
     )
 

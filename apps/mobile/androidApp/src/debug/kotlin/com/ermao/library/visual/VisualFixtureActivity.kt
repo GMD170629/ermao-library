@@ -34,14 +34,13 @@ import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.HomeContent
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.MediaContent
+import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.model.BookDetailContent
+import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.content.model.AssetContent
 import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.ReadingUnitContent
-import com.ermao.library.features.content.model.VolumeContent
-import com.ermao.library.features.content.model.VolumeFileContent
-import com.ermao.library.features.content.model.WorkCard
-import com.ermao.library.features.content.model.WorkDetailContent
 import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.features.home.ui.HomeScreen
@@ -66,10 +65,10 @@ import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.OfflineFilterAvailability
-import com.ermao.library.shared.modules.library.WorkDetailQuery
-import com.ermao.library.shared.modules.library.WorksQuery
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.BooksQuery
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -148,14 +147,14 @@ class VisualFixtureActivity : ComponentActivity() {
                 WarmPageTheme(darkTheme = variant.appearance == VisualFixtureAppearance.Dark) {
                     when (variant.scenario) {
                         VisualFixtureScenario.HomeDefault -> FixtureHome()
-                        VisualFixtureScenario.LibraryWorks -> FixtureLibrary(showFilter = false)
+                        VisualFixtureScenario.LibraryBooks -> FixtureLibrary(showFilter = false)
                         VisualFixtureScenario.LibraryFilter -> FixtureLibrary(showFilter = true)
-                        VisualFixtureScenario.WorkAbout -> FixtureWorkDetail(fixtureDetail)
-                        VisualFixtureScenario.WorkVolumes -> FixtureWorkDetail(
+                        VisualFixtureScenario.BookAbout -> FixtureBookDetail(fixtureDetail)
+                        VisualFixtureScenario.BookResources -> FixtureBookDetail(
                             fixtureDetail.copy(description = null),
                         )
-                        VisualFixtureScenario.WorkSingleEbook -> FixtureWorkDetail(fixtureSingleEbookDetail)
-                        VisualFixtureScenario.WorkActions -> FixtureWorkDetail(fixtureDetail)
+                        VisualFixtureScenario.BookSingleEbook -> FixtureBookDetail(fixtureSingleEbookDetail)
+                        VisualFixtureScenario.BookActions -> FixtureBookDetail(fixtureDetail)
                     }
                 }
             }
@@ -186,14 +185,14 @@ class VisualFixtureActivity : ComponentActivity() {
     private fun prewarmFixtureCovers(scenario: VisualFixtureScenario) {
         val paths = when (scenario) {
             VisualFixtureScenario.HomeDefault,
-            VisualFixtureScenario.LibraryWorks,
+            VisualFixtureScenario.LibraryBooks,
             VisualFixtureScenario.LibraryFilter,
-            -> fixtureWorks.map(WorkCard::coverUrl)
-            VisualFixtureScenario.WorkAbout,
-            VisualFixtureScenario.WorkVolumes,
-            VisualFixtureScenario.WorkActions,
-            -> fixtureWorks.map(WorkCard::coverUrl) + fixtureDetail.coverPaths()
-            VisualFixtureScenario.WorkSingleEbook -> fixtureWorks.map(WorkCard::coverUrl) +
+            -> fixtureBooks.map(BookCard::coverUrl)
+            VisualFixtureScenario.BookAbout,
+            VisualFixtureScenario.BookResources,
+            VisualFixtureScenario.BookActions,
+            -> fixtureBooks.map(BookCard::coverUrl) + fixtureDetail.coverPaths()
+            VisualFixtureScenario.BookSingleEbook -> fixtureBooks.map(BookCard::coverUrl) +
                 fixtureSingleEbookDetail.coverPaths()
         }.distinct()
         runBlocking(Dispatchers.IO) {
@@ -220,12 +219,12 @@ class VisualFixtureActivity : ComponentActivity() {
 
 enum class VisualFixtureScenario(val wireValue: String) {
     HomeDefault("home-default"),
-    LibraryWorks("library-works"),
+    LibraryBooks("library-books"),
     LibraryFilter("library-filter"),
-    WorkAbout("work-about"),
-    WorkVolumes("work-volumes"),
-    WorkSingleEbook("work-single-ebook"),
-    WorkActions("work-actions"),
+    BookAbout("book-about"),
+    BookResources("book-resources"),
+    BookSingleEbook("book-single-ebook"),
+    BookActions("book-actions"),
     ;
 
     companion object {
@@ -305,19 +304,19 @@ private fun FixtureHome() {
             isLoading = false,
             content = HomeContent(
                 continueReading = ContinueReadingCard(
-                    work = fixtureWorks.first(),
-                    volumeTitle = "第二卷 黑暗森林",
+                    book = fixtureBooks.first(),
+                    resourceTitle = "第二卷 黑暗森林",
                     positionLabel = "第二章 黑暗森林",
                     lastReadAtEpochMillis = Instant.parse("2026-08-15T01:18:00Z").toEpochMilli(),
                 ),
-                recentReading = fixtureWorks.take(3),
-                recentAdded = fixtureWorks.drop(3).take(3),
+                recentReading = fixtureBooks.take(3),
+                recentAdded = fixtureBooks.drop(3).take(3),
             ),
             freshness = ContentFreshness.Fresh,
         ),
         repository = fixtureRepository,
         context = fixtureRequestContext,
-        onOpenWork = {},
+        onOpenBook = {},
         onContinueReading = {},
         onOpenLibrary = {},
         onRetry = {},
@@ -333,7 +332,7 @@ private val VisualFixtureClock: Clock = Clock.fixed(
 
 @androidx.compose.runtime.Composable
 private fun FixtureLibrary(showFilter: Boolean) {
-    val worksState = ScopeUiState(
+    val booksState = ScopeUiState(
         query = "",
         sort = ContentSort.RecentAdded,
         viewMode = ContentViewMode.Grid,
@@ -341,7 +340,7 @@ private fun FixtureLibrary(showFilter: Boolean) {
             media = setOf(MediaFilter.Ebook),
             reading = setOf(ReadingFilter.Unread),
         ),
-        works = fixtureWorks,
+        works = fixtureBooks,
         total = 128,
         loadedPage = 1,
         totalPages = 3,
@@ -350,9 +349,9 @@ private fun FixtureLibrary(showFilter: Boolean) {
     )
     LibraryScreen(
         state = LibraryUiState(
-            selectedScope = LibraryScope.Works,
+            selectedScope = LibraryScope.Books,
             scopes = LibraryScope.entries.associateWith { scope ->
-                if (scope == LibraryScope.Works) worksState else ScopeUiState(isLoading = false)
+                if (scope == LibraryScope.Books) booksState else ScopeUiState(isLoading = false)
             },
             offlineFilterAvailability = OfflineFilterAvailability.Available,
             filterDraft = WorksFilters(
@@ -384,16 +383,14 @@ private fun FixtureLibrary(showFilter: Boolean) {
 }
 
 @androidx.compose.runtime.Composable
-private fun FixtureWorkDetail(content: WorkDetailContent) {
+private fun FixtureBookDetail(content: BookDetailContent) {
     var showShelfPicker by remember { mutableStateOf(false) }
-    val selectedVolume = content.media.firstOrNull()?.volumes?.getOrNull(1)
-        ?: content.media.firstOrNull()?.volumes?.firstOrNull()
+    val selectedResource = content.resources.getOrNull(1) ?: content.resources.firstOrNull()
     WorkDetailScreen(
         state = WorkDetailUiState(
             isLoading = false,
             content = content,
-            selectedMediaKind = "EBOOK",
-            selectedVolumeId = selectedVolume?.id,
+            selectedResourceId = selectedResource?.id,
             shelves = fixtureShelves,
             selectedShelfIds = setOf(fixtureShelves.first().id),
             isShelfPickerVisible = showShelfPicker,
@@ -401,8 +398,7 @@ private fun FixtureWorkDetail(content: WorkDetailContent) {
         repository = fixtureRepository,
         context = fixtureRequestContext,
         onBack = {},
-        onSelectMedia = {},
-        onSelectVolume = {},
+        onSelectResource = {},
         onOpenShelfPicker = { showShelfPicker = true },
         onDismissShelfPicker = { showShelfPicker = false },
         onToggleShelf = {},
@@ -411,35 +407,38 @@ private fun FixtureWorkDetail(content: WorkDetailContent) {
         onViewShelves = {},
         onOpenFacet = { _, _ -> },
         onRetry = {},
-        downloadRecordsByVolume = selectedVolume?.let { volume ->
-            mapOf(volume.id to fixtureCompletedDownload(content, volume))
+        downloadRecordsByResource = selectedResource?.let { resource ->
+            mapOf(resource.id to fixtureCompletedDownload(content, resource))
         }.orEmpty(),
     )
 }
 
 private fun fixtureCompletedDownload(
-    content: WorkDetailContent,
-    volume: VolumeContent,
+    content: BookDetailContent,
+    resource: ResourceContent,
 ): AndroidDownloadRecord = AndroidDownloadRecord(
-    taskId = "fixture-download-${volume.id}",
+    taskId = "fixture-download-${resource.id}",
     namespace = AndroidDownloadNamespace("visual-fixture-server", "visual-fixture-user", 1),
-    workId = content.work.id,
-    workTitle = content.work.title,
-    author = content.work.author,
-    coverUrl = volume.coverUrl,
-    volumeId = volume.id,
-    volumeTitle = volume.title,
-    format = volume.format,
-    readerType = volume.readerType,
-    sourceApiPath = "/api/volumes/${volume.id}/file",
+    bookId = content.book.id,
+    bookTitle = content.book.title,
+    author = content.book.author,
+    coverUrl = resource.coverUrl,
+    resourceId = resource.id,
+    resourceTitle = resource.title,
+    format = resource.format,
+    readerType = resource.readerType,
+    assetId = resource.assets.firstOrNull()?.id ?: "asset-${resource.id}",
+    sourceApiPath = "/api/resources/${resource.id}/asset",
     sourceMimeType = "application/epub+zip",
-    expectedBytes = volume.sizeBytes,
-    transferredBytes = volume.sizeBytes,
+    expectedBytes = resource.sizeBytes,
+    transferredBytes = resource.sizeBytes,
     status = AndroidDownloadStatus.Completed,
-    localReference = "fixture-${volume.id}.epub",
+    localReference = "fixture-${resource.id}.epub",
     verified = true,
     createdAtEpochMillis = 1,
     updatedAtEpochMillis = 2,
+    resourceIndex = resource.resourceIndex,
+    resourceSortOrder = resource.sortOrder,
 )
 
 private val fixtureShelves = listOf(
@@ -447,22 +446,22 @@ private val fixtureShelves = listOf(
         id = "shelf-reading-list",
         name = "稍后阅读",
         kind = ShelfKind.Static,
-        containsWork = true,
+        containsBook = true,
     ),
 )
 
 private const val CAPTURE_SETTLE_FRAMES = 30
 
-private val fixtureWorks = listOf(
-    fixtureWork("work-1", "三体", "刘慈欣", 34),
-    fixtureWork("work-2", "沙丘", "弗兰克·赫伯特", 8),
-    fixtureWork("work-3", "人类简史", "尤瓦尔·赫拉利", null),
-    fixtureWork("work-4", "银河帝国", "艾萨克·阿西莫夫", null),
-    fixtureWork("work-5", "百年孤独", "加西亚·马尔克斯", null),
-    fixtureWork("work-6", "活着", "余华", null),
+private val fixtureBooks = listOf(
+    fixtureBook("book-1", "三体", "刘慈欣", 34),
+    fixtureBook("book-2", "沙丘", "弗兰克·赫伯特", 8),
+    fixtureBook("book-3", "人类简史", "尤瓦尔·赫拉利", null),
+    fixtureBook("book-4", "银河帝国", "艾萨克·阿西莫夫", null),
+    fixtureBook("book-5", "百年孤独", "加西亚·马尔克斯", null),
+    fixtureBook("book-6", "活着", "余华", null),
 )
 
-private fun fixtureWork(id: String, title: String, author: String, progress: Int?): WorkCard = WorkCard(
+private fun fixtureBook(id: String, title: String, author: String, progress: Int?): BookCard = BookCard(
     id = id,
     title = title,
     author = author,
@@ -471,27 +470,22 @@ private fun fixtureWork(id: String, title: String, author: String, progress: Int
     progressPercent = progress,
 )
 
-private val fixtureDetail = WorkDetailContent(
-    work = fixtureWorks.first(),
+private val fixtureDetail = BookDetailContent(
+    book = fixtureBooks.first(),
     seriesId = "series-three-body",
     seriesName = "三体系列",
     authorFacetId = "author-liu-cixin",
     description = "在文明与宇宙的尺度上，人类第一次直面来自群星深处的未知回声。",
     tags = listOf("科幻", "长篇小说"),
-    media = listOf(
-        MediaContent(
-            kind = "EBOOK",
-            volumes = listOf(
-                fixtureVolume("volume-1", "第一卷 地球往事", 100, true),
-                fixtureVolume("volume-2", "第二卷 黑暗森林", 34, true),
-                fixtureVolume("volume-3", "第三卷 死神永生", null, true),
-                fixtureVolume("volume-4", "第四卷 宇宙回声", null, true),
-            ),
-        ),
-        MediaContent(kind = "COMIC", volumes = listOf(fixtureVolume("comic-1", "漫画版 第一卷", null, true))),
-        MediaContent(kind = "AUDIOBOOK", volumes = listOf(fixtureVolume("audio-1", "有声版", 12, true))),
+    resources = listOf(
+        fixtureResource("resource-1", "第一卷 地球往事", 100, true),
+        fixtureResource("resource-2", "第二卷 黑暗森林", 34, true),
+        fixtureResource("resource-3", "第三卷 死神永生", null, true),
+        fixtureResource("resource-4", "第四卷 宇宙回声", null, true),
+        fixtureResource("comic-1", "漫画版 第一卷", null, true, format = "CBZ", readerType = "comic"),
+        fixtureResource("audio-1", "有声版", 12, true, format = "M4B", readerType = "audio"),
     ),
-    selectedMediaKind = "EBOOK",
+    selectedResourceId = "resource-2",
     readingUnits = listOf(
         ReadingUnitContent("chapter-1", "第一章 科学边界", 100, readingState = ChapterReadingState.Read),
         ReadingUnitContent("chapter-2", "第二章 黑暗森林", 34, readingState = ChapterReadingState.Current),
@@ -499,20 +493,15 @@ private val fixtureDetail = WorkDetailContent(
     ),
 )
 
-private val fixtureSingleEbookDetail = WorkDetailContent(
-    work = fixtureWorks[1].copy(mediaKinds = listOf("EBOOK"), progressPercent = 42),
+private val fixtureSingleEbookDetail = BookDetailContent(
+    book = fixtureBooks[1].copy(mediaKinds = listOf("EBOOK"), progressPercent = 42),
     seriesId = "series-dune",
     seriesName = "沙丘系列",
     authorFacetId = "author-frank-herbert",
     description = null,
     tags = listOf("科幻"),
-    media = listOf(
-        MediaContent(
-            kind = "EBOOK",
-            volumes = listOf(fixtureVolume("single-ebook-1", "沙丘", 42, true)),
-        ),
-    ),
-    selectedMediaKind = "EBOOK",
+    resources = listOf(fixtureResource("single-ebook-1", "沙丘", 42, true)),
+    selectedResourceId = "single-ebook-1",
     readingUnits = listOf(
         ReadingUnitContent("dune-chapter-1", "第一章 厄拉科斯", 100, readingState = ChapterReadingState.Read),
         ReadingUnitContent("dune-chapter-2", "第二章 沙漠之路", 42, readingState = ChapterReadingState.Current),
@@ -520,22 +509,28 @@ private val fixtureSingleEbookDetail = WorkDetailContent(
     ),
 )
 
-private fun WorkDetailContent.coverPaths(): List<String> =
-    media.flatMap(MediaContent::volumes).map(VolumeContent::coverUrl)
+private fun BookDetailContent.coverPaths(): List<String> = resources.map(ResourceContent::coverUrl)
 
-private fun fixtureVolume(id: String, title: String, progress: Int?, readable: Boolean): VolumeContent = VolumeContent(
+private fun fixtureResource(
+    id: String,
+    title: String,
+    progress: Int?,
+    readable: Boolean,
+    format: String = "EPUB",
+    readerType: String = "reflowable",
+): ResourceContent = ResourceContent(
     id = id,
     title = title,
-    format = "EPUB",
-    readerType = "reflowable",
-    volumeIndex = id.substringAfterLast('-').toDoubleOrNull(),
+    format = format,
+    readerType = readerType,
+    resourceIndex = id.substringAfterLast('-').toDoubleOrNull(),
     publishedAt = "2010-11-01",
     language = "zh-CN",
     pageCount = 428,
     metadataSource = "内嵌元数据",
-    files = listOf(
-        VolumeFileContent(
-            id = "file-$id",
+    assets = listOf(
+        AssetContent(
+            id = "asset-$id",
             path = "/library/三体系列/$title.epub",
             sizeBytes = 3_200_000,
             displaySize = "3.2 MB",
@@ -545,7 +540,7 @@ private fun fixtureVolume(id: String, title: String, progress: Int?, readable: B
     sizeBytes = 3_200_000,
     progressPercent = progress,
     readable = readable,
-    selected = id == "volume-2",
+    selected = id == "resource-2",
 )
 
 private val fixtureRequestContext: ContentRequestContext = run {
@@ -582,10 +577,10 @@ private val fixtureRepository: ContentRepository = object : ContentRepository {
     override suspend fun loadContinueReading(context: ContentRequestContext) = forbidden("loadContinueReading")
     override suspend fun loadRecentReading(context: ContentRequestContext, limit: Int) = forbidden("loadRecentReading")
     override suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int) = forbidden("loadRecentAdded")
-    override suspend fun loadWorks(context: ContentRequestContext, query: WorksQuery): ContentResult<LibraryPage<WorkSummary>> = forbidden("loadWorks")
+    override suspend fun loadBooks(context: ContentRequestContext, query: BooksQuery): ContentResult<LibraryPage<BookSummary>> = forbidden("loadBooks")
     override suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>> = forbidden("loadGroupings")
     override suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage> = forbidden("loadFacet")
-    override suspend fun loadWorkDetail(context: ContentRequestContext, query: WorkDetailQuery): ContentResult<WorkDetailSummary> = forbidden("loadWorkDetail")
+    override suspend fun loadBookDetail(context: ContentRequestContext, query: BookDetailQuery): ContentResult<BookDetailSummary> = forbidden("loadBookDetail")
     override suspend fun invalidate(namespace: PrivateDataNamespace) = Unit
 }
 

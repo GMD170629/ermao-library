@@ -6,13 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -205,43 +201,6 @@ internal fun <T> List<T>.moved(from: Int, to: Int): List<T> = toMutableList().al
 }
 
 @Composable
-fun DuplicatesScreen(
-    state: AdministrativePageState<DuplicatesSnapshot>,
-    locale: AdministrativeLocale,
-    onNavigate: (AdministrativeSettingsRoute) -> Unit,
-    onCommand: (AdministrativeCommand) -> Unit,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var selectedGroup by remember { mutableStateOf<DuplicateGroup?>(null) }
-    AdministrativePage(AdministrativeCopy.DuplicatesAndCategories, locale, onBack, modifier) {
-        AdministrativeNavigationRow(
-            AdministrativeCopy.OperationHistory.text(locale), null,
-            { onNavigate(AdministrativeSettingsRoute.LibraryOperations) },
-        )
-        PageStateContent(state, locale, onRetry) { snapshot ->
-            snapshot.groups.forEach { group ->
-                ListItem(
-                    headlineContent = { Text("${group.title} · ${group.versions.size}") },
-                    supportingContent = { Text("${group.author} · ${group.confidencePercent}%") },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { selectedGroup = group },
-                )
-                AdministrativeDivider()
-            }
-        }
-    }
-    selectedGroup?.let { group ->
-        MergeDuplicatesDialog(group, locale, onDismiss = { selectedGroup = null }) { canonical ->
-            selectedGroup = null
-            onCommand(AdministrativeCommand.MergeDuplicates(group.id, canonical))
-        }
-    }
-}
-
-@Composable
 fun LibraryOperationsScreen(
     state: AdministrativePageState<LibraryOperationsSnapshot>,
     locale: AdministrativeLocale,
@@ -268,35 +227,6 @@ fun LibraryOperationsScreen(
             }
         }
     }
-}
-
-@Composable
-private fun MergeDuplicatesDialog(
-    group: DuplicateGroup,
-    locale: AdministrativeLocale,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var canonical by remember(group) { mutableStateOf(group.versions.firstOrNull()?.workId) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(AdministrativeCopy.MergeDuplicatesTitle.text(locale)) },
-        text = {
-            Column {
-                Text(AdministrativeCopy.CanonicalWork.text(locale))
-                group.versions.forEach { version ->
-                    ListItem(
-                        headlineContent = { Text(version.title) },
-                        supportingContent = { Text(version.subtitle) },
-                        leadingContent = { RadioButton(canonical == version.workId, null) },
-                        modifier = Modifier.clickable(role = Role.RadioButton) { canonical = version.workId },
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(enabled = canonical != null, onClick = { canonical?.let(onConfirm) }) { Text(AdministrativeCopy.MergeWorks.text(locale)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(AdministrativeCopy.Cancel.text(locale)) } },
-    )
 }
 
 @Composable

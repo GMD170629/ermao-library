@@ -8,13 +8,13 @@ export type ReaderBookmark = {
   createdAt: string;
 };
 
-export function readerBookmarkStorageKey(userId: string, volumeId: string) {
-  return ['shuku', 'reader-bookmarks', 'v4', userId, volumeId].join(':');
+export function readerBookmarkStorageKey(userId: string, resourceId: string) {
+  return ['shuku', 'reader-bookmarks', 'v4', userId, resourceId].join(':');
 }
 
 export function readerBookmarkId(location: ReaderLocation | null | undefined) {
   if (!location) return null;
-  if (location.kind === 'comic') return `comic:${location.volumeId}:${location.pageIndex}`;
+  if (location.kind === 'comic') return `comic:${location.resourceId}:${location.pageIndex}`;
   if (location.kind === 'pdf') return `pdf:${location.pageIndex}`;
   if (location.kind === 'reflowable') {
     if (location.cfi) return `reflowable:${location.format}:cfi:${location.cfi}`;
@@ -25,14 +25,6 @@ export function readerBookmarkId(location: ReaderLocation | null | undefined) {
       return `reflowable:${location.format}:position:${location.href ?? ''}:${progression}`;
     }
     return null;
-  }
-  if (location.cfi) return `epub:cfi:${location.cfi}`;
-
-  const progression = typeof location.progression === 'number'
-    ? Math.round(location.progression * 10_000) / 10_000
-    : '';
-  if (location.href || location.spineIndex !== undefined || progression !== '') {
-    return `epub:position:${location.href ?? ''}:${location.spineIndex ?? ''}:${progression}`;
   }
   return null;
 }

@@ -74,10 +74,6 @@ FAILURE_CAUSES = {
         "数据库更新已提交，但基础设施返回原始版本行；响应要求完整 LibraryEdition UI 投影，"
         "缺少 readable、files、volumes 等字段。"
     ),
-    ("POST", "/api/library/duplicates/merge"): (
-        "作品合并已提交，但服务返回 targetWorkId/sourceWorkIds/operation；"
-        "模型还要求 merged，并禁止额外 operation，响应序列化后置失败。"
-    ),
     ("GET", "/api/organize/runs"): (
         "数据库中的 run.scope 可为 {}，响应模型强制要求 scope.workIds 与 scope.rules，"
         "两个真实运行记录均触发缺字段校验错误。"

@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
 from app.db.maintenance import (
     DatabaseMaintenanceLockTimeout,
     database_restore_barrier,
@@ -10,8 +13,6 @@ from app.db.maintenance import (
 )
 from app.db.sqlite import create_sqlite_engine
 from app.models.settings import SystemSetting
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
 
 
 def test_restore_barrier_waits_for_writers_and_keeps_reads_available(

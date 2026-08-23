@@ -18,11 +18,11 @@ class LibraryGrouping:
     normalized_name: str
     book_count: int
     updated_at: datetime
-    representative_works: tuple[LibraryGroupingWork, ...] = ()
+    representative_books: tuple[LibraryGroupingBook, ...] = ()
 
 
 @dataclass(frozen=True)
-class LibraryGroupingWork:
+class LibraryGroupingBook:
     id: str
     title: str
     author: str

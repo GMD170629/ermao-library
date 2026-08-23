@@ -12,7 +12,7 @@ import com.ermao.library.features.content.model.GroupingCard
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
-import com.ermao.library.features.content.model.WorkCard
+import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toCard
@@ -26,7 +26,7 @@ import com.ermao.library.shared.modules.library.LibraryFilters
 import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.shared.modules.library.ReadingStatus
-import com.ermao.library.shared.modules.library.WorksQuery
+import com.ermao.library.shared.modules.library.BooksQuery
 import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.library.application.FilterCommitResult
@@ -48,7 +48,7 @@ data class ScopeUiState(
     val sort: ContentSort = ContentSort.RecentAdded,
     val viewMode: ContentViewMode = ContentViewMode.Grid,
     val filters: WorksFilters = WorksFilters(),
-    val works: List<WorkCard> = emptyList(),
+    val works: List<BookCard> = emptyList(),
     val groups: List<GroupingCard> = emptyList(),
     val total: Int = 0,
     val loadedPage: Int = 0,
@@ -62,13 +62,13 @@ data class ScopeUiState(
 )
 
 data class LibraryUiState(
-    val selectedScope: LibraryScope = LibraryScope.Works,
+    val selectedScope: LibraryScope = LibraryScope.Books,
     val scopes: Map<LibraryScope, ScopeUiState> = LibraryScope.entries.associateWith { ScopeUiState() },
     val filterDraft: WorksFilters? = null,
     val offlineFilterAvailability: OfflineFilterAvailability = OfflineFilterAvailability.Unavailable(
         "MANAGED_DOWNLOADS_UNAVAILABLE",
     ),
-    val selectedWorkId: String? = null,
+    val selectedBookId: String? = null,
 ) {
     val current: ScopeUiState get() = scopes.getValue(selectedScope)
 }
@@ -83,7 +83,7 @@ class LibraryViewModel(
     private var searchJob: Job? = null
     private val discoveryRuntime = LibraryDiscoveryRuntime()
 
-    init { loadScope(LibraryScope.Works, reset = true) }
+    init { loadScope(LibraryScope.Books, reset = true) }
 
     fun selectScope(scope: LibraryScope) {
         if (scope == mutableUiState.value.selectedScope) return
@@ -125,9 +125,9 @@ class LibraryViewModel(
     }
 
     fun selectSort(sort: ContentSort) {
-        if (mutableUiState.value.selectedScope != LibraryScope.Works) return
+        if (mutableUiState.value.selectedScope != LibraryScope.Books) return
         discoveryRuntime.updateSort(
-            com.ermao.library.shared.modules.library.LibraryScope.Works,
+            com.ermao.library.shared.modules.library.LibraryScope.Books,
             sort.toShared(),
         )
         updateCurrent { it.copy(sort = sort) }
@@ -136,7 +136,7 @@ class LibraryViewModel(
 
     fun selectViewMode(viewMode: ContentViewMode) {
         discoveryRuntime.updateViewMode(
-            com.ermao.library.shared.modules.library.LibraryScope.Works,
+            com.ermao.library.shared.modules.library.LibraryScope.Books,
             when (viewMode) {
                 ContentViewMode.Grid -> com.ermao.library.shared.modules.library.LibraryViewMode.Grid
                 ContentViewMode.List -> com.ermao.library.shared.modules.library.LibraryViewMode.List
@@ -151,7 +151,7 @@ class LibraryViewModel(
         }
     }
 
-    fun openFilter() = mutableUiState.update { it.copy(filterDraft = it.scopes.getValue(LibraryScope.Works).filters) }
+    fun openFilter() = mutableUiState.update { it.copy(filterDraft = it.scopes.getValue(LibraryScope.Books).filters) }
 
     fun updateFilterDraft(filters: WorksFilters) = mutableUiState.update { it.copy(filterDraft = filters) }
 
@@ -160,33 +160,33 @@ class LibraryViewModel(
     fun applyFilter() {
         val draft = mutableUiState.value.filterDraft ?: return
         if (discoveryRuntime.applyFilters(draft.toSharedFilters()) !is FilterCommitResult.Applied) return
-        updateScope(LibraryScope.Works) { it.copy(filters = draft) }
+        updateScope(LibraryScope.Books) { it.copy(filters = draft) }
         mutableUiState.update { it.copy(filterDraft = null) }
-        if (mutableUiState.value.selectedScope == LibraryScope.Works) loadScope(LibraryScope.Works, reset = true)
+        if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
     }
 
     fun clearFilters() = updateFilterDraft(WorksFilters())
 
     fun removeMediaFilter(mediaFilter: MediaFilter) {
-        val filters = mutableUiState.value.scopes.getValue(LibraryScope.Works).filters.let {
+        val filters = mutableUiState.value.scopes.getValue(LibraryScope.Books).filters.let {
             it.copy(media = it.media - mediaFilter)
         }
         discoveryRuntime.applyFilters(filters.toSharedFilters())
-        updateScope(LibraryScope.Works) { state ->
+        updateScope(LibraryScope.Books) { state ->
             state.copy(filters = filters)
         }
-        if (mutableUiState.value.selectedScope == LibraryScope.Works) loadScope(LibraryScope.Works, reset = true)
+        if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
     }
 
     fun removeReadingFilter(readingFilter: ReadingFilter) {
-        val filters = mutableUiState.value.scopes.getValue(LibraryScope.Works).filters.let {
+        val filters = mutableUiState.value.scopes.getValue(LibraryScope.Books).filters.let {
             it.copy(reading = it.reading - readingFilter)
         }
         discoveryRuntime.applyFilters(filters.toSharedFilters())
-        updateScope(LibraryScope.Works) { state ->
+        updateScope(LibraryScope.Books) { state ->
             state.copy(filters = filters)
         }
-        if (mutableUiState.value.selectedScope == LibraryScope.Works) loadScope(LibraryScope.Works, reset = true)
+        if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
     }
 
     fun retry() = loadScope(mutableUiState.value.selectedScope, reset = true)
@@ -206,9 +206,9 @@ class LibraryViewModel(
         updateCurrent { it.copy(scrollAnchor = ScrollAnchor(itemId, offset)) }
     }
 
-    fun selectWork(workId: String?) {
-        discoveryRuntime.selectWork(mutableUiState.value.selectedScope.toDiscoveryScope(), workId)
-        mutableUiState.update { it.copy(selectedWorkId = workId) }
+    fun selectBook(bookId: String?) {
+        discoveryRuntime.selectBook(mutableUiState.value.selectedScope.toDiscoveryScope(), bookId)
+        mutableUiState.update { it.copy(selectedBookId = bookId) }
     }
 
     private fun loadScope(scope: LibraryScope, reset: Boolean) {
@@ -240,10 +240,10 @@ class LibraryViewModel(
         viewModelScope.launch {
             try {
                 val snapshot = mutableUiState.value.scopes.getValue(scope)
-                val worksQuery = snapshot.toWorksQuery(page)
+                val worksQuery = snapshot.toBooksQuery(page)
                 val groupingQuery = snapshot.toGroupingQuery(scope, page)
-                val result = if (scope == LibraryScope.Works) {
-                    repository.loadWorks(context, worksQuery)
+                val result = if (scope == LibraryScope.Books) {
+                    repository.loadBooks(context, worksQuery)
                 } else {
                     repository.loadGroupings(context, groupingQuery)
                 }
@@ -301,8 +301,8 @@ class LibraryViewModel(
         freshness: ContentFreshness,
         reset: Boolean,
     ) = updateScope(scope) { current ->
-        if (scope == LibraryScope.Works) {
-            val incoming = page.items.filterIsInstance<com.ermao.library.shared.modules.library.domain.WorkSummary>().map { it.toCard() }
+        if (scope == LibraryScope.Books) {
+            val incoming = page.items.filterIsInstance<com.ermao.library.shared.modules.library.domain.BookSummary>().map { it.toCard() }
             current.copy(
                 works = mergeById(if (reset) emptyList() else current.works, incoming) { it.id },
                 groups = emptyList(),
@@ -317,7 +317,7 @@ class LibraryViewModel(
             )
         } else {
             val incoming = page.items.filterIsInstance<com.ermao.library.shared.modules.library.GroupingSummary>().map { group ->
-                GroupingCard(group.id, group.name, group.bookCount, group.representativeWorks.map { it.toCard() })
+                GroupingCard(group.id, group.name, group.bookCount, group.representativeBooks.map { it.toCard() })
             }
             current.copy(
                 works = emptyList(),
@@ -374,7 +374,7 @@ class LibraryViewModel(
     }
 }
 
-private fun ScopeUiState.toWorksQuery(page: Int): WorksQuery = WorksQuery(
+private fun ScopeUiState.toBooksQuery(page: Int): BooksQuery = BooksQuery(
     query = query.trim(),
     sort = sort.toShared(),
     filters = filters.toSharedFilters(),
@@ -400,7 +400,7 @@ private fun WorksFilters.toSharedFilters(): LibraryFilters = LibraryFilters(
 )
 
 private fun LibraryScope.toDiscoveryScope(): com.ermao.library.shared.modules.library.LibraryScope = when (this) {
-    LibraryScope.Works -> com.ermao.library.shared.modules.library.LibraryScope.Works
+    LibraryScope.Books -> com.ermao.library.shared.modules.library.LibraryScope.Books
     LibraryScope.Series -> com.ermao.library.shared.modules.library.LibraryScope.Series
     LibraryScope.Authors -> com.ermao.library.shared.modules.library.LibraryScope.Authors
 }

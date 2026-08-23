@@ -18,8 +18,8 @@ enum HomeSectionState<Value: Sendable>: Sendable {
 @MainActor
 final class HomeStore: ObservableObject {
     @Published private(set) var continueReading: HomeSectionState<ContinueReadingItem> = .loading
-    @Published private(set) var recentReading: HomeSectionState<[WorkCard]> = .loading
-    @Published private(set) var recentAdded: HomeSectionState<[WorkCard]> = .loading
+    @Published private(set) var recentReading: HomeSectionState<[BookCard]> = .loading
+    @Published private(set) var recentAdded: HomeSectionState<[BookCard]> = .loading
     @Published private(set) var cacheIssue: ContentCacheIssue?
 
     private let context: ContentRequestContext
@@ -136,12 +136,12 @@ final class HomeStore: ObservableObject {
 }
 
 enum LibraryResultItem: Identifiable, Sendable {
-    case work(WorkCard)
+    case book(BookCard)
     case grouping(LibraryGrouping)
 
     var id: String {
         switch self {
-        case .work(let value): "work:\(value.id)"
+        case .book(let value): "book:\(value.id)"
         case .grouping(let value): "group:\(value.id)"
         }
     }
@@ -173,10 +173,10 @@ struct LibraryScopeState: Sendable {
 
 @MainActor
 final class LibraryStore: ObservableObject {
-    @Published private(set) var selectedScope: LibraryScope = .works
+    @Published private(set) var selectedScope: LibraryScope = .books
     @Published private(set) var cacheIssue: ContentCacheIssue?
     @Published private(set) var scopeStates: [LibraryScope: LibraryScopeState] = [
-        .works: LibraryScopeState(),
+        .books: LibraryScopeState(),
         .series: LibraryScopeState(),
         .authors: LibraryScopeState(),
     ]
@@ -233,9 +233,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func setSort(_ sort: LibrarySort) {
-        guard selectedScope == .works else { return }
+        guard selectedScope == .books else { return }
         guard current.sort != sort else { return }
-        discoveryRuntime.updateSort(scope: .works, sort: sharedSort(sort))
+        discoveryRuntime.updateSort(scope: .books, sort: sharedSort(sort))
         updateCurrent { $0.sort = sort }
         reload()
     }
@@ -258,7 +258,7 @@ final class LibraryStore: ObservableObject {
     }
 
     func applyFilters(_ filters: LibraryFilters) {
-        guard selectedScope == .works, !filters.downloadedOnly else { return }
+        guard selectedScope == .books, !filters.downloadedOnly else { return }
         guard discoveryRuntime.applyFilters(filters: sharedFilters(filters)) is ErmaoShared.FilterCommitResultApplied
         else { return }
         updateCurrent { $0.filters = filters }
@@ -449,12 +449,12 @@ final class LibraryStore: ObservableObject {
     }
 
     private enum PageResponse: Sendable {
-        case works(WorkPage)
+        case books(BookPage)
         case groupings(GroupingPage)
 
         var isEmpty: Bool {
             switch self {
-            case .works(let page): page.works.isEmpty
+            case .books(let page): page.books.isEmpty
             case .groupings(let page): page.groups.isEmpty
             }
         }
@@ -468,10 +468,10 @@ final class LibraryStore: ObservableObject {
 
     private func fetch(scope: LibraryScope, state: LibraryScopeState, page: Int) async throws -> PageFetch {
         switch scope {
-        case .works:
-            let result = try await client.fetchWorksResult(
+        case .books:
+            let result = try await client.fetchBooksResult(
                     context: context,
-                    query: WorksQuery(
+                    query: BooksQuery(
                         query: state.query,
                         sort: state.sort,
                         filters: state.filters,
@@ -480,7 +480,7 @@ final class LibraryStore: ObservableObject {
                     )
                 )
             return PageFetch(
-                response: .works(result.value),
+                response: .books(result.value),
                 provenance: result.provenance,
                 isStale: result.isStale
             )
@@ -507,8 +507,8 @@ final class LibraryStore: ObservableObject {
         let total: Int
         let totalPages: Int
         switch response {
-        case .works(let value):
-            nextItems = value.works.map(LibraryResultItem.work)
+        case .books(let value):
+            nextItems = value.books.map(LibraryResultItem.book)
             total = value.total
             totalPages = value.totalPages
         case .groupings(let value):
@@ -557,7 +557,7 @@ final class LibraryStore: ObservableObject {
 
     private func sharedScope(_ scope: LibraryScope) -> ErmaoShared.LibraryScope {
         switch scope {
-        case .works: .works
+        case .books: .books
         case .series: .series
         case .authors: .authors
         }
@@ -632,10 +632,10 @@ final class FacetStore: ObservableObject {
         Task { [weak self] in await self?.loadPage(1, generation: generation) }
     }
 
-    func loadNextPageIfNeeded(workID: String) {
+    func loadNextPageIfNeeded(bookID: String) {
         guard case .ready(let page, _) = state,
               page.page < page.totalPages,
-              page.works.suffix(6).contains(where: { $0.id == workID }),
+              page.books.suffix(6).contains(where: { $0.id == bookID }),
               !isLoadingNextPage else { return }
         isLoadingNextPage = true
         hasPaginationError = false
@@ -688,80 +688,76 @@ final class FacetStore: ObservableObject {
     private func apply(_ result: FacetPage, appending: Bool, isCached: Bool) {
         var result = result
         if appending, case .ready(let previous, _) = state {
-            var ids = Set(previous.works.map(\.id))
+            var ids = Set(previous.books.map(\.id))
             result = FacetPage(
                 facet: result.facet,
-                works: previous.works + result.works.filter { ids.insert($0.id).inserted },
+                books: previous.books + result.books.filter { ids.insert($0.id).inserted },
                 page: result.page,
                 pageSize: result.pageSize,
                 total: result.total,
                 totalPages: result.totalPages
             )
         }
-        state = result.works.isEmpty ? .empty(result.facet) : .ready(result, isCached: isCached)
+        state = result.books.isEmpty ? .empty(result.facet) : .ready(result, isCached: isCached)
         isLoadingNextPage = false
         hasPaginationError = false
     }
 }
 
-enum WorkDetailLoadState: Sendable {
+enum BookDetailLoadState: Sendable {
     case loading
-    case ready(WorkDetailContent, isCached: Bool)
+    case ready(BookDetailContent, isCached: Bool)
     case inaccessible
     case failure
 }
 
 @MainActor
-final class WorkDetailStore: ObservableObject {
-    @Published private(set) var state: WorkDetailLoadState = .loading
+final class BookDetailStore: ObservableObject {
+    @Published private(set) var state: BookDetailLoadState = .loading
     @Published private(set) var cacheIssue: ContentCacheIssue?
-    @Published private(set) var isLoadingMoreVolumes = false
-    @Published private(set) var hasVolumePaginationError = false
+    @Published private(set) var isLoadingMoreResources = false
+    @Published private(set) var hasResourcePaginationError = false
+    @Published private(set) var hasMoreResources = true
 
     private let context: ContentRequestContext
     private let client: any ContentClient
     private let cache: LibraryCacheStore
-    private let workID: String
-    var workIDValue: String { workID }
+    private let bookID: String
+    var bookIDValue: String { bookID }
     private let onUnauthorized: @MainActor () -> Void
     private var requestGeneration = UUID()
-    private var activeMediaKind: LibraryMediaKind?
-    private var activeVolumeID: String?
-    private var latestProgressUpdatesByVolumeID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
+    private var activeResourceID: String?
+    private var latestProgressUpdatesByResourceID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
-    init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, workID: String, onUnauthorized: @escaping @MainActor () -> Void) {
+    init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, bookID: String, onUnauthorized: @escaping @MainActor () -> Void) {
         self.context = context
         self.client = client
         self.cache = cache
-        self.workID = workID
+        self.bookID = bookID
         self.onUnauthorized = onUnauthorized
         ReaderProgressPresentationCenter.shared.updates
-            .filter { $0.namespaceKey == context.namespaceKey && $0.workId == workID }
+            .filter { $0.namespaceKey == context.namespaceKey && $0.bookId == bookID }
             .sink { [weak self] update in self?.apply(update) }
             .store(in: &cancellables)
     }
 
-    func load(
-        mediaKind: LibraryMediaKind? = nil,
-        volumeID: String? = nil,
-        showBlockingLoading: Bool = true
-    ) {
-        activeMediaKind = mediaKind
-        activeVolumeID = volumeID
+    func load(resourceID: String? = nil, showBlockingLoading: Bool = true) {
+        activeResourceID = resourceID
+        hasMoreResources = true
         if showBlockingLoading || currentContent == nil { state = .loading }
         let generation = UUID()
         requestGeneration = generation
         Task { [weak self] in
             guard let self else { return }
             do {
-                let value = try await client.fetchWorkDetail(
+                let value = try await client.fetchBookDetail(
                     context: context,
-                    query: WorkDetailQuery(workID: workID, mediaKind: mediaKind, volumeID: volumeID)
+                    query: BookDetailQuery(bookID: bookID, resourceID: resourceID)
                 )
                 guard requestGeneration == generation else { return }
-                let latestProgressUpdate = value.selectedVolumeID
-                    .flatMap { latestProgressUpdatesByVolumeID[$0] }
+                let latestProgressUpdate = value.selectedResourceID
+                    .flatMap { latestProgressUpdatesByResourceID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
                 state = .ready(presented, isCached: false)
             } catch {
@@ -780,175 +776,134 @@ final class WorkDetailStore: ObservableObject {
 
     func refreshIfLoaded() {
         guard currentContent != nil else { return }
-        load(mediaKind: activeMediaKind, volumeID: activeVolumeID, showBlockingLoading: false)
+        load(resourceID: activeResourceID, showBlockingLoading: false)
     }
 
-    func loadMoreVolumes() {
-        guard !isLoadingMoreVolumes,
+    func loadMoreResources() {
+        guard !isLoadingMoreResources,
+              hasMoreResources,
               let content = currentContent,
-              content.volumes.count < content.volumeCount,
-              let mediaVersionID = content.volumes.first?.mediaVersionID
+              !content.resources.isEmpty
         else { return }
         let pageSize = 24
-        let nextPage = content.volumes.count / pageSize + 1
-        let requestedMediaKind = content.selectedMediaKind
-        isLoadingMoreVolumes = true
-        hasVolumePaginationError = false
+        let nextPage = content.resources.count / pageSize + 1
+        isLoadingMoreResources = true
+        hasResourcePaginationError = false
         Task { [weak self] in
             guard let self else { return }
             do {
-                let page = try await client.fetchWorkVolumes(
+                let page = try await client.fetchBookResources(
                     context: context,
-                    workID: workID,
-                    mediaVersionID: mediaVersionID,
+                    bookID: bookID,
                     page: nextPage,
                     pageSize: pageSize
                 )
                 guard case .ready(let current, let isCached) = state else {
-                    isLoadingMoreVolumes = false
-                    return
-                }
-                guard current.selectedMediaKind == requestedMediaKind,
-                      current.volumes.first?.mediaVersionID == mediaVersionID else {
-                    isLoadingMoreVolumes = false
+                    isLoadingMoreResources = false
                     return
                 }
                 state = .ready(current.appending(page), isCached: isCached)
-                isLoadingMoreVolumes = false
+                hasMoreResources = page.page < page.totalPages && !page.resources.isEmpty
+                isLoadingMoreResources = false
             } catch {
-                isLoadingMoreVolumes = false
-                if currentContent?.selectedMediaKind == requestedMediaKind,
-                   currentContent?.volumes.first?.mediaVersionID == mediaVersionID {
-                    hasVolumePaginationError = true
-                }
+                isLoadingMoreResources = false
+                hasResourcePaginationError = true
             }
         }
     }
 
-    private var currentContent: WorkDetailContent? {
+    private var currentContent: BookDetailContent? {
         guard case .ready(let content, _) = state else { return nil }
         return content
     }
 
     private func apply(_ update: ErmaoShared.ReaderProgressPresentationUpdate) {
-        let previous = latestProgressUpdatesByVolumeID[update.volumeId]
+        let previous = latestProgressUpdatesByResourceID[update.resourceId]
         guard update.capturedAtEpochMillis >= (previous?.capturedAtEpochMillis ?? -1) else { return }
-        latestProgressUpdatesByVolumeID[update.volumeId] = update
+        latestProgressUpdatesByResourceID[update.resourceId] = update
         guard case .ready(let content, let isCached) = state else { return }
-        guard content.selectedVolumeID == update.volumeId else { return }
+        guard content.selectedResourceID == update.resourceId else { return }
         let presented = content.applying(update)
         state = .ready(presented, isCached: isCached)
     }
 }
 
-private extension WorkDetailContent {
-    func appending(_ page: WorkVolumePage) -> WorkDetailContent {
-        var seen = Set(volumes.map(\.id))
-        let merged = (volumes + page.volumes.filter { seen.insert($0.id).inserted })
+private extension BookDetailContent {
+    func appending(_ page: BookResourcePage) -> BookDetailContent {
+        var seen = Set(resources.map(\.id))
+        let merged = (resources + page.resources.filter { seen.insert($0.id).inserted })
             .sorted { lhs, rhs in
                 lhs.sortOrder == rhs.sortOrder ? lhs.id < rhs.id : lhs.sortOrder < rhs.sortOrder
             }
-        return WorkDetailContent(
-            work: work,
+        return BookDetailContent(
+            book: book,
             description: description,
             tags: tags,
             seriesFacet: seriesFacet,
             seriesIndex: seriesIndex,
             authorFacets: authorFacets,
-            availableMediaKinds: availableMediaKinds,
-            selectedMediaKind: selectedMediaKind,
-            selectedVolumeID: selectedVolumeID,
+            resources: merged,
+            selectedResourceID: selectedResourceID,
             readingStatus: readingStatus,
-            volumes: merged,
-            volumeCount: page.total,
             chapters: chapters
         )
     }
 
-    func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> WorkDetailContent {
-        guard work.id == update.workId,
-              selectedVolumeID == update.volumeId,
-              volumes.contains(where: { $0.id == update.volumeId })
+    func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> BookDetailContent {
+        guard book.id == update.bookId,
+              selectedResourceID == update.resourceId,
+              resources.contains(where: { $0.id == update.resourceId })
         else { return self }
-        let updatedWork = WorkCard(
-            id: work.id,
-            title: work.title,
-            author: work.author,
-            cover: work.cover,
+        let updatedBook = BookCard(
+            id: book.id,
+            title: book.title,
+            author: book.author,
+            cover: book.cover,
             progress: update.percent,
-            availableMediaKinds: work.availableMediaKinds
+            availableMediaKinds: book.availableMediaKinds
         )
-        let updatedVolumes = volumes.map { volume in
-            guard volume.id == update.volumeId else { return volume }
-            return WorkVolume(
-                id: volume.id,
-                mediaVersionID: volume.mediaVersionID,
-                title: volume.title,
-                formatLabel: volume.formatLabel,
-                volumeIndex: volume.volumeIndex,
-                cover: volume.cover,
-                sizeLabel: volume.sizeLabel,
+        let updatedResources = resources.map { resource in
+            guard resource.id == update.resourceId else { return resource }
+            return BookResource(
+                id: resource.id,
+                bookID: resource.bookID,
+                sourceNodeID: resource.sourceNodeID,
+                title: resource.title,
+                description: resource.description,
+                format: resource.format,
+                readerType: resource.readerType,
+                mediaKind: resource.mediaKind,
+                suggestedMediaKind: resource.suggestedMediaKind,
+                resourceIndex: resource.resourceIndex,
+                cover: resource.cover,
+                sizeLabel: resource.sizeLabel,
                 progress: update.percent,
-                isReadable: volume.isReadable,
-                isSelected: volume.isSelected,
-                sortOrder: volume.sortOrder,
-                publisher: volume.publisher,
-                publishedAt: volume.publishedAt,
-                language: volume.language,
-                isbn: volume.isbn,
-                identifier: volume.identifier,
-                narrator: volume.narrator,
-                pageCount: volume.pageCount,
-                metadataSource: volume.metadataSource,
-                kindleSendAvailable: volume.kindleSendAvailable,
-                files: volume.files
+                isReadable: resource.isReadable,
+                isSelected: resource.isSelected,
+                sortOrder: resource.sortOrder,
+                publisher: resource.publisher,
+                publishedAt: resource.publishedAt,
+                language: resource.language,
+                isbn: resource.isbn,
+                identifier: resource.identifier,
+                narrator: resource.narrator,
+                pageCount: resource.pageCount,
+                metadataSource: resource.metadataSource,
+                kindleSendAvailable: resource.kindleSendAvailable,
+                assets: resource.assets
             )
         }
-        let readerChapterUnits: [ErmaoShared.ReaderChapterUnit] = chapters.map {
-            ErmaoShared.ReaderChapterUnit(
-                href: $0.href,
-                sortOrder: Int32($0.sortOrder),
-                readingOrderPosition: $0.readingOrderPosition.map {
-                    KotlinInt(int: Int32($0))
-                }
-            )
-        }
-        let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromLocation(
-            units: readerChapterUnits,
-            location: update.location,
-            progressPercent: update.percent
-        )
-        let updatedChapters = chapters.enumerated().map { index, chapter in
-            let state: WorkChapterReadingState = switch states[index] {
-            case .current: .current
-            case .read: .read
-            default: .unread
-            }
-            return WorkChapter(
-                id: chapter.id,
-                title: chapter.title,
-                progress: state == .current ? update.percent : nil,
-                isCurrent: state == .current,
-                href: chapter.href,
-                sortOrder: chapter.sortOrder,
-                readingOrderPosition: chapter.readingOrderPosition,
-                state: state
-            )
-        }
-        return WorkDetailContent(
-            work: updatedWork,
+        return BookDetailContent(
+            book: updatedBook,
             description: description,
             tags: tags,
             seriesFacet: seriesFacet,
             seriesIndex: seriesIndex,
             authorFacets: authorFacets,
-            availableMediaKinds: availableMediaKinds,
-            selectedMediaKind: selectedMediaKind,
-            selectedVolumeID: selectedVolumeID,
+            resources: updatedResources,
+            selectedResourceID: selectedResourceID,
             readingStatus: update.percent >= 100 ? .finished : .reading,
-            volumes: updatedVolumes,
-            volumeCount: volumeCount,
-            chapters: updatedChapters
+            chapters: chapters
         )
     }
 }

@@ -159,7 +159,7 @@ export function ShelvesPage() {
     let active = true;
     const params = new URLSearchParams({ pageSize: '16', visibility: 'active', sort: 'title', view: 'search', search: search.trim() });
     setSearchLoading(true);
-    fetch(`/api/works?${params}`)
+    fetch(`/api/books?${params}`)
       .then((response) => readPayload<BooksPayload>(response, '搜索图书失败'))
       .then((payload) => {
         if (active) setSearchBooks(payload.data?.books ?? []);
@@ -216,7 +216,7 @@ export function ShelvesPage() {
       if (smartFilterQuery) params.set('filters', smartFilterQuery);
       setPreviewLoading(true);
       setPreviewError('');
-      fetch(`/api/works?${params}`, {
+      fetch(`/api/books?${params}`, {
         cache: 'no-store',
         credentials: 'same-origin',
         signal: controller.signal
@@ -298,8 +298,6 @@ export function ShelvesPage() {
         return i18nAttribute("合集仍有书架，请先移除全部书架");
       case 'INVALID_COLLECTION_MEMBER':
         return i18nAttribute("合集只能包含自己的普通或智能书架");
-      case 'COLLECTION_CANNOT_CONTAIN_WORKS':
-        return i18nAttribute("合集不能包含图书");
       case 'COLLECTION_CANNOT_HAVE_RULES':
         return i18nAttribute("合集不能设置智能书架规则");
       default:
@@ -927,7 +925,7 @@ export function ShelvesPage() {
               <BookshelfCollection
                 books={shelfBooks}
                 testId="shelf-book-bookshelves"
-                onOpen={(book) => router.push(`/works/${book.id}`)}
+                onOpen={(book) => router.push(`/books/${book.id}`)}
               />
               <ShelfLoadStatus
                 sentinelRef={loadMoreRef}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,12 +10,20 @@ from sqlalchemy.orm import Session
 from app.core.auth import hash_password
 from app.core.config import Settings
 from app.models.auth import User
-from app.models.library import (
-    LibraryFile,
-    LibraryMediaVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models.library import Library
+from app.modules.library.infrastructure.readable_resource_schema import (
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
 )
+
+
+def _path_key(path: str) -> str:
+    return f"v1:{hashlib.sha256(path.encode('utf-8')).hexdigest()}"
 
 
 def test_fb2_publication_manifest_and_resources_use_direct_adapter(
@@ -39,42 +48,86 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         </section></body></FictionBook>""",
         encoding="utf-8",
     )
-    source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    work = LibraryWork(
-        id="work-fb2-publication",
-        origin="MANUAL",
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    library.root_path = str(test_settings.resolved_storage_root)
+    book_node = LibrarySourceNode(
+        id="book-fb2-publication-node",
+        library_id="test-library",
+        relative_path="fb2-publication/",
+        path_key=_path_key("fb2-publication/"),
+        name="fb2-publication",
+        physical_kind="DIRECTORY",
+        observed_size_bytes=None,
+        observed_mtime_ns=1_000_000,
+        observed_at=datetime.now(UTC),
+    )
+    source_node = LibrarySourceNode(
+        id="asset-fb2-publication-node",
+        library_id="test-library",
+        relative_path=relative_path.as_posix(),
+        path_key=_path_key(relative_path.as_posix()),
+        name=relative_path.name,
+        physical_kind="REGULAR_FILE",
+        observed_size_bytes=source_path.stat().st_size,
+        observed_mtime_ns=int(source_path.stat().st_mtime * 1000) * 1_000_000,
+        observed_at=datetime.now(UTC),
+    )
+    book = LibraryBook(
+        id="book-fb2-publication",
+        library_id="test-library",
+        source_node_id=book_node.id,
+    )
+    book_metadata = LibraryBookMetadata(
+        book_id=book.id,
         title="直接读取 FB2",
         normalized_title="直接读取 fb2",
-        tags="[]",
     )
-    media = LibraryMediaVersion(
-        id="media-fb2-publication",
-        work_id=work.id,
+    resource = LibraryReadableResource(
+        id="resource-fb2-publication",
+        library_id="test-library",
+        book_id=book.id,
+        source_node_id=source_node.id,
+        adapter_id="fb2",
+        adapter_version="1",
         media_kind="EBOOK",
-    )
-    volume = LibraryVolume(
-        id="volume-fb2-publication",
-        media_version_id=media.id,
-        title=work.title,
-        sort_order=0,
         format="FB2",
-        resource_key="manual:fb2-publication",
-        import_status="COMPLETED",
+        enablement_state="ENABLED",
+        import_state="READY",
     )
-    source = LibraryFile(
-        id="file-fb2-publication",
-        volume_id=volume.id,
-        path=str(relative_path),
-        fingerprint=f"sha256:{source_hash}",
-        full_hash=source_hash,
-        hash_status="COMPLETED",
-        mtime_ms=int(source_path.stat().st_mtime * 1000),
-        kind="FB2",
+    resource_metadata = LibraryReadableResourceMetadata(
+        resource_id=resource.id,
+        title=book_metadata.title,
+    )
+    asset = LibraryResourceAsset(
+        id="asset-fb2-publication",
+        library_id="test-library",
+        resource_id=resource.id,
+        source_node_id=source_node.id,
+        source_node_physical_kind="REGULAR_FILE",
+        role="PRIMARY",
+        import_state="READY",
+        sequence_index=0,
+        sort_key="0",
+    )
+    asset_metadata = LibraryResourceAssetMetadata(
+        asset_id=asset.id,
         mime_type="application/x-fictionbook+xml",
-        size_bytes=source_path.stat().st_size,
-        sort_order=0,
     )
-    db_session.add_all([user, work, media, volume, source])
+    db_session.add(user)
+    db_session.add_all([book_node, source_node])
+    db_session.flush()
+    db_session.add(book)
+    db_session.flush()
+    db_session.add(book_metadata)
+    db_session.flush()
+    db_session.add(resource)
+    db_session.flush()
+    db_session.add(resource_metadata)
+    db_session.flush()
+    db_session.add(asset)
+    db_session.flush()
+    db_session.add(asset_metadata)
     db_session.commit()
     login = client.post(
         "/api/auth/login",
@@ -83,7 +136,7 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     assert login.status_code == 200
 
     manifest_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/manifest.json"
+        f"/api/reader/v4/resources/{resource.id}/publication/manifest.json"
     )
 
     assert manifest_response.status_code == 200
@@ -99,14 +152,15 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     assert manifest["toc"][0]["title"] == "第一部"
     assert manifest["toc"][0]["children"][0]["title"] == "第一章"
     assert manifest["https://shuku.app/reader/runtime"] == {
-        "originalFileHash": f"sha256:{source_hash}",
+        "sourceSizeBytes": source_path.stat().st_size,
+        "sourceMtimeMs": int(source_path.stat().st_mtime * 1000),
         "parser": "shuku-fb2-parser-v1",
         "normalization": "shuku-fb2-publication-v1",
         "positionPageLength": 1024,
     }
 
     resource_response = client.get(
-        f"/api/reader/v4/volumes/{volume.id}/publication/fb2/section-0001.xhtml"
+        f"/api/reader/v4/resources/{resource.id}/publication/fb2/section-0001.xhtml"
     )
     assert resource_response.status_code == 200
     assert "正文内容" in resource_response.text

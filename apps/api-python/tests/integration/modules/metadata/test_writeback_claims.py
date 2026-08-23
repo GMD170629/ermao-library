@@ -6,10 +6,20 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from app.core.config import Settings
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import LibraryMediaVersion, LibraryWork
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryBookMetadata,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibrarySourceNode,
+)
 from app.models.organize import (
     MetadataWritebackOperation,
     MetadataWritebackPreparation,
@@ -17,54 +27,104 @@ from app.models.organize import (
 )
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.infrastructure import writeback_queue
-from sqlalchemy import update
-from sqlalchemy.orm import Session
+
+
+def _node(
+    node_id: str, relative_path: str, *, directory: bool = False
+) -> LibrarySourceNode:
+    return LibrarySourceNode(
+        id=node_id,
+        library_id="test-library",
+        relative_path=relative_path,
+        path_key="v1:" + (node_id + relative_path).encode().hex()[:64].ljust(64, "0"),
+        name=Path(relative_path).name or node_id,
+        physical_kind="DIRECTORY" if directory else "REGULAR_FILE",
+        observed_size_bytes=None if directory else 4,
+        observed_mtime_ns=0,
+        observed_at=datetime.now(UTC),
+    )
 
 
 def _seed_claim_rows(engine, source: Path) -> None:
     now = datetime.now(UTC)
     with Session(engine) as db, db.begin():
-        db.add(
-            LibraryWork(
-                id="claim-work",
-                title="Claim",
-                normalized_title="claim",
-                author="Author",
-                normalized_author="author",
-                tags="[]",
-            )
+        library = Library(
+            id="test-library",
+            name="Test Library",
+            root_path=str(source.parent),
+            organization_mode="FLAT",
         )
-    with Session(engine) as db, db.begin():
-        db.add(
-            LibraryMediaVersion(
-                id="claim-media",
-                work_id="claim-work",
-                media_kind="EBOOK",
-            )
+        book_node = _node("claim-book-node", "claim-book", directory=True)
+        resource_node = _node("claim-resource-node", str(source))
+        book = LibraryBook(
+            id="claim-book",
+            library_id=library.id,
+            source_node_id=book_node.id,
         )
-    with Session(engine) as db, db.begin():
-        db.add(
-            MetadataWritebackOperation(
-                id="claim-operation",
-                work_id="claim-work",
-                media_version_id="claim-media",
-                source="TEST",
-                status="PENDING",
-                total_targets=1,
-            )
+        resource = LibraryReadableResource(
+            id="claim-resource",
+            library_id=library.id,
+            book_id=book.id,
+            source_node_id=resource_node.id,
+            adapter_id="txt",
+            adapter_version="1",
+            media_kind="EBOOK",
+            format="TXT",
+            enablement_state="ENABLED",
+            import_state="READY",
         )
-    with Session(engine) as db, db.begin():
+        db.add_all([library, book_node, resource_node, book])
+        db.flush()
+        db.add_all(
+            [
+                LibraryBookMetadata(
+                    book_id=book.id,
+                    title="Claim",
+                    normalized_title="claim",
+                ),
+                resource,
+            ]
+        )
+        db.flush()
+        db.add_all(
+            [
+                LibraryReadableResourceMetadata(
+                    resource_id=resource.id,
+                    title="Claim resource",
+                ),
+                LibraryResourceAsset(
+                    id="claim-asset",
+                    library_id=library.id,
+                    resource_id=resource.id,
+                    source_node_id=resource_node.id,
+                    source_node_physical_kind="REGULAR_FILE",
+                    role="PRIMARY",
+                    import_state="READY",
+                ),
+                MetadataWritebackOperation(
+                    id="claim-operation",
+                    book_id=book.id,
+                    source_node_id=resource_node.id,
+                    resource_id=resource.id,
+                    source="TEST",
+                    status="PENDING",
+                    total_targets=1,
+                ),
+            ]
+        )
+        db.flush()
         db.add_all(
             [
                 MetadataWritebackPreparation(
                     id="claim-preparation",
                     operation_id="claim-operation",
-                    work_id="claim-work",
-                    media_version_id="claim-media",
+                    book_id=book.id,
+                    source_node_id=resource_node.id,
+                    resource_id=resource.id,
                     source="TEST",
                     idempotency_key="claim-preparation-key",
                     source_revision="revision",
-                    snapshot_json='{"volumes": []}',
+                    snapshot_json='{"resources": []}',
                     status="PENDING",
                     attempts=0,
                     created_at=now,
@@ -73,9 +133,10 @@ def _seed_claim_rows(engine, source: Path) -> None:
                 MetadataWritebackTarget(
                     id="claim-target",
                     operation_id="claim-operation",
+                    asset_id="claim-asset",
                     target_key="claim-target-key",
                     source_path=str(source),
-                    format="EPUB",
+                    format="TXT",
                     payload_json="{}",
                     status="PENDING",
                     attempts=0,
@@ -92,11 +153,11 @@ def test_two_workers_atomically_claim_one_writeback_item(
     tmp_path: Path,
     claim_kind: str,
 ) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings = type("Settings", (), {"database_path": tmp_path / "db.sqlite"})()
     engine = create_sqlite_engine(settings.database_path)
     bootstrap_database(engine, settings)
-    source = tmp_path / "book.epub"
-    source.write_bytes(b"book")
+    source = tmp_path / "book.txt"
+    source.write_text("book")
     _seed_claim_rows(engine, source)
     barrier = Barrier(2)
 
@@ -133,11 +194,11 @@ def test_writeback_claim_respects_and_recovers_leases(
     tmp_path: Path,
     claim_kind: str,
 ) -> None:
-    settings = Settings(storage_root=str(tmp_path / "storage"))
+    settings = type("Settings", (), {"database_path": tmp_path / "db.sqlite"})()
     engine = create_sqlite_engine(settings.database_path)
     bootstrap_database(engine, settings)
-    source = tmp_path / "book.epub"
-    source.write_bytes(b"book")
+    source = tmp_path / "book.txt"
+    source.write_text("book")
     _seed_claim_rows(engine, source)
     model = (
         MetadataWritebackPreparation
@@ -153,16 +214,16 @@ def test_writeback_claim_respects_and_recovers_leases(
         with Session(engine) as db:
             now = datetime.now(UTC)
             with MetadataWriteTransaction(db):
-                first = claim_next(
-                    db, owner_id="worker-a", lease_seconds=60, now=now
-                )
+                first = claim_next(db, owner_id="worker-a", lease_seconds=60, now=now)
             assert first is not None
 
-            now = datetime.now(UTC)
             with MetadataWriteTransaction(db):
                 assert (
                     claim_next(
-                        db, owner_id="worker-b", lease_seconds=60, now=now
+                        db,
+                        owner_id="worker-b",
+                        lease_seconds=60,
+                        now=datetime.now(UTC),
                     )
                     is None
                 )
@@ -174,10 +235,12 @@ def test_writeback_claim_respects_and_recovers_leases(
                     .values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1))
                 )
 
-            now = datetime.now(UTC)
             with MetadataWriteTransaction(db):
                 recovered = claim_next(
-                    db, owner_id="worker-b", lease_seconds=60, now=now
+                    db,
+                    owner_id="worker-b",
+                    lease_seconds=60,
+                    now=datetime.now(UTC),
                 )
 
         assert recovered is not None

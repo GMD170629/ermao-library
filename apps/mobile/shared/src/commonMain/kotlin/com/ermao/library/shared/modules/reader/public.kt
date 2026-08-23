@@ -216,13 +216,13 @@ fun createReaderSyncNamespace(
 fun createReaderLocalProgressIdentity(
     namespace: ReaderSyncNamespace,
     clientId: String,
-    workId: String,
-    volumeId: String,
+    bookId: String,
+    resourceId: String,
 ): ReaderLocalProgressIdentity = ReaderLocalProgressIdentity(
     namespace,
     clientId,
-    workId,
-    volumeId,
+    bookId,
+    resourceId,
 )
 
 fun createEngineLocator(
@@ -234,15 +234,15 @@ fun createEngineLocator(
 
 fun createReaderProgressPresentationUpdate(
     namespaceKey: String,
-    workId: String,
-    volumeId: String,
+    bookId: String,
+    resourceId: String,
     percent: Double,
     progress: ReaderProgress,
     chapterTitle: String?,
 ): ReaderProgressPresentationUpdate = ReaderProgressPresentationUpdate(
     namespaceKey = namespaceKey,
-    workId = workId,
-    volumeId = volumeId,
+    bookId = bookId,
+    resourceId = resourceId,
     percent = percent,
     location = progress.exactPublicationLocation(),
     chapterTitle = chapterTitle,

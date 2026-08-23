@@ -40,11 +40,10 @@ class ReaderPdfInstrumentedTest {
     fun publishRealPdf() = runBlocking {
         source = instrumentation.context.assets.open("reading-notes.pdf").use { input ->
             publicationStore.publishLocalPublication(
-                sourceId = sourceId,
+                resourceId = sourceId,
                 displayTitle = "Reading notes",
                 input = input,
                 sourceFormat = ReaderSourceFormat.Pdf,
-                volumeId = sourceId,
             )
         }
     }

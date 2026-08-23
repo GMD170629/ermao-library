@@ -129,7 +129,7 @@ sealed interface ReaderRestoreCandidate {
 
     data class ComicPage(val resourceHref: String, val pageIndex: Int) : ReaderRestoreCandidate
 
-    data class AudioPosition(val fileId: String, val chapterId: String?, val positionMillis: Long) :
+    data class AudioPosition(val assetId: String, val chapterId: String?, val positionMillis: Long) :
         ReaderRestoreCandidate
 
     data class TotalProgression(val progression: Double) : ReaderRestoreCandidate
@@ -181,11 +181,11 @@ fun decideReaderResume(
     openedSource: ReaderSource,
 ): ReaderResumeDecision {
     val validLocal = localProgress?.takeIf {
-        it.sourceId == openedSource.sourceId &&
+        it.resourceId == openedSource.resourceId &&
             runCatching { it.exactPublicationLocation() }.isSuccess
     }
     val validRemote = remoteSnapshot?.takeIf {
-        it.sourceId == openedSource.sourceId
+        it.resourceId == openedSource.resourceId
     }
     val localTarget = validLocal?.let {
         ReaderResumeTarget(
@@ -244,7 +244,7 @@ fun decidePendingVsServerStartup(
 ): PendingVsServerDecision {
     val pending = durableState.pending ?: return PendingVsServerDecision.UseServer(remoteSnapshot)
     val validLocal = localProgress?.takeIf {
-        it.sourceId == openedSource.sourceId &&
+        it.resourceId == openedSource.resourceId &&
             runCatching { it.exactPublicationLocation() }.isSuccess &&
             runCatching {
                 compareExactProgressLocations(it.exactPublicationLocation(), pending.locator) == ExactLocationMatch.Exact
@@ -301,7 +301,7 @@ fun restoreCandidates(snapshot: ReaderProgressSnapshotV4): List<ReaderRestoreCan
         is PdfPublicationLocation -> listOf(ReaderRestoreCandidate.PdfPage(location.pageIndex, location.pageProgression))
         is ComicPublicationLocation -> listOf(ReaderRestoreCandidate.ComicPage(location.resourceHref, location.pageIndex))
         is AudioPublicationLocation -> listOf(
-            ReaderRestoreCandidate.AudioPosition(location.fileId, location.chapterId, location.positionMillis),
+            ReaderRestoreCandidate.AudioPosition(location.assetId, location.chapterId, location.positionMillis),
         )
     }
 
@@ -317,7 +317,7 @@ fun restoreCandidates(
         is ComicReaderLocation -> listOf(ReaderRestoreCandidate.ComicPage(savedLocation.resourceHref, savedLocation.pageIndex))
         is AudioReaderLocation -> listOf(
             ReaderRestoreCandidate.AudioPosition(
-                savedLocation.fileId,
+                savedLocation.assetId,
                 savedLocation.chapterId,
                 savedLocation.positionMillis,
             ),

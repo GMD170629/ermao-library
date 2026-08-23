@@ -55,7 +55,7 @@ class ReaderProgressJson(
     }
 
     private fun ReaderProgress.toWire() = ReaderProgressDocumentWire(
-        sourceId = sourceId,
+        resourceId = resourceId,
         location = location.toWire(),
         updatedAtEpochMillis = updatedAtEpochMillis,
         deviceId = deviceId,
@@ -82,7 +82,7 @@ class ReaderProgressJson(
             engineLocator = engineLocator?.toWire(),
         )
         is AudioReaderLocation -> AudioLocationWire(
-            fileId = fileId,
+            assetId = assetId,
             chapterId = chapterId,
             positionMillis = positionMillis,
             engineLocator = engineLocator?.toWire(),
@@ -90,7 +90,7 @@ class ReaderProgressJson(
     }
 
     private fun ReaderProgressDocumentWire.toDomain() = ReaderProgress(
-        sourceId,
+        resourceId,
         location.toDomain(),
         updatedAtEpochMillis,
         deviceId,
@@ -116,7 +116,7 @@ class ReaderProgressJson(
         }
         is AudioLocationWire -> {
             AudioReaderLocation(
-                fileId,
+                assetId,
                 chapterId,
                 positionMillis,
                 engineLocator?.toEngineLocator(),
@@ -142,7 +142,7 @@ class ReaderProgressJson(
 }
 
 private const val SCHEMA_NAME = "ermao.reader-progress"
-private const val SCHEMA_VERSION = 6
+private const val SCHEMA_VERSION = 7
 private val SUPPORTED_VERSIONS = setOf(SCHEMA_VERSION)
 
 private val defaultReaderProgressJson = Json {
@@ -156,7 +156,7 @@ private val defaultReaderProgressJson = Json {
 private data class ReaderProgressDocumentWire(
     val schema: String = SCHEMA_NAME,
     val version: Int = SCHEMA_VERSION,
-    val sourceId: String,
+    val resourceId: String,
     val location: ReaderLocationWire,
     val updatedAtEpochMillis: Long,
     val deviceId: String,
@@ -196,7 +196,7 @@ private data class ComicLocationWire(
 @Serializable
 @SerialName("audio")
 private data class AudioLocationWire(
-    val fileId: String,
+    val assetId: String,
     val chapterId: String? = null,
     val positionMillis: Long,
     val engineLocator: JsonObject? = null,

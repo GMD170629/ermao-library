@@ -114,7 +114,7 @@ def _publication(
             cover_path = resolved
     metadata = PublicationMetadata(
         title=str(payload.get("title") or "").strip() or None,
-        volume_title=str(payload.get("volumeTitle") or "").strip() or None,
+        volume_title=str(payload.get("resourceTitle") or "").strip() or None,
         authors=tuple(str(item).strip() for item in authors if str(item).strip())
         if isinstance(authors, list)
         else (),

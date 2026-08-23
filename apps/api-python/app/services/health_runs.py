@@ -1,4 +1,4 @@
-"""Compatibility re-export for health runs (owned by modules.system)."""
+"""Stable service facade for health runs (owned by modules.system)."""
 
 from app.bootstrap.system import (
     create_or_reuse_health_run,

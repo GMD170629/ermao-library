@@ -1,9 +1,8 @@
-"""Alembic-backed schema migration runner for fresh, v14, and Alembic databases."""
+"""Alembic-backed schema bootstrap for fresh installations."""
 
 from __future__ import annotations
 
 import logging
-import sqlite3
 import time
 from pathlib import Path
 
@@ -13,16 +12,12 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
-import app.models  # noqa: F401 — ensure metadata is complete
 from app.core.config import Settings
-from app.db.base import Base
-from app.db.timestamp_triggers import ensure_timestamp_triggers
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_LOCK_RETRY_SECONDS = 60.0
-BASELINE_USER_VERSION = 14
-V14_BASELINE_REVISION = "0003_import_work_queue"
 
 
 def alembic_config_for_engine(engine: Engine) -> Config:
@@ -73,10 +68,6 @@ def _run_alembic(engine: Engine, fn) -> None:
         fn(config)
 
 
-def _user_version(connection: sqlite3.Connection) -> int:
-    return int(connection.execute("PRAGMA user_version").fetchone()[0])
-
-
 def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
     with engine.connect() as connection:
         revision = MigrationContext.configure(connection).get_current_revision()
@@ -85,141 +76,44 @@ def _schema_state(engine: Engine) -> tuple[str | None, set[str]]:
     return revision, table_names
 
 
-def _backup_before_migration(
-    connection: sqlite3.Connection, settings: Settings, label: str
-) -> None:
-    backup_dir = settings.database_path.parent / "migrations"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    backup_path = backup_dir / f"shuku-before-alembic-{label}.sqlite3"
-    if backup_path.exists():
-        return
-    backup_connection = sqlite3.connect(backup_path)
-    try:
-        connection.backup(backup_connection)
-    finally:
-        backup_connection.close()
-    LOGGER.info("database migration backup created path=%s", backup_path)
-
-
-def _stamp_revision(engine: Engine, revision: str) -> None:
-    _run_alembic(engine, lambda config: command.stamp(config, revision))
-    LOGGER.info("database alembic version stamped revision=%s", revision)
-
-
 def _upgrade_head(engine: Engine) -> None:
     _run_alembic(engine, lambda config: command.upgrade(config, "head"))
     LOGGER.info("database alembic upgraded to head=%s", head_revision(engine))
 
 
-def _rebuild_unversioned_in_memory_database(
-    engine: Engine, application_tables: set[str]
-) -> None:
-    declared_tables = set(Base.metadata.tables)
-    undeclared_tables = application_tables - declared_tables
-    if undeclared_tables:
-        raise RuntimeError(
-            f"不支持包含未声明表的内存数据库；tables={sorted(undeclared_tables)!r}"
+def _unsupported_database_error(
+    current_revision: str | None, head: str
+) -> RuntimeError:
+    if current_revision is None:
+        return RuntimeError(
+            "Existing database is not supported by this release. "
+            "This release requires a fresh installation with an empty database."
         )
-    Base.metadata.drop_all(engine)
-    _upgrade_head(engine)
+    return RuntimeError(
+        f"Database revision {current_revision!r} is not supported by this release. "
+        f"Expected {head!r}. This release requires a fresh installation."
+    )
 
 
-def _apply_schema_once(engine: Engine, settings: Settings | None = None) -> None:
-    current_alembic, application_tables = _schema_state(engine)
-    raw_connection = engine.raw_connection()
-    try:
-        driver_connection: sqlite3.Connection = raw_connection.driver_connection
-        try:
-            driver_connection.execute("PRAGMA journal_mode = WAL")
-        except sqlite3.OperationalError:
-            # :memory: with some pool configs may reject WAL; ignore.
-            pass
+def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> None:
+    current_revision, application_tables = _schema_state(engine)
+    head = head_revision(engine)
 
-        user_version = _user_version(driver_connection)
-        has_tables = bool(application_tables)
-        head = head_revision(engine)
+    if not application_tables and current_revision is None:
+        _upgrade_head(engine)
+    elif current_revision == head:
+        pass
+    else:
+        raise _unsupported_database_error(current_revision, head)
 
-        if current_alembic is not None:
-            if current_alembic == head:
-                raw_connection.close()
-                raw_connection = None
-            else:
-                if settings is not None and engine.url.database not in (
-                    None,
-                    "",
-                    ":memory:",
-                ):
-                    _backup_before_migration(
-                        driver_connection,
-                        settings,
-                        f"{current_alembic}-to-{head}",
-                    )
-                raw_connection.close()
-                raw_connection = None
-                _upgrade_head(engine)
-        elif not has_tables:
-            if settings is not None and engine.url.database not in (
-                None,
-                "",
-                ":memory:",
-            ):
-                _backup_before_migration(driver_connection, settings, head)
-            raw_connection.close()
-            raw_connection = None
-            _upgrade_head(engine)
-        elif user_version == BASELINE_USER_VERSION:
-            # v14 is the predecessor of the published Alembic history. Stamp only
-            # that boundary, then execute every deterministic migration after it.
-            if settings is not None and engine.url.database not in (
-                None,
-                "",
-                ":memory:",
-            ):
-                _backup_before_migration(
-                    driver_connection,
-                    settings,
-                    f"v14-to-{head}",
-                )
-            raw_connection.close()
-            raw_connection = None
-            _stamp_revision(engine, V14_BASELINE_REVISION)
-            _upgrade_head(engine)
-        elif (
-            user_version == 0 and settings is None and engine.url.database == ":memory:"
-        ):
-            # Tests may compose an ephemeral ORM schema before requesting the
-            # complete database. Rebuild it through Alembic instead of stamping
-            # an unverified layout, so its revision has the production schema.
-            raw_connection.close()
-            raw_connection = None
-            _rebuild_unversioned_in_memory_database(engine, application_tables)
-        elif user_version == 0:
-            raise RuntimeError(
-                "不支持 pre-v14 或未标记版本的非空数据库；"
-                "数据库必须从空库或已发布的 v14/Alembic 版本升级"
-            )
-        elif user_version < BASELINE_USER_VERSION:
-            raise RuntimeError(
-                f"不支持 pre-v14 数据库（user_version={user_version}）；"
-                "请先使用支持旧版本迁移的应用升级到 v14"
-            )
-        else:
-            raise RuntimeError(
-                f"数据库版本 {user_version} 高于当前应用支持的版本 {BASELINE_USER_VERSION}，请升级应用"
-            )
-    finally:
-        if raw_connection is not None:
-            raw_connection.close()
-
-    with engine.begin() as connection:
-        ensure_timestamp_triggers(connection)
+    with engine.connect() as connection:
         stamped = MigrationContext.configure(connection).get_current_revision()
         if stamped is None:
             raise RuntimeError("database migration did not record an alembic_version")
 
 
 def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
-    """Apply Alembic migrations for supported databases and timestamp triggers."""
+    """Create the current schema on an empty database, or accept the current HEAD."""
 
     deadline = time.monotonic() + SCHEMA_LOCK_RETRY_SECONDS
     retry_delay = 0.25
@@ -227,7 +121,7 @@ def apply_schema(engine: Engine, settings: Settings | None = None) -> None:
         try:
             _apply_schema_once(engine, settings)
             return
-        except sqlite3.OperationalError as exc:
+        except OperationalError as exc:
             if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
                 raise
             remaining = max(0.0, deadline - time.monotonic())

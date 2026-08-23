@@ -15,10 +15,8 @@ class MediaKindPolicy(StrEnum):
 
 class ClassificationSource(StrEnum):
     AUTO = "AUTO"
-    MONITOR_FOLDER = "MONITOR_FOLDER"
+    LIBRARY_RULE = "LIBRARY_RULE"
     USER = "USER"
-    INHERITED = "INHERITED"
-    LEGACY = "LEGACY"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +81,8 @@ def classify_content(
     if policy is not MediaKindPolicy.MIXED:
         return ContentClassification(
             media_kind=policy.value,
-            source=ClassificationSource.MONITOR_FOLDER,
-            reason="FOLDER_POLICY",
+            source=ClassificationSource.LIBRARY_RULE,
+            reason="LIBRARY_POLICY",
         )
 
     normalized_format = evidence.volume_format.strip().upper()
@@ -137,12 +135,4 @@ def classify_content(
         media_kind="EBOOK",
         source=ClassificationSource.AUTO,
         reason="FORMAT_DEFAULT",
-    )
-
-
-def inherited_classification(media_kind: str) -> ContentClassification:
-    return ContentClassification(
-        media_kind=media_kind,
-        source=ClassificationSource.INHERITED,
-        reason="DERIVED_FROM_VOLUME",
     )

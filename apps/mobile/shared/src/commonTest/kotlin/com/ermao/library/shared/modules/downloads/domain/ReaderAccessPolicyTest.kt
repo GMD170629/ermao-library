@@ -9,7 +9,7 @@ class ReaderAccessPolicyTest {
     private val policy = ReaderAccessPolicy()
 
     @Test
-    fun completedArtifactForTheVolumeWins() {
+    fun completedArtifactForTheResourceWins() {
         val old = artifact(DownloadReaderType.Reflowable)
         val request = request(DownloadReaderType.Reflowable, isOnline = true)
 
@@ -33,25 +33,34 @@ class ReaderAccessPolicyTest {
         }
     }
 
+    @Test
+    fun audioRequiresTheExistingExplicitNativeSupportContract() {
+        assertEquals(
+            ReaderAccessDecision.Unavailable("READER_TYPE_NOT_SUPPORTED"),
+            policy.decide(request(DownloadReaderType.Audio, isOnline = true), emptyList()),
+        )
+    }
+
     private fun request(type: DownloadReaderType, isOnline: Boolean) =
-        ReaderAccessRequest(namespace, "volume", type, isOnline)
+        ReaderAccessRequest(namespace, "resource", type, isOnline)
 
     private fun artifact(type: DownloadReaderType): CompletedDownloadArtifact {
         val mime = when (type) {
             DownloadReaderType.Pdf -> "application/pdf"
-            DownloadReaderType.Comic -> "application/zip"
+            DownloadReaderType.Comic -> "application/vnd.comicbook+zip"
+            DownloadReaderType.Audio -> "audio/mpeg"
             else -> "application/epub+zip"
         }
         val descriptor = DownloadDescriptor(
-            DownloadIdentity(namespace, "work", "volume"),
-            "Book",
-            null,
-            null,
-            "Volume",
-            type.name,
-            type,
-            DownloadSource("/api/volumes/volume/file", mime, 10),
+            identity = DownloadIdentity(namespace, "book", "resource", "asset"),
+            bookTitle = "Book",
+            bookAuthor = null,
+            coverApiPath = null,
+            resourceTitle = "Resource",
+            format = type.name,
+            readerType = type,
+            source = DownloadSource("/api/assets/asset", mime, 10),
         )
-        return CompletedDownloadArtifact(descriptor, "local://volume", 10, 1)
+        return CompletedDownloadArtifact(descriptor, "local://asset", 10, 1)
     }
 }

@@ -9,47 +9,48 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlinx.coroutines.runBlocking
 
-class DownloadVolumeRuntimeTest {
+class DownloadResourceRuntimeTest {
     @Test
-    fun emitsTaskProgressAndReadyOnlyAfterCompletedArtifactIsPersisted() = runBlocking {
+    fun emitsResourceProgressAndReadyOnlyAfterCompletedArtifactIsPersisted() = runBlocking {
         val catalog = InMemoryDownloadCatalogRepository()
-        val observations = mutableListOf<DownloadVolumeObservation>()
-        val runtime = DownloadVolumeRuntime(catalog, SuccessfulGateway(descriptor), nowEpochMillis = { 42 })
+        val observations = mutableListOf<DownloadResourceObservation>()
+        val runtime = DownloadResourceRuntime(catalog, SuccessfulGateway(descriptor), nowEpochMillis = { 42 })
 
         val result = runtime.downloadThenOpen(
             context = context,
-            volumeId = "volume",
+            resourceId = "resource",
             taskId = "task",
             sink = NoopSink,
-            observer = DownloadVolumeObserver(observations::add),
+            observer = DownloadResourceObserver(observations::add),
         )
 
-        val ready = assertIs<DownloadVolumeResult.ReadyToOpen>(result)
-        assertEquals("media", ready.artifact.descriptor.mediaVersionId)
+        val ready = assertIs<DownloadResourceResult.ReadyToOpen>(result)
+        assertEquals("resource", ready.artifact.descriptor.identity.resourceId)
+        assertEquals("asset", ready.artifact.descriptor.identity.assetId)
         assertEquals(
             listOf(
-                DownloadVolumeObservationKind.Preparing,
-                DownloadVolumeObservationKind.TaskCreated,
-                DownloadVolumeObservationKind.Downloading,
-                DownloadVolumeObservationKind.Progress,
-                DownloadVolumeObservationKind.Progress,
-                DownloadVolumeObservationKind.ReadyToOpen,
+                DownloadResourceObservationKind.Preparing,
+                DownloadResourceObservationKind.TaskCreated,
+                DownloadResourceObservationKind.Downloading,
+                DownloadResourceObservationKind.Progress,
+                DownloadResourceObservationKind.Progress,
+                DownloadResourceObservationKind.ReadyToOpen,
             ),
-            observations.map(DownloadVolumeObservation::kind),
+            observations.map(DownloadResourceObservation::kind),
         )
-        assertEquals(listOf(4L, 10L), observations.filter { it.kind == DownloadVolumeObservationKind.Progress }.map { it.transferredBytes })
+        assertEquals(listOf(4L, 10L), observations.filter { it.kind == DownloadResourceObservationKind.Progress }.map { it.transferredBytes })
         assertEquals(ready.artifact, catalog.listArtifacts(namespace).single())
     }
 
     private class SuccessfulGateway(
         private val descriptor: DownloadDescriptor,
     ) : DownloadsGateway {
-        override suspend fun load(context: DownloadRequestContext, volumeId: String): DownloadBootstrapResult =
+        override suspend fun load(context: DownloadRequestContext, resourceId: String): DownloadBootstrapResult =
             DownloadBootstrapResult.Success(DownloadBootstrap(descriptor))
 
         override suspend fun transfer(
@@ -60,7 +61,7 @@ class DownloadVolumeRuntimeTest {
         ): DownloadTransferResult {
             progressObserver?.onProgress(4, 10)
             progressObserver?.onProgress(10, 10)
-            return DownloadTransferResult.Success(CompletedTransfer("managed/volume.bin", 10, null, null))
+            return DownloadTransferResult.Success(CompletedTransfer("managed/asset.bin", 10, null, null))
         }
     }
 
@@ -79,18 +80,13 @@ class DownloadVolumeRuntimeTest {
     )
     private val context = DownloadRequestContext(profile, namespace)
     private val descriptor = DownloadDescriptor(
-        identity = DownloadIdentity(namespace, "work", "volume"),
-        workTitle = "Book",
-        workAuthor = "Author",
-        coverApiPath = "/api/works/work/cover",
-        volumeTitle = "Volume",
-        format = "EPUB",
+        identity = DownloadIdentity(namespace, "book", "resource", "asset"),
+        bookTitle = "Book",
+        bookAuthor = "Author",
+        coverApiPath = "/api/books/book/cover",
+        resourceTitle = "Resource",
+        format = "epub",
         readerType = DownloadReaderType.Reflowable,
-        source = DownloadSource("/api/volumes/volume/file", "application/epub+zip", 10),
-        mediaVersionId = "media",
-        mediaKind = "EBOOK",
-        mediaVersionCompleted = true,
-        volumeIndex = 1.0,
-        volumeSortOrder = 0,
+        source = DownloadSource("/api/assets/asset", "application/epub+zip", 10),
     )
 }

@@ -3,19 +3,18 @@ package com.ermao.library.shared.modules.workmanagement.domain
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
-data class WorkManagementContext(
+data class BookManagementContext(
     val profile: ServerProfile,
     val namespace: PrivateDataNamespace,
 ) {
-    init {
-        require(profile.serverIdentity == namespace.serverIdentity)
-    }
+    init { require(profile.serverIdentity == namespace.serverIdentity) }
 }
 
 enum class WorkManagementErrorKind {
     Unauthorized,
     Forbidden,
     Inaccessible,
+    Unavailable,
     Conflict,
     Validation,
     Offline,
@@ -35,13 +34,13 @@ sealed interface WorkManagementResult<out T> {
     data class Failure(val error: WorkManagementError) : WorkManagementResult<Nothing>
 }
 
-data class WorkMetadataDraft(
+data class BookMetadataDraft(
     val title: String,
-    val author: String,
-    val description: String,
+    val author: String?,
+    val description: String?,
     val seriesName: String?,
     val seriesIndex: Double?,
-    val tags: List<String>,
+    val tags: List<String> = emptyList(),
 ) {
     init {
         require(title.isNotBlank())
@@ -49,22 +48,18 @@ data class WorkMetadataDraft(
     }
 }
 
-data class VolumeMetadataDraft(
-    val title: String,
-    val volumeIndex: Double?,
-    val sortOrder: Int,
-    val publisher: String?,
-    val language: String?,
-    val isbn: String?,
-    val identifier: String?,
-    val narrator: String?,
-) {
-    init {
-        require(title.isNotBlank())
-        require(volumeIndex == null || volumeIndex.isFinite())
-        require(sortOrder >= 0)
-    }
-}
+data class ResourceMetadataDraft(
+    val title: String? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    val publishedAt: String? = null,
+    val language: String? = null,
+    val isbn: String? = null,
+    val identifier: String? = null,
+    val narrator: String? = null,
+    val abridged: Boolean? = null,
+    val resourceIndex: Double? = null,
+)
 
 enum class ManagedMediaKind(val wireValue: String) {
     Ebook("EBOOK"),
@@ -77,17 +72,8 @@ enum class ManagedReadingStatus(val wireValue: String) {
     Finished("FINISHED"),
 }
 
-data class WorkTransferTarget(
-    val id: String,
-    val title: String,
-    val author: String,
-)
-
-data class WorkMutationOutcome(
-    val workId: String,
-    val deletedWork: Boolean = false,
-    val targetWorkId: String? = null,
-    val targetMediaVersionId: String? = null,
+data class BookMutationOutcome(
+    val bookId: String,
     val operationId: String? = null,
 )
 

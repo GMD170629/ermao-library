@@ -7,6 +7,7 @@ data class ServerCompatibility(
     val protocolVersion: Int,
     val minimumSupportedClientVersion: Int,
     val readerSchemaVersion: Int,
+    val librarySchemaVersion: Int,
     val capabilities: ServerCapabilities,
 )
 
@@ -16,7 +17,8 @@ data class ServerCapabilities(
     val readerV4: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
-    val workDetailManagement: Boolean,
+    val bookResourceAsset: Boolean,
+    val bookDetailManagement: Boolean,
 )
 
 sealed interface ServerCompatibilityDecision {

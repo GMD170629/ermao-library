@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from collections.abc import Callable, Iterable
+from importlib import import_module
 from pathlib import Path
 from time import monotonic
-from typing import Protocol
+from typing import Protocol, cast
 
 from app.modules.imports.application.pdf_types import (
     PdfChapter,
-    PdfCoverPublication,
     PdfInspection,
 )
 from app.modules.imports.domain.pdf_content import (
@@ -54,9 +53,25 @@ class _PdfBookmark(Protocol):
 
 
 class _PdfDocument(Protocol):
+    def __len__(self) -> int: ...
+
     def __getitem__(self, index: int) -> _PdfPage: ...
 
+    def get_metadata_dict(self) -> dict[str, object] | None: ...
+
     def get_toc(self, max_depth: int) -> Iterable[_PdfBookmark]: ...
+
+    def close(self) -> None: ...
+
+
+class _PdfiumModule(Protocol):
+    def PdfDocument(self, path: str) -> _PdfDocument: ...
+
+
+def _load_pdfium() -> _PdfiumModule:
+    """Load the optional PDF adapter behind an explicit typed boundary."""
+
+    return cast(_PdfiumModule, import_module("pypdfium2"))
 
 
 def inspect_pdf(
@@ -81,8 +96,7 @@ def inspect_pdf(
         elapsed_ms=0,
     )
     try:
-        import pypdfium2 as pdfium
-
+        pdfium = _load_pdfium()
         pdf = pdfium.PdfDocument(str(path))
         try:
             page_count = max(1, len(pdf))
@@ -154,47 +168,6 @@ def inspect_pdf(
         content_kind=content_kind,
         text_evidence=evidence,
     )
-
-
-def publish_pdf_cover(
-    storage_root: Path,
-    source_path: Path,
-    work_id: str,
-    media_version_id: str,
-    volume_id: str,
-) -> PdfCoverPublication:
-    target = (
-        storage_root / "books" / work_id / media_version_id / volume_id / "cover.jpg"
-    )
-    temporary = target.with_suffix(f"{target.suffix}.part")
-    try:
-        import pypdfium2 as pdfium
-
-        pdf = pdfium.PdfDocument(str(source_path))
-        try:
-            if len(pdf) < 1:
-                return PdfCoverPublication(path=None)
-            page = pdf[0]
-            try:
-                bitmap = page.render(scale=2)
-                try:
-                    image = bitmap.to_pil().copy()
-                finally:
-                    bitmap.close()
-            finally:
-                page.close()
-            if image.mode not in {"RGB", "L"}:
-                image = image.convert("RGB")
-            image.thumbnail((900, 1200))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            image.save(temporary, format="JPEG", quality=88, optimize=True)
-            os.replace(temporary, target)
-            return PdfCoverPublication(path=str(target), rendered_page=1)
-        finally:
-            pdf.close()
-    except Exception as exc:  # noqa: BLE001 - cover adapter contains backend failures
-        temporary.unlink(missing_ok=True)
-        return PdfCoverPublication(path=None, warning=str(exc))
 
 
 def _inspect_text_layer(

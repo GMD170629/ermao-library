@@ -1,36 +1,35 @@
-"""SQLAlchemy persistence for personal shelves and shelf-work links."""
+"""SQLAlchemy persistence for personal shelves and book links."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Mapper, Session
 
 from app.core.authorization import (
     AuthorizationContext,
-    work_visibility_predicate,
+    book_visibility_predicate,
 )
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models.library import LibraryWork
-from app.models.settings import MonitorFolder
-from app.models.shelf import Shelf, ShelfWork
+from app.models import LibraryBook, LibraryBookMetadata
+from app.models.shelf import Shelf, ShelfBook
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
 def _entity_record(entity: object) -> dict[str, Any]:
-    mapper = sa_inspect(entity).mapper
+    inspection = sa_inspect(entity)
+    mapper = cast(Mapper[Any], getattr(inspection, "mapper", inspection))
     return {
         prop.columns[0].name: getattr(entity, prop.key) for prop in mapper.column_attrs
     }
 
 
 def list_shelves_for_user(db: Session, user_id: str) -> list[dict[str, Any]]:
-    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
-        return []
     rows = db.scalars(
         select(Shelf)
         .where(Shelf.owner_user_id == user_id)
@@ -48,8 +47,6 @@ def get_owned_shelf(
     shelf_id: str,
     user_id: str,
 ) -> dict[str, Any] | None:
-    if not sa_inspect(db.get_bind()).has_table(Shelf.__tablename__):
-        return None
     row = db.scalar(
         select(Shelf).where(
             Shelf.id == shelf_id,
@@ -63,7 +60,7 @@ def shelf_exists(db: Session, shelf_id: str) -> bool:
     return db.scalar(select(Shelf.id).where(Shelf.id == shelf_id)) is not None
 
 
-def shelf_accepts_works(db: Session, shelf_id: str) -> bool:
+def shelf_accepts_books(db: Session, shelf_id: str) -> bool:
     kind = db.scalar(select(Shelf.kind).where(Shelf.id == shelf_id))
     return str(kind or "").upper() == "STATIC"
 
@@ -72,7 +69,7 @@ def list_collection_ids_by_shelf_ids(
     db: Session,
     shelf_ids: list[str],
 ) -> dict[str, list[str]]:
-    result = {shelf_id: [] for shelf_id in shelf_ids}
+    result: dict[str, list[str]] = {shelf_id: [] for shelf_id in shelf_ids}
     if not shelf_ids:
         return result
     rows = db.execute(
@@ -212,17 +209,17 @@ def collection_has_members(db: Session, collection_id: str) -> bool:
     )
 
 
-def list_static_shelf_work_ids(db: Session, shelf_id: str) -> list[str]:
+def list_static_shelf_book_ids(db: Session, shelf_id: str) -> list[str]:
     return list(
         db.scalars(
-            select(ShelfWork.work_id)
-            .where(ShelfWork.shelf_id == shelf_id)
-            .order_by(ShelfWork.created_at.asc())
+            select(ShelfBook.book_id)
+            .where(ShelfBook.shelf_id == shelf_id)
+            .order_by(ShelfBook.created_at.asc())
         ).all()
     )
 
 
-def list_static_shelf_work_page(
+def list_static_shelf_book_page(
     db: Session,
     shelf_id: str,
     context: AuthorizationContext,
@@ -230,61 +227,64 @@ def list_static_shelf_work_page(
     page: int,
     page_size: int,
 ) -> tuple[list[str], int]:
-    predicates = [ShelfWork.shelf_id == shelf_id]
+    predicates = [ShelfBook.shelf_id == shelf_id]
     if not context.is_admin:
-        predicates.append(work_visibility_predicate(context))
+        predicates.append(book_visibility_predicate(context))
     total = int(
         db.scalar(
             select(func.count())
-            .select_from(ShelfWork)
-            .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
+            .select_from(ShelfBook)
+            .join(LibraryBook, LibraryBook.id == ShelfBook.book_id)
             .where(*predicates)
         )
         or 0
     )
-    work_ids = list(
+    book_ids = list(
         db.scalars(
-            select(ShelfWork.work_id)
-            .join(LibraryWork, LibraryWork.id == ShelfWork.work_id)
+            select(ShelfBook.book_id)
+            .join(LibraryBook, LibraryBook.id == ShelfBook.book_id)
             .where(*predicates)
-            .order_by(ShelfWork.created_at.asc(), ShelfWork.work_id.asc())
+            .order_by(ShelfBook.created_at.asc(), ShelfBook.book_id.asc())
             .limit(page_size)
             .offset((page - 1) * page_size)
         ).all()
     )
-    return [str(work_id) for work_id in work_ids], total
+    return [str(book_id) for book_id in book_ids], total
 
 
-def filter_visible_work_ids(
+def filter_visible_book_ids(
     db: Session,
-    work_ids: list[str],
+    book_ids: list[str],
     context: AuthorizationContext,
 ) -> list[str]:
-    if not work_ids:
+    if not book_ids:
         return []
     visible: set[str] = set()
-    for chunk_start in range(0, len(work_ids), 400):
-        chunk = work_ids[chunk_start : chunk_start + 400]
-        stmt = select(LibraryWork.id).where(LibraryWork.id.in_(chunk))
+    for chunk_start in range(0, len(book_ids), 400):
+        chunk = book_ids[chunk_start : chunk_start + 400]
+        stmt = select(LibraryBook.id).where(LibraryBook.id.in_(chunk))
         if not context.is_admin:
-            stmt = stmt.where(work_visibility_predicate(context))
+            stmt = stmt.where(book_visibility_predicate(context))
         visible.update(str(row) for row in db.scalars(stmt).all())
-    return [str(work_id) for work_id in work_ids if str(work_id) in visible]
+    return [str(book_id) for book_id in book_ids if str(book_id) in visible]
 
 
-def list_work_cards(
+def list_book_cards(
     db: Session,
-    work_ids: list[str],
+    book_ids: list[str],
 ) -> list[dict[str, Any]]:
-    if not work_ids:
+    if not book_ids:
         return []
     rows = (
         db.execute(
             select(
-                LibraryWork.id,
-                LibraryWork.title,
-                LibraryWork.author,
-            ).where(LibraryWork.id.in_(work_ids))
+                LibraryBook.id,
+                LibraryBookMetadata.title,
+                LibraryBookMetadata.author,
+            )
+            .select_from(LibraryBook)
+            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+            .where(LibraryBook.id.in_(book_ids))
         )
         .mappings()
         .all()
@@ -297,7 +297,7 @@ def list_work_cards(
         }
         for row in rows
     }
-    return [by_id[str(work_id)] for work_id in work_ids if str(work_id) in by_id]
+    return [by_id[str(book_id)] for book_id in book_ids if str(book_id) in by_id]
 
 
 def create_shelf(db: Session, values: dict[str, Any]) -> dict[str, Any]:
@@ -345,84 +345,84 @@ def update_shelf(
     return _entity_record(shelf)
 
 
-def replace_shelf_works(
+def replace_shelf_books(
     db: Session,
     shelf_id: str,
-    work_ids: list[str],
+    book_ids: list[str],
     *,
     now: datetime,
 ) -> None:
     rows = [
-        {"shelf_id": shelf_id, "work_id": work_id, "created_at": now}
-        for work_id in work_ids
+        {"shelf_id": shelf_id, "book_id": book_id, "created_at": now}
+        for book_id in book_ids
     ]
-    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
+    db.execute(delete(ShelfBook).where(ShelfBook.shelf_id == shelf_id))
     for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
-        db.execute(sqlite_insert(ShelfWork).values(list(chunk)))
+        db.execute(sqlite_insert(ShelfBook).values(list(chunk)))
 
 
-def add_shelf_work(
+def add_shelf_book(
     db: Session,
     *,
     shelf_id: str,
-    work_id: str,
+    book_id: str,
     now: datetime,
 ) -> None:
-    if not shelf_accepts_works(db, shelf_id):
-        raise ValueError("COLLECTION_CANNOT_CONTAIN_WORKS")
+    if not shelf_accepts_books(db, shelf_id):
+        raise ValueError("COLLECTION_CANNOT_CONTAIN_BOOKS")
     db.execute(
-        sqlite_insert(ShelfWork)
-        .values(shelf_id=shelf_id, work_id=work_id, created_at=now)
-        .on_conflict_do_nothing(index_elements=[ShelfWork.shelf_id, ShelfWork.work_id])
+        sqlite_insert(ShelfBook)
+        .values(shelf_id=shelf_id, book_id=book_id, created_at=now)
+        .on_conflict_do_nothing(index_elements=[ShelfBook.shelf_id, ShelfBook.book_id])
     )
 
 
-def add_shelf_works(
+def add_shelf_books(
     db: Session,
     *,
     shelf_id: str,
-    work_ids: tuple[str, ...],
+    book_ids: tuple[str, ...],
     now: datetime,
 ) -> None:
     rows = tuple(
-        {"shelf_id": shelf_id, "work_id": work_id, "created_at": now}
-        for work_id in work_ids
+        {"shelf_id": shelf_id, "book_id": book_id, "created_at": now}
+        for book_id in book_ids
     )
     for chunk in sqlite_parameter_chunks(rows, parameters_per_row=3):
         db.execute(
-            sqlite_insert(ShelfWork)
+            sqlite_insert(ShelfBook)
             .values(list(chunk))
             .on_conflict_do_nothing(
-                index_elements=[ShelfWork.shelf_id, ShelfWork.work_id]
+                index_elements=[ShelfBook.shelf_id, ShelfBook.book_id]
             )
         )
 
 
-def remove_shelf_work(
+def remove_shelf_book(
     db: Session,
     *,
     shelf_id: str,
-    work_id: str,
+    book_id: str,
 ) -> None:
     db.execute(
-        delete(ShelfWork).where(
-            ShelfWork.shelf_id == shelf_id,
-            ShelfWork.work_id == work_id,
+        delete(ShelfBook).where(
+            ShelfBook.shelf_id == shelf_id,
+            ShelfBook.book_id == book_id,
         )
     )
 
 
-def remove_shelf_works(
+def remove_shelf_books(
     db: Session,
     *,
     shelf_id: str,
-    work_ids: tuple[str, ...],
+    book_ids: tuple[str, ...],
 ) -> None:
-    for chunk in sqlite_parameter_chunks(work_ids, parameters_per_row=1):
+    for chunk in sqlite_parameter_chunks(book_ids, parameters_per_row=1):
         db.execute(
-            delete(ShelfWork).where(
-                ShelfWork.shelf_id == shelf_id,
-                ShelfWork.work_id.in_(chunk),
+            delete(ShelfBook).where(
+                ShelfBook.shelf_id == shelf_id,
+                ShelfBook.book_id.in_(chunk),
             )
         )
 
@@ -436,19 +436,17 @@ def delete_shelf(db: Session, shelf_id: str) -> bool:
             )
         )
     )
-    db.execute(delete(ShelfWork).where(ShelfWork.shelf_id == shelf_id))
-    result = db.execute(delete(Shelf).where(Shelf.id == shelf_id))
+    db.execute(delete(ShelfBook).where(ShelfBook.shelf_id == shelf_id))
+    result = cast(
+        CursorResult[Any], db.execute(delete(Shelf).where(Shelf.id == shelf_id))
+    )
     return bool(result.rowcount)
 
 
-def clear_monitor_folder_shelf_links(
+def clear_library_shelf_links(
     db: Session,
     shelf_id: str,
     *,
     now: datetime,
 ) -> None:
-    db.execute(
-        update(MonitorFolder)
-        .where(MonitorFolder.shelf_id == shelf_id)
-        .values(shelf_id=None, updated_at=now)
-    )
+    del db, shelf_id, now

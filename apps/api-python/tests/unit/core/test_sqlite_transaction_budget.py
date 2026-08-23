@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from app.db.sqlite import create_sqlite_engine
 from sqlalchemy.exc import OperationalError
+
+from app.db.sqlite import create_sqlite_engine
 
 
 def _budget_table(engine: sa.Engine) -> sa.Table:

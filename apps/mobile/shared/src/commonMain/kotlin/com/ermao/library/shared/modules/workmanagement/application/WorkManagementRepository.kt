@@ -1,5 +1,8 @@
 package com.ermao.library.shared.modules.workmanagement.application
 
+import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
@@ -9,37 +12,36 @@ import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult
-import com.ermao.library.shared.modules.workmanagement.domain.VolumeMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementContext
+import com.ermao.library.shared.modules.workmanagement.domain.ResourceMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult
-import com.ermao.library.shared.modules.workmanagement.domain.WorkMetadataDraft
-import com.ermao.library.shared.modules.workmanagement.domain.WorkMutationOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.WorkTransferTarget
 
 interface WorkManagementRepository {
-    suspend fun supportsNativeManagement(context: WorkManagementContext): WorkManagementResult<Boolean>
-    suspend fun updateWork(context: WorkManagementContext, workId: String, draft: WorkMetadataDraft): WorkManagementResult<Unit>
-    suspend fun uploadCover(context: WorkManagementContext, workId: String, upload: CoverUpload): WorkManagementResult<Unit>
-    suspend fun regenerateCover(context: WorkManagementContext, workId: String): WorkManagementResult<Unit>
-    suspend fun deleteWork(context: WorkManagementContext, workId: String): WorkManagementResult<WorkMutationOutcome>
-    suspend fun updateVolume(context: WorkManagementContext, workId: String, volumeId: String, draft: VolumeMetadataDraft): WorkManagementResult<WorkMutationOutcome>
-    suspend fun reclassifyVolume(context: WorkManagementContext, workId: String, volumeId: String, mediaKind: ManagedMediaKind): WorkManagementResult<WorkMutationOutcome>
-    suspend fun splitVolume(context: WorkManagementContext, workId: String, volumeId: String, title: String, author: String?): WorkManagementResult<WorkMutationOutcome>
-    suspend fun transferVolume(context: WorkManagementContext, workId: String, volumeId: String, targetWorkId: String): WorkManagementResult<WorkMutationOutcome>
-    suspend fun deleteVolume(context: WorkManagementContext, workId: String, volumeId: String): WorkManagementResult<WorkMutationOutcome>
-    suspend fun searchTransferTargets(context: WorkManagementContext, workId: String, query: String): WorkManagementResult<List<WorkTransferTarget>>
-    suspend fun loadMetadataProviders(context: WorkManagementContext, mediaKind: ManagedMediaKind): WorkManagementResult<List<MetadataProvider>>
-    suspend fun searchMetadata(context: WorkManagementContext, workId: String, providerId: String, query: String): WorkManagementResult<MetadataSearchResult>
+    suspend fun supportsNativeManagement(context: BookManagementContext): WorkManagementResult<Boolean>
+    suspend fun updateBook(context: BookManagementContext, bookId: String, draft: BookMetadataDraft): WorkManagementResult<Unit>
+    suspend fun uploadCover(
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
+        title: String,
+        description: String?,
+        upload: CoverUpload,
+    ): WorkManagementResult<Unit>
+    suspend fun regenerateResourceCover(context: BookManagementContext, bookId: String, resourceId: String): WorkManagementResult<Unit>
+    suspend fun updateResource(context: BookManagementContext, bookId: String, resourceId: String, draft: ResourceMetadataDraft): WorkManagementResult<BookMutationOutcome>
+    suspend fun reclassifyResource(context: BookManagementContext, bookId: String, resourceId: String, mediaKind: ManagedMediaKind): WorkManagementResult<BookMutationOutcome>
+    suspend fun loadMetadataProviders(context: BookManagementContext, mediaKind: ManagedMediaKind): WorkManagementResult<List<MetadataProvider>>
+    suspend fun searchMetadata(context: BookManagementContext, bookId: String, sourceNodeId: String, providerId: String, query: String): WorkManagementResult<MetadataSearchResult>
     suspend fun applyMetadata(
-        context: WorkManagementContext,
-        workId: String,
+        context: BookManagementContext,
+        bookId: String,
+        sourceNodeId: String,
         providerId: String,
         candidate: MetadataCandidate,
         fields: Set<MetadataField>,
-        volumeId: String?,
-        applyToAllVolumes: Boolean,
+        resourceId: String? = null,
+        applyToAllResources: Boolean = false,
     ): WorkManagementResult<Unit>
-    suspend fun loadKindleSettings(context: WorkManagementContext): WorkManagementResult<KindleSettings>
-    suspend fun sendToKindle(context: WorkManagementContext, workId: String, fileId: String): WorkManagementResult<KindleSendOutcome>
-    suspend fun setReadingStatus(context: WorkManagementContext, volumeId: String, status: ManagedReadingStatus): WorkManagementResult<Unit>
+    suspend fun loadKindleSettings(context: BookManagementContext): WorkManagementResult<KindleSettings>
+    suspend fun sendToKindle(context: BookManagementContext, bookId: String, assetId: String): WorkManagementResult<KindleSendOutcome>
+    suspend fun setReadingStatus(context: BookManagementContext, resourceId: String, status: ManagedReadingStatus): WorkManagementResult<Unit>
 }

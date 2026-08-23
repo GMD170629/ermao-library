@@ -6,9 +6,11 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from hmac import compare_digest
 from secrets import token_hex
+from typing import Any, cast
 
 from fastapi import Request, Response
 from sqlalchemy import delete, insert, or_, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
@@ -153,7 +155,7 @@ def delete_invalid_sessions(
         current_time=current_time,
         exclude_token_hash=exclude_token_hash,
     )
-    result = db.execute(statement)
+    result = cast(CursorResult[Any], db.execute(statement))
     return int(result.rowcount or 0)
 
 

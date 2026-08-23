@@ -45,12 +45,11 @@ fun LibrarySourcesScreen(
         toolbarActions = { IconButton({ onNavigate(AdministrativeSettingsRoute.LibrarySourceEdit()) }) { Icon(Icons.Outlined.CreateNewFolder, AdministrativeCopy.AddSource.text(locale)) } },
     ) {
         PageStateContent(state, locale, onRetry) { snapshot ->
-            snapshot.monitorRoot?.let { AdministrativeValueRow(AdministrativeCopy.StorageLocation.text(locale), it) }
-            AdministrativeSection(AdministrativeCopy.MonitoringFolders, locale)
+            AdministrativeSection(AdministrativeCopy.LibraryRoots, locale)
             snapshot.sources.forEach { source ->
                 ListItem(
                     headlineContent = { Text(source.name) },
-                    supportingContent = { Text("${source.path}\n${if (source.monitoring) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale)} · ${source.mediaKindPolicy.name}") },
+                    supportingContent = { Text("${source.path}\n${if (source.enabled) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale)} · ${source.organizationMode.name}") },
                     leadingContent = { Icon(Icons.Outlined.Folder, null) },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
@@ -125,8 +124,10 @@ fun LibrarySourceEditScreen(
                         ?: source?.let { NativeDirectorySelection(it.path, it.path.substringAfterLast('/')) },
                 )
             }
-            var monitoring by remember(source) { mutableStateOf(source?.monitoring ?: true) }
-            var mediaPolicy by remember(source) { mutableStateOf(source?.mediaKindPolicy ?: MediaKindPolicy.Mixed) }
+            var enabled by remember(source) { mutableStateOf(source?.enabled ?: true) }
+            var organizationMode by remember(source) {
+                mutableStateOf(source?.organizationMode ?: LibraryOrganizationMode.Flat)
+            }
             var ignorePatterns by remember(snapshot) { mutableStateOf(snapshot.ignorePatterns) }
             var ignoreHidden by remember(snapshot) { mutableStateOf(snapshot.ignoreHidden) }
             var minimumFileSize by remember(snapshot) { mutableStateOf(snapshot.minimumFileSizeBytes.toString()) }
@@ -146,8 +147,20 @@ fun LibrarySourceEditScreen(
                     )
                 },
             )
-            AdministrativeSwitchRow(AdministrativeCopy.EnableMonitoring.text(locale), monitoring, { monitoring = it })
-            EnumChoiceRow(AdministrativeCopy.MediaTypes, MediaKindPolicy.entries, mediaPolicy, { mediaPolicy = it }, locale) { it.name }
+            AdministrativeSwitchRow(AdministrativeCopy.EnableScanning.text(locale), enabled, { enabled = it })
+            EnumChoiceRow(
+                AdministrativeCopy.OrganizationMode,
+                LibraryOrganizationMode.entries,
+                organizationMode,
+                { organizationMode = it },
+                locale,
+            ) {
+                when (it) {
+                    LibraryOrganizationMode.Flat -> AdministrativeCopy.FlatLayout.text(locale)
+                    LibraryOrganizationMode.Volumes -> AdministrativeCopy.VolumesLayout.text(locale)
+                    LibraryOrganizationMode.Audiobook -> AdministrativeCopy.AudiobookLayout.text(locale)
+                }
+            }
             AdministrativeTextField(ignorePatterns, { ignorePatterns = it }, AdministrativeCopy.Filter, locale)
             AdministrativeSwitchRow(AdministrativeCopy.Enabled.text(locale), ignoreHidden, { ignoreHidden = it }, supporting = "ignoreHidden")
             AdministrativeTextField(minimumFileSize, { minimumFileSize = it.filter(Char::isDigit) }, AdministrativeCopy.Progress, locale)
@@ -162,7 +175,7 @@ fun LibrarySourceEditScreen(
                 onCommand(
                     AdministrativeCommand.SaveLibrarySource(
                         LibrarySourceDraft(
-                            source?.id, name.trim(), requireNotNull(selectedDirectory), monitoring, mediaPolicy,
+                            source?.id, name.trim(), requireNotNull(selectedDirectory), enabled, organizationMode,
                             ignorePatterns, ignoreHidden, minimumFileSize.toLongOrNull() ?: 0L, description.ifBlank { null },
                         ),
                     ),
@@ -353,17 +366,12 @@ fun ImportPreferencesScreen(
 ) {
     AdministrativePage(AdministrativeCopy.ImportPreferences, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { initial ->
-            var stabilityEnabled by remember(initial) { mutableStateOf(initial.stabilityCheckEnabled) }
-            var seconds by remember(initial) { mutableStateOf(initial.stabilitySeconds.toString()) }
             var extensions by remember(initial) { mutableStateOf(initial.allowedExtensions.joinToString(", ")) }
             var ignorePatterns by remember(initial) { mutableStateOf(initial.ignorePatterns) }
-            AdministrativeSwitchRow(AdministrativeCopy.Enabled.text(locale), stabilityEnabled, { stabilityEnabled = it }, supporting = "stabilityCheck")
-            AdministrativeTextField(seconds, { seconds = it }, AdministrativeCopy.Progress, locale)
             AdministrativeTextField(extensions, { extensions = it }, AdministrativeCopy.FileFormat, locale)
             AdministrativeTextField(ignorePatterns, { ignorePatterns = it }, AdministrativeCopy.Filter, locale)
-            val secondsValue = seconds.toDoubleOrNull()
-            PrimaryAction(AdministrativeCopy.SaveImportPreferences, locale, !state.mutationInFlight && secondsValue != null && secondsValue in 0.5..300.0) {
-                onCommand(AdministrativeCommand.SaveImportPreferences(ImportPreferencesSnapshot(stabilityEnabled, requireNotNull(secondsValue), extensions.split(',').map(String::trim).filter(String::isNotBlank), ignorePatterns)))
+            PrimaryAction(AdministrativeCopy.SaveImportPreferences, locale, !state.mutationInFlight) {
+                onCommand(AdministrativeCommand.SaveImportPreferences(ImportPreferencesSnapshot(extensions.split(',').map(String::trim).filter(String::isNotBlank), ignorePatterns)))
             }
         }
     }

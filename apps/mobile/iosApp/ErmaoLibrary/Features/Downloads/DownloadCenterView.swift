@@ -47,8 +47,8 @@ struct ReaderDownloadTransitionView: View {
         VStack(spacing: .space3) {
             Spacer(minLength: .space3)
             BookCoverView(
-                reference: request.work.cover,
-                title: request.work.title,
+                reference: request.book.cover,
+                title: request.book.title,
                 context: request.context,
                 client: client,
                 cache: cache,
@@ -57,11 +57,11 @@ struct ReaderDownloadTransitionView: View {
             .frame(width: 190, height: 285)
 
             VStack(spacing: .spaceHalf) {
-                Text(request.work.title)
+                Text(request.book.title)
                     .appTextStyle(.title)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                Text(request.work.author)
+                Text(request.book.author ?? "—")
                     .appTextStyle(.body)
                     .foregroundStyle(theme.textSecondary)
                     .lineLimit(1)
@@ -155,8 +155,8 @@ struct ReaderDownloadTransitionView: View {
         guard accessTask == nil, !cancelled else { return }
         phase = .creating
         accessTask = store.requestReaderAccess(
-            work: request.work,
-            volume: request.volume,
+            book: request.book,
+            resource: request.resource,
             mediaKind: request.mediaKind
         ) { outcome in
             accessTask = nil
@@ -186,10 +186,11 @@ struct ReaderDownloadTransitionView: View {
             recordID: recordID
         ) != nil {
             enterReader(ReaderHandoff(
-                workID: record.workID,
-                volumeID: record.volumeID,
-                title: record.workTitle,
-                volumeTitle: record.volumeTitle,
+                bookID: record.bookID,
+                resourceID: record.resourceID,
+                assetID: record.assetID,
+                title: record.bookTitle,
+                resourceTitle: record.resourceTitle,
                 format: record.format,
                 readerType: record.readerType,
                 source: .verifiedLocal(recordID: record.id)
@@ -213,8 +214,8 @@ struct ReaderDownloadTransitionView: View {
             let recordID: String? = if case .verifiedLocal(let value) = handoff.source { value } else { nil }
             phase = .reader(IosReaderLaunchRequest(
                 context: request.context,
-                workID: handoff.workID,
-                volumeID: handoff.volumeID,
+                bookID: handoff.bookID,
+                resourceID: handoff.resourceID,
                 displayTitle: handoff.title,
                 managedDownloadRecordID: recordID
             ))
@@ -352,17 +353,17 @@ struct DownloadCenterView: View {
                         Text(group.author)
                             .appTextStyle(.caption)
                             .foregroundStyle(theme.textSecondary)
-                        ForEach(group.mediaVersions) { mediaVersion in
+                        ForEach(group.resources) { resource in
                             Divider()
                             VStack(alignment: .leading, spacing: .spaceHalf) {
-                                Label(mediaKindTitle(mediaVersion.mediaKind), systemImage: mediaKindImage(mediaVersion.mediaKind))
+                                Label(resource.title, systemImage: "square.stack.3d.up")
                                     .appTextStyle(.label)
                                     .foregroundStyle(theme.textSecondary)
-                                ForEach(mediaVersion.records) { record in
+                                ForEach(resource.records) { record in
                                     Button { open(record) } label: {
                                         HStack(spacing: .space1) {
                                             VStack(alignment: .leading, spacing: .spaceHalf) {
-                                                Text(record.volumeTitle)
+                                                Text(record.resourceTitle)
                                                     .foregroundStyle(theme.textPrimary)
                                                 Text(completedDetail(record))
                                                     .appTextStyle(.caption)
@@ -400,8 +401,8 @@ struct DownloadCenterView: View {
             Section("downloads.failed.section") {
                 ForEach(store.failedRecords) { record in
                     VStack(alignment: .leading, spacing: .space1) {
-                        Text(record.workTitle).appTextStyle(.headline)
-                        Text("\(mediaKindName(record.mediaKind)) · \(record.volumeTitle)")
+                        Text(record.bookTitle).appTextStyle(.headline)
+                        Text("\(record.resourceTitle) · \(record.format)")
                             .appTextStyle(.caption)
                             .foregroundStyle(theme.textSecondary)
                         Text(errorMessage(record.stableErrorCode))
@@ -424,8 +425,8 @@ struct DownloadCenterView: View {
 
     private func taskRow(_ record: ManagedDownloadRecord) -> some View {
         VStack(alignment: .leading, spacing: .space1) {
-            Text(record.workTitle).appTextStyle(.headline)
-            Text("\(mediaKindName(record.mediaKind)) · \(record.volumeTitle) · \(record.format)")
+            Text(record.bookTitle).appTextStyle(.headline)
+            Text("\(record.resourceTitle) · \(record.format)")
                 .appTextStyle(.caption)
                 .foregroundStyle(theme.textSecondary)
             if let progress = record.progress {
@@ -467,10 +468,11 @@ struct DownloadCenterView: View {
     private func open(_ record: ManagedDownloadRecord) {
         openReader(
             ReaderHandoff(
-                workID: record.workID,
-                volumeID: record.volumeID,
-                title: record.workTitle,
-                volumeTitle: record.volumeTitle,
+                bookID: record.bookID,
+                resourceID: record.resourceID,
+                assetID: record.assetID,
+                title: record.bookTitle,
+                resourceTitle: record.resourceTitle,
                 format: record.format,
                 readerType: record.readerType,
                 source: .verifiedLocal(recordID: record.id)
@@ -507,29 +509,6 @@ struct DownloadCenterView: View {
         }
     }
 
-    private func mediaKindTitle(_ kind: LibraryMediaKind) -> LocalizedStringKey {
-        switch kind {
-        case .ebook: "library.media.ebook"
-        case .comic: "library.media.comic"
-        case .audiobook: "library.media.audiobook"
-        }
-    }
-
-    private func mediaKindImage(_ kind: LibraryMediaKind) -> String {
-        switch kind {
-        case .ebook: "book.closed"
-        case .comic: "rectangle.stack"
-        case .audiobook: "headphones"
-        }
-    }
-
-    private func mediaKindName(_ kind: LibraryMediaKind) -> String {
-        switch kind {
-        case .ebook: String(localized: "library.media.ebook")
-        case .comic: String(localized: "library.media.comic")
-        case .audiobook: String(localized: "library.media.audiobook")
-        }
-    }
 }
 
 struct ReaderHandoffView: View {
@@ -543,7 +522,7 @@ struct ReaderHandoffView: View {
             Text("reader.handoff.unavailable.title").appTextStyle(.headline)
             VStack(spacing: .space1) {
                 Text(handoff.title).appTextStyle(.headline)
-                Text(handoff.volumeTitle)
+                Text(handoff.resourceTitle)
                 Text(message)
                     .multilineTextAlignment(.center)
             }

@@ -2,7 +2,7 @@ import Foundation
 
 enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case managementTitle, librarySection, organizeSection, serviceSection, systemSection
-    case librarySources, importTasks, importPreferences, organizeQueue, duplicateCategories
+    case librarySources, importTasks, importPreferences, organizeQueue
     case metadataProviders, usersPermissions, emailKindle, kindleQueue, opds, backups
     case workDetailOrder, systemHealth, systemLogs, enhancedAbout
     case loading, retry, save, saved, cancel, delete, remove, add, edit, done, close
@@ -18,8 +18,9 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case newPassword, confirmPassword, resetAndRequireLogin, deleteUserTitle, deleteUserMessage
     case manageSystemPermission, accountLanguage
     case allLibraries, manualImports, selectedDirectories, saveAccess, accessHint
-    case sourcesTitle, storageLocation, availableSpace, monitorFolders, browseDirectory
-    case scanDirectory, sourceName, serverPath, monitorEnabled, scanInterval, mediaTypes
+    case sourcesTitle, storageLocation, availableSpace, libraries, browseDirectory
+    case scanDirectory, sourceName, serverPath, scanningEnabled, scanInterval, mediaTypes
+    case organizationMode, flatLayout, volumesLayout, audiobookLayout
     case includeSubdirectories, autoImportNewFiles, deleteSource, deleteSourceTitle
     case deleteSourceMessage, selectServerDirectory, parentDirectory, chooseDirectory
     case scanning, cancelScan, lastScan, scanFileCount
@@ -29,7 +30,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case deleteImportTitle, deleteImportMessage, rescanAll
     case importPreferencesTitle, fileProcessing, keepSourceFiles, duplicatePolicy
     case ignoreHiddenFiles, ignorePatterns, minimumFileSize, sourceDescription
-    case stabilityCheck, stabilitySeconds, allowedExtensions, seconds
+    case allowedExtensions
     case duplicateSkip, duplicateReplace, duplicateKeepBoth, preferOPF, titleFromFilename
     case metadataSection, metadataLanguage, automatic, targetPathTemplate, autoOrganize
     case resourceLimits, concurrentTasks, retryLimit, futureTasksHint
@@ -39,10 +40,8 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case recognitionPolicyTitle, scheduledRecognition, schedule, runAfterImport
     case persistOPF, localMetadataFirst, metadataPriority, recognitionScope
     case recognizeUnmatched, recognizeIncomplete, eligibleCount, nextRun, opfQueue
-    case duplicatesTitle, duplicatesTab, categoriesTab, duplicateGroupsDetected
-    case compare, merge, mergeWorksTitle, canonicalWork
-    case mergeWarning, mergeWorks, categoryGovernanceTitle, author, tag, series
-    case selectedCount, aliases, workCount, deleteCategory, mergeCategoriesTitle
+    case merge, categoryGovernanceTitle, author, tag, series
+    case selectedCount, aliases, bookCount, deleteCategory, mergeCategoriesTitle
     case targetCategory, confirmMerge, renameCategory, newCategoryName, confirmRename
     case operationHistory, undoOperation, undoOperationMessage
     case providersTitle, provider, queryPipeline, editPriority, autoMatching
@@ -53,7 +52,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case opdsInstructions, copy, copied, disableOPDSTitle, disableOPDSMessage, disableService
     case backupsTitle, createBackup, backupDirectory, downloadFile, restoreBackup, deleteBackup
     case restoreWarning, restoreConfirmation, enterRestore, restore, deleteBackupTitle
-    case deleteBackupMessage, backupWorkCount, backupProgressCount, backupDirectoryCount
+    case deleteBackupMessage, backupBookCount, backupProgressCount, backupLibraryCount
     case workOrderTitle, workOrderHint, restoreDefault, saveOrder
     case overview, ebook, comic, audiobook, chaptersContent
     case healthTitle, lastChecked, runHealthCheck, restartImportQueue, restartQueueTitle
@@ -90,7 +89,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .managementTitle: "Management", .librarySection: "Library", .organizeSection: "Organization",
         .serviceSection: "Services", .systemSection: "System", .librarySources: "Library Sources",
         .importTasks: "Import Tasks", .importPreferences: "Import Preferences", .organizeQueue: "Smart Organization",
-        .duplicateCategories: "Duplicates & Categories", .metadataProviders: "Metadata Providers",
+        .metadataProviders: "Metadata Providers",
         .usersPermissions: "Users & Permissions", .emailKindle: "Email & Kindle",
         .kindleQueue: "Kindle Send Queue", .opds: "OPDS", .backups: "Data & Backups",
         .workDetailOrder: "Work Detail Order", .systemHealth: "System Health", .systemLogs: "System Logs",
@@ -122,12 +121,13 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .allLibraries: "All Libraries", .manualImports: "Manual Imports", .selectedDirectories: "Selected Directories",
         .saveAccess: "Save Access Scope", .accessHint: "Users can only browse and read content inside their assigned scope.",
         .sourcesTitle: "Library Sources", .storageLocation: "Storage Location", .availableSpace: "Available Space",
-        .monitorFolders: "Monitored Folders", .browseDirectory: "Browse Server Directory",
+        .libraries: "Library Roots", .browseDirectory: "Browse Server Directory",
         .scanDirectory: "Scan Directory", .sourceName: "Display Name", .serverPath: "Server Path",
-        .monitorEnabled: "Enable Monitoring", .scanInterval: "Scan Interval", .mediaTypes: "Media Types",
+        .scanningEnabled: "Enable Scanning", .scanInterval: "Scan Interval", .mediaTypes: "Media Types",
+        .organizationMode: "Organization Mode", .flatLayout: "Flat", .volumesLayout: "Resources", .audiobookLayout: "Audiobook",
         .includeSubdirectories: "Include Subdirectories", .autoImportNewFiles: "Automatically Import New Files",
         .deleteSource: "Delete Source", .deleteSourceTitle: "Delete this library source?",
-        .deleteSourceMessage: "Its configuration and monitoring records will be removed. Original book files are not deleted.",
+        .deleteSourceMessage: "Its library-root configuration will be removed and future scans will stop. Original book files are not deleted.",
         .selectServerDirectory: "Select Server Directory", .parentDirectory: "Parent Directory",
         .chooseDirectory: "Choose This Directory", .scanning: "Scanning", .cancelScan: "Cancel Scan",
         .lastScan: "Last Scan", .scanFileCount: "Files Found", .importTasksTitle: "Import Tasks",
@@ -140,8 +140,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .rescanAll: "Rescan All Sources", .importPreferencesTitle: "Import Preferences",
         .ignoreHiddenFiles: "Ignore Hidden Files", .ignorePatterns: "Ignore Patterns",
         .minimumFileSize: "Minimum File Size", .sourceDescription: "Description",
-        .stabilityCheck: "Stability Check", .stabilitySeconds: "Stability Seconds",
-        .allowedExtensions: "Allowed Extensions", .seconds: "Seconds",
+        .allowedExtensions: "Allowed Extensions",
         .fileProcessing: "File Processing", .keepSourceFiles: "Keep Source Files",
         .duplicatePolicy: "Duplicate File Policy", .duplicateSkip: "Skip Duplicates",
         .duplicateReplace: "Replace Existing", .duplicateKeepBoth: "Keep Both", .preferOPF: "Prefer OPF Metadata",
@@ -159,13 +158,9 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .localMetadataFirst: "Prefer Local Metadata", .metadataPriority: "Metadata Priority",
         .recognitionScope: "Recognition Scope", .recognizeUnmatched: "Unrecognized Books",
         .recognizeIncomplete: "Missing Author or Cover", .eligibleCount: "Eligible Books", .nextRun: "Next Run",
-        .opfQueue: "OPF Save Queue", .duplicatesTitle: "Duplicates & Categories", .duplicatesTab: "Duplicates",
-        .categoriesTab: "Categories", .duplicateGroupsDetected: "Duplicate Groups Detected", .compare: "Compare",
-        .merge: "Merge", .mergeWorksTitle: "Merge Works?", .canonicalWork: "Canonical Work",
-        .mergeWarning: "Media files are preserved. Metadata and selected user state will be consolidated.",
-        .mergeWorks: "Merge Works", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
+        .opfQueue: "OPF Save Queue", .merge: "Merge", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
         .tag: "Tags", .series: "Series", .selectedCount: "Selected", .aliases: "Aliases",
-        .workCount: "Works", .deleteCategory: "Delete Category", .mergeCategoriesTitle: "Merge Categories",
+        .bookCount: "Books", .deleteCategory: "Delete Category", .mergeCategoriesTitle: "Merge Categories",
         .targetCategory: "Target Category", .confirmMerge: "Confirm Merge", .renameCategory: "Rename Category",
         .newCategoryName: "New Name", .confirmRename: "Rename", .operationHistory: "Operation History",
         .undoOperation: "Undo Operation", .undoOperationMessage: "Undo this library operation?",
@@ -185,10 +180,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .disableOPDSMessage: "All OPDS catalog addresses will stop serving immediately.", .disableService: "Disable Service",
         .backupsTitle: "Data & Backups", .createBackup: "Create Backup", .backupDirectory: "Server Backup Directory",
         .downloadFile: "Download to Files", .restoreBackup: "Restore This Backup", .deleteBackup: "Delete Backup",
-        .restoreWarning: "Restoring overwrites metadata, tags, progress, and monitored source settings. Original book files are not affected.",
+        .restoreWarning: "Restoring overwrites metadata, tags, progress, and library-root settings. Original book files are not affected.",
         .restoreConfirmation: "Enter RESTORE to continue", .enterRestore: "Enter RESTORE", .restore: "Restore Backup",
         .deleteBackupTitle: "Delete this backup?", .deleteBackupMessage: "The backup archive will be permanently removed.",
-        .backupWorkCount: "Works", .backupProgressCount: "Progress Records", .backupDirectoryCount: "Directories",
+        .backupBookCount: "Books", .backupProgressCount: "Progress Records", .backupLibraryCount: "Libraries",
         .workOrderTitle: "Work Detail Order", .workOrderHint: "Media sections without content are hidden automatically.",
         .restoreDefault: "Restore Default", .saveOrder: "Save Order", .overview: "Overview", .ebook: "Ebook",
         .comic: "Comic", .audiobook: "Audiobook", .chaptersContent: "Chapters & Content",
@@ -225,7 +220,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
     private static let chineseOverrides: [AdministrativeCopyKey: String] = [
         .managementTitle: "管理", .librarySection: "书库", .organizeSection: "整理", .serviceSection: "服务",
         .systemSection: "系统", .librarySources: "书库来源", .importTasks: "导入任务", .importPreferences: "导入偏好",
-        .organizeQueue: "智能整理", .duplicateCategories: "重复项与分类", .metadataProviders: "元数据提供者",
+        .organizeQueue: "智能整理", .metadataProviders: "元数据提供者",
         .usersPermissions: "用户与权限", .emailKindle: "邮件与 Kindle", .kindleQueue: "Kindle 发送队列",
         .opds: "OPDS", .backups: "数据与备份", .workDetailOrder: "作品详情顺序", .systemHealth: "系统健康",
         .systemLogs: "系统日志", .enhancedAbout: "关于二毛图书", .loading: "正在加载…", .retry: "重试",
@@ -251,11 +246,12 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .manageSystemPermission: "管理系统设置", .accountLanguage: "账户语言",
         .manualImports: "手工导入内容", .selectedDirectories: "已选目录", .saveAccess: "保存访问范围",
         .accessHint: "用户只能浏览和阅读所选范围内的内容。", .sourcesTitle: "书库来源", .storageLocation: "存储位置",
-        .availableSpace: "可用空间", .monitorFolders: "监控文件夹", .browseDirectory: "浏览服务器目录",
-        .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .monitorEnabled: "启用监控",
-        .scanInterval: "扫描间隔", .mediaTypes: "媒体类型", .includeSubdirectories: "包含子目录",
+        .availableSpace: "可用空间", .libraries: "书库", .browseDirectory: "浏览服务器目录",
+        .scanDirectory: "扫描指定目录", .sourceName: "显示名称", .serverPath: "服务器路径", .scanningEnabled: "启用扫描",
+        .scanInterval: "扫描间隔", .mediaTypes: "媒体类型", .organizationMode: "组织方式",
+        .flatLayout: "平铺", .volumesLayout: "资源", .audiobookLayout: "有声书", .includeSubdirectories: "包含子目录",
         .autoImportNewFiles: "自动导入新文件", .deleteSource: "删除此来源", .deleteSourceTitle: "删除此书库来源？",
-        .deleteSourceMessage: "将移除此来源的配置与监控记录，但不会删除原始书籍文件。",
+        .deleteSourceMessage: "将移除此书库根目录配置，并停止后续扫描，但不会删除原始书籍文件。",
         .selectServerDirectory: "选择服务器目录", .parentDirectory: "上级目录", .chooseDirectory: "选择此目录",
         .scanning: "正在扫描", .cancelScan: "取消扫描", .lastScan: "上次扫描", .scanFileCount: "本次找到文件",
         .importTaskDetail: "导入任务详情", .importTaskLogs: "任务日志", .scanJobs: "目录扫描任务",
@@ -265,8 +261,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .parsing: "解析中", .pending: "待处理", .cancelled: "已取消", .deleteImportTitle: "删除此导入任务？",
         .deleteImportMessage: "任务记录将被移除。", .rescanAll: "重新扫描全部来源", .importPreferencesTitle: "导入偏好",
         .ignoreHiddenFiles: "忽略隐藏文件", .ignorePatterns: "忽略规则", .minimumFileSize: "最小文件大小",
-        .sourceDescription: "说明", .stabilityCheck: "稳定性检查", .stabilitySeconds: "稳定等待秒数",
-        .allowedExtensions: "允许的扩展名", .seconds: "秒",
+        .sourceDescription: "说明", .allowedExtensions: "允许的扩展名",
         .fileProcessing: "文件处理", .keepSourceFiles: "保留源文件", .duplicatePolicy: "重复文件处理策略",
         .duplicateSkip: "跳过重复文件", .duplicateReplace: "替换现有文件", .duplicateKeepBoth: "保留两者",
         .preferOPF: "优先读取 OPF", .titleFromFilename: "使用文件名补全标题", .metadataSection: "元数据",
@@ -280,11 +275,9 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .schedule: "执行周期", .runAfterImport: "新增后自动执行", .persistOPF: "元数据变化自动保存到旁车 OPF",
         .localMetadataFirst: "本地元数据优先", .metadataPriority: "元数据优先级", .recognitionScope: "识别范围",
         .recognizeUnmatched: "尚未识别的读物", .recognizeIncomplete: "缺少作者或封面", .eligibleCount: "符合规则的读物",
-        .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .duplicatesTitle: "重复项与分类", .duplicatesTab: "重复项",
-        .categoriesTab: "分类", .duplicateGroupsDetected: "检测到的重复组", .compare: "比较", .merge: "合并",
-        .mergeWorksTitle: "合并作品？", .canonicalWork: "保留的主作品", .mergeWarning: "媒体文件（封面、插图等）将保留，不会被删除。",
-        .mergeWorks: "合并作品", .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
-        .selectedCount: "已选择", .aliases: "别名", .workCount: "作品", .deleteCategory: "删除分类",
+        .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .merge: "合并",
+        .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
+        .selectedCount: "已选择", .aliases: "别名", .bookCount: "图书", .deleteCategory: "删除分类",
         .mergeCategoriesTitle: "合并分类", .targetCategory: "目标分类", .confirmMerge: "确认合并",
         .renameCategory: "重命名分类", .newCategoryName: "新名称", .confirmRename: "重命名",
         .operationHistory: "操作历史", .undoOperation: "撤销操作", .undoOperationMessage: "撤销此书库操作？",
@@ -300,10 +293,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .disableOPDSMessage: "关闭后，所有 OPDS 目录地址将立即停止服务，第三方客户端将无法访问。", .disableService: "关闭服务",
         .backupsTitle: "数据与备份", .createBackup: "创建备份", .backupDirectory: "服务器备份目录", .downloadFile: "下载到文件",
         .restoreBackup: "恢复此备份", .deleteBackup: "删除备份",
-        .restoreWarning: "恢复此备份将覆盖当前的所有元数据、标签、进度以及监控目录设置，但不会影响原始书籍文件。",
+        .restoreWarning: "恢复此备份将覆盖当前的所有元数据、标签、进度以及书库根目录设置，但不会影响原始书籍文件。",
         .restoreConfirmation: "输入 RESTORE 继续", .enterRestore: "在此输入 RESTORE", .restore: "恢复备份",
-        .deleteBackupTitle: "删除此备份？", .deleteBackupMessage: "备份压缩包将被永久移除。", .backupWorkCount: "部作品",
-        .backupProgressCount: "条进度", .backupDirectoryCount: "个目录", .workOrderTitle: "作品详情顺序",
+        .deleteBackupTitle: "删除此备份？", .deleteBackupMessage: "备份压缩包将被永久移除。", .backupBookCount: "本图书",
+        .backupProgressCount: "条进度", .backupLibraryCount: "个书库", .workOrderTitle: "作品详情顺序",
         .workOrderHint: "不包含内容的媒体将自动隐藏。", .restoreDefault: "恢复默认", .saveOrder: "保存顺序",
         .overview: "简介", .ebook: "电子书", .comic: "漫画", .audiobook: "有声书", .chaptersContent: "章节与内容",
         .healthTitle: "系统健康", .lastChecked: "上次检查", .runHealthCheck: "运行健康检查",

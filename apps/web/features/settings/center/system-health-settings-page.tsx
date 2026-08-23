@@ -1,6 +1,6 @@
 'use client';
 
-import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, RotateCcw, SkipForward, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, Circle, LoaderCircle, RefreshCw, SkipForward, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/feedback';
@@ -31,14 +31,12 @@ type HealthRun = {
   summary: { total: number; completed: number; ok: number; warning: number; error: number; skipped: number };
 };
 type RunPayload = { ok?: boolean; data?: { run?: HealthRun; created?: boolean }; error?: { message?: string } };
-type Operation = { id: string; status: string; messageCode?: string | null };
 
 const LABELS: Record<string, string> = {
   'health.group.storage': '目录与数据库',
   'health.group.queues': '后台队列',
   'health.group.configuration': '功能配置',
   'health.item.database': '数据库连接',
-  'health.item.monitorRoot': '监控文件夹状态',
   'health.item.importFolder': '启用的导入目录',
   'health.item.storageRoot': '存储根目录',
   'health.item.databaseDirectory': '数据库目录',
@@ -87,14 +85,6 @@ const MESSAGES: Record<string, string> = {
   'health.unknownCheck': '未知检查项目'
 };
 
-const OPERATION_MESSAGES: Record<string, string> = {
-  'queue.restart.requested': '已提交重启请求',
-  'queue.restart.waiting': '正在等待当前导入任务结束',
-  'queue.restart.starting': '正在启动新的导入消费者',
-  'queue.restart.completed': '导入队列已安全重启',
-  'queue.restart.failed': '导入队列重启失败'
-};
-
 function statusLabel(status: CheckStatus) {
   return {
     pending: '等待中',
@@ -126,7 +116,6 @@ export function SystemHealthSettingsPage() {
   const [starting, setStarting] = useState(false);
   const [streamMode, setStreamMode] = useState<'idle' | 'sse' | 'polling'>('idle');
   const [now, setNow] = useState(Date.now());
-  const [operation, setOperation] = useState<Operation | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const errorsRef = useRef(0);
@@ -241,30 +230,6 @@ export function SystemHealthSettingsPage() {
     }
   }
 
-  async function restartImportQueue() {
-    if (!window.confirm(t('安全重启导入队列？如果正在导入，将等待当前任务完成。'))) return;
-    const response = await fetch('/api/system/queues/import/restart', { method: 'POST' });
-    const payload = await response.json() as { ok?: boolean; data?: { operation?: Operation }; error?: { message?: string } };
-    if (!payload.ok || !payload.data?.operation) {
-      toast.error('重启导入队列失败', payload.error?.message ?? t('请稍后重试'));
-      return;
-    }
-    setOperation(payload.data.operation);
-    const operationId = payload.data.operation.id;
-    const timer = window.setInterval(async () => {
-      const statusResponse = await fetch(`/api/system/queue-operations/${encodeURIComponent(operationId)}`, { cache: 'no-store' });
-      const statusPayload = await statusResponse.json() as { ok?: boolean; data?: { operation?: Operation } };
-      const next = statusPayload.data?.operation;
-      if (!next) return;
-      setOperation(next);
-      if (['completed', 'failed'].includes(next.status)) {
-        window.clearInterval(timer);
-        if (next.status === 'completed') toast.success('导入队列已安全重启');
-        else toast.error('导入队列重启失败');
-      }
-    }, 1000);
-  }
-
   const elapsed = run ? healthRunElapsedMs(run.startedAt, run.finishedAt, now) : 0;
   const current = run?.items.find((item) => item.status === 'running');
   const groups = useMemo(() => run?.groups ?? [
@@ -294,9 +259,6 @@ export function SystemHealthSettingsPage() {
             <Button icon={RefreshCw} loading={starting || isRunning} loadingText={isRunning ? t('检查中') : t('启动中')} onClick={() => void execute()} disabled={isRunning}>
               <I18nText>运行健康检查</I18nText>
             </Button>
-            <Button variant="secondary" icon={RotateCcw} disabled={!terminal(run) || Boolean(operation && !['completed', 'failed'].includes(operation.status))} onClick={() => void restartImportQueue()}>
-              <I18nText>安全重启导入队列</I18nText>
-            </Button>
           </div>
         </div>
         {run ? (
@@ -313,7 +275,6 @@ export function SystemHealthSettingsPage() {
             </div>
           </>
         ) : null}
-        {operation ? <div aria-live="polite" className="mt-4 rounded-xl bg-[#F7F4F1] px-4 py-3 text-sm text-[#625D57]">{t(OPERATION_MESSAGES[operation.messageCode ?? ''] ?? operation.status)}</div> : null}
       </section>
 
       <div className="mt-6 space-y-5">

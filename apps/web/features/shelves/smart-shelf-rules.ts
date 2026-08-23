@@ -24,12 +24,12 @@ const fieldLabels: Record<string, string> = {
   title: '书名', author: '作者', tag: '标签', series: '丛书', description: '简介',
   publishedYear: '出版年份', seriesIndex: '丛书序号', metadataQuality: '元数据完整度',
   publisher: '出版社', language: '语言', isbn: 'ISBN', identifier: '外部标识',
-  volumeTitle: '卷册名称', narrator: '演播者', mediaKind: '读物类型', format: '文件格式',
+  resourceTitle: '资源名称', narrator: '演播者', mediaKind: '读物类型', format: '文件格式',
   fileSize: '文件总大小', pageCount: '页数', chapterCount: '章节数', duration: '时长',
-  volumeCount: '卷册数量', sourcePath: '原始文件路径', readingStatus: '阅读状态',
+  resourceCount: '资源数量', sourcePath: '原始文件路径', readingStatus: '阅读状态',
   progress: '阅读进度', lastReadAt: '最近阅读时间', publicationStatus: '连载状态',
   trackingStatus: '追踪状态', organizeStatus: '整理状态', organized: '已完成整理',
-  hasCover: '有封面', shelf: '所在普通书架', monitorFolder: '监控文件夹', origin: '加入来源',
+  hasCover: '有封面', shelf: '所在普通书架', library: '书库', origin: '加入来源',
   importStatus: '导入状态', createdAt: '加入时间', updatedAt: '最后更新时间'
 };
 

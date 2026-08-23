@@ -248,13 +248,13 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
     operation: operation(sequence, 'bootstrap'),
     signal: new AbortController().signal,
     source: {
-      workId: 'work-1',
+      bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      volumeId: 'volume-1',
+      resourceId: 'resource-1',
       totalPages: 3
     },
     initialLocation: null,
@@ -328,13 +328,13 @@ test('comic navigation waits for the candidate image to decode before promoting 
     operation: operation(sequence, 'bootstrap'),
     signal: new AbortController().signal,
     source: {
-      workId: 'work-1',
+      bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      volumeId: 'volume-1',
+      resourceId: 'resource-1',
       totalPages: 2
     },
     initialLocation: null,
@@ -383,13 +383,13 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
     operation: operation(1, 'bootstrap'),
     signal: new AbortController().signal,
     source: {
-      workId: 'work-1',
+      bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      volumeId: 'volume-1',
+      resourceId: 'resource-1',
       totalPages: 3
     },
     initialLocation: null,
@@ -403,9 +403,9 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   const images = slots.map((slot) => slot.children[0]);
   assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
   assert.deepEqual(images.map((image) => image.src), [
-    '/api/reader/v4/volumes/volume-1/comic/pages/0?imageVariant=original',
-    '/api/reader/v4/volumes/volume-1/comic/pages/1?imageVariant=original',
-    '/api/reader/v4/volumes/volume-1/comic/pages/2?imageVariant=original'
+    '/api/reader/v4/resources/resource-1/comic/pages/0?imageVariant=original',
+    '/api/reader/v4/resources/resource-1/comic/pages/1?imageVariant=original',
+    '/api/reader/v4/resources/resource-1/comic/pages/2?imageVariant=original'
   ]);
   const preloadObserver = FakeIntersectionObserver.latest as FakeIntersectionObserver | null;
   assert.ok(preloadObserver);
@@ -466,13 +466,13 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
     operation: operation(1, 'bootstrap'),
     signal: new AbortController().signal,
     source: {
-      workId: 'work-1',
+      bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
-      volumeId: 'volume-1',
+      resourceId: 'resource-1',
       totalPages: 2
     },
     initialLocation: null,
@@ -552,13 +552,13 @@ test('comic signal fallback removes source listeners after abort and every compl
       operation: operation(1, 'bootstrap'),
       signal: new AbortController().signal,
       source: {
-        workId: 'work-1',
+        bookId: 'book-1',
         kind: 'comic',
         sourceFormat: 'cbz',
-        comicManifestUrl: '/api/reader/v4/volumes/volume-1/comic/manifest',
-        comicPageUrlTemplate: '/api/reader/v4/volumes/volume-1/comic/pages/{pageIndex}',
+        comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+        comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
         contentUrl: '/comic',
-        volumeId: 'volume-1',
+        resourceId: 'resource-1',
         totalPages: 3
       },
       initialLocation: null,

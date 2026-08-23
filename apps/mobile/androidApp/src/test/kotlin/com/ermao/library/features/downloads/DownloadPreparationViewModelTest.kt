@@ -58,7 +58,7 @@ class DownloadPreparationViewModelTest {
         catalog.saveArtifact(CompletedDownloadArtifact(descriptor, "artifact.epub", 8, 1))
         var transferCount = 0
         val viewModel = DownloadPreparationViewModel(
-            volumeId = "volume",
+            resourceId = "resource",
             context = context(),
             catalog = catalog,
             sink = unusedSink,
@@ -88,7 +88,7 @@ class DownloadPreparationViewModelTest {
         val catalog = InMemoryDownloadCatalogRepository()
         val descriptor = descriptor()
         val viewModel = DownloadPreparationViewModel(
-            volumeId = "volume",
+            resourceId = "resource",
             context = context(),
             catalog = catalog,
             sink = unusedSink,
@@ -117,21 +117,24 @@ class DownloadPreparationViewModelTest {
     }
 
     private fun bootstrap(descriptor: DownloadDescriptor) = object : DownloadBootstrapGateway {
-        override suspend fun load(context: DownloadRequestContext, volumeId: String) =
+        override suspend fun load(context: DownloadRequestContext, resourceId: String) =
             DownloadBootstrapSuccess(DownloadBootstrap(descriptor))
     }
 
     private fun descriptor() = DownloadDescriptor(
-        identity = DownloadIdentity(DownloadNamespace("server", "user", 2), "work", "volume"),
-        workTitle = "Book",
-        workAuthor = "Author",
-        coverApiPath = "/api/works/work/cover",
-        volumeTitle = "Volume",
+        identity = DownloadIdentity(
+            DownloadNamespace("server", "user", 2),
+            "book",
+            "resource",
+            "asset",
+        ),
+        bookTitle = "Book",
+        bookAuthor = "Author",
+        coverApiPath = "/api/books/book/cover",
+        resourceTitle = "Resource",
         format = "EPUB",
         readerType = DownloadReaderType.Reflowable,
-        source = DownloadSource("/api/files/file", "application/epub+zip", 8),
-        mediaVersionId = "media-version",
-        mediaKind = "EBOOK",
+        source = DownloadSource("/api/resources/resource/asset", "application/epub+zip", 8),
     )
 
     private fun context(): DownloadRequestContext {

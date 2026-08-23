@@ -19,6 +19,7 @@ import com.ermao.library.features.downloads.infrastructure.SharedDownloadCatalog
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.application.ReaderProgressPresentationCenter
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.platform.persistence.AndroidMobileStorageContract
 
 class ErmaoLibraryApplication : Application() {
     lateinit var mobileRuntime: MobileRuntime
@@ -44,13 +45,14 @@ class ErmaoLibraryApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AndroidMobileStorageContract.initialize(this)
         val mobileStore = AndroidServerProfileStore(this)
         loginCredentialStore = AndroidLoginCredentialStore(this)
         contentRepository = createAndroidContentRepository(this)
         personalSettingsRepository = createAndroidPersonalSettingsRepository(this)
         administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(this)
         workManagementRepository = createAndroidWorkManagementRepository(this)
-        val downloadRoot = java.io.File(filesDir, "managed-downloads-v1")
+        val downloadRoot = java.io.File(filesDir, "managed-downloads-v3")
         downloadCatalog = AndroidDownloadCatalog(downloadRoot)
         downloadFiles = AtomicDownloadFileSink(downloadRoot)
         sharedDownloadCatalog = SharedDownloadCatalogAdapter(downloadCatalog, downloadFiles)

@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
 Status: Reader v4 cross-format exact-progress contract implemented; physical-device conformance pending
-Last updated: 2026-08-16
+Last updated: 2026-08-23
 
 This document is the architecture contract for the native Reader and its Reader v4 cross-platform progress integration. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -41,7 +41,7 @@ Reader v4 retains these Publication diagnostics:
 
 Navigator SDK versions are also diagnostic metadata. None of these fingerprint
 fields participates in reading-progress ownership or validation. Progress is
-owned by the server-authorized `workId + volumeId`; a file, parser, or
+owned by the server-authorized `bookId + resourceId`; an asset, parser, or
 normalization change does not create a new progress slot or block restoration.
 
 For EPUB, MOBI-family, and TXT, matching content identity means that every client
@@ -65,12 +65,12 @@ author body.
 The exact local progress record identity is:
 
 ```text
-serverIdentity + userId + clientId + workId + volumeId
+serverIdentity + userId + clientId + bookId + resourceId
 ```
 
 `authorizationVersion` is deliberately absent. Reauthentication does not hide a
-valid position for the same client, work, and volume. A different account,
-client, server, work, or volume cannot reuse that exact record.
+valid position for the same client, book, and resource. A different account,
+client, server, book, or resource cannot reuse that exact record.
 
 ## 4. Location model
 
@@ -81,7 +81,7 @@ location is limited to 64 KiB. The variants are:
 - `reflowable`: a required Readium `engineLocator` with an exact DOM anchor;
 - `pdf`: a zero-based page index and required four-decimal normalized page-local progression;
 - `comic`: a zero-based page index and the canonical safe reading-order resource href;
-- `audio`: a file id, optional chapter id, and playback position in milliseconds.
+- `audio`: an asset id, optional chapter id, and playback position in milliseconds.
 
 For a reflowable publication, the required engine locator contains:
 
@@ -107,11 +107,11 @@ diagnostics. It does not participate in their exact location identity.
 First-party clients use only:
 
 ```text
-GET /api/reader/v4/volumes/{volumeId}/bootstrap
-GET /api/reader/v4/volumes/{volumeId}/progress
-PUT /api/reader/v4/volumes/{volumeId}/progress
-PUT /api/reader/v4/volumes/{volumeId}/reading-status
-GET|PUT /api/reader/v4/volumes/{volumeId}/bookmarks
+GET /api/reader/v4/resources/{resourceId}/bootstrap
+GET /api/reader/v4/resources/{resourceId}/progress
+PUT /api/reader/v4/resources/{resourceId}/progress
+PUT /api/reader/v4/resources/{resourceId}/reading-status
+GET|PUT /api/reader/v4/resources/{resourceId}/bookmarks
 ```
 
 Reader v1–v3 routes return `410 Gone`. Mobile compatibility advertises only `readerV4=true` and schema version 4.
@@ -149,8 +149,8 @@ foreground entry, and on network recovery. There is no polling, WebSocket, or SS
 
 ## 6. Server persistence
 
-`LibraryReadingProgress` is the current aggregate snapshot with one row per user
-and volume. Revision increases monotonically. Mutation receipts make retries
+`ReaderResourceProgress` is the current aggregate snapshot with one row per user
+and resource. Revision increases monotonically. Mutation receipts make retries
 idempotent.
 
 The repository saves:
@@ -163,7 +163,7 @@ The repository saves:
 
 A stale `baseRevision` returns `409 READER_PROGRESS_CONFLICT` with the current
 snapshot. The server never silently overwrites or applies a forward-only rule.
-The authorized work and volume are the progress identity. Publication fingerprint
+The authorized book and resource are the progress identity. Publication fingerprint
 differences never reject a progress read or write.
 
 ## 7. Local save and upload
@@ -196,11 +196,11 @@ An explicit deep link, chapter/page request, or bookmark always wins. Online
 Reader entry fetches a fresh bootstrap. When content is already local, bootstrap
 and local parsing are independent: bootstrap failure does not prevent the parser
 from opening the publication. With no pending mutation, the newest valid exact
-location for the same work and volume restores automatically. Invalid or
+location for the same book and resource restores automatically. Invalid or
 un-restorable progress starts at the beginning. A newer server snapshot is
 selected deterministically and a newer valid local pending mutation remains local
 and retries normally; no startup progress condition may display a blocking
-local/cloud/cancel dialog. A pending state for another work or volume is ignored.
+local/cloud/cancel dialog. A pending state for another book or resource is ignored.
 
 Once Reader is open, a newer snapshot from another `clientId` that differs from
 the current exact position is shown as a non-modal notice. It does not steal focus
@@ -247,17 +247,17 @@ preflight the complete reading order. Redirect, traversal, symlink, empty-body,
 overflow, truncation, cancellation, and oversized-error cases fail closed.
 
 Reader v4 bootstrap is also the authoritative Download Center catalog source. A completed
-artifact persists the real `mediaVersion.id`, `mediaVersion.mediaKind`, server-completed
-hint, and the volume's index/sort order. The stable local hierarchy is
-`work -> media version -> volume`; title/author/cover decorate the work, never replace
-these identifiers. Pre-v4 local manifests may migrate into deterministic per-volume
-`legacy-volume:<volumeId>` groups, but an online v4 response missing or contradicting
-media-version identity fails closed.
+artifact persists the real `book.id`, `resource.id`, selected `asset.id`, server-completed
+hint, and the resource's display/sort order. The stable local hierarchy is
+`book -> resource -> asset`; title, author, cover, format, and media kind decorate that
+topology and never replace its identifiers. Local manifests without this ADR 0020 identity
+are discarded. An online response with missing or contradictory Book/Resource/Asset
+ownership fails closed.
 
-A shared foreground volume runtime exposes observable `Preparing`, `TaskCreated`,
+A shared foreground resource runtime exposes observable `Preparing`, `TaskCreated`,
 `Downloading`, `Progress`, `ReadyToOpen`, `Failed`, and `Cancelled` states. Reader
 navigation consumes `ReadyToOpen` only after byte verification, atomic file publication,
-and completed-artifact persistence. An already verified downloaded volume enters Reader
+and completed-artifact persistence. An already verified downloaded resource enters Reader
 directly; authenticated cover loading is a non-blocking visual transition and is never a
 publication-completion dependency.
 
@@ -276,7 +276,7 @@ Automated contracts must cover:
 - network failure preserving the latest durable pending mutation;
 - all four Publication location round trips and morphology-specific post-navigation verification;
 - progression, position, and percentage never counting as exact;
-- identical work/volume progress surviving Publication fingerprint changes;
+- identical book/resource progress surviving Publication fingerprint changes;
 - PDF, comic, and audio exact positions;
 - v1–v3 `410 Gone` and first-party v4-only paths;
 - process-death recovery for pending state and fresh session reconstruction from bootstrap.
@@ -284,11 +284,11 @@ Automated contracts must cover:
 - source bytes remaining unchanged and no Reader derivative directory being created;
 - MOBI/TXT virtual Publication href and Locator conformance across platforms.
 
-Android acceptance includes building and deploying the debug APK to the dedicated test emulator, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
+Android acceptance includes building and deploying the debug APK to an explicitly selected physical Android device, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
 
 ## 12. Security and observability
 
-Reader routes preserve resource authorization and anti-enumeration behavior. External location JSON is bounded and validated before mapping. Logs may contain stable user/volume/correlation identifiers and outcome codes, but never book text, cookies, tokens, full locator payloads, or private filesystem paths.
+Reader routes preserve resource authorization and anti-enumeration behavior. External location JSON is bounded and validated before mapping. Logs may contain stable user/resource/correlation identifiers and outcome codes, but never book text, cookies, tokens, full locator payloads, or private filesystem paths.
 
 The Reader shell remains native and owns lifecycle, accessibility, back/close,
 navigation controls, table of contents, and preferences. Readium internals are
@@ -334,7 +334,7 @@ adaptation may modify only the document head as defined above; body mutation or
 re-serialization is prohibited.
 
 Bookmarks use the existing Reader v4 collection wire schema. Local state is
-isolated by `serverIdentity + userId + volumeId + contentFingerprint`, retains
+isolated by `serverIdentity + userId + resourceId + assetId + contentFingerprint`, retains
 an exact platform Locator for local jumps, and projects only `reflow
 resourceKey/progression` to the server. Every mutation atomically replaces the
 local collection and latest pending snapshot before a single-flight whole-set
@@ -350,7 +350,7 @@ The center reading zone, accessibility actions, and keyboard Escape affordance
 remain responsible for revealing controls; loading and recovery UI must not
 force the controls open.
 
-Local and Reader v4 exact positions are scoped by work and volume rather than
+Local and Reader v4 exact positions are scoped by book and resource rather than
 Publication fingerprint. Positions with the same semantic Readium anchor restore
 silently. Different positions are ordered by their actual captured timestamp,
 with the server winning an exact timestamp tie. The newer position is restored
@@ -366,11 +366,11 @@ After every successful local progress transaction the Reader publishes the
 shared `ReaderProgressPresentationUpdate` contract at application scope. The
 event carries the complete, validated `PublicationLocation`; platform shells
 must not replace it with a resource-only href, synthetic page key, percentage,
-or chapter title. An open Work Detail projection applies a matching
-namespace/work/volume update immediately, including overall progress, volume
+or chapter title. An open Book Detail projection applies a matching
+namespace/book/resource update immediately, including overall progress, resource
 progress, and chapter state, then refreshes the server representation without
 replacing newer local state.
-Work Detail also performs a non-blocking refresh whenever it becomes active.
+Book Detail also performs a non-blocking refresh whenever it becomes active.
 Chapter state is derived from exact href/fragment first, then the server's
 global chapter index and sort order. Duplicate titles are never navigation
 identities, and overall percentage is not used to guess a chapter; 100 percent

@@ -9,15 +9,15 @@ import kotlinx.serialization.json.intOrNull
 
 data class ReaderProgressPresentationUpdate(
     val namespaceKey: String,
-    val workId: String,
-    val volumeId: String,
+    val bookId: String,
+    val resourceId: String,
     val percent: Double,
     val location: PublicationLocation,
     val chapterTitle: String?,
     val capturedAtEpochMillis: Long,
 ) {
     init {
-        require(namespaceKey.isNotBlank() && workId.isNotBlank() && volumeId.isNotBlank())
+        require(namespaceKey.isNotBlank() && bookId.isNotBlank() && resourceId.isNotBlank())
         require(percent.isFinite() && percent in 0.0..100.0)
         require(capturedAtEpochMillis >= 0)
     }

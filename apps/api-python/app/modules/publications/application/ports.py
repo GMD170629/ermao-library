@@ -15,26 +15,27 @@ from app.modules.publications.domain.model import (
 class PublicationAccessScope:
     is_admin: bool
     can_view_manual_imports: bool
-    monitor_folder_ids: tuple[str, ...]
+    library_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class PublicationSource:
-    volume_id: str
-    file_id: str
+    resource_id: str
+    asset_id: str
     source_format: str
     path: str
     size_bytes: int
     mtime_ms: int
     title: str
     author: str | None
+    library_root: str | None = None
 
 
 class PublicationSourceRepository(Protocol):
     def find_source(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> PublicationSource | None: ...
 

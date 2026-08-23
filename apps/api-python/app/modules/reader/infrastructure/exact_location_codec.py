@@ -34,7 +34,7 @@ def encode_exact_location(location: ReaderExactLocationDto) -> str:
         _add_optional_engine(document, location.engine_locator)
     elif isinstance(location, ReaderAudioExactLocationDto):
         document.update(
-            fileId=location.file_id,
+            assetId=location.asset_id,
             positionMillis=location.position_millis,
         )
         if location.chapter_id is not None:
@@ -75,7 +75,7 @@ def decode_exact_location(raw_json: str | None) -> ReaderExactLocationDto | None
             )
         if kind == "audio":
             return ReaderAudioExactLocationDto(
-                file_id=_string(root, "fileId"),
+                asset_id=_string(root, "assetId"),
                 chapter_id=_optional_string(root, "chapterId"),
                 position_millis=_integer(root, "positionMillis"),
                 engine_locator=_optional_engine(root),

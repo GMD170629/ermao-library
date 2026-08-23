@@ -27,7 +27,7 @@ class ApiClientStreamingDownloadTest {
         val result = client(
             status = HttpStatusCode.Found,
             bytes = ByteArray(256 * 1024),
-            extraHeaders = mapOf(HttpHeaders.Location to "/api/files/other"),
+            extraHeaders = mapOf(HttpHeaders.Location to "/api/assets/other"),
         ).streamAuthenticatedDownload(PATH, 512 * 1024L, MIMES) { _, _ -> writes += 1 }
 
         val failure = assertIs<ApiResult.Failure>(result).error
@@ -125,7 +125,7 @@ class ApiClientStreamingDownloadTest {
     }
 
     private companion object {
-        const val PATH = "/api/files/publication"
+        const val PATH = "/api/assets/publication"
         val MIMES = setOf("application/epub+zip")
     }
 }

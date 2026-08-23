@@ -5,9 +5,9 @@ export function libraryReturnHref(searchParameters: string): string {
   return query ? `/library?${query}` : '/library';
 }
 
-export function workDetailHrefFromLibrary(workId: string, searchParameters: string): string {
+export function bookDetailHrefFromLibrary(bookId: string, searchParameters: string): string {
   const parameters = new URLSearchParams({
     returnTo: libraryReturnHref(searchParameters)
   });
-  return `/works/${encodeURIComponent(workId)}?${parameters}`;
+  return `/books/${encodeURIComponent(bookId)}?${parameters}`;
 }

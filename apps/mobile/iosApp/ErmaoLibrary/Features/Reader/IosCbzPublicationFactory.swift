@@ -277,7 +277,7 @@ struct IosCbzPublicationFactory {
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:cbz:\(managed.sourceID)",
+                    identifier: "urn:shuku:cbz:\(managed.resourceID)",
                     conformsTo: [.divina],
                     title: managed.displayTitle,
                     layout: .fixed,
@@ -381,7 +381,7 @@ struct IosRemoteComicPublicationFactory {
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:comic:\(source.volumeId):\(source.protocolFingerprint)",
+                    identifier: "urn:shuku:comic:\(source.resourceId):\(source.protocolFingerprint)",
                     conformsTo: [.divina],
                     title: source.displayTitle,
                     layout: .fixed,

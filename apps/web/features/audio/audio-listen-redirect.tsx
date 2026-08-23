@@ -7,9 +7,9 @@ import { useEffect, useRef } from 'react';
 import { useAudioPlayback } from './audio-playback-provider';
 import { I18nText } from '@/i18n/provider';
 
-export function AudioListenRedirect({ volumeId }: { volumeId: string }) {
+export function AudioListenRedirect({ resourceId }: { resourceId: string }) {
   const player = useAudioPlayback();
-  const loadVolume = player.loadVolume;
+  const loadResource = player.loadResource;
   const playerBootstrap = player.bootstrap;
   const selectTrack = player.selectTrack;
   const router = useRouter();
@@ -19,16 +19,16 @@ export function AudioListenRedirect({ volumeId }: { volumeId: string }) {
   const appliedTrackRef = useRef('');
 
   useEffect(() => {
-    void loadVolume(volumeId, {
+    void loadResource(resourceId, {
       autoplay: false,
       chapterId: chapterId ?? undefined
     });
-  }, [chapterId, loadVolume, volumeId]);
+  }, [chapterId, loadResource, resourceId]);
 
   useEffect(() => {
-    const bootstrap = playerBootstrap?.volume.id === volumeId ? playerBootstrap : null;
+    const bootstrap = playerBootstrap?.resource.id === resourceId ? playerBootstrap : null;
     if (!bootstrap) return;
-    const targetKey = `${volumeId}:${trackParam ?? ''}`;
+    const targetKey = `${resourceId}:${trackParam ?? ''}`;
     if (!chapterId && trackParam !== null && appliedTrackRef.current !== targetKey) {
       const trackIndex = Number(trackParam);
       if (Number.isInteger(trackIndex) && trackIndex >= 0 && trackIndex < bootstrap.tracks.length) {
@@ -36,10 +36,10 @@ export function AudioListenRedirect({ volumeId }: { volumeId: string }) {
       }
       appliedTrackRef.current = targetKey;
     }
-    router.replace(`/works/${encodeURIComponent(bootstrap.mediaVersion.workId)}?detailTab=AUDIOBOOK&volumeId=${encodeURIComponent(bootstrap.volume.id)}`);
-  }, [chapterId, playerBootstrap, router, selectTrack, trackParam, volumeId]);
+    router.replace(`/books/${encodeURIComponent(bootstrap.book.id)}?resourceId=${encodeURIComponent(bootstrap.resource.id)}`);
+  }, [chapterId, playerBootstrap, router, selectTrack, trackParam, resourceId]);
 
-  const failed = player.pendingVolumeId === volumeId && Boolean(player.loadError);
+  const failed = player.pendingResourceId === resourceId && Boolean(player.loadError);
   if (failed) {
     return (
       <div className="flex min-h-[60dvh] items-center justify-center px-4">

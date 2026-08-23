@@ -38,6 +38,7 @@ export default defineConfig([
     'out/**',
     'build/**',
     'generated/**',
+    'public/vendor/**',
     'next-env.d.ts'
   ])
 ]);

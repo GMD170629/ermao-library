@@ -15,7 +15,7 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 const progressTransport: ProgressSyncTransport = async (upload, signal) => {
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(upload.volumeId)}/progress`, {
+  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(upload.resourceId)}/progress`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
@@ -41,8 +41,8 @@ const progressTransport: ProgressSyncTransport = async (upload, signal) => {
   return snapshot;
 };
 
-const progressQueryTransport: ProgressQueryTransport = async (volumeId, etag, signal) => {
-  const response = await fetch(`/api/reader/v4/volumes/${encodeURIComponent(volumeId)}/progress`, {
+const progressQueryTransport: ProgressQueryTransport = async (resourceId, etag, signal) => {
+  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/progress`, {
     method: 'GET',
     headers: etag ? { 'If-None-Match': etag } : undefined,
     credentials: 'same-origin',

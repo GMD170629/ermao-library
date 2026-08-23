@@ -6,6 +6,11 @@ import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.modules.library.AuthenticatedCover
+import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.BookResourcePage
+import com.ermao.library.shared.modules.library.BookResourcePageQuery
+import com.ermao.library.shared.modules.library.BookResourcePageRepository
+import com.ermao.library.shared.modules.library.BooksQuery
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentResult
@@ -17,24 +22,19 @@ import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.HomeSection
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.LibraryPage
-import com.ermao.library.shared.modules.library.WorkDetailQuery
-import com.ermao.library.shared.modules.library.WorkVolumePageQuery
-import com.ermao.library.shared.modules.library.WorkVolumePageRepository
-import com.ermao.library.shared.modules.library.WorksQuery
-import com.ermao.library.shared.modules.library.domain.FacetKind
-import com.ermao.library.shared.modules.library.domain.WorkDetail
-import com.ermao.library.shared.modules.library.domain.WorkDetailSummary
-import com.ermao.library.shared.modules.library.domain.WorkSummary
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.shared.modules.library.domain.BookSummary
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import io.ktor.http.encodeURLPathPart
 
 class KtorContentRepository(
     private val clients: ApiClientFactory,
-) : ContentRepository, WorkVolumePageRepository {
+) : ContentRepository, BookResourcePageRepository {
     override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = coroutineScope {
         val continueReading = async { requestContinueReading(context) }
-        val recentReading = async { requestWorksSection(context, "/api/dashboard/recent-reading") }
-        val recentAdded = async { requestWorksSection(context, "/api/dashboard/recent-books") }
+        val recentReading = async { requestBooksSection(context, "/api/dashboard/recent-reading") }
+        val recentAdded = async { requestBooksSection(context, "/api/dashboard/recent-books") }
         val snapshot = HomeSnapshot(continueReading.await(), recentReading.await(), recentAdded.await())
         val hasNetworkContent = listOf(snapshot.continueReading, snapshot.recentReading, snapshot.recentAdded)
             .any { it is HomeSection.Content<*> }
@@ -53,72 +53,59 @@ class KtorContentRepository(
     override suspend fun loadRecentReading(
         context: ContentRequestContext,
         limit: Int,
-    ): ContentResult<List<WorkSummary>> = requestWorksContent(context, "/api/dashboard/recent-reading", limit)
+    ): ContentResult<List<BookSummary>> = requestBooksContent(context, "/api/dashboard/recent-reading", limit)
 
     override suspend fun loadRecentAdded(
         context: ContentRequestContext,
         limit: Int,
-    ): ContentResult<List<WorkSummary>> = requestWorksContent(context, "/api/dashboard/recent-books", limit)
+    ): ContentResult<List<BookSummary>> = requestBooksContent(context, "/api/dashboard/recent-books", limit)
 
-    override suspend fun loadWorks(
+    override suspend fun loadBooks(
         context: ContentRequestContext,
-        query: WorksQuery,
-    ): ContentResult<LibraryPage<WorkSummary>> {
-        if (query.filters.downloadedOnly) {
-            return ContentResult.Failure(
-                com.ermao.library.shared.core.network.AppError(
-                    com.ermao.library.shared.core.network.AppErrorKind.Validation,
-                    "MANAGED_DOWNLOADS_UNAVAILABLE",
-                    "The managed download manifest is not available for this server capability.",
-                ),
-            )
-        }
-        return when (val result = withClient(context) { client ->
+        query: BooksQuery,
+    ): ContentResult<LibraryPage<BookSummary>> = when (val result = withClient(context) { client ->
             client.execute(
                 ApiRequest(
                     ApiMethod.Get,
-                    "/api/works",
-                    WorkPageWire.serializer(),
-                    queryParameters = worksParameters(query),
+                    "/api/books",
+                    BookPageWire.serializer(),
+                    queryParameters = booksParameters(query),
                 ),
             )
         }) {
             is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
-    }
 
     override suspend fun loadGroupings(
         context: ContentRequestContext,
         query: GroupingQuery,
-    ): ContentResult<LibraryPage<GroupingSummary>> {
-        return when (val result = withClient(context) { client ->
-            client.execute(
-                ApiRequest(
-                    ApiMethod.Get,
-                    "/api/library/groupings",
-                    GroupingPageWire.serializer(),
-                    queryParameters = mapOf(
-                        "kind" to listOf(facetKindWire(query.kind)),
-                        "search" to listOf(query.query.trim()),
-                        "page" to listOf(query.page.toString()),
-                        "pageSize" to listOf(query.pageSize.toString()),
-                    ),
+    ): ContentResult<LibraryPage<GroupingSummary>> = when (val result = withClient(context) { client ->
+        client.execute(
+            ApiRequest(
+                ApiMethod.Get,
+                "/api/library/groupings",
+                GroupingPageWire.serializer(),
+                queryParameters = mapOf(
+                    "kind" to listOf(facetKindWire(query.kind)),
+                    "search" to listOf(query.query.trim()),
+                    "page" to listOf(query.page.toString()),
+                    "pageSize" to listOf(query.pageSize.toString()),
                 ),
-            )
-        }) {
-            is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
-            is ApiResult.Failure -> ContentResult.Failure(result.error)
-        }
+            ),
+        )
+    }) {
+        is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
+        is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
-    override suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage> {
-        return when (val result = withClient(context) { client ->
+    override suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage> =
+        when (val result = withClient(context) { client ->
             client.execute(
                 ApiRequest(
                     ApiMethod.Get,
-                    "/api/works",
-                    WorkPageWire.serializer(),
+                    "/api/books",
+                    BookPageWire.serializer(),
                     queryParameters = mapOf(
                         "view" to listOf("search"),
                         "visibility" to listOf("active"),
@@ -131,61 +118,45 @@ class KtorContentRepository(
                 ),
             )
         }) {
-            is ApiResult.Success -> result.value.toFacetPage()?.let { page ->
-                ContentResult.Content(page, ContentSource.Network)
-            } ?: ContentResult.Failure(
-                com.ermao.library.shared.core.network.AppError(
-                    com.ermao.library.shared.core.network.AppErrorKind.ProtocolViolation,
-                    "FACET_IDENTITY_MISSING",
-                    "Facet response is missing appliedFacet",
-                ),
+            is ApiResult.Success -> ContentResult.Content(
+                result.value.toFacetPage(query.kind, query.facetId),
+                ContentSource.Network,
             )
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
-    }
 
-    override suspend fun loadWorkDetail(
+    override suspend fun loadBookDetail(
         context: ContentRequestContext,
-        query: WorkDetailQuery,
-    ): ContentResult<WorkDetailSummary> = when (val result = withClient(context) { client ->
+        query: BookDetailQuery,
+    ): ContentResult<BookDetailSummary> = when (val result = withClient(context) { client ->
         client.execute(
             ApiRequest(
                 ApiMethod.Get,
-                "/api/works/${query.workId}",
-                WorkDetailPayloadWire.serializer(),
-                queryParameters = buildMap {
-                    // Without any query parameter the compatibility API intentionally returns
-                    // a summary without readingUnits. Request the first bounded navigation page
-                    // so a single-volume EPUB exposes its real directory on the initial load.
-                    put("chapterPageSize", listOf(DEFAULT_READING_UNITS_PAGE_SIZE.toString()))
-                    query.mediaKind?.let { put("detailTab", listOf(it.wireValue)) }
-                    query.volumeId?.let { put("volumeId", listOf(it)) }
-                },
+                "/api/books/${query.bookId.encodeURLPathPart()}",
+                BookPayloadWire.serializer(),
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain().toSummary(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
-    override suspend fun loadWorkVolumes(
+    override suspend fun loadBookResources(
         context: ContentRequestContext,
-        query: WorkVolumePageQuery,
-    ): ContentResult<com.ermao.library.shared.modules.library.WorkVolumePage> = when (
-        val result = withClient(context) { client ->
-            client.execute(
-                ApiRequest(
-                    ApiMethod.Get,
-                    "/api/works/${query.workId}/media-versions/${query.mediaVersionId}/volumes",
-                    WorkVolumePageWire.serializer(),
-                    queryParameters = mapOf(
-                        "page" to listOf(query.page.toString()),
-                        "pageSize" to listOf(query.pageSize.toString()),
-                    ),
+        query: BookResourcePageQuery,
+    ): ContentResult<BookResourcePage> = when (val result = withClient(context) { client ->
+        client.execute(
+            ApiRequest(
+                ApiMethod.Get,
+                "/api/books/${query.bookId.encodeURLPathPart()}/resources",
+                ResourcesPayloadWire.serializer(),
+                queryParameters = mapOf(
+                    "page" to listOf(query.page.toString()),
+                    "pageSize" to listOf(query.pageSize.toString()),
                 ),
-            )
-        }
-    ) {
+            ),
+        )
+    }) {
         is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
@@ -198,12 +169,7 @@ class KtorContentRepository(
         client.loadAuthenticatedAsset(apiPath, etag)
     }) {
         is ApiResult.Success -> ContentResult.Content(
-            AuthenticatedCover(
-                result.value.bytes,
-                result.value.mimeType,
-                result.value.etag,
-                result.value.notModified,
-            ),
+            AuthenticatedCover(result.value.bytes, result.value.mimeType, result.value.etag, result.value.notModified),
             ContentSource.Network,
         )
         is ApiResult.Failure -> ContentResult.Failure(result.error)
@@ -219,43 +185,43 @@ class KtorContentRepository(
             is ApiResult.Failure -> HomeSection.Failure(result.error)
         }
 
-    private suspend fun requestWorksSection(context: ContentRequestContext, path: String): HomeSection<List<WorkSummary>> =
-        when (val result = requestWorks(context, path, 10)) {
+    private suspend fun requestBooksSection(context: ContentRequestContext, path: String): HomeSection<List<BookSummary>> =
+        when (val result = requestBooks(context, path, 10)) {
             is ApiResult.Success -> HomeSection.Content(result.value)
             is ApiResult.Failure -> HomeSection.Failure(result.error)
         }
 
-    private suspend fun requestWorksContent(
+    private suspend fun requestBooksContent(
         context: ContentRequestContext,
         path: String,
         limit: Int,
-    ): ContentResult<List<WorkSummary>> {
-        require(limit in 1..24)
-        return when (val result = requestWorks(context, path, limit)) {
+    ): ContentResult<List<BookSummary>> {
+        require(limit in 1..50)
+        return when (val result = requestBooks(context, path, limit)) {
             is ApiResult.Success -> ContentResult.Content(result.value, ContentSource.Network)
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
     }
 
-    private suspend fun requestWorks(
+    private suspend fun requestBooks(
         context: ContentRequestContext,
         path: String,
         limit: Int,
-    ): ApiResult<List<WorkSummary>> = when (val result = withClient(context) { client ->
-            client.execute(
-                ApiRequest(
-                    ApiMethod.Get,
-                    path,
-                    WorksWire.serializer(),
-                    queryParameters = mapOf("limit" to listOf(limit.toString())),
-                ),
-            )
-        }) {
-            is ApiResult.Success -> ApiResult.Success(result.value.books.map(WorkSummaryWire::toDomain), result.metadata)
-            is ApiResult.Failure -> result
-        }
+    ): ApiResult<List<BookSummary>> = when (val result = withClient(context) { client ->
+        client.execute(
+            ApiRequest(
+                ApiMethod.Get,
+                path,
+                BooksWire.serializer(),
+                queryParameters = mapOf("limit" to listOf(limit.toString())),
+            ),
+        )
+    }) {
+        is ApiResult.Success -> ApiResult.Success(result.value.books.map(BookSummaryWire::toDomain), result.metadata)
+        is ApiResult.Failure -> result
+    }
 
-    private fun worksParameters(query: WorksQuery): Map<String, List<String>> = buildMap {
+    private fun booksParameters(query: BooksQuery): Map<String, List<String>> = buildMap {
         put("view", listOf("search"))
         put("visibility", listOf("active"))
         put("page", listOf(query.page.toString()))
@@ -263,39 +229,17 @@ class KtorContentRepository(
         put("sort", listOf(query.sort.wireValue))
         query.query.trim().takeIf(String::isNotEmpty)?.let { put("search", listOf(it)) }
         query.filters.mediaKinds.takeIf(Set<*>::isNotEmpty)?.let { kinds ->
-            put("mediaKinds", listOf(kinds.map { it.wireValue }.sorted().joinToString(",")))
+            put("media", listOf(kinds.map { it.wireValue }.sorted().joinToString(",")))
         }
         query.filters.readingStatuses.takeIf(Set<*>::isNotEmpty)?.let { statuses ->
-            put("statuses", listOf(statuses.map { it.wireValue }.sorted().joinToString(",")))
+            put("status", listOf(statuses.map { it.wireValue }.sorted().joinToString(",")))
         }
     }
 
-    private fun WorkDetail.toSummary(): WorkDetailSummary = WorkDetailSummary(
-        id = id,
-        title = title,
-        author = author,
-        description = description,
-        tags = tags,
-        seriesName = seriesName,
-        seriesFacet = seriesFacet,
-        authorFacets = authorFacets,
-        seriesIndex = seriesIndex,
-        coverStatus = coverStatus,
-        coverUrl = coverUrl,
-        recentMediaKind = recentMediaKind,
-        continueVolumeId = continueVolumeId,
-        continueVolumeProgress = continueVolumeProgress,
-        completed = completed,
-        mediaVersions = mediaVersions,
-        availableMediaKinds = availableMediaKinds,
-        detailTabs = detailTabs,
-        selectedDetailTab = selectedDetailTab,
-        activeMedia = activeMedia,
-        readingUnits = readingUnits,
-        readingUnitsPage = readingUnitsPage,
-    )
-
-    private suspend fun <T> withClient(context: ContentRequestContext, block: suspend (ApiClient) -> ApiResult<T>): ApiResult<T> {
+    private suspend fun <T> withClient(
+        context: ContentRequestContext,
+        block: suspend (ApiClient) -> ApiResult<T>,
+    ): ApiResult<T> {
         val client = clients.create(context.profile)
         return try { block(client) } finally { client.close() }
     }
@@ -305,8 +249,23 @@ class KtorContentRepository(
         snapshot.recentReading,
         snapshot.recentAdded,
     ).filterIsInstance<HomeSection.Failure>().first().error
+}
 
-    private companion object {
-        const val DEFAULT_READING_UNITS_PAGE_SIZE = 120
-    }
+@kotlinx.serialization.Serializable
+private data class ResourcesPayloadWire(
+    val bookId: String,
+    val resources: List<ResourceWire>,
+    val page: Int,
+    val pageSize: Int,
+    val total: Int,
+    val totalPages: Int,
+) {
+    fun toDomain() = BookResourcePage(
+        bookId = bookId,
+        resources = resources.map(ResourceWire::toDomain),
+        page = page,
+        pageSize = pageSize,
+        total = total,
+        totalPages = totalPages,
+    )
 }

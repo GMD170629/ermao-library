@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import ColumnElement, func
@@ -13,7 +13,7 @@ def cuid() -> str:
 
 
 def db_timestamp() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def timestamp_ms_server_default() -> ColumnElement[int]:

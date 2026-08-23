@@ -1,35 +1,30 @@
-"""Stable import capability contracts."""
+"""Stable public surface of the readable-resource import capability."""
 
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
-from app.modules.imports.application.commands import (
-    commit_import_checkpoint,
-    reset_failed_import_checkpoint,
-)
-from app.modules.imports.application.deletion import (
-    ImportFileQuarantineError,
-    PreparedImportDeletion,
-)
-from app.modules.imports.application.dto import (
-    ImportOptions,
-    ImportResult,
-    ImportTaskDTO,
-    SeriesVolumeInfo,
-    StageImportCommand,
-)
-from app.modules.imports.application.enqueue import (
-    ImportEnqueueProjection,
-    PreparedImportEnqueue,
-)
 from app.modules.imports.application.file_types import is_supported_import_filename
-from app.modules.imports.application.import_support import parse_series_volume_info
-from app.modules.imports.application.monitor_paths import (
-    MonitorPathError,
+from app.modules.imports.application.identity_policy import (
+    UNKNOWN_AUTHOR,
+    normalize_identity_part,
+)
+from app.modules.imports.application.library_paths import (
+    LibraryPathError,
     is_inside_path,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
+    library_directory_tree_node,
+    resolve_library_root_path,
     target_directory_from_path,
 )
-from app.modules.imports.application.ports import ImportUnitOfWork
+from app.modules.imports.application.readable_resource.continue_import import (
+    ContinueImport,
+    ContinueImportResult,
+    ContinueLibraryImport,
+    ContinueSourceImport,
+)
+from app.modules.imports.application.readable_resource.process_import_task import (
+    ProcessReadableResourceImportTask,
+)
+from app.modules.imports.application.readable_resource.scan_source_tree import (
+    ScanLibrarySourceTree,
+)
 from app.modules.imports.application.release_titles import (
     ParsedReleaseTitle,
     parse_release_title,
@@ -46,32 +41,27 @@ from app.modules.imports.application.save_uploaded_files import (
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
-    "ImportEnqueueProjection",
-    "ImportFileQuarantineError",
-    "ImportOptions",
-    "ImportResult",
-    "ImportTaskDTO",
-    "ImportUnitOfWork",
-    "MonitorPathError",
+    "UNKNOWN_AUTHOR",
+    "ContinueImport",
+    "ContinueImportResult",
+    "ContinueLibraryImport",
+    "ContinueSourceImport",
+    "LibraryPathError",
     "ParsedReleaseTitle",
-    "PreparedImportDeletion",
-    "PreparedImportEnqueue",
+    "ProcessReadableResourceImportTask",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
     "SavedUploadFile",
-    "SeriesVolumeInfo",
-    "StageImportCommand",
+    "ScanLibrarySourceTree",
     "UploadFileTooLargeError",
     "UploadPublicationError",
     "UploadSource",
-    "commit_import_checkpoint",
     "is_inside_path",
     "is_supported_import_filename",
-    "monitor_directory_tree_node",
+    "library_directory_tree_node",
+    "normalize_identity_part",
     "parse_release_title",
-    "parse_series_volume_info",
-    "reset_failed_import_checkpoint",
-    "resolve_monitor_folder_path",
+    "resolve_library_root_path",
     "safe_upload_filename",
     "target_directory_from_path",
 ]

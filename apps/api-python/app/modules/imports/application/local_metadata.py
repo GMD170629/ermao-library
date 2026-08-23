@@ -16,30 +16,28 @@ from app.contracts.publication_titles import finalize_volume_title
 
 
 @dataclass(frozen=True, slots=True)
+class LocalCoverPayload:
+    content: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class LocalMetadataCandidate:
     source: LocalMetadataSource
     metadata: PublicationMetadata
-    evidence: tuple[tuple[str, str], ...] = ()
-    warnings: tuple[str, ...] = ()
+    cover: LocalCoverPayload | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedLocalMetadata:
     metadata: PublicationMetadata
+    cover: LocalCoverPayload | None
     field_sources: tuple[tuple[str, LocalMetadataSource | Literal["REQUESTED"]], ...]
     source_order: tuple[LocalMetadataSource, ...]
-    warnings: tuple[str, ...] = ()
-
-    def source_for(self, field: str) -> str | None:
-        return dict(self.field_sources).get(field)
 
 
 def resolve_local_metadata(
     candidates: tuple[LocalMetadataCandidate, ...],
     source_order: tuple[LocalMetadataSource, ...] = DEFAULT_LOCAL_METADATA_PRIORITY,
-    *,
-    requested_title: str | None = None,
-    requested_author: str | None = None,
 ) -> ResolvedLocalMetadata:
     order = validate_local_metadata_priority(source_order)
     by_source = {candidate.source: candidate for candidate in candidates}
@@ -49,6 +47,8 @@ def resolve_local_metadata(
         "title",
         "volume_title",
         "authors",
+        "narrators",
+        "abridged",
         "description",
         "subjects",
         "series_name",
@@ -59,33 +59,31 @@ def resolve_local_metadata(
         "published_at",
         "identifier",
         "isbn",
-        "cover_href",
         "unparsed_values",
     )
     for field in fields:
         for source in order:
             candidate = by_source.get(source)
-            value = (
-                getattr(candidate.metadata, field) if candidate is not None else None
-            )
+            value = getattr(candidate.metadata, field) if candidate else None
             if _valid_field_value(field, value):
                 values[field] = value
                 sources[_public_field_name(field)] = source
                 break
 
-    title = _clean(requested_title)
-    author = _clean(requested_author)
-    if title is not None:
-        values["title"] = title
-        sources["title"] = "REQUESTED"
-    if author is not None:
-        values["authors"] = (author,)
-        sources["author"] = "REQUESTED"
+    cover: LocalCoverPayload | None = None
+    for source in order:
+        candidate = by_source.get(source)
+        if candidate is not None and candidate.cover is not None:
+            cover = candidate.cover
+            sources["cover"] = source
+            break
 
     metadata = PublicationMetadata(
         title=cast(str | None, values.get("title")),
         volume_title=cast(str | None, values.get("volume_title")),
         authors=cast(tuple[str, ...], values.get("authors", ())),
+        narrators=cast(tuple[str, ...], values.get("narrators", ())),
+        abridged=cast(bool | None, values.get("abridged")),
         description=cast(str | None, values.get("description")),
         subjects=cast(tuple[str, ...], values.get("subjects", ())),
         series_name=cast(str | None, values.get("series_name")),
@@ -96,7 +94,6 @@ def resolve_local_metadata(
         published_at=cast(str | None, values.get("published_at")),
         identifier=cast(str | None, values.get("identifier")),
         isbn=cast(str | None, values.get("isbn")),
-        cover_href=cast(str | None, values.get("cover_href")),
         unparsed_values=cast(
             tuple[tuple[str, str], ...], values.get("unparsed_values", ())
         ),
@@ -107,20 +104,11 @@ def resolve_local_metadata(
             metadata.title, metadata.volume_title, metadata.volume_index
         ),
     )
-    if metadata.volume_title is not None and "volumeTitle" not in sources:
-        derived_source = sources.get("title") or sources.get("volumeIndex")
-        if derived_source is not None:
-            sources["volumeTitle"] = derived_source
-    warnings: list[str] = []
-    for source in order:
-        candidate = by_source.get(source)
-        if candidate is not None:
-            warnings.extend(candidate.warnings)
     return ResolvedLocalMetadata(
         metadata=metadata,
+        cover=cover,
         field_sources=tuple(sources.items()),
         source_order=order,
-        warnings=tuple(warnings),
     )
 
 
@@ -139,27 +127,20 @@ def _valid_field_value(field: str, value: object) -> bool:
 def _public_field_name(field: str) -> str:
     return {
         "authors": "author",
+        "narrators": "narrator",
         "volume_title": "volumeTitle",
         "subjects": "tags",
         "series_name": "seriesName",
         "series_index": "seriesIndex",
         "volume_index": "volumeIndex",
         "published_at": "publishedAt",
-        "cover_href": "cover",
         "unparsed_values": "unparsed",
     }.get(field, field)
 
 
-def _clean(value: str | None) -> str | None:
-    cleaned = str(value or "").strip()
-    return cleaned or None
-
-
 __all__ = [
-    "DEFAULT_LOCAL_METADATA_PRIORITY",
+    "LocalCoverPayload",
     "LocalMetadataCandidate",
-    "LocalMetadataSource",
     "ResolvedLocalMetadata",
     "resolve_local_metadata",
-    "validate_local_metadata_priority",
 ]

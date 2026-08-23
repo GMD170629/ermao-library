@@ -9,23 +9,48 @@ import kotlin.test.assertIs
 import kotlinx.serialization.json.Json
 
 class WorkDetailWireTest {
-    @Test
-    fun decodesAndMapsTheRealBoundedWorkDetailShape() {
-        val decoded = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false }).decode(
-            statusCode = 200,
-            body = WORK_DETAIL_FIXTURE,
-            dataDeserializer = WorkDetailSummaryPayloadWire.serializer(),
-        )
-        val work = assertIs<ApiResult.Success<WorkDetailSummaryPayloadWire>>(decoded).value.toDomain()
+    private val decoder = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false })
 
-        assertEquals("detail-work", work.id)
-        assertEquals(MediaKind.Comic, work.mediaVersions.single().mediaKind)
-        assertEquals(12, work.mediaVersions.single().volumeCount)
-        assertEquals("/library/detail-01.zip", work.mediaVersions.single().volumes.single().files.single().path)
-        assertEquals(listOf(MediaKind.Comic), work.availableMediaKinds)
-        assertEquals("chapter-1", work.readingUnits.single().id)
-        assertEquals("第一章", work.readingUnits.single().title)
+    @Test
+    fun decodesBookWithResourcesAndAssetsWithoutVersionLayer() {
+        val decoded = decoder.decode(
+            statusCode = 200,
+            body = BOOK_DETAIL_FIXTURE,
+            dataDeserializer = BookPayloadWire.serializer(),
+        )
+        val book = assertIs<ApiResult.Success<BookPayloadWire>>(decoded).value.toDomain()
+        val resource = book.resources.single()
+        val asset = resource.assets.single()
+
+        assertEquals("book-1", book.id)
+        assertEquals("source-node-1", book.sourceNodeId)
+        assertEquals("resource-1", resource.id)
+        assertEquals("book-1", resource.bookId)
+        assertEquals(MediaKind.Ebook, resource.mediaKind)
+        assertEquals("asset-1", asset.id)
+        assertEquals("resource-1", asset.resourceId)
+        assertEquals("/api/assets/asset-1/content", asset.url)
+    }
+
+    @Test
+    fun mixedResourceFormatsRemainResourcesOfTheSameBook() {
+        val decoded = decoder.decode(
+            statusCode = 200,
+            body = MIXED_RESOURCE_BOOK_FIXTURE,
+            dataDeserializer = BookPayloadWire.serializer(),
+        )
+        val book = assertIs<ApiResult.Success<BookPayloadWire>>(decoded).value.toDomain()
+
+        assertEquals("book-mixed", book.id)
+        assertEquals(3, book.resources.size)
+        assertEquals(listOf(MediaKind.Ebook, MediaKind.Comic, MediaKind.Audiobook), book.resources.map { it.mediaKind })
+        assertEquals(setOf("book-mixed"), book.resources.map { it.bookId }.toSet())
     }
 }
 
-private const val WORK_DETAIL_FIXTURE = """{"ok":true,"data":{"book":{"id":"detail-work","title":"Detail work","author":"Author","description":null,"tags":[],"seriesName":null,"seriesIndex":null,"coverStatus":"READY","coverUrl":"/api/works/detail-work/cover","recentMediaKind":"COMIC","continueVolumeId":"detail-volume-01","completed":false,"mediaVersions":[{"id":"detail-media","mediaKind":"COMIC","completed":false,"volumeCount":12,"sizeBytes":7800,"volumes":[{"id":"detail-volume-01","mediaVersionId":"detail-media","title":"第 1 卷","volumeIndex":1.0,"sortOrder":0,"format":"COMIC","readerType":"comic","classification":{"source":"AUTO","reason":"archive","suggestedMediaKind":"COMIC"},"readable":true,"kindleSendAvailable":false,"derivedFromVolumeId":null,"publisher":null,"publishedAt":null,"language":"zh-CN","isbn":null,"identifier":null,"narrator":null,"coverUrl":"/api/volumes/detail-volume-01/cover","sizeBytes":100,"pageCount":2,"chapterCount":null,"durationMs":null,"trackCount":null,"progress":12.5,"files":[{"id":"detail-file-01","path":"/library/detail-01.zip","sizeBytes":100,"size":"100 B"}]}]}],"availableMediaKinds":["COMIC"],"detailTabs":[{"key":"COMIC","label":"漫画","sortOrder":0}],"selectedDetailTab":"COMIC"},"readingUnits":[{"id":"chapter-1","volumeId":"detail-volume-01","unitType":"chapter","title":"第一章","sortOrder":0,"metadataJson":{"exactNavigation":true}}]}}"""
+private const val BOOK_DETAIL_FIXTURE = """{"ok":true,"data":{"book":{"id":"book-1","libraryId":"library-1","sourceNodeId":"source-node-1","title":"Book 1","author":null,"description":"Description","seriesName":"Series","seriesIndex":1.0,"visibilityState":"ACTIVE","curationState":"NONE","publicationStatus":"ONGOING","trackingStatus":"TRACKING","metadataQuality":90,"coverStatus":"READY","coverPath":null,"coverUrl":"/api/books/book-1/cover","tags":["tag"],"ignored":false,"organized":true,"addedAt":"2026-08-01T00:00:00Z","createdAt":"2026-08-01T00:00:00Z","updatedAt":"2026-08-02T00:00:00Z","gradient":"#112233","availableMediaKinds":["EBOOK"],"completed":false,"continueResourceId":"resource-1","continueResourceTitle":"Resource 1","continueResourceProgress":12.5,"resources":[{"id":"resource-1","bookId":"book-1","sourceNodeId":"source-node-1","title":"Resource 1","description":null,"resourceIndex":1.0,"sortOrder":0,"format":"EPUB","mediaKind":"EBOOK","readerType":"reflowable","classification":{"source":"AUTO","reason":"epub","suggestedMediaKind":"EBOOK"},"kindleSendAvailable":true,"publisher":"Publisher","publishedAt":"2026-08-01","language":"zh-CN","isbn":null,"identifier":"id-1","narrator":null,"abridged":false,"importStatus":"READY","importError":null,"sizeBytes":1024,"pageCount":12,"chapterCount":3,"durationMs":null,"trackCount":null,"coverStatus":"READY","coverPath":null,"coverUrl":"/api/books/book-1/resources/resource-1/cover","progress":12.5,"lastReadAt":null,"hidden":false,"readable":true,"resourceCompleted":false,"assets":[{"id":"asset-1","resourceId":"resource-1","sourceNodeId":"source-node-1","role":"PUBLICATION","mimeType":"application/epub+zip","sizeBytes":1024,"size":"1 KB","mtimeMs":1722470400000,"durationMs":null,"codec":null,"bitrate":null,"sampleRate":null,"channels":null,"discNumber":null,"trackNumber":null,"sortOrder":0,"url":"/api/assets/asset-1/content","downloadUrl":"/api/assets/asset-1/download"}]}]}}}"""
+
+private val MIXED_RESOURCE_BOOK_FIXTURE = """{"ok":true,"data":{"book":{"id":"book-mixed","libraryId":"library-1","sourceNodeId":"source-node-1","title":"Mixed book","author":"Author","description":null,"seriesName":null,"seriesIndex":null,"visibilityState":"ACTIVE","curationState":"NONE","publicationStatus":"UNKNOWN","trackingStatus":"UNTRACKED","metadataQuality":0,"coverStatus":"UNKNOWN","coverUrl":"/api/books/book-mixed/cover","availableMediaKinds":["EBOOK","COMIC","AUDIOBOOK"],"completed":false,"resources":[${resourceFixture("resource-epub", "EPUB", "EBOOK")},${resourceFixture("resource-cbz", "CBZ", "COMIC")},${resourceFixture("resource-audio", "M4B", "AUDIOBOOK")}]}}}"""
+
+private fun resourceFixture(id: String, format: String, mediaKind: String) =
+    """{"id":"$id","bookId":"book-mixed","sourceNodeId":"source-node-1","title":"$id","format":"$format","mediaKind":"$mediaKind","readerType":"reflowable","classification":{"source":"AUTO","reason":"fixture","suggestedMediaKind":"$mediaKind"},"assets":[]}"""

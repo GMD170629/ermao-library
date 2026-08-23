@@ -2,6 +2,7 @@ package com.ermao.library.features.downloads.model
 
 import kotlinx.serialization.Serializable
 
+/** Android's durable namespace mirrors the shared private-data namespace. */
 @Serializable
 data class AndroidDownloadNamespace(
     val serverIdentity: String,
@@ -11,7 +12,7 @@ data class AndroidDownloadNamespace(
     init {
         require(serverIdentity.isNotBlank())
         require(userId.isNotBlank())
-        require(authorizationVersion >= 0)
+        require(authorizationVersion > 0)
     }
 }
 
@@ -26,21 +27,20 @@ enum class AndroidDownloadStatus {
     FailedTerminal,
 }
 
+/** Book -> Resource -> Asset ownership for catalog v3. */
 @Serializable
 data class AndroidDownloadRecord(
     val taskId: String,
     val namespace: AndroidDownloadNamespace,
-    val workId: String,
-    val workTitle: String,
+    val bookId: String,
+    val bookTitle: String,
     val author: String,
     val coverUrl: String,
-    val volumeId: String,
-    val volumeTitle: String,
+    val resourceId: String,
+    val resourceTitle: String,
     val format: String,
     val readerType: String,
-    val mediaVersionId: String = "legacy-volume:$volumeId",
-    val mediaKind: String = readerType.toLegacyMediaKind(),
-    val mediaVersionCompleted: Boolean? = null,
+    val assetId: String,
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
@@ -52,91 +52,88 @@ data class AndroidDownloadRecord(
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
     val lastOpenedAtEpochMillis: Long? = null,
-    val volumeIndex: Double? = null,
-    val volumeSortOrder: Int? = null,
+    val resourceIndex: Double? = null,
+    val resourceSortOrder: Int? = null,
 ) {
     init {
         require(taskId.isNotBlank())
-        require(workId.isNotBlank())
-        require(volumeId.isNotBlank())
+        require(bookId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(assetId.isNotBlank())
         require(sourceApiPath.startsWith("/api/"))
         require(sourceMimeType.isNotBlank())
-        require(expectedBytes >= 0)
-        require(transferredBytes >= 0)
-        require(transferredBytes <= expectedBytes || expectedBytes == 0L)
+        require(expectedBytes > 0)
+        require(transferredBytes >= 0 && transferredBytes <= expectedBytes)
         require(verified == (status == AndroidDownloadStatus.Completed))
         require(!verified || !localReference.isNullOrBlank())
     }
 
     val isReadable: Boolean
         get() = status == AndroidDownloadStatus.Completed && verified && !localReference.isNullOrBlank()
+
 }
 
-data class DownloadedWorkGroup(
-    val workId: String,
+/** A completed Book projection used by the Android Downloads screen. */
+data class DownloadedBookGroup(
+    val bookId: String,
     val title: String,
     val author: String,
     val coverUrl: String,
-    val mediaVersions: List<DownloadedMediaVersionGroup>,
+    val resources: List<DownloadedResourceGroup>,
 ) {
-    val volumes: List<AndroidDownloadRecord> get() = mediaVersions.flatMap(DownloadedMediaVersionGroup::volumes)
-    val totalBytes: Long get() = volumes.sumOf(AndroidDownloadRecord::expectedBytes)
-    val lastOpenedAtEpochMillis: Long? get() = volumes.mapNotNull(AndroidDownloadRecord::lastOpenedAtEpochMillis).maxOrNull()
+    val artifacts: List<AndroidDownloadRecord> get() = resources.flatMap { it.artifacts }
+    val totalBytes: Long get() = artifacts.sumOf(AndroidDownloadRecord::expectedBytes)
+    val lastOpenedAtEpochMillis: Long? get() = artifacts.mapNotNull(AndroidDownloadRecord::lastOpenedAtEpochMillis).maxOrNull()
 }
 
-data class DownloadedMediaVersionGroup(
-    val mediaVersionId: String,
-    val mediaKind: String,
-    val isServerComplete: Boolean?,
-    val volumes: List<AndroidDownloadRecord>,
+/** A Resource projection; assets remain individual catalog records. */
+data class DownloadedResourceGroup(
+    val resourceId: String,
+    val title: String,
+    val artifacts: List<AndroidDownloadRecord>,
 ) {
-    val totalBytes: Long get() = volumes.sumOf(AndroidDownloadRecord::expectedBytes)
+    val totalBytes: Long get() = artifacts.sumOf(AndroidDownloadRecord::expectedBytes)
 }
 
 fun groupReadableDownloads(
     records: List<AndroidDownloadRecord>,
     query: String,
     localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
-): List<DownloadedWorkGroup> {
+): List<DownloadedBookGroup> {
     val normalizedQuery = query.trim()
     return records.asSequence()
         .filter(AndroidDownloadRecord::isReadable)
         .filter(localArtifactIsValid)
         .filter { record ->
-            normalizedQuery.isEmpty() || sequenceOf(record.workTitle, record.author, record.volumeTitle)
+            normalizedQuery.isEmpty() || sequenceOf(record.bookTitle, record.author, record.resourceTitle)
                 .any { it.contains(normalizedQuery, ignoreCase = true) }
         }
-        .groupBy(AndroidDownloadRecord::workId)
+        .groupBy(AndroidDownloadRecord::bookId)
         .values
-        .map { volumes ->
-            val sorted = volumes.sortedWith(
-                compareBy<AndroidDownloadRecord> { it.volumeSortOrder ?: Int.MAX_VALUE }
-                    .thenBy { it.volumeIndex ?: Double.MAX_VALUE }
-                    .thenBy(AndroidDownloadRecord::volumeTitle)
-                    .thenBy(AndroidDownloadRecord::volumeId),
-            )
-            val first = sorted.first()
-            val mediaVersions = sorted.groupBy(AndroidDownloadRecord::mediaVersionId).values.map { mediaVolumes ->
-                val media = mediaVolumes.first()
-                DownloadedMediaVersionGroup(
-                    mediaVersionId = media.mediaVersionId,
-                    mediaKind = media.mediaKind,
-                    isServerComplete = media.mediaVersionCompleted,
-                    volumes = mediaVolumes,
+        .map { bookRecords ->
+            val resources = bookRecords.groupBy(AndroidDownloadRecord::resourceId).values
+                .map { resourceRecords ->
+                    val first = resourceRecords.first()
+                    DownloadedResourceGroup(
+                        resourceId = first.resourceId,
+                        title = first.resourceTitle,
+                        artifacts = resourceRecords.sortedWith(compareBy(AndroidDownloadRecord::assetId)),
+                    )
+                }
+                .sortedWith(
+                    compareBy<DownloadedResourceGroup> {
+                        it.artifacts.firstOrNull()?.resourceSortOrder ?: Int.MAX_VALUE
+                    }.thenBy { it.artifacts.firstOrNull()?.resourceIndex ?: Double.MAX_VALUE }
+                        .thenBy { it.title }
+                        .thenBy(DownloadedResourceGroup::resourceId),
                 )
-            }
-            DownloadedWorkGroup(first.workId, first.workTitle, first.author, first.coverUrl, mediaVersions)
+            val first = resources.first().artifacts.first()
+            DownloadedBookGroup(first.bookId, first.bookTitle, first.author, first.coverUrl, resources)
         }
         .sortedWith(
-            compareByDescending<DownloadedWorkGroup> { it.lastOpenedAtEpochMillis ?: Long.MIN_VALUE }
+            compareByDescending<DownloadedBookGroup> { it.lastOpenedAtEpochMillis ?: Long.MIN_VALUE }
                 .thenBy { it.title.lowercase() }
-                .thenBy(DownloadedWorkGroup::workId),
+                .thenBy(DownloadedBookGroup::bookId),
         )
         .toList()
-}
-
-private fun String.toLegacyMediaKind(): String = when {
-    equals("comic", true) -> "COMIC"
-    equals("audio", true) -> "AUDIOBOOK"
-    else -> "EBOOK"
 }

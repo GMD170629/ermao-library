@@ -11,6 +11,14 @@ const basePath = configuredBasePath && configuredBasePath !== '/'
   ? `/${configuredBasePath.replace(/^\/+|\/+$/g, '')}`
   : '';
 
+function pythonBackendOrigin(value = process.env.PYTHON_API_ORIGIN) {
+  const parsed = new URL((value || 'http://127.0.0.1:8000').trim());
+  if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) {
+    throw new Error('PYTHON_API_ORIGIN must use HTTP on a loopback host');
+  }
+  return parsed.origin;
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
@@ -23,15 +31,16 @@ const nextConfig = {
     keepAlive: false
   },
   async rewrites() {
+    const apiOrigin = pythonBackendOrigin();
     return {
       beforeFiles: [
         {
           source: '/api/:path*',
-          destination: 'http://127.0.0.1:8000/api/:path*'
+          destination: `${apiOrigin}/api/:path*`
         },
         {
           source: '/opds/:path*',
-          destination: 'http://127.0.0.1:8000/opds/:path*'
+          destination: `${apiOrigin}/opds/:path*`
         }
       ]
     };

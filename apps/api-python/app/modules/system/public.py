@@ -15,10 +15,6 @@ from app.modules.system.domain.health import (
     normalize_health_run_snapshot,
 )
 from app.modules.system.domain.queue import (
-    ACTIVE_OPERATION_STATUSES,
-    DEFAULT_BUSY_TIMEOUT_MS,
-    HEARTBEAT_BUSY_TIMEOUT_MS,
-    TERMINAL_OPERATION_STATUSES,
     safe_runtime_error,
 )
 from app.modules.system.domain.settings_policy import (
@@ -30,17 +26,13 @@ from app.modules.system.domain.settings_policy import (
 )
 
 __all__ = [
-    "ACTIVE_OPERATION_STATUSES",
-    "DEFAULT_BUSY_TIMEOUT_MS",
     "DEFAULT_MAX_EVENT_BYTES",
     "DETAIL_TAB_KEYS",
-    "HEARTBEAT_BUSY_TIMEOUT_MS",
     "LOG_MAX_BYTES_SETTING",
     "MAX_MAX_EVENT_BYTES",
     "MIN_MAX_EVENT_BYTES",
     "RETIRED_SYSTEM_SETTING_KEYS",
     "SENSITIVE_SYSTEM_SETTING_KEYS",
-    "TERMINAL_OPERATION_STATUSES",
     "HealthRunItem",
     "HealthRunSnapshot",
     "PreparedSystemEvent",

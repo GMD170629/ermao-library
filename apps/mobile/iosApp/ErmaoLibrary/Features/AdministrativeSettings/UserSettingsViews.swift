@@ -200,7 +200,7 @@ struct UserAccessView: View {
                 Section(copy[.selectedDirectories]) {
                     ForEach(snapshot.scopes.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }) { scope in
                         Button { if selected.contains(scope.id) { selected.remove(scope.id) } else { selected.insert(scope.id) } } label: {
-                            HStack { Image(systemName: selected.contains(scope.id) ? "checkmark.square.fill" : "square"); VStack(alignment: .leading) { Text(scope.name); Text(scope.serverPath).font(.caption).foregroundStyle(theme.textSecondary) }; Spacer(); Text("\(scope.workCount)").foregroundStyle(theme.textSecondary) }
+                            HStack { Image(systemName: selected.contains(scope.id) ? "checkmark.square.fill" : "square"); VStack(alignment: .leading) { Text(scope.name); Text(scope.serverPath).font(.caption).foregroundStyle(theme.textSecondary) }; Spacer(); Text("\(scope.bookCount)").foregroundStyle(theme.textSecondary) }
                         }
                     }
                 }
@@ -216,11 +216,11 @@ struct UserAccessView: View {
     private func load() async {
         state = .loading
         state = await store.load(scope: "user-access-\(userID)") { try await store.client.loadUserAccess(id: userID) }
-        if case let .loaded(snapshot) = state { manualImports = snapshot.user.canViewManualImports; selected = snapshot.user.monitorFolderIDs }
+        if case let .loaded(snapshot) = state { manualImports = snapshot.user.canViewManualImports; selected = snapshot.user.libraryIDs }
     }
     private func save() {
         Task {
-            let result = await store.performValue(id: "save-access") { try await store.client.saveUserAccess(id: userID, monitorFolderIDs: selected, canViewManualImports: manualImports) }
+            let result = await store.performValue(id: "save-access") { try await store.client.saveUserAccess(id: userID, libraryIDs: selected, canViewManualImports: manualImports) }
             if case .success = result { dismiss() }
         }
     }

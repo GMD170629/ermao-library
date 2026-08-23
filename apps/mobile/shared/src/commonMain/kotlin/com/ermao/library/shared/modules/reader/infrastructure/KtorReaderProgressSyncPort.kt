@@ -29,13 +29,13 @@ class KtorReaderProgressSyncPort(
             when (val result = client.execute(
                 ApiRequest(
                     method = ApiMethod.Put,
-                    apiPath = "/api/reader/v4/volumes/${encodePathSegment(upload.target.volumeId)}/progress",
+                    apiPath = "/api/reader/v4/resources/${encodePathSegment(upload.target.resourceId)}/progress",
                     responseDeserializer = mapper.responseSerializer(),
                     requestBody = mapper.encodeProgressUpload(upload),
                 ),
             )) {
                 is ApiResult.Success -> runCatching {
-                    ReaderProgressPushResult.Accepted(mapper.decodeSnapshot(result.value, upload.target.volumeId))
+                    ReaderProgressPushResult.Accepted(mapper.decodeSnapshot(result.value, upload.target.resourceId))
                 }.getOrElse { ReaderProgressPushResult.Rejected("INVALID_PROGRESS_RESPONSE") }
                 is ApiResult.Failure -> {
                     if (result.error.code == "READER_PROGRESS_CONFLICT") {
@@ -43,7 +43,7 @@ class KtorReaderProgressSyncPort(
                         val current = (details?.get("current") as? JsonObject)
                             ?: details
                         val conflict = current?.let {
-                            runCatching { mapper.decodeSnapshot(it, upload.target.volumeId) }.getOrNull()
+                            runCatching { mapper.decodeSnapshot(it, upload.target.resourceId) }.getOrNull()
                         }
                         if (conflict != null) ReaderProgressPushResult.Conflict(conflict)
                         else ReaderProgressPushResult.Rejected("INVALID_PROGRESS_CONFLICT")
@@ -71,7 +71,7 @@ class KtorReaderProgressSyncPort(
         val client = clients.create(profile)
         return try {
             when (val result = client.loadAuthenticatedAsset(
-                apiPath = "/api/reader/v4/volumes/${encodePathSegment(target.volumeId)}/progress",
+                apiPath = "/api/reader/v4/resources/${encodePathSegment(target.resourceId)}/progress",
                 etag = etag,
                 maximumBytes = 196_608,
             )) {
@@ -80,7 +80,7 @@ class KtorReaderProgressSyncPort(
                 } else {
                     runCatching {
                         ReaderProgressQueryResult.Current(
-                            mapper.decodeProgressState(result.value.bytes.decodeToString(), target.volumeId),
+                            mapper.decodeProgressState(result.value.bytes.decodeToString(), target.resourceId),
                             result.value.etag,
                         )
                     }.getOrElse { ReaderProgressQueryResult.Failure("INVALID_PROGRESS_RESPONSE", false) }

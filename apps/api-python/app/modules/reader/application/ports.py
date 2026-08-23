@@ -7,45 +7,46 @@ from typing import Protocol
 
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
+    ReaderAssetDto,
     ReaderBookmarkDto,
     ReaderExactLocationDto,
-    ReaderFileDto,
+    ReaderNavigationUnitDto,
     ReaderProgressDto,
     ReaderReadingStatus,
-    ReaderUnitDto,
-    ReaderVolumeContextDto,
-    ReaderVolumeDto,
+    ReaderResourceContextDto,
 )
 
 
-class ReaderVolumeRepository(Protocol):
-    def get_context(self, volume_id: str) -> ReaderVolumeContextDto | None: ...
+class ReaderResourceRepository(Protocol):
+    def get_context(self, resource_id: str) -> ReaderResourceContextDto | None: ...
 
-    def list_visible_volumes_for_work(
-        self, work_id: str, access_scope: ReaderAccessScope
-    ) -> list[ReaderVolumeDto]: ...
+    def get_visible_context(
+        self, resource_id: str, access_scope: ReaderAccessScope
+    ) -> ReaderResourceContextDto | None: ...
 
-    def list_files(self, volume_id: str) -> list[ReaderFileDto]: ...
+    def list_assets(self, resource_id: str) -> list[ReaderAssetDto]: ...
 
-    def list_units(self, volume_id: str) -> list[ReaderUnitDto]: ...
+    def list_navigation_units(
+        self, resource_id: str
+    ) -> list[ReaderNavigationUnitDto]: ...
 
     def get_progress(
-        self, user_id: str, volume_id: str
+        self, user_id: str, resource_id: str
     ) -> ReaderProgressDto | None: ...
 
     def list_progresses(
-        self, user_id: str, volume_ids: list[str]
+        self, user_id: str, resource_ids: list[str]
     ) -> list[ReaderProgressDto]: ...
 
     def get_progress_mutation(
-        self, user_id: str, volume_id: str, mutation_id: str
+        self, user_id: str, resource_id: str, mutation_id: str
     ) -> ReaderProgressDto | None: ...
 
     def save_exact_progress(
         self,
         *,
         user_id: str,
-        context: ReaderVolumeContextDto,
+        context: ReaderResourceContextDto,
         reader_type: str,
         display_percent: float,
         location: ReaderExactLocationDto,
@@ -61,7 +62,7 @@ class ReaderVolumeRepository(Protocol):
         self,
         *,
         user_id: str,
-        context: ReaderVolumeContextDto,
+        context: ReaderResourceContextDto,
         reader_type: str,
         status: ReaderReadingStatus,
         now: datetime,
@@ -71,7 +72,7 @@ class ReaderVolumeRepository(Protocol):
         self,
         *,
         user_id: str,
-        context: ReaderVolumeContextDto,
+        context: ReaderResourceContextDto,
         reader_type: str,
         percent: float,
         location_json: str,
@@ -85,14 +86,14 @@ class ReaderVolumeRepository(Protocol):
     ) -> ReaderProgressDto: ...
 
     def list_bookmarks(
-        self, user_id: str, volume_id: str
+        self, user_id: str, resource_id: str
     ) -> list[ReaderBookmarkDto]: ...
 
     def replace_bookmarks(
         self,
         *,
         user_id: str,
-        volume_id: str,
+        resource_id: str,
         bookmarks: list[ReaderBookmarkDto],
         now: datetime,
     ) -> list[ReaderBookmarkDto]: ...
@@ -112,7 +113,7 @@ class ReaderPublicationLocatorIndex(Protocol):
     def validate(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
         location: ReaderExactLocationDto,
     ) -> bool: ...

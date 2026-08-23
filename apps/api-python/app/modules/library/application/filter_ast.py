@@ -69,7 +69,7 @@ FIELD_OPERATORS = {
             "trackingStatus",
             "organizeStatus",
             "shelf",
-            "monitorFolder",
+            "library",
             "origin",
             "importStatus",
         )
@@ -83,7 +83,7 @@ FIELD_OPERATORS = {
             "pageCount",
             "chapterCount",
             "duration",
-            "volumeCount",
+            "resourceCount",
             "progress",
         )
     },

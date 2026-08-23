@@ -1,21 +1,24 @@
-"""SQLAlchemy ORM media resource query adapter."""
+"""SQLAlchemy media adapter for READY ResourceAssets."""
 
 from __future__ import annotations
 
-from sqlalchemy import case, select
+from typing import cast
+
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.authorization import AuthorizationContext, volume_visibility_predicate
-from app.models.library import (
-    LibraryFile,
-    LibraryMediaVersion,
-    LibraryVolume,
-    LibraryWork,
+from app.models import (
+    Library,
+    LibraryBook,
+    LibraryReadableResourceMetadata,
+    LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
+    LibrarySourceNode,
+    LibrarySourceNodeMetadata,
 )
-from app.modules.media.application.resource_query import MediaFileResource
-from app.modules.media.application.volume_archive import (
-    VolumeArchiveSelection,
-    VolumeArchiveSource,
+from app.modules.media.application.resource_query import (
+    MediaAssetResource,
+    SourceNodeCoverResource,
 )
 
 
@@ -23,119 +26,116 @@ class SqlAlchemyMediaResourceRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get_file(self, file_id: str) -> MediaFileResource | None:
-        file = self._session.get(LibraryFile, file_id)
-        return self._file_resource(file)
+    def get_asset(self, asset_id: str) -> MediaAssetResource | None:
+        row = self._session.execute(
+            select(
+                LibraryResourceAsset,
+                LibrarySourceNode,
+                LibraryResourceAssetMetadata,
+                Library,
+            )
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(
+                LibraryResourceAsset.id == asset_id,
+                LibraryResourceAsset.import_state == "READY",
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+            )
+        ).one_or_none()
+        return self._asset_resource(row)
 
-    def first_volume_file(self, volume_id: str) -> MediaFileResource | None:
-        file = self._session.scalars(
-            select(LibraryFile)
-            .where(LibraryFile.volume_id == volume_id)
+    def first_resource_asset(self, resource_id: str) -> MediaAssetResource | None:
+        row = self._session.execute(
+            select(
+                LibraryResourceAsset,
+                LibrarySourceNode,
+                LibraryResourceAssetMetadata,
+                Library,
+            )
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == "READY",
+                LibrarySourceNode.physical_kind == "REGULAR_FILE",
+            )
             .order_by(
-                LibraryFile.sort_order,
-                LibraryFile.created_at,
-                LibraryFile.id,
+                LibraryResourceAsset.sequence_index,
+                LibraryResourceAsset.sort_key,
+                LibraryResourceAsset.created_at,
+                LibraryResourceAsset.id,
             )
             .limit(1)
         ).first()
-        return self._file_resource(file)
+        return self._asset_resource(row)
 
-    def get_volume_archive_selection(
-        self,
-        *,
-        actor: AuthorizationContext,
-        work_id: str,
-        volume_ids: tuple[str, ...],
-    ) -> VolumeArchiveSelection | None:
-        rows = self._session.execute(
-            select(LibraryWork.title, LibraryVolume, LibraryFile)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.work_id == LibraryWork.id,
+    def resource_cover_path(self, resource_id: str) -> str | None:
+        return self._session.scalar(
+            select(LibraryReadableResourceMetadata.cover_path).where(
+                LibraryReadableResourceMetadata.resource_id == resource_id
             )
-            .join(
-                LibraryVolume,
-                LibraryVolume.media_version_id == LibraryMediaVersion.id,
-            )
-            .outerjoin(LibraryFile, LibraryFile.volume_id == LibraryVolume.id)
-            .where(
-                LibraryWork.id == work_id,
-                LibraryVolume.id.in_(volume_ids),
-                LibraryVolume.hidden.is_(False),
-                volume_visibility_predicate(actor),
-            )
-            .order_by(
-                LibraryMediaVersion.media_kind,
-                LibraryVolume.sort_order,
-                LibraryVolume.created_at,
-                LibraryVolume.id,
-                LibraryFile.sort_order,
-                LibraryFile.created_at,
-                LibraryFile.id,
-            )
-        ).all()
-        if not rows:
-            return None
-        sources_by_volume: dict[str, VolumeArchiveSource] = {}
-        for work_title, volume, file in rows:
-            existing = sources_by_volume.get(volume.id)
-            if existing is not None and (existing.source_path or file is None):
-                continue
-            sources_by_volume[volume.id] = VolumeArchiveSource(
-                volume_id=volume.id,
-                volume_title=volume.title,
-                source_path=file.path if file is not None else "",
-            )
-        return VolumeArchiveSelection(
-            work_title=str(rows[0][0]),
-            sources=tuple(sources_by_volume.values()),
         )
 
-    def work_cover_path(self, work_id: str) -> str | None:
-        explicit_cover = self._session.scalar(
-            select(LibraryWork.cover_path).where(LibraryWork.id == work_id)
+    def source_node_cover(
+        self, *, book_id: str, source_node_id: str
+    ) -> SourceNodeCoverResource:
+        book = self._session.get(LibraryBook, book_id)
+        node = self._session.get(LibrarySourceNode, source_node_id)
+        if book is None or node is None or node.physical_kind != "DIRECTORY":
+            return SourceNodeCoverResource(found=False, path=None)
+        root = self._session.get(LibrarySourceNode, book.source_node_id)
+        if root is None or node.library_id != root.library_id:
+            return SourceNodeCoverResource(found=False, path=None)
+        root_relative = root.relative_path.rstrip("/")
+        inside_root = (
+            node.id == root.id
+            or not root_relative
+            or node.relative_path.startswith(f"{root_relative}/")
         )
-        if explicit_cover:
-            return str(explicit_cover)
-        fallback = self._session.scalar(
-            select(LibraryVolume.cover_path)
-            .join(
-                LibraryMediaVersion,
-                LibraryMediaVersion.id == LibraryVolume.media_version_id,
-            )
-            .where(
-                LibraryMediaVersion.work_id == work_id,
-                LibraryVolume.hidden.is_(False),
-                LibraryVolume.cover_path.is_not(None),
-                LibraryVolume.cover_path != "",
-            )
-            .order_by(
-                case(
-                    (LibraryMediaVersion.media_kind == "EBOOK", 0),
-                    (LibraryMediaVersion.media_kind == "COMIC", 1),
-                    (LibraryMediaVersion.media_kind == "AUDIOBOOK", 2),
-                    else_=3,
-                ),
-                LibraryVolume.sort_order,
-                LibraryVolume.created_at,
-                LibraryVolume.id,
-            )
-            .limit(1)
+        if not inside_root:
+            return SourceNodeCoverResource(found=False, path=None)
+        metadata = self._session.get(LibrarySourceNodeMetadata, node.id)
+        return SourceNodeCoverResource(
+            found=True,
+            path=metadata.cover_path if metadata is not None else None,
         )
-        return str(fallback) if fallback else None
-
-    def volume_cover_path(self, volume_id: str) -> str | None:
-        cover_path = self._session.scalar(
-            select(LibraryVolume.cover_path).where(LibraryVolume.id == volume_id)
-        )
-        return str(cover_path) if cover_path else None
 
     @staticmethod
-    def _file_resource(file: LibraryFile | None) -> MediaFileResource | None:
-        if file is None:
+    def _asset_resource(
+        row: object,
+    ) -> MediaAssetResource | None:
+        if row is None:
             return None
-        return MediaFileResource(
-            id=file.id,
-            path=file.path,
-            mime_type=file.mime_type,
+        asset, source_node, metadata, library = cast(
+            tuple[
+                LibraryResourceAsset,
+                LibrarySourceNode,
+                LibraryResourceAssetMetadata | None,
+                Library,
+            ],
+            row,
+        )
+        return MediaAssetResource(
+            id=asset.id,
+            path=source_node.relative_path,
+            source_root=library.root_path,
+            mime_type=(
+                metadata.mime_type
+                if metadata is not None and metadata.mime_type
+                else "application/octet-stream"
+            ),
         )

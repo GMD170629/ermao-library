@@ -1,13 +1,11 @@
-"""Imports HTTP surface: monitor folders and import-task reads."""
+"""Read HTTP adapters for libraries and the target import queue."""
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from time import perf_counter, time_ns
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import Response
@@ -17,54 +15,64 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
-    import_http_store,
-    persist_import_monitor_folder_create,
-    persist_import_monitor_folder_delete,
-    persist_import_monitor_folder_update,
+    continue_library_import,
+    get_import_task,
+    get_library,
+    get_library_by_root_path,
+    library_has_topology,
+    list_import_tasks_page,
+    list_libraries,
+    list_library_access_user_ids,
+    persist_import_library_create,
+    persist_import_library_delete,
+    persist_import_library_update,
 )
 from app.bootstrap.system import get_setting
-from app.core.authorization import authorization_context, can_access_monitor_folder
+from app.contracts.http_errors import ErrorResponses
+from app.core.authorization import (
+    authorization_context,
+    can_access_library,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.imports.application.monitor_folder_commands import (
-    PreparedMonitorFolderCreate,
-    PreparedMonitorFolderDelete,
-    PreparedMonitorFolderUpdate,
-    prepare_monitor_folder_update_values,
+from app.models.common import cuid
+from app.modules.imports.application.library_commands import (
+    PreparedLibraryCreate,
+    PreparedLibraryDelete,
+    PreparedLibraryUpdate,
+    prepare_library_update_values,
 )
-from app.modules.imports.presentation.mappers import (
-    MonitorPathError,
-    import_task_view,
-    monitor_directory_tree_node,
-    resolve_monitor_folder_path,
+from app.modules.imports.application.library_paths import (
+    LibraryPathError,
+    library_directory_tree_node,
+    resolve_library_root_path,
 )
-from app.modules.imports.presentation.path_helpers import (
-    enabled_monitor_folder_for_path,
-)
+from app.modules.imports.presentation.path_helpers import enabled_library_for_path
 from app.modules.imports.presentation.schemas import (
-    CreateMonitorFolderRequest,
-    DeletedMonitorFolderResponse,
-    ImportLogsResponse,
-    ImportTaskResponse,
-    ImportTasksResponse,
-    MonitorDirectoryResponse,
-    MonitorFolderResponse,
-    MonitorFoldersResponse,
+    CreateLibraryRequest,
+    DeletedLibraryResponse,
+    ImportBadRequestError,
+    ImportConflictError,
+    ImportForbiddenError,
+    ImportNotFoundError,
+    LibrariesResponse,
+    LibraryDirectoryResponse,
+    LibraryImportTaskDetailResponse,
+    LibraryImportTaskListResponse,
+    LibraryResponse,
     ParsedReleaseTitleResponse,
     ParseReleaseTitleRequest,
-    UpdateMonitorFolderRequest,
+    UpdateLibraryRequest,
 )
 from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import parse_release_title
+from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
-from app.services.system_events import (
-    prepare_system_event,
-)
+from app.services.system_events import prepare_system_event
 
 router = APIRouter(tags=["imports"], route_class=TypedContractRoute)
 router.include_router(writes_router)
-logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -82,41 +90,29 @@ def _system_setting_value(db: Session, key: str) -> str | None:
     return str(parsed).strip() if parsed is not None and str(parsed).strip() else None
 
 
-def _visible_import_task_or_none(
-    db: Session, user: User, task_id: str
-) -> dict[str, Any] | None:
-    task = import_http_store.get_import_task(db, task_id)
-    if task is None or not can_access_monitor_folder(
-        db, user, task.get("monitorFolderId")
-    ):
-        return None
-    return task
-
-
-@router.get("/monitor-folders")
-def list_monitor_folders(
+@router.get("/libraries", response_model=LibrariesResponse)
+def list_library_roots(
     request: Request,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFoldersResponse:
+) -> LibrariesResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    folders = import_http_store.list_monitor_folders(db)
+    folders = list_libraries(db)
     if purpose == "upload" and user is not None:
         context = authorization_context(db, user)
-        allowed_folder_ids = set(context.monitor_folder_ids)
+        allowed_library_ids = set(context.library_ids)
         folders = [
             folder
             for folder in folders
             if bool(folder.get("enabled"))
-            and (context.is_admin or str(folder.get("id") or "") in allowed_folder_ids)
+            and (context.is_admin or str(folder.get("id") or "") in allowed_library_ids)
         ]
     return ok(
         {
-            "folders": folders,
-            "monitorRoot": None,
+            "libraries": folders,
             "lastUploadTargetPath": _system_setting_value(
                 db, "library.lastUploadTargetPath"
             ),
@@ -127,83 +123,140 @@ def list_monitor_folders(
     )
 
 
-@router.get("/monitor-folders/tree")
-def monitor_folder_tree(
+@router.get(
+    "/libraries/{library_id}/import-tasks", response_model=LibraryImportTaskListResponse
+)
+def list_library_import_tasks(
+    library_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, alias="pageSize", ge=1, le=100),
+    state: Literal["ALL", "QUEUED", "RUNNING", "SUCCEEDED", "FAILED"] | None = Query(
+        default=None
+    ),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LibraryImportTaskListResponse | Response:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if (
+        user is None
+        or get_library(db, library_id) is None
+        or not can_access_library(db, user, library_id)
+    ):
+        return fail("书库不存在或无权访问", status_code=404, code="LIBRARY_NOT_FOUND")
+
+    context = authorization_context(db, user)
+    tasks, total, summary = list_import_tasks_page(
+        db,
+        context,
+        page=page,
+        page_size=page_size,
+        library_id=library_id,
+        state=state,
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    normalized_page = min(max(1, page), total_pages)
+    return ok(
+        {
+            "tasks": tasks,
+            "page": normalized_page,
+            "pageSize": page_size,
+            "total": total,
+            "totalPages": total_pages,
+            "completed": summary["completed"],
+            "failed": summary["failed"],
+        }
+    )
+
+
+@router.get(
+    "/library-import-tasks/{task_id}", response_model=LibraryImportTaskDetailResponse
+)
+def get_library_import_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> LibraryImportTaskDetailResponse | Response:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if user is None:
+        return fail("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+
+    task = get_import_task(db, task_id, authorization_context(db, user))
+    if task is None:
+        return fail("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+    return ok({"task": task})
+
+
+@router.get("/libraries/tree", response_model=LibraryDirectoryResponse)
+def library_tree(
     request: Request,
     path: str | None = None,
     purpose: Literal["upload"] | None = Query(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorDirectoryResponse:
+) -> LibraryDirectoryResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
     if purpose == "upload":
-        monitor_folder = (
-            enabled_monitor_folder_for_path(db, Path(path)) if path else None
-        )
-        monitor_folder_id = str((monitor_folder or {}).get("id") or "") or None
+        library = enabled_library_for_path(db, Path(path)) if path else None
+        library_id = str((library or {}).get("id") or "") or None
         if (
-            monitor_folder is None
+            library is None
             or user is None
-            or not can_access_monitor_folder(db, user, monitor_folder_id)
+            or not can_access_library(db, user, library_id)
         ):
             return fail(
                 "目标文件夹不存在或无权访问",
                 status_code=404,
-                code="MONITOR_FOLDER_NOT_FOUND",
+                code="LIBRARY_NOT_FOUND",
             )
-    db.close()
-    node, error, status_code = monitor_directory_tree_node(path)
+    node, error, status_code = library_directory_tree_node(path)
     if error:
         return fail(error, status_code=status_code)
-    return ok(
-        {
-            "node": node,
-            "monitorRoot": None,
-        }
-    )
+    return ok({"node": node})
 
 
-@router.post("/monitor-folders")
-async def create_monitor_folder(
-    payload: CreateMonitorFolderRequest,
+@router.post("/libraries", response_model=LibraryResponse)
+def create_library(
+    payload: CreateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFolderResponse:
+) -> Annotated[
+    LibraryResponse | Response,
+    ErrorResponses(
+        ImportBadRequestError,
+        ImportConflictError,
+        ImportForbiddenError,
+        ImportNotFoundError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
     try:
-        root_path = str(resolve_monitor_folder_path(payload.root_path))
-    except MonitorPathError as exc:
+        root_path = str(resolve_library_root_path(payload.root_path))
+    except LibraryPathError as exc:
         return fail(str(exc), status_code=exc.status_code, code=exc.code)
-    if payload.shelf_id:
-        return fail(
-            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
-            status_code=400,
-            code="MONITOR_FOLDER_SHELF_RETIRED",
-        )
-    media_kind_policy = payload.media_kind_policy.strip().upper()
-    if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
-        return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
-    existing_folder = import_http_store.get_monitor_folder_by_root_path(db, root_path)
-    db.close()
-    if existing_folder:
-        return fail(
-            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
-        )
-    folder_id = f"py_{time_ns()}"
+    if get_library_by_root_path(db, root_path) is not None:
+        return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
+
+    library_id = cuid()
     checkpoint_at = _now()
-    folder: dict[str, object] = {
-        "id": folder_id,
-        "name": payload.name or Path(root_path).name or "监控文件夹",
+    library: dict[str, object] = {
+        "id": library_id,
+        "name": payload.name or Path(root_path).name or "书库",
         "rootPath": root_path,
-        "shelfId": None,
+        "organizationMode": payload.organization_mode.value,
         "enabled": payload.enabled,
-        "mediaKindPolicy": media_kind_policy,
         "ignorePatterns": payload.ignore_patterns,
         "ignoreHidden": payload.ignore_hidden,
         "minFileSizeBytes": payload.min_file_size_bytes,
@@ -213,323 +266,196 @@ async def create_monitor_folder(
     }
     prepared_event = prepare_system_event(
         level="info",
-        source="folder",
+        source="library",
         actor_type="admin",
         actor_id=user.id,
         action="created",
-        target_type="monitorFolder",
-        target_id=folder_id,
-        message=f"新增来源目录：{folder['name']}",
+        target_type="library",
+        target_id=library_id,
+        message=f"新增书库：{library['name']}",
         metadata={"rootPath": root_path},
     )
     try:
-        persist_import_monitor_folder_create(
+        persist_import_library_create(
             db,
-            PreparedMonitorFolderCreate(folder, prepared_event),
+            PreparedLibraryCreate(library, prepared_event),
         )
     except IntegrityError:
-        return fail(
-            "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
-        )
-    return ok({"folder": folder}, status_code=201)
+        return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
+    if payload.enabled:
+        continue_library_import(db, library_id)
+    return ok({"library": get_library(db, library_id) or library}, status_code=201)
 
 
-@router.put("/monitor-folders/{folder_id}")
-@router.patch("/monitor-folders/{folder_id}")
-async def update_monitor_folder(
-    folder_id: str,
-    payload: UpdateMonitorFolderRequest,
+@router.patch("/libraries/{library_id}", response_model=LibraryResponse)
+def update_library(
+    library_id: str,
+    payload: UpdateLibraryRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> MonitorFolderResponse:
+) -> Annotated[
+    LibraryResponse | Response,
+    ErrorResponses(
+        ImportBadRequestError,
+        ImportConflictError,
+        ImportForbiddenError,
+        ImportNotFoundError,
+    ),
+]:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    if payload.shelf_id:
-        return fail(
-            "监控文件夹不再绑定全局书架，请创建个人来源文件夹智能书架",
-            status_code=400,
-            code="MONITOR_FOLDER_SHELF_RETIRED",
-        )
-    values = payload.model_dump(
-        by_alias=True,
-        exclude_unset=True,
-        exclude={"shelf_id", "import_mode"},
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
+
+    existing = get_library(db, library_id)
+    if existing is None:
+        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
+    values = payload.model_dump(by_alias=True, exclude_unset=True)
+    if "organizationMode" in values and values["organizationMode"] is not None:
+        values["organizationMode"] = LibraryOrganizationMode(
+            values["organizationMode"]
+        ).value
+    structural_change = (
+        "rootPath" in values and values["rootPath"] != existing.get("rootPath")
+    ) or (
+        "organizationMode" in values
+        and values["organizationMode"] != existing.get("organizationMode")
     )
-    if "mediaKindPolicy" in values and values["mediaKindPolicy"] is not None:
-        media_kind_policy = str(values["mediaKindPolicy"]).strip().upper()
-        if media_kind_policy not in {"MIXED", "EBOOK", "COMIC", "AUDIOBOOK"}:
-            return fail("内容分类无效", status_code=400, code="INVALID_MEDIA_KIND")
-        values["mediaKindPolicy"] = media_kind_policy
-    existing = import_http_store.get_monitor_folder(db, folder_id)
-    if not existing:
-        return fail("监控文件夹不存在", status_code=404)
+    if structural_change and library_has_topology(db, library_id):
+        return fail(
+            "书库已有目录拓扑，不能修改根路径或组织方式",
+            status_code=409,
+            code="LIBRARY_TOPOLOGY_LOCKED",
+        )
     if "rootPath" in values:
         try:
-            root_path = str(resolve_monitor_folder_path(values["rootPath"]))
-        except MonitorPathError as exc:
+            root_path = str(resolve_library_root_path(values["rootPath"]))
+        except LibraryPathError as exc:
             return fail(str(exc), status_code=exc.status_code, code=exc.code)
-        if import_http_store.get_monitor_folder_by_root_path(
-            db, root_path, exclude_id=folder_id
-        ):
-            return fail(
-                "监控文件夹路径已存在", status_code=409, details={"rootPath": root_path}
-            )
+        if get_library_by_root_path(db, root_path, exclude_id=library_id) is not None:
+            return fail("书库路径已存在", status_code=409)
         values["rootPath"] = root_path
-    db.close()
+    was_enabled = bool(existing.get("enabled"))
     if values:
         values["updatedAt"] = _now()
         prepared_event = prepare_system_event(
             level="info",
-            source="folder",
+            source="library",
             actor_type="admin",
             actor_id=user.id,
             action="updated",
-            target_type="monitorFolder",
-            target_id=folder_id,
-            message=f"更新来源目录：{values.get('name') or existing.get('name')}",
+            target_type="library",
+            target_id=library_id,
+            message=f"更新书库：{values.get('name') or existing.get('name')}",
             metadata={
                 "changes": values,
                 "rootPath": values.get("rootPath") or existing.get("rootPath"),
             },
         )
-        prepared_values = prepare_monitor_folder_update_values(values)
         try:
-            persist_import_monitor_folder_update(
+            persist_import_library_update(
                 db,
-                PreparedMonitorFolderUpdate(
-                    folder_id,
-                    prepared_values,
+                PreparedLibraryUpdate(
+                    library_id,
+                    prepare_library_update_values(values),
                     prepared_event,
                 ),
             )
         except IntegrityError:
-            return fail(
-                "监控文件夹路径已存在",
-                status_code=409,
-                details={"rootPath": values.get("rootPath")},
-            )
-        folder = import_http_store.get_monitor_folder(db, folder_id)
-    else:
-        folder = existing
-    return ok({"folder": folder})
+            return fail("书库路径已存在", status_code=409)
+    updated = get_library(db, library_id) or existing
+    if bool(updated.get("enabled")) and not was_enabled:
+        continue_library_import(db, library_id)
+    return ok({"library": updated})
 
 
-@router.delete("/monitor-folders/{folder_id}")
-def delete_monitor_folder(
-    folder_id: str,
+@router.delete("/libraries/{library_id}", response_model=DeletedLibraryResponse)
+def delete_library(
+    library_id: str,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> DeletedMonitorFolderResponse:
+) -> DeletedLibraryResponse | Response:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    existing = import_http_store.get_monitor_folder(db, folder_id)
-    affected_user_ids = import_http_store.list_monitor_folder_access_user_ids(
-        db,
-        folder_id,
-    )
-    db.close()
+    if user is None:
+        return fail("当前用户无权管理书库", status_code=403)
+    existing = get_library(db, library_id)
+    if existing is None:
+        return fail("书库不存在", status_code=404, code="LIBRARY_NOT_FOUND")
+    affected_user_ids = list_library_access_user_ids(db, library_id)
     checkpoint_at = _now()
     prepared_event = prepare_system_event(
         level="warning",
-        source="folder",
+        source="library",
         actor_type="admin",
         actor_id=user.id,
         action="deleted",
-        target_type="monitorFolder",
-        target_id=folder_id,
-        message=f"删除来源目录：{(existing or {}).get('name') or folder_id}",
+        target_type="library",
+        target_id=library_id,
+        message=f"删除书库：{existing.get('name') or library_id}",
         metadata={
-            "rootPath": (existing or {}).get("rootPath"),
+            "rootPath": existing.get("rootPath"),
             "authorizationInvalidatedFor": len(affected_user_ids),
         },
     )
-    deleted = persist_import_monitor_folder_delete(
+    deleted = persist_import_library_delete(
         db,
-        PreparedMonitorFolderDelete(
-            folder_id,
+        PreparedLibraryDelete(
+            library_id,
             affected_user_ids,
             checkpoint_at,
             prepared_event,
         ),
     )
-    return ok({"deleted": deleted, "id": folder_id})
+    return ok({"deleted": deleted, "id": library_id})
 
 
-@router.get("/import-tasks")
-def list_import_tasks(
-    request: Request,
-    page: int = 1,
-    pageSize: int = 10,
-    status: str | None = None,
-    keyword: str | None = None,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ImportTasksResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    page = max(1, page)
-    page_size = min(50, max(1, pageSize))
-    context = authorization_context(db, user)
-    normalized_status = str(status or "").strip().upper()
-    if normalized_status and normalized_status != "ALL":
-        if normalized_status not in {"PENDING", "PARSING", "COMPLETED", "FAILED"}:
-            return fail("导入状态无效", status_code=400)
-    started_at = perf_counter()
-    tasks, total, summary = import_http_store.list_import_tasks_page(
-        db,
-        context,
-        page=page,
-        page_size=page_size,
-        status=normalized_status or None,
-        keyword=keyword,
+def _parsed_release_title(title: str) -> dict[str, object]:
+    volume_info = parse_release_title(title)
+    chapter = re.search(
+        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
+        title,
+        flags=re.IGNORECASE,
     )
-    queried_at = perf_counter()
-    tasks = import_http_store.hydrate_import_task_page(db, tasks, log_limit=20)
-    hydrated_at = perf_counter()
-    db.close()
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, total_pages)
-    views = [import_task_view(db, task, log_limit=20) for task in tasks]
-    mapped_at = perf_counter()
-    logger.info(
-        "import_tasks.page.loaded",
-        extra={
-            "event": "import_tasks.page.loaded",
-            "actorId": user.id,
-            "page": page,
-            "pageSize": page_size,
-            "resultCount": len(views),
-            "queryElapsedMs": round((queried_at - started_at) * 1000, 2),
-            "hydrateElapsedMs": round((hydrated_at - queried_at) * 1000, 2),
-            "mapElapsedMs": round((mapped_at - hydrated_at) * 1000, 2),
-            "elapsedMs": round((mapped_at - started_at) * 1000, 2),
-        },
-    )
-    return ok(
-        {
-            "tasks": views,
-            "summary": summary,
-            "page": page,
-            "pageSize": page_size,
-            "total": total,
-            "totalPages": total_pages,
+    return {
+        "parsed": {
+            "title": title,
+            "volume": volume_info.volume_index if volume_info else None,
+            "chapter": float(chapter.group(1)) if chapter else None,
         }
-    )
+    }
 
 
-@router.get("/import-tasks/{task_id}")
-def get_import_task(
-    task_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ImportTaskResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    task = _visible_import_task_or_none(db, user, task_id)
-    if not task:
-        return fail("导入任务不存在", status_code=404)
-    task = import_http_store.hydrate_import_task_page(db, [task], log_limit=100)[0]
-    db.close()
-    return ok({"task": import_task_view(db, task, log_limit=100)})
-
-
-@router.get("/import-tasks/{task_id}/logs")
-def get_import_logs(
-    task_id: str,
-    request: Request,
-    page: int = 1,
-    pageSize: int = 100,
-    level: str | None = None,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> ImportLogsResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if _visible_import_task_or_none(db, user, task_id) is None:
-        return fail("导入任务不存在", status_code=404)
-    page = max(1, page)
-    page_size = min(200, max(1, pageSize))
-    logs, total = import_http_store.list_import_logs(
-        db,
-        task_id,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        level=level,
-    )
-    db.close()
-    from app.modules.imports.presentation.mappers import serialize_import_log
-
-    return ok(
-        {
-            "logs": [serialize_import_log(log) for log in logs],
-            "page": page,
-            "pageSize": page_size,
-            "total": total,
-            "totalPages": max(1, (total + page_size - 1) // page_size),
-        }
-    )
-
-
-@router.get("/tracking/release-title-parser")
+@router.get("/tracking/release-title-parser", response_model=ParsedReleaseTitleResponse)
 def release_title_parser_get(
     request: Request,
     title: str = "",
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ParsedReleaseTitleResponse:
+) -> ParsedReleaseTitleResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
-    volume_info = parse_release_title(title)
-    chapter = re.search(
-        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
-        title,
-        flags=re.IGNORECASE,
-    )
-    return ok(
-        {
-            "parsed": {
-                "title": title,
-                "volume": volume_info.volume_index if volume_info else None,
-                "chapter": float(chapter.group(1)) if chapter else None,
-            }
-        }
-    )
+    return ok(_parsed_release_title(title))
 
 
-@router.post("/tracking/release-title-parser")
+@router.post(
+    "/tracking/release-title-parser", response_model=ParsedReleaseTitleResponse
+)
 def release_title_parser(
     request: Request,
     payload: Annotated[ParseReleaseTitleRequest | None, Body()] = None,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> ParsedReleaseTitleResponse:
+) -> ParsedReleaseTitleResponse | Response:
     _user, auth_error = _auth(db, request, settings)
     if auth_error:
         return auth_error
-    db.close()
-    title = payload.title if payload is not None else ""
-    volume_info = parse_release_title(title)
-    chapter = re.search(
-        r"(?:ch(?:apter)?\.?|第)\s*(\d+(?:\.\d+)?)\s*(?:话|章|ch)?",
-        title,
-        flags=re.IGNORECASE,
-    )
-    return ok(
-        {
-            "parsed": {
-                "title": title,
-                "volume": volume_info.volume_index if volume_info else None,
-                "chapter": float(chapter.group(1)) if chapter else None,
-            }
-        }
-    )
+    return ok(_parsed_release_title(payload.title if payload is not None else ""))
+
+
+__all__ = ["router"]

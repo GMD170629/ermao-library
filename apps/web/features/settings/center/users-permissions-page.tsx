@@ -20,13 +20,13 @@ type ManagedUser = {
   status: UserStatus;
   canManageSystem: boolean;
   canViewManualImports: boolean;
-  monitorFolderIds: string[];
+  libraryIds: string[];
   locale: 'zh-CN' | 'en-US';
   authzVersion: number;
   createdAt?: string | number;
 };
 
-type MonitorFolder = {
+type Library = {
   id: string;
   name: string;
   rootPath: string;
@@ -40,7 +40,7 @@ type UserForm = {
   status: UserStatus;
   canManageSystem: boolean;
   canViewManualImports: boolean;
-  monitorFolderIds: string[];
+  libraryIds: string[];
   locale: 'zh-CN' | 'en-US';
 };
 
@@ -52,7 +52,7 @@ const emptyForm: UserForm = {
   status: 'active',
   canManageSystem: false,
   canViewManualImports: false,
-  monitorFolderIds: [],
+  libraryIds: [],
   locale: 'zh-CN'
 };
 
@@ -65,7 +65,7 @@ function formFromUser(user: ManagedUser): UserForm {
     status: user.status,
     canManageSystem: user.canManageSystem,
     canViewManualImports: user.canViewManualImports,
-    monitorFolderIds: user.monitorFolderIds ?? [],
+    libraryIds: user.libraryIds ?? [],
     locale: user.locale
   };
 }
@@ -89,7 +89,7 @@ export function UsersPermissionsPage() {
   const { t, formatDateTime } = useI18n();
   const toast = useToast();
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [folders, setFolders] = useState<MonitorFolder[]>([]);
+  const [folders, setFolders] = useState<Library[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<UserForm>(emptyForm);
@@ -111,11 +111,11 @@ export function UsersPermissionsPage() {
     try {
       const [usersData, folderData] = await Promise.all([
         apiRequest('/api/admin/users'),
-        apiRequest('/api/monitor-folders')
+        apiRequest('/api/libraries')
       ]);
       const nextUsers = (usersData?.users ?? []) as ManagedUser[];
       setUsers(nextUsers);
-      setFolders((folderData?.folders ?? []) as MonitorFolder[]);
+      setFolders((folderData?.libraries ?? []) as Library[]);
       const nextId = preferredUserId && nextUsers.some((user) => user.id === preferredUserId)
         ? preferredUserId
         : selectedId && nextUsers.some((user) => user.id === selectedId)
@@ -154,9 +154,9 @@ export function UsersPermissionsPage() {
   function toggleFolder(folderId: string) {
     setForm((current) => ({
       ...current,
-      monitorFolderIds: current.monitorFolderIds.includes(folderId)
-        ? current.monitorFolderIds.filter((id) => id !== folderId)
-        : [...current.monitorFolderIds, folderId]
+      libraryIds: current.libraryIds.includes(folderId)
+        ? current.libraryIds.filter((id) => id !== folderId)
+        : [...current.libraryIds, folderId]
     }));
   }
 
@@ -172,7 +172,7 @@ export function UsersPermissionsPage() {
         status: form.status,
         canManageSystem: form.role === 'member' && form.canManageSystem,
         canViewManualImports: form.role === 'member' && form.canViewManualImports,
-        monitorFolderIds: form.role === 'member' ? form.monitorFolderIds : [],
+        libraryIds: form.role === 'member' ? form.libraryIds : [],
         locale: form.locale,
         ...(creating ? { password: form.password } : {})
       };
@@ -384,7 +384,7 @@ export function UsersPermissionsPage() {
 
           {form.role === 'admin' ? (
             <div className="mt-6 rounded-2xl border border-[#F2C6B9] bg-[#FFF5F1] px-4 py-3 text-sm leading-6 text-[#8A3E2B]">
-              {t('管理员隐式拥有全部书库、系统设置和用户管理权限，不保存额外的文件夹授权。')}
+              {t('管理员隐式拥有全部书库、系统设置和用户管理权限，不保存额外的书库授权。')}
             </div>
           ) : (
             <>
@@ -400,19 +400,19 @@ export function UsersPermissionsPage() {
               </fieldset>
 
               <fieldset className="mt-6">
-                <legend className="text-sm font-semibold text-[#35312D]">{t('书库文件夹查看范围')}</legend>
+                <legend className="text-sm font-semibold text-[#35312D]">{t('书库权限')}</legend>
                 <p className="mt-1 text-xs leading-5 text-[#817A73]">{t('未选择任何范围时，该用户默认看不到书库内容。')}</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#E3DED8] px-3.5 py-3">
                     <input type="checkbox" checked={form.canViewManualImports} onChange={(event) => setForm({ ...form, canViewManualImports: event.target.checked })} className="mt-0.5 h-4 w-4 accent-[#E9583A]" />
                     <span>
                       <span className="block text-sm font-medium text-[#35312D]">{t('手动导入')}</span>
-                      <span className="mt-0.5 block text-xs text-[#817A73]">{t('不属于监控文件夹的内容')}</span>
+                      <span className="mt-0.5 block text-xs text-[#817A73]">{t('不属于书库的内容')}</span>
                     </span>
                   </label>
                   {folders.map((folder) => (
                     <label key={folder.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#E3DED8] px-3.5 py-3">
-                      <input type="checkbox" checked={form.monitorFolderIds.includes(folder.id)} onChange={() => toggleFolder(folder.id)} className="mt-0.5 h-4 w-4 accent-[#E9583A]" />
+                      <input type="checkbox" checked={form.libraryIds.includes(folder.id)} onChange={() => toggleFolder(folder.id)} className="mt-0.5 h-4 w-4 accent-[#E9583A]" />
                       <span className="min-w-0">
                         <span data-i18n-skip className="block truncate text-sm font-medium text-[#35312D]">{folder.name}</span>
                         <span data-i18n-skip className="mt-0.5 block truncate text-xs text-[#817A73]">{folder.rootPath}</span>

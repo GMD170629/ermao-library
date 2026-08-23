@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -14,13 +13,13 @@ from app.modules.publications.infrastructure.txt_adapter import TxtPublicationAd
 
 
 def _source(path: Path) -> PublicationSource:
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return PublicationSource(
-        volume_id="txt-volume",
-        file_id="txt-file",
+        resource_id="txt-resource",
+        asset_id="txt-asset",
         source_format="txt",
         path=str(path),
-        full_hash=digest,
+        size_bytes=path.stat().st_size,
+        mtime_ms=int(path.stat().st_mtime * 1000),
         title="确定性文本",
         author="测试作者",
     )
@@ -46,8 +45,8 @@ def test_txt_adapter_has_fixed_encoding_and_newline_policy(
     publication = adapter.open(_source(path))
     resource = adapter.read_resource(_source(path), "text/chapter-0001.xhtml")
 
-    assert publication.fingerprint.parser == "shuku-txt-parser-v1"
-    assert publication.fingerprint.normalization == "shuku-txt-publication-v2"
+    assert publication.revision.parser == "shuku-txt-parser-v1"
+    assert publication.revision.normalization == "shuku-txt-publication-v2"
     assert publication.reading_order[0].href == "text/chapter-0001.xhtml"
     assert publication.toc[0].href == ("text/chapter-0001.xhtml#heading-000001")
     assert marker in resource.content.decode("utf-8")

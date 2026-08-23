@@ -16,14 +16,14 @@ from app.modules.reader.application.dto import (
     ReaderPdfExactLocationDto,
     ReaderReflowableExactLocationDto,
 )
-from app.modules.reader.application.ports import ReaderVolumeRepository
+from app.modules.reader.application.ports import ReaderResourceRepository
 
 
 class NormalizedPublicationLocatorIndex:
     def __init__(
         self,
         publications: OpenPublication,
-        reader_repository: ReaderVolumeRepository,
+        reader_repository: ReaderResourceRepository,
     ) -> None:
         self._publications = publications
         self._reader_repository = reader_repository
@@ -31,40 +31,42 @@ class NormalizedPublicationLocatorIndex:
     def validate(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
         location: ReaderExactLocationDto,
     ) -> bool:
         if isinstance(location, ReaderReflowableExactLocationDto):
-            publication = self._manifest(volume_id=volume_id, access_scope=access_scope)
+            publication = self._manifest(
+                resource_id=resource_id, access_scope=access_scope
+            )
             return publication is not None and any(
                 link.href == location.resource_href
                 and _is_reflowable_markup(link.media_type)
                 and _is_reflowable_markup(location.media_type)
                 for link in (*publication.reading_order, *publication.resources)
             )
-        return self._is_indexed_location(volume_id, location)
+        return self._is_indexed_location(resource_id, location)
 
     def _is_indexed_location(
         self,
-        volume_id: str,
+        resource_id: str,
         location: ReaderExactLocationDto,
     ) -> bool:
-        context = self._reader_repository.get_context(volume_id)
+        context = self._reader_repository.get_context(resource_id)
         if context is None:
             return False
         if isinstance(location, ReaderPdfExactLocationDto):
             return (
-                context.volume.format.lower() == "pdf"
-                and context.volume.page_count is not None
-                and location.page_index < context.volume.page_count
+                context.resource.format.lower() == "pdf"
+                and context.resource.page_count is not None
+                and location.page_index < context.resource.page_count
             )
         if isinstance(location, ReaderComicExactLocationDto):
-            if context.volume.format.lower() not in _COMIC_FORMATS:
+            if context.resource.format.lower() not in _COMIC_FORMATS:
                 return False
             page_units = [
                 unit
-                for unit in self._reader_repository.list_units(volume_id)
+                for unit in self._reader_repository.list_navigation_units(resource_id)
                 if unit.unit_type == "page"
             ]
             return (
@@ -72,10 +74,12 @@ class NormalizedPublicationLocatorIndex:
                 and page_units[location.page_index].href == location.resource_href
             )
         if isinstance(location, ReaderAudioExactLocationDto):
-            if context.volume.format.lower() not in _AUDIO_FORMATS:
+            if context.resource.format.lower() not in _AUDIO_FORMATS:
                 return False
-            files = self._reader_repository.list_files(volume_id)
-            target = next((file for file in files if file.id == location.file_id), None)
+            assets = self._reader_repository.list_assets(resource_id)
+            target = next(
+                (file for file in assets if file.id == location.asset_id), None
+            )
             if target is None or not target.mime_type.lower().startswith("audio/"):
                 return False
             if (
@@ -86,24 +90,24 @@ class NormalizedPublicationLocatorIndex:
             if location.chapter_id is None:
                 return True
             return any(
-                unit.id == location.chapter_id and unit.file_id == location.file_id
-                for unit in self._reader_repository.list_units(volume_id)
+                unit.id == location.chapter_id and unit.asset_id == location.asset_id
+                for unit in self._reader_repository.list_navigation_units(resource_id)
             )
         return False
 
     def _manifest(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: ReaderAccessScope,
     ) -> NormalizedPublication | None:
         try:
             return self._publications.manifest(
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=PublicationAccessScope(
                     is_admin=access_scope.is_admin,
                     can_view_manual_imports=access_scope.can_view_manual_imports,
-                    monitor_folder_ids=access_scope.monitor_folder_ids,
+                    library_ids=access_scope.library_ids,
                 ),
             )
         except (

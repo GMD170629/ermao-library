@@ -2,10 +2,10 @@
 
 from app.modules.shelf.application.catalog import (
     CatalogShelf,
+    CatalogShelfBookPage,
     CatalogShelfPage,
     CatalogShelfQueryPort,
-    CatalogShelfWorkPage,
-    ListCatalogShelfWorkIds,
+    ListCatalogShelfBookIds,
     ListCatalogShelves,
 )
 from app.modules.shelf.application.commands import (
@@ -16,19 +16,21 @@ from app.modules.shelf.application.commands import (
     UpdateShelf,
     UpdateShelfCommand,
 )
+from app.modules.shelf.application.memberships import ShelfBookMembershipPort
 from app.modules.shelf.domain.policies import ShelfKind
 
 __all__ = [
     "CatalogShelf",
+    "CatalogShelfBookPage",
     "CatalogShelfPage",
     "CatalogShelfQueryPort",
-    "CatalogShelfWorkPage",
     "CreateShelf",
     "CreateShelfCommand",
     "DeleteShelf",
     "DeleteShelfCommand",
-    "ListCatalogShelfWorkIds",
+    "ListCatalogShelfBookIds",
     "ListCatalogShelves",
+    "ShelfBookMembershipPort",
     "ShelfKind",
     "UpdateShelf",
     "UpdateShelfCommand",

@@ -19,21 +19,21 @@ class LibraryRequestUnitOfWork(Protocol):
 @dataclass(frozen=True, slots=True)
 class DetailPreferenceMutation:
     user_id: str
-    work_id: str
+    book_id: str
     selected_tab: str
     now: datetime
 
 
 @dataclass(frozen=True, slots=True)
-class WorkRecordMutation:
-    work_id: str
+class BookRecordMutation:
+    book_id: str
     values: Mapping[str, object]
     facet_write: object
     writeback_intents: tuple[object, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class BulkWorkMutation:
+class BulkBookMutation:
     updates: tuple[tuple[str, Mapping[str, object]], ...]
     facet_write: object | None = None
     writeback_intents: tuple[object, ...] = ()
@@ -44,7 +44,7 @@ class BulkWorkMutation:
 @dataclass(frozen=True, slots=True)
 class BulkReadingStatusMutation:
     context: AuthorizationContext
-    work_ids: tuple[str, ...]
+    book_ids: tuple[str, ...]
     status: str
     now: datetime
     events: tuple[object, ...] = ()
@@ -53,7 +53,7 @@ class BulkReadingStatusMutation:
 @dataclass(frozen=True, slots=True)
 class BulkShelfMembershipMutation:
     shelf_id: str
-    work_ids: tuple[str, ...]
+    book_ids: tuple[str, ...]
     membership: str
     now: datetime
     events: tuple[object, ...] = ()
@@ -61,7 +61,7 @@ class BulkShelfMembershipMutation:
 
 @dataclass(frozen=True, slots=True)
 class CoverRecordMutation:
-    work_id: str
+    book_id: str
     cover_path: str
     cover_status: str
 
@@ -76,9 +76,9 @@ class CoverMutation:
 
 @dataclass(frozen=True, slots=True)
 class MetadataApplyMutation:
-    work_id: str
-    work_values: Mapping[str, object]
-    volume_rows: tuple[Mapping[str, object], ...]
+    book_id: str
+    book_values: Mapping[str, object]
+    resource_rows: tuple[Mapping[str, object], ...]
     facet_write: object
     writeback_intents: tuple[object, ...]
     finished_job_ids: tuple[str, ...]
@@ -87,14 +87,14 @@ class MetadataApplyMutation:
 
 @dataclass(frozen=True, slots=True)
 class MetadataApplyResult:
-    work: Mapping[str, object] | None
+    book: Mapping[str, object] | None
     finished_job_ids: tuple[str, ...]
     writeback_operation_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class CoverPublicationFailure:
-    work_id: str
+    book_id: str
     expected_cover_path: str
     expected_updated_at: datetime
     fallback_cover_path: str | None
@@ -104,11 +104,11 @@ class CoverPublicationFailure:
 class LibraryRequestMutationGateway(Protocol):
     def save_detail_preference(self, command: DetailPreferenceMutation) -> None: ...
 
-    def update_work(
-        self, command: WorkRecordMutation
+    def update_book(
+        self, command: BookRecordMutation
     ) -> Mapping[str, object] | None: ...
 
-    def update_works(self, command: BulkWorkMutation) -> int: ...
+    def update_books(self, command: BulkBookMutation) -> int: ...
 
     def update_reading_status(self, command: BulkReadingStatusMutation) -> int: ...
 
@@ -141,7 +141,7 @@ class SaveDetailPreference:
             raise
 
 
-class UpdateWorkRecord:
+class UpdateBookRecord:
     def __init__(
         self,
         gateway: LibraryRequestMutationGateway,
@@ -150,9 +150,9 @@ class UpdateWorkRecord:
         self._gateway = gateway
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: WorkRecordMutation) -> Mapping[str, object] | None:
+    def execute(self, command: BookRecordMutation) -> Mapping[str, object] | None:
         try:
-            result = self._gateway.update_work(command)
+            result = self._gateway.update_book(command)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -160,7 +160,7 @@ class UpdateWorkRecord:
         return result
 
 
-class UpdateBulkWorks:
+class UpdateBulkBooks:
     def __init__(
         self,
         gateway: LibraryRequestMutationGateway,
@@ -169,9 +169,9 @@ class UpdateBulkWorks:
         self._gateway = gateway
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: BulkWorkMutation) -> int:
+    def execute(self, command: BulkBookMutation) -> int:
         try:
-            updated = self._gateway.update_works(command)
+            updated = self._gateway.update_books(command)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -236,7 +236,7 @@ class UpdateCoverRecords:
         return updated
 
 
-class ApplyWorkMetadata:
+class ApplyBookMetadata:
     def __init__(
         self,
         gateway: LibraryRequestMutationGateway,
@@ -275,10 +275,11 @@ class CompensateCoverPublication:
 
 
 __all__ = [
-    "ApplyWorkMetadata",
+    "ApplyBookMetadata",
+    "BookRecordMutation",
+    "BulkBookMutation",
     "BulkReadingStatusMutation",
     "BulkShelfMembershipMutation",
-    "BulkWorkMutation",
     "CompensateCoverPublication",
     "CoverMutation",
     "CoverPublicationFailure",
@@ -289,10 +290,9 @@ __all__ = [
     "MetadataApplyMutation",
     "MetadataApplyResult",
     "SaveDetailPreference",
+    "UpdateBookRecord",
+    "UpdateBulkBooks",
     "UpdateBulkReadingStatus",
     "UpdateBulkShelfMembership",
-    "UpdateBulkWorks",
     "UpdateCoverRecords",
-    "UpdateWorkRecord",
-    "WorkRecordMutation",
 ]

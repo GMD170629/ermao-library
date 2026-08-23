@@ -6,37 +6,37 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.ermao.library.ErmaoLibraryApplication
+import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.model.BookDetailContent
+import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.content.model.ChapterReadingState
 import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.WorkCard
-import com.ermao.library.features.content.model.WorkDetailContent
-import com.ermao.library.features.content.model.ChapterReadingState
 import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toCard
 import com.ermao.library.features.content.model.toFacetKind
 import com.ermao.library.features.content.model.toUiContent
+import com.ermao.library.shared.core.network.AppErrorKind
+import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.BookResourcePageQuery
+import com.ermao.library.shared.modules.library.BookResourcePageRepository
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.FacetSort
-import com.ermao.library.shared.modules.library.WorkDetailQuery
-import com.ermao.library.shared.modules.library.WorkVolumePageQuery
-import com.ermao.library.shared.modules.library.WorkVolumePageRepository
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.resolveReaderChapterStatesFromLocation
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
+import com.ermao.library.shared.modules.shelf.domain.ShelfErrorKind
 import com.ermao.library.shared.modules.shelf.domain.ShelfMembership
 import com.ermao.library.shared.modules.shelf.domain.ShelfMembershipChange
 import com.ermao.library.shared.modules.shelf.domain.ShelfRequestContext
 import com.ermao.library.shared.modules.shelf.domain.ShelfResult
 import com.ermao.library.shared.modules.shelf.domain.ShelfSummary
-import com.ermao.library.shared.modules.shelf.domain.ShelfErrorKind
-import com.ermao.library.ErmaoLibraryApplication
-import com.ermao.library.shared.core.network.AppErrorKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 
 data class FacetUiState(
     val facetName: String? = null,
-    val works: List<WorkCard> = emptyList(),
+    val books: List<BookCard> = emptyList(),
     val total: Int = 0,
     val page: Int = 0,
     val totalPages: Int = 1,
@@ -55,7 +55,8 @@ data class FacetUiState(
     val errorCode: String? = null,
     val paginationErrorCode: String? = null,
     val freshness: ContentFreshness = ContentFreshness.Fresh,
-)
+) {
+}
 
 class FacetViewModel(
     private val repository: ContentRepository,
@@ -86,25 +87,27 @@ class FacetViewModel(
                 val query = FacetQuery(kind.toFacetKind(), facetId, facetSort, nextPage)
                 when (val result = repository.loadFacet(context, query)) {
                     is ContentResult.Content -> {
-                        val works = result.value.works.items.map { it.toCard() }
-                        mutableUiState.update { state -> state.copy(
-                            facetName = result.value.facet.name,
-                            works = mergeWorks(if (reset) emptyList() else state.works, works),
-                            total = result.value.works.total,
-                            page = result.value.works.page,
-                            totalPages = result.value.works.totalPages,
-                            isLoading = false,
-                            isLoadingMore = false,
-                            errorCode = null,
-                            paginationErrorCode = null,
-                            freshness = result.freshness(),
-                        ) }
+                        val books = result.value.books.items.map { it.toCard() }
+                        mutableUiState.update { state ->
+                            state.copy(
+                                facetName = result.value.facet.name,
+                                books = mergeBooks(if (reset) emptyList() else state.books, books),
+                                total = result.value.books.total,
+                                page = result.value.books.page,
+                                totalPages = result.value.books.totalPages,
+                                isLoading = false,
+                                isLoadingMore = false,
+                                errorCode = null,
+                                paginationErrorCode = null,
+                                freshness = result.freshness(),
+                            )
+                        }
                     }
                     is ContentResult.Failure -> mutableUiState.update {
                         if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
                         if (result.error.kind == AppErrorKind.Forbidden || result.error.kind == AppErrorKind.NotFoundOrUnavailable) {
-                            it.copy(works = emptyList(), isLoading = false, isLoadingMore = false, errorCode = "CONTENT_NOT_ACCESSIBLE")
-                        } else if (reset && it.works.isEmpty()) it.copy(isLoading = false, errorCode = result.error.code)
+                            it.copy(books = emptyList(), isLoading = false, isLoadingMore = false, errorCode = "CONTENT_NOT_ACCESSIBLE")
+                        } else if (reset && it.books.isEmpty()) it.copy(isLoading = false, errorCode = result.error.code)
                         else if (reset) it.copy(isLoading = false, freshness = ContentFreshness.Stale)
                         else it.copy(isLoadingMore = false, paginationErrorCode = result.error.code)
                     }
@@ -113,7 +116,7 @@ class FacetViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 mutableUiState.update {
-                    if (reset && it.works.isEmpty()) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED")
+                    if (reset && it.books.isEmpty()) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED")
                     else if (reset) it.copy(isLoading = false, freshness = ContentFreshness.Stale)
                     else it.copy(isLoadingMore = false, paginationErrorCode = "CONTENT_LOAD_FAILED")
                 }
@@ -129,18 +132,15 @@ class FacetViewModel(
             facetId: String,
             onSessionUnauthorized: () -> Unit,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer {
-                FacetViewModel(repository, context, kind, facetId, onSessionUnauthorized)
-            }
+            initializer { FacetViewModel(repository, context, kind, facetId, onSessionUnauthorized) }
         }
     }
 }
 
 data class WorkDetailUiState(
     val isLoading: Boolean = true,
-    val content: WorkDetailContent? = null,
-    val selectedMediaKind: String? = null,
-    val selectedVolumeId: String? = null,
+    val content: BookDetailContent? = null,
+    val selectedResourceId: String? = null,
     val errorCode: String? = null,
     val shelves: List<ShelfSummary> = emptyList(),
     val selectedShelfIds: Set<String> = emptySet(),
@@ -149,30 +149,31 @@ data class WorkDetailUiState(
     val isSavingShelves: Boolean = false,
     val shelfErrorCode: String? = null,
     val shelfSaveCompleted: Boolean = false,
-    val isLoadingMoreVolumes: Boolean = false,
-    val volumePaginationErrorCode: String? = null,
-)
+    val isLoadingMoreResources: Boolean = false,
+    val resourcePaginationErrorCode: String? = null,
+) {
+}
 
 class WorkDetailViewModel(
     private val repository: ContentRepository,
     private val shelfRepository: ShelfRepository,
     private val context: ContentRequestContext,
     private val appContext: Context,
-    private val workId: String,
+    private val bookId: String,
     private val onSessionUnauthorized: () -> Unit,
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
     val uiState: StateFlow<WorkDetailUiState> = mutableUiState.asStateFlow()
-    private var loadGeneration: Int = 0
-    private val latestProgressUpdatesByVolumeId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
+    private var loadGeneration = 0
+    private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
 
     init {
         viewModelScope.launch {
             (appContext as ErmaoLibraryApplication).readerProgressPresentationCenter.updates.collect { update ->
-                if (update.namespaceKey == context.presentationKey() && update.workId == workId) {
-                    latestProgressUpdatesByVolumeId[update.volumeId] = update
+                if (update.namespaceKey == context.presentationKey() && update.bookId == bookId) {
+                    latestProgressUpdatesByResourceId[update.resourceId] = update
                     mutableUiState.update { state ->
-                        val content = state.content?.applying(update, state.selectedVolumeId) ?: return@update state
+                        val content = state.content?.applying(update, state.selectedResourceId) ?: return@update state
                         if (content === state.content) return@update state
                         state.copy(content = content)
                     }
@@ -182,101 +183,52 @@ class WorkDetailViewModel(
         load()
     }
 
-    fun retry() = load(
-        mediaKind = mutableUiState.value.selectedMediaKind,
-        volumeId = mutableUiState.value.selectedVolumeId,
-    )
+    fun retry() = load(resourceId = mutableUiState.value.selectedResourceId)
 
-    fun refresh() = load(
-        mediaKind = mutableUiState.value.selectedMediaKind,
-        volumeId = mutableUiState.value.selectedVolumeId,
-        showBlockingLoading = false,
-    )
+    fun refresh() = load(resourceId = mutableUiState.value.selectedResourceId, showBlockingLoading = false)
 
-    fun selectMedia(kind: String) {
-        val firstVolume = mutableUiState.value.content?.media
-            ?.firstOrNull { it.kind == kind }?.volumes?.firstOrNull()
-        mutableUiState.update { it.copy(selectedMediaKind = kind, selectedVolumeId = firstVolume?.id) }
-        load(kind, firstVolume?.id, showBlockingLoading = false)
+    fun selectResource(resourceId: String) {
+        mutableUiState.update { it.copy(selectedResourceId = resourceId) }
+        load(resourceId = resourceId, showBlockingLoading = false)
     }
 
-    fun selectVolume(volumeId: String) {
-        mutableUiState.update { it.copy(selectedVolumeId = volumeId) }
-        load(mutableUiState.value.selectedMediaKind, volumeId, showBlockingLoading = false)
-    }
-
-    fun loadMoreVolumes() {
+    fun loadMoreResources() {
         val state = mutableUiState.value
-        if (state.isLoadingMoreVolumes) return
-        val loader = repository as? WorkVolumePageRepository ?: return
-        val media = state.content?.media?.firstOrNull { it.kind == state.selectedMediaKind } ?: return
-        if (media.volumes.size >= media.volumeCount) return
-        val mediaVersionId = media.volumes.firstOrNull()?.mediaVersionId ?: return
-        val requestedMediaKind = media.kind
+        if (state.isLoadingMoreResources) return
+        val loader = repository as? BookResourcePageRepository ?: return
+        val current = state.content ?: return
         val pageSize = 24
-        val nextPage = (media.volumes.size / pageSize) + 1
-        mutableUiState.update { it.copy(isLoadingMoreVolumes = true, volumePaginationErrorCode = null) }
+        val nextPage = (current.resources.size / pageSize) + 1
+        mutableUiState.update { it.copy(isLoadingMoreResources = true, resourcePaginationErrorCode = null) }
         viewModelScope.launch {
-            when (val result = loader.loadWorkVolumes(
-                context,
-                WorkVolumePageQuery(workId, mediaVersionId, nextPage, pageSize),
-            )) {
-                is ContentResult.Content -> mutableUiState.update { current ->
-                    val currentContent = current.content ?: return@update current.copy(isLoadingMoreVolumes = false)
-                    val currentMedia = currentContent.media.firstOrNull { it.kind == requestedMediaKind }
-                    if (current.selectedMediaKind != requestedMediaKind ||
-                        currentMedia?.volumes?.firstOrNull()?.mediaVersionId != mediaVersionId
-                    ) return@update current.copy(isLoadingMoreVolumes = false)
-                    current.copy(
-                        isLoadingMoreVolumes = false,
+            when (val result = loader.loadBookResources(context, BookResourcePageQuery(bookId, nextPage, pageSize))) {
+                is ContentResult.Content -> mutableUiState.update { currentState ->
+                    val currentContent = currentState.content ?: return@update currentState.copy(isLoadingMoreResources = false)
+                    currentState.copy(
+                        isLoadingMoreResources = false,
                         content = currentContent.copy(
-                            media = currentContent.media.map { candidate ->
-                                if (candidate.kind != requestedMediaKind) candidate else candidate.copy(
-                                    volumeCount = result.value.total,
-                                    volumes = (candidate.volumes + result.value.volumes.map { it.toUiContent() })
-                                        .distinctBy { it.id }
-                                        .sortedWith(compareBy({ it.sortOrder }, { it.id })),
-                                )
-                            },
+                            resources = (currentContent.resources + result.value.resources.map { it.toUiContent() })
+                                .distinctBy { it.id }
+                                .sortedWith(compareBy({ it.sortOrder }, { it.id })),
                         ),
                     )
                 }
-                is ContentResult.Failure -> mutableUiState.update { current ->
-                    val currentMediaVersionId = current.content?.media
-                        ?.firstOrNull { it.kind == requestedMediaKind }
-                        ?.volumes?.firstOrNull()?.mediaVersionId
-                    current.copy(
-                        isLoadingMoreVolumes = false,
-                        volumePaginationErrorCode = result.error.code.takeIf {
-                            current.selectedMediaKind == requestedMediaKind && currentMediaVersionId == mediaVersionId
-                        },
-                    )
+                is ContentResult.Failure -> mutableUiState.update {
+                    it.copy(isLoadingMoreResources = false, resourcePaginationErrorCode = result.error.code)
                 }
             }
         }
     }
 
     fun openShelfPicker() {
-        mutableUiState.update {
-            it.copy(
-                isShelfPickerVisible = true,
-                isLoadingShelves = true,
-                shelfErrorCode = null,
-                shelfSaveCompleted = false,
-            )
-        }
+        mutableUiState.update { it.copy(isShelfPickerVisible = true, isLoadingShelves = true, shelfErrorCode = null, shelfSaveCompleted = false) }
         viewModelScope.launch {
-            when (val result = shelfRepository.loadShelves(
-                ShelfRequestContext(context.profile, context.namespace),
-                workId,
-            )) {
-                is ShelfResult.Content -> mutableUiState.update {
-                    it.copy(
-                        shelves = result.value,
-                        selectedShelfIds = result.value.filter(ShelfSummary::containsWork).map(ShelfSummary::id).toSet(),
-                        isLoadingShelves = false,
-                    )
-                }
+            when (val result = shelfRepository.loadShelves(ShelfRequestContext(context.profile, context.namespace), bookId)) {
+                is ShelfResult.Content -> mutableUiState.update { it.copy(
+                    shelves = result.value,
+                    selectedShelfIds = result.value.filter(ShelfSummary::containsBook).map(ShelfSummary::id).toSet(),
+                    isLoadingShelves = false,
+                ) }
                 is ShelfResult.Failure -> mutableUiState.update {
                     if (result.error.kind == ShelfErrorKind.Unauthorized) onSessionUnauthorized()
                     it.copy(isLoadingShelves = false, shelfErrorCode = result.error.code)
@@ -285,26 +237,16 @@ class WorkDetailViewModel(
         }
     }
 
-    fun dismissShelfPicker() = mutableUiState.update {
-        it.copy(isShelfPickerVisible = false, shelfErrorCode = null, shelfSaveCompleted = false)
-    }
-
-    fun consumeShelfSaveCompleted() = mutableUiState.update {
-        it.copy(shelfSaveCompleted = false)
-    }
-
+    fun dismissShelfPicker() = mutableUiState.update { it.copy(isShelfPickerVisible = false, shelfErrorCode = null, shelfSaveCompleted = false) }
+    fun consumeShelfSaveCompleted() = mutableUiState.update { it.copy(shelfSaveCompleted = false) }
     fun toggleShelf(shelfId: String) = mutableUiState.update { state ->
-        if (state.isSavingShelves) state else state.copy(
-            selectedShelfIds = state.selectedShelfIds.toMutableSet().apply {
-                if (!add(shelfId)) remove(shelfId)
-            },
-        )
+        if (state.isSavingShelves) state else state.copy(selectedShelfIds = state.selectedShelfIds.toMutableSet().apply { if (!add(shelfId)) remove(shelfId) })
     }
 
     fun saveShelves() {
         val state = mutableUiState.value
         if (state.isSavingShelves || state.isLoadingShelves) return
-        val original = state.shelves.filter(ShelfSummary::containsWork).map(ShelfSummary::id).toSet()
+        val original = state.shelves.filter(ShelfSummary::containsBook).map(ShelfSummary::id).toSet()
         val additions = state.selectedShelfIds - original
         val removals = original - state.selectedShelfIds
         if (additions.isEmpty() && removals.isEmpty()) {
@@ -314,8 +256,8 @@ class WorkDetailViewModel(
         mutableUiState.update { it.copy(isSavingShelves = true, shelfErrorCode = null) }
         viewModelScope.launch {
             val shelfContext = ShelfRequestContext(context.profile, context.namespace)
-            val changes = additions.map { ShelfMembershipChange(workId, it, ShelfMembership.Add) } +
-                removals.map { ShelfMembershipChange(workId, it, ShelfMembership.Remove) }
+            val changes = additions.map { ShelfMembershipChange(bookId, it, ShelfMembership.Add) } +
+                removals.map { ShelfMembershipChange(bookId, it, ShelfMembership.Remove) }
             var failure: ShelfResult.Failure? = null
             for (change in changes) {
                 when (val result = shelfRepository.updateMembership(shelfContext, change)) {
@@ -324,14 +266,12 @@ class WorkDetailViewModel(
                 }
             }
             mutableUiState.update { current ->
-                if (failure == null) {
-                    current.copy(
-                        shelves = current.shelves.map { it.copy(containsWork = it.id in current.selectedShelfIds) },
-                        isShelfPickerVisible = false,
-                        isSavingShelves = false,
-                        shelfSaveCompleted = true,
-                    )
-                } else {
+                if (failure == null) current.copy(
+                    shelves = current.shelves.map { it.copy(containsBook = it.id in current.selectedShelfIds) },
+                    isShelfPickerVisible = false,
+                    isSavingShelves = false,
+                    shelfSaveCompleted = true,
+                ) else {
                     if (failure.error.kind == ShelfErrorKind.Unauthorized) onSessionUnauthorized()
                     current.copy(isSavingShelves = false, shelfErrorCode = failure.error.code)
                 }
@@ -339,37 +279,24 @@ class WorkDetailViewModel(
         }
     }
 
-    private fun load(
-        mediaKind: String? = null,
-        volumeId: String? = null,
-        showBlockingLoading: Boolean = true,
-    ) {
+    private fun load(resourceId: String? = null, showBlockingLoading: Boolean = true) {
         val generation = ++loadGeneration
         mutableUiState.update { it.copy(isLoading = showBlockingLoading, errorCode = null) }
         viewModelScope.launch {
             try {
-                val requestedKind = mediaKind?.let(::MediaKind)
-                when (val result = repository.loadWorkDetail(context, WorkDetailQuery(workId, requestedKind, volumeId))) {
+                when (val result = repository.loadBookDetail(context, BookDetailQuery(bookId, resourceId))) {
                     is ContentResult.Content -> {
                         if (generation != loadGeneration) return@launch
                         val baseContent = result.value.toUiContent()
-                        val selectedKind = mediaKind ?: baseContent.selectedMediaKind ?: baseContent.media.firstOrNull()?.kind
-                        val selectedVolume = baseContent.media.firstOrNull { it.kind == selectedKind }
-                            ?.volumes?.firstOrNull { it.id == volumeId }
-                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }?.volumes?.firstOrNull { it.selected }
-                            ?: baseContent.media.firstOrNull { it.kind == selectedKind }
-                            ?.volumes?.firstOrNull()
-                        val selectedVolumeId = selectedVolume?.id
-                        val uiContent = selectedVolumeId
-                            ?.let(latestProgressUpdatesByVolumeId::get)
-                            ?.let { baseContent.applying(it, selectedVolumeId) }
-                            ?: baseContent
+                        val selectedResource = pickSelectedResource(baseContent.resources, resourceId, result.value.continueResourceId)
+                        val selectedResourceId = selectedResource?.id ?: baseContent.selectedResourceId
+                        val uiContent = selectedResourceId?.let(latestProgressUpdatesByResourceId::get)
+                            ?.let { baseContent.applying(it, selectedResourceId) } ?: baseContent
                         val shelfState = mutableUiState.value
                         mutableUiState.value = WorkDetailUiState(
                             isLoading = false,
                             content = uiContent,
-                            selectedMediaKind = selectedKind,
-                            selectedVolumeId = selectedVolume?.id,
+                            selectedResourceId = selectedResourceId,
                             shelves = shelfState.shelves,
                             selectedShelfIds = shelfState.selectedShelfIds,
                             isShelfPickerVisible = shelfState.isShelfPickerVisible,
@@ -389,10 +316,7 @@ class WorkDetailViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 if (generation != loadGeneration) return@launch
-                mutableUiState.update {
-                    if (it.content == null) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED")
-                    else it.copy(isLoading = false)
-                }
+                mutableUiState.update { if (it.content == null) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED") else it.copy(isLoading = false) }
             }
         }
     }
@@ -403,12 +327,10 @@ class WorkDetailViewModel(
             shelfRepository: ShelfRepository,
             context: ContentRequestContext,
             appContext: Context,
-            workId: String,
+            bookId: String,
             onSessionUnauthorized: () -> Unit,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer {
-                WorkDetailViewModel(repository, shelfRepository, context, appContext.applicationContext, workId, onSessionUnauthorized)
-            }
+            initializer { WorkDetailViewModel(repository, shelfRepository, context, appContext.applicationContext, bookId, onSessionUnauthorized) }
         }
     }
 }
@@ -416,49 +338,33 @@ class WorkDetailViewModel(
 private fun ContentRequestContext.presentationKey(): String =
     "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
 
-internal fun WorkDetailContent.applying(
-    update: ReaderProgressPresentationUpdate,
-    selectedVolumeId: String?,
-): WorkDetailContent {
-    if (work.id != update.workId || selectedVolumeId != update.volumeId) return this
-    val units = readingUnits.map {
-        ReaderChapterUnit(
-            href = it.href,
-            sortOrder = it.sortOrder,
-            readingOrderPosition = it.readingOrderPosition,
-        )
-    }
-    val states = resolveReaderChapterStatesFromLocation(
-        units = units,
-        location = update.location,
-        progressPercent = update.percent,
-    )
+internal fun BookDetailContent.applying(update: ReaderProgressPresentationUpdate, selectedResourceId: String?): BookDetailContent {
+    if (book.id != update.bookId || selectedResourceId != update.resourceId) return this
+    val units = readingUnits.map { ReaderChapterUnit(href = it.href, sortOrder = it.sortOrder, readingOrderPosition = it.readingOrderPosition) }
+    val states = resolveReaderChapterStatesFromLocation(units, update.location, update.percent)
+    val progress = update.percent.toInt().coerceIn(0, 100)
     return copy(
-        work = work.copy(progressPercent = update.percent.toInt().coerceIn(0, 100)),
+        book = book.copy(progressPercent = progress),
         completed = update.percent >= 100.0,
-        media = media.map { mediaVersion ->
-            mediaVersion.copy(
-                volumes = mediaVersion.volumes.map { volume ->
-                    if (volume.id == update.volumeId) {
-                        volume.copy(progressPercent = update.percent.toInt().coerceIn(0, 100))
-                    } else {
-                        volume
-                    }
-                },
-            )
-        },
+        resources = resources.map { resource -> if (resource.id == update.resourceId) resource.copy(progressPercent = progress) else resource },
         readingUnits = readingUnits.mapIndexed { index, unit ->
             unit.copy(
-                progressPercent = update.percent.toInt().takeIf { states[index] == ReaderChapterState.Current },
-                readingState = when (states[index]) {
+                progressPercent = progress.takeIf { states.getOrNull(index) == ReaderChapterState.Current },
+                readingState = when (states.getOrNull(index)) {
                     ReaderChapterState.Current -> ChapterReadingState.Current
                     ReaderChapterState.Read -> ChapterReadingState.Read
-                    ReaderChapterState.Unread -> ChapterReadingState.Unread
+                    else -> ChapterReadingState.Unread
                 },
             )
         },
     )
 }
 
-private fun mergeWorks(existing: List<WorkCard>, incoming: List<WorkCard>): List<WorkCard> =
-    (existing + incoming).associateBy(WorkCard::id).values.toList()
+private fun pickSelectedResource(resources: List<ResourceContent>, requestedResourceId: String?, continueResourceId: String?): ResourceContent? =
+    requestedResourceId?.let { id -> resources.firstOrNull { it.id == id } }
+        ?: continueResourceId?.let { id -> resources.firstOrNull { it.id == id } }
+        ?: resources.firstOrNull { (it.progressPercent ?: 0) < 100 }
+        ?: resources.firstOrNull()
+
+private fun mergeBooks(existing: List<BookCard>, incoming: List<BookCard>): List<BookCard> =
+    (existing + incoming).associateBy(BookCard::id).values.toList()

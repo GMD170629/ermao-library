@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -18,13 +19,16 @@ from app.core.time import TimestampMilliseconds
 from app.db.base import Base
 from app.models.common import timestamp_ms_server_default
 
+if TYPE_CHECKING:
+    from app.models import LibraryReadableResource
+
 
 def cuid() -> str:
     return f"py_{uuid4().hex}"
 
 
 def db_timestamp() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class User(Base):
@@ -84,7 +88,7 @@ class User(Base):
 
     def to_auth_view(self) -> dict[str, str | int | bool | None]:
         avatar_version = (
-            int(self.updated_at.replace(tzinfo=timezone.utc).timestamp())
+            int(self.updated_at.replace(tzinfo=UTC).timestamp())
             if self.avatar_path
             else None
         )
@@ -171,9 +175,9 @@ class PasswordResetToken(Base):
     user: Mapped[User] = relationship("User", back_populates="password_reset_tokens")
 
 
-class UserMonitorFolderAccess(Base):
-    __tablename__ = "UserMonitorFolderAccess"
-    __table_args__ = (Index("UserMonitorFolderAccess_folder_idx", "monitorFolderId"),)
+class UserLibraryAccess(Base):
+    __tablename__ = "UserLibraryAccess"
+    __table_args__ = (Index("UserLibraryAccess_library_idx", "libraryId"),)
 
     user_id: Mapped[str] = mapped_column(
         "userId",
@@ -181,10 +185,10 @@ class UserMonitorFolderAccess(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
-    monitor_folder_id: Mapped[str] = mapped_column(
-        "monitorFolderId",
+    library_id: Mapped[str] = mapped_column(
+        "libraryId",
         String(191),
-        ForeignKey("MonitorFolder.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey("Library.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -229,11 +233,11 @@ class ReaderBookmark(Base):
     __table_args__ = (
         UniqueConstraint(
             "userId",
-            "volumeId",
+            "resourceId",
             "bookmarkId",
-            name="ReaderBookmark_user_volume_bookmark_key",
+            name="ReaderBookmark_user_resource_bookmark_key",
         ),
-        Index("ReaderBookmark_user_volume_idx", "userId", "volumeId"),
+        Index("ReaderBookmark_user_resource_idx", "userId", "resourceId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -243,10 +247,12 @@ class ReaderBookmark(Base):
         ForeignKey("User.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=False,
     )
-    volume_id: Mapped[str] = mapped_column(
-        "volumeId",
+    resource_id: Mapped[str] = mapped_column(
+        "resourceId",
         String(191),
-        ForeignKey("LibraryVolume.id", ondelete="CASCADE", onupdate="CASCADE"),
+        ForeignKey(
+            "LibraryReadableResource.id", ondelete="CASCADE", onupdate="CASCADE"
+        ),
         nullable=False,
     )
     bookmark_id: Mapped[str] = mapped_column("bookmarkId", Text, nullable=False)
@@ -272,3 +278,6 @@ class ReaderBookmark(Base):
         default=db_timestamp,
         onupdate=db_timestamp,
     )
+
+    user: Mapped[User] = relationship("User")
+    resource: Mapped[LibraryReadableResource] = relationship("LibraryReadableResource")

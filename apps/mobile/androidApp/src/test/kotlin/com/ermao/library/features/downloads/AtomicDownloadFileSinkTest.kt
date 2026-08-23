@@ -18,7 +18,7 @@ class AtomicDownloadFileSinkTest {
         val root = Files.createTempDirectory("download-sink-test").toFile()
         try {
             val sink = AtomicDownloadFileSink(root)
-            val session = sink.begin(AndroidDownloadNamespace("server", "user", 1), "volume")
+            val session = sink.begin(AndroidDownloadNamespace("server", "user", 1), "resource", "asset")
             session.write(byteArrayOf(1, 2))
             session.write(byteArrayOf(3, 4))
 
@@ -39,7 +39,8 @@ class AtomicDownloadFileSinkTest {
         try {
             val session = AtomicDownloadFileSink(root).begin(
                 AndroidDownloadNamespace("server", "user", 1),
-                "volume",
+                "resource",
+                "asset",
             )
             session.write(byteArrayOf(1, 2))
 
@@ -59,7 +60,8 @@ class AtomicDownloadFileSinkTest {
                 DownloadSinkRequest(
                     namespace = DownloadNamespace("server", "user", 1),
                     taskId = "task",
-                    volumeId = "volume",
+                    resourceId = "resource",
+                    assetId = "asset",
                     expectedTotalBytes = 4,
                     resumeFromBytes = 0,
                 ),

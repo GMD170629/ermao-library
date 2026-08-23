@@ -1,4 +1,4 @@
-"""Reader v4 volume-first HTTP contracts."""
+"""Reader v4 resource-first HTTP contracts."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from fastapi.responses import Response
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -24,6 +25,14 @@ from app.contracts.http_errors import HttpContractError
 
 class ReaderWireModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ReaderComicPageResponse(Response):
+    media_type = "application/octet-stream"
+
+
+class ReaderComicArchiveResponse(Response):
+    media_type = "application/octet-stream"
 
 
 ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]
@@ -75,6 +84,8 @@ class ReadiumExtensionModel(BaseModel):
 
 _MAX_UTC_EPOCH_MILLIS = 253_402_300_799_999
 _MAX_LOCATOR_ENVELOPE_BYTES = 65_536
+
+
 class ReadiumLocatorText(ReaderWireModel):
     before: str | None = Field(
         default=None, max_length=256, exclude_if=lambda value: value is None
@@ -233,7 +244,7 @@ class ComicExactLocation(ReaderWireModel):
 
 class AudioExactLocation(ReaderWireModel):
     kind: Literal["audio"]
-    file_id: str = Field(alias="fileId", min_length=1, max_length=191)
+    asset_id: str = Field(alias="assetId", min_length=1, max_length=191)
     chapter_id: str | None = Field(
         default=None,
         alias="chapterId",
@@ -246,7 +257,7 @@ class AudioExactLocation(ReaderWireModel):
         default=None, alias="engineLocator", exclude_if=lambda value: value is None
     )
 
-    @field_validator("file_id", "chapter_id")
+    @field_validator("asset_id", "chapter_id")
     @classmethod
     def require_non_blank_identity(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
@@ -347,7 +358,7 @@ class PdfLocation(ReaderWireModel):
 
 class AudioLocation(ReaderWireModel):
     kind: Literal["audio"]
-    file_id: str = Field(alias="fileId", min_length=1, max_length=191)
+    asset_id: str = Field(alias="assetId", min_length=1, max_length=191)
     chapter_id: str | None = Field(default=None, alias="chapterId", max_length=191)
     position_ms: int = Field(alias="positionMs", ge=0)
 
@@ -365,47 +376,42 @@ class ReaderBookSummary(ReaderWireModel):
     cover_url: str | None = Field(default=None, alias="coverUrl")
 
 
-class ReaderMediaVersionSummary(ReaderWireModel):
+class ReaderResourceSummary(ReaderWireModel):
     id: str
-    work_id: str = Field(alias="workId")
-    media_kind: Literal["EBOOK", "COMIC", "AUDIOBOOK"] = Field(alias="mediaKind")
-    completed: bool
-
-
-class ReaderVolumeSummary(ReaderWireModel):
-    id: str
-    media_version_id: str = Field(alias="mediaVersionId")
+    book_id: str = Field(alias="bookId")
+    source_node_id: str = Field(alias="sourceNodeId")
     title: str
-    volume_index: float | None = Field(default=None, alias="volumeIndex")
+    resource_index: float | None = Field(default=None, alias="resourceIndex")
     sort_order: int = Field(alias="sortOrder")
     format: str
+    media_kind: str = Field(alias="mediaKind")
     reader_type: ReaderFormat = Field(alias="readerType")
-    derived_from_volume_id: str | None = Field(
-        default=None, alias="derivedFromVolumeId"
-    )
     page_count: int | None = Field(default=None, alias="pageCount")
     chapter_count: int | None = Field(default=None, alias="chapterCount")
     duration_ms: int | None = Field(default=None, alias="durationMs")
     track_count: int | None = Field(default=None, alias="trackCount")
     progress: float = Field(ge=0, le=100)
+    resource_completed: bool = Field(alias="resourceCompleted")
     last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
 
 
-class ReaderUnitSummary(ReaderWireModel):
+class ReaderNavigationUnitSummary(ReaderWireModel):
     id: str
     index: int
     title: str
     href: str | None = None
-    file_id: str | None = Field(default=None, alias="fileId")
+    asset_id: str | None = Field(default=None, alias="assetId")
     start_ms: int | None = Field(default=None, alias="startMs", ge=0)
     end_ms: int | None = Field(default=None, alias="endMs", ge=0)
     duration_ms: int | None = Field(default=None, alias="durationMs", ge=0)
     metadata: dict[str, ReaderJsonValue] = Field(default_factory=dict)
 
 
-class ReaderFileSummary(ReaderWireModel):
+class ReaderAssetSummary(ReaderWireModel):
     id: str
-    kind: str
+    resource_id: str = Field(alias="resourceId")
+    source_node_id: str = Field(alias="sourceNodeId")
+    role: str
     mime_type: str = Field(alias="mimeType")
     size_bytes: int = Field(alias="sizeBytes", ge=0)
     duration_ms: int | None = Field(default=None, alias="durationMs", ge=0)
@@ -431,9 +437,7 @@ class ReaderCapabilities(ReaderWireModel):
 
 class ReaderComicDownloadArtifact(ReaderWireModel):
     url: str
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
-        alias="sourceFormat"
-    )
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
     mime_type: str = Field(alias="mimeType", min_length=1, max_length=191)
     size_bytes: int = Field(alias="sizeBytes", gt=0)
 
@@ -451,6 +455,7 @@ class ReaderPublicationAccess(ReaderWireModel):
         default=None,
         alias="downloadArtifact",
     )
+
     @model_validator(mode="after")
     def validate_kind(self) -> ReaderPublicationAccess:
         if self.kind == "reflowable":
@@ -481,10 +486,8 @@ class ReaderComicManifestPage(ReaderWireModel):
 class ReaderComicManifestData(ReaderWireModel):
     schema_version: Literal[1] = Field(1, alias="schemaVersion")
     kind: Literal["comic"] = "comic"
-    volume_id: str = Field(alias="volumeId", min_length=1)
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(
-        alias="sourceFormat"
-    )
+    resource_id: str = Field(alias="resourceId", min_length=1)
+    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
     page_count: int = Field(alias="pageCount", gt=0)
     reading_order: list[ReaderComicManifestPage] = Field(alias="readingOrder")
 
@@ -533,12 +536,11 @@ class ReaderBootstrapData(ReaderWireModel):
     reader_type: ReaderFormat = Field(alias="readerType")
     source_format: ReaderSourceFormat = Field(alias="sourceFormat")
     book: ReaderBookSummary
-    media_version: ReaderMediaVersionSummary = Field(alias="mediaVersion")
-    volume: ReaderVolumeSummary
-    available_volumes: list[ReaderVolumeSummary] = Field(alias="availableVolumes")
-    files: list[ReaderFileSummary]
-    units: list[ReaderUnitSummary]
-    file_url: str = Field(alias="fileUrl")
+    resource: ReaderResourceSummary
+    available_resources: list[ReaderResourceSummary] = Field(alias="availableResources")
+    assets: list[ReaderAssetSummary] = Field(alias="assets")
+    units: list[ReaderNavigationUnitSummary]
+    resource_url: str = Field(alias="resourceUrl")
     capabilities: ReaderCapabilities
     publication: ReaderPublicationAccess | None = None
     progress_snapshot: ReaderProgressSnapshot | None = Field(
@@ -571,7 +573,7 @@ class ReaderReadingStatusPut(ReaderWireModel):
 
 
 class ReaderReadingStatusData(ReaderWireModel):
-    volume_id: str = Field(alias="volumeId")
+    resource_id: str = Field(alias="resourceId")
     status: Literal["UNREAD", "FINISHED"]
     percent: float = Field(ge=0, le=100)
 
@@ -596,7 +598,7 @@ class ReaderBookmarksReplaceRequest(ReaderWireModel):
     def require_unique_bookmark_ids(self) -> ReaderBookmarksReplaceRequest:
         bookmark_ids = [bookmark.id for bookmark in self.bookmarks]
         if len(bookmark_ids) != len(set(bookmark_ids)):
-            raise ValueError("Bookmark IDs must be unique within a volume")
+            raise ValueError("Bookmark IDs must be unique within a resource")
         return self
 
 

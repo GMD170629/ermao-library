@@ -27,9 +27,13 @@ from app.modules.publications.domain.model import (
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
-from app.modules.publications.infrastructure.locator_dom import validate_xhtml
+from app.modules.publications.infrastructure.locator_dom import (
+    WEB_SECURITY_PROFILE,
+    decorate_markup_head,
+)
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
+    select_publication_source_root,
 )
 
 FB2_PARSER_IDENTIFIER = "shuku-fb2-parser-v1"
@@ -410,8 +414,7 @@ def _section_xhtml(
 <head><meta charset="utf-8"/><title>{_escape(section.title)}</title>
 <link rel="stylesheet" type="text/css" href="reader.css"/></head>
 <body>{body}</body></html>""".encode()
-    validate_xhtml(document)
-    return document
+    return decorate_markup_head(document, WEB_SECURITY_PROFILE)
 
 
 def _toc_entry(section: _Fb2Section) -> PublicationTocEntry:
@@ -530,7 +533,10 @@ class Fb2PublicationAdapter(PublicationAdapter):
     def _require_snapshot(self, source: PublicationSource) -> _Fb2Snapshot:
         if source.source_format != "fb2":
             raise PublicationUnsupportedError(source.source_format)
-        source_path = resolve_publication_source(source.path, self._storage_root)
+        source_path = resolve_publication_source(
+            source.path,
+            select_publication_source_root(source.library_root, self._storage_root),
+        )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_FB2_SOURCE_BYTES:
             raise PublicationCorruptError("FB2 source exceeds the size limit")

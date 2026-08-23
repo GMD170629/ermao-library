@@ -35,7 +35,6 @@ from app.modules.publications.domain.navigation import (
 class EnsurePublicationNavigationOutcome(StrEnum):
     CACHED = "CACHED"
     GENERATED = "GENERATED"
-    SOURCE_CHANGED = "SOURCE_CHANGED"
     UNSUPPORTED = "UNSUPPORTED"
 
 
@@ -51,12 +50,8 @@ class OpenPublicationNavigationResult:
     navigation: EnsurePublicationNavigationResult
 
 
-class PublicationNavigationSourceChangedError(Exception):
-    """The selected source changed while its navigation was being generated."""
-
-
 class EnsurePublicationNavigation:
-    """Generate outside a transaction and atomically publish after source CAS."""
+    """Lazily generate and atomically publish a navigation projection."""
 
     def __init__(
         self,
@@ -74,11 +69,11 @@ class EnsurePublicationNavigation:
     def execute(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> EnsurePublicationNavigationResult:
         source, cached, has_projection = self._lookup(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
 
@@ -88,102 +83,80 @@ class EnsurePublicationNavigation:
                 outcome=EnsurePublicationNavigationOutcome.UNSUPPORTED,
                 chapter_count=None,
             )
-        expected_identity = self._expected_identity(source, profile)
-        if expected_identity is not None and (
-            cached is not None
-            and cached.identity == expected_identity
-            and cached.projection_version
-            == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
+        if cached is not None and self._cache_matches(
+            cached=cached,
+            source=source,
+            profile=profile,
         ):
             return EnsurePublicationNavigationResult(
                 outcome=EnsurePublicationNavigationOutcome.CACHED,
                 chapter_count=cached.chapter_count,
             )
 
-        if has_projection and not self._invalidate(source):
-            return EnsurePublicationNavigationResult(
-                outcome=EnsurePublicationNavigationOutcome.SOURCE_CHANGED,
-                chapter_count=None,
-            )
+        if has_projection:
+            self._invalidate(source.resource_id)
 
         publication = self._publication_adapter.open(source)
-        if not _source_matches_publication(source, publication):
-            return EnsurePublicationNavigationResult(
-                outcome=EnsurePublicationNavigationOutcome.SOURCE_CHANGED,
-                chapter_count=None,
-            )
         entries = flatten_publication_navigation(
-            volume_id=source.volume_id,
+            resource_id=source.resource_id,
             publication=publication,
         )
         actual_identity = publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
+            resource_id=source.resource_id,
+            asset_id=source.asset_id,
             source_size_bytes=publication.revision.source_size_bytes,
             source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
         )
         with self._unit_of_work_factory() as unit_of_work:
-            replaced = unit_of_work.navigation.replace_if_source_current(
+            unit_of_work.navigation.replace(
                 source=source,
                 identity=actual_identity,
                 entries=entries,
             )
-            if replaced:
-                unit_of_work.commit()
+            unit_of_work.commit()
         return EnsurePublicationNavigationResult(
-            outcome=(
-                EnsurePublicationNavigationOutcome.GENERATED
-                if replaced
-                else EnsurePublicationNavigationOutcome.SOURCE_CHANGED
-            ),
-            chapter_count=len(entries) if replaced else None,
+            outcome=EnsurePublicationNavigationOutcome.GENERATED,
+            chapter_count=len(entries),
         )
 
     def open_and_ensure(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> OpenPublicationNavigationResult:
         """Open once and reuse that Publication when the manifest needs caching."""
 
         source, cached, has_projection = self._lookup(
-            volume_id=volume_id,
+            resource_id=resource_id,
             access_scope=access_scope,
         )
         profile = self._profile(source)
         if profile is None:
             raise PublicationUnsupportedError(source.source_format)
-        expected_identity = self._expected_identity(source, profile)
-        cache_matches = expected_identity is not None and (
-            cached is not None
-            and cached.identity == expected_identity
-            and cached.projection_version
-            == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
+        cache_matches = self._cache_matches(
+            cached=cached,
+            source=source,
+            profile=profile,
         )
-        if not cache_matches and has_projection and not self._invalidate(source):
-            raise PublicationNavigationSourceChangedError
+        if not cache_matches and has_projection:
+            self._invalidate(source.resource_id)
 
         try:
             publication = self._publication_adapter.open(source)
         except (PublicationCorruptError, PublicationUnsupportedError):
             if cache_matches:
-                self._invalidate(source)
+                self._invalidate(source.resource_id)
             raise
         actual_identity = publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
+            resource_id=source.resource_id,
+            asset_id=source.asset_id,
             source_size_bytes=publication.revision.source_size_bytes,
             source_mtime_ms=publication.revision.source_mtime_ms,
             profile=profile,
         )
-        if not _source_matches_publication(source, publication):
-            if cache_matches:
-                self._invalidate(source)
-            raise PublicationNavigationSourceChangedError
-
-        if cache_matches and cached is not None and cached.identity == actual_identity:
+        if cache_matches and cached is not None:
             return OpenPublicationNavigationResult(
                 publication=publication,
                 navigation=EnsurePublicationNavigationResult(
@@ -192,14 +165,11 @@ class EnsurePublicationNavigation:
                 ),
             )
 
-        if cache_matches and not self._invalidate(source):
-            raise PublicationNavigationSourceChangedError
         entries = flatten_publication_navigation(
-            volume_id=source.volume_id,
+            resource_id=source.resource_id,
             publication=publication,
         )
-        if not self._publish(source=source, identity=actual_identity, entries=entries):
-            raise PublicationNavigationSourceChangedError
+        self._publish(source=source, identity=actual_identity, entries=entries)
         return OpenPublicationNavigationResult(
             publication=publication,
             navigation=EnsurePublicationNavigationResult(
@@ -211,30 +181,26 @@ class EnsurePublicationNavigation:
     def _lookup(
         self,
         *,
-        volume_id: str,
+        resource_id: str,
         access_scope: PublicationAccessScope,
     ) -> tuple[PublicationSource, PublicationNavigationCacheState | None, bool]:
         with self._lookup_unit_of_work_factory() as lookup:
             source = lookup.sources.find_source(
-                volume_id=volume_id,
+                resource_id=resource_id,
                 access_scope=access_scope,
             )
-            cached = lookup.cache.find(volume_id=volume_id)
+            cached = lookup.cache.find(resource_id=resource_id)
             has_projection = lookup.cache.has_materialized_projection(
-                volume_id=volume_id
+                resource_id=resource_id
             )
         if source is None:
             raise PublicationNotFoundError
         return source, cached, has_projection
 
-    def _invalidate(self, source: PublicationSource) -> bool:
+    def _invalidate(self, resource_id: str) -> None:
         with self._unit_of_work_factory() as unit_of_work:
-            invalidated = unit_of_work.navigation.invalidate_if_source_current(
-                source=source
-            )
-            if invalidated:
-                unit_of_work.commit()
-        return invalidated
+            unit_of_work.navigation.invalidate(resource_id=resource_id)
+            unit_of_work.commit()
 
     def _publish(
         self,
@@ -242,28 +208,30 @@ class EnsurePublicationNavigation:
         source: PublicationSource,
         identity: PublicationNavigationCacheIdentity,
         entries: tuple[PublicationNavigationEntry, ...],
-    ) -> bool:
+    ) -> None:
         with self._unit_of_work_factory() as unit_of_work:
-            replaced = unit_of_work.navigation.replace_if_source_current(
+            unit_of_work.navigation.replace(
                 source=source,
                 identity=identity,
                 entries=entries,
             )
-            if replaced:
-                unit_of_work.commit()
-        return replaced
+            unit_of_work.commit()
 
-    def _expected_identity(
-        self,
+    @staticmethod
+    def _cache_matches(
+        *,
+        cached: PublicationNavigationCacheState | None,
         source: PublicationSource,
         profile: PublicationParserProfile,
-    ) -> PublicationNavigationCacheIdentity:
-        return publication_cache_identity(
-            volume_id=source.volume_id,
-            file_id=source.file_id,
-            source_size_bytes=source.size_bytes,
-            source_mtime_ms=source.mtime_ms,
-            profile=profile,
+    ) -> bool:
+        return bool(
+            cached is not None
+            and cached.identity.resource_id == source.resource_id
+            and cached.identity.asset_id == source.asset_id
+            and cached.identity.parser == profile.parser
+            and cached.identity.normalization == profile.normalization
+            and cached.projection_version
+            == CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
         )
 
     def _profile(
@@ -273,20 +241,9 @@ class EnsurePublicationNavigation:
         return self._profile_resolver.resolve(source_format=source.source_format)
 
 
-def _source_matches_publication(
-    source: PublicationSource,
-    publication: NormalizedPublication,
-) -> bool:
-    return (
-        publication.revision.source_size_bytes == source.size_bytes
-        and publication.revision.source_mtime_ms == source.mtime_ms
-    )
-
-
 __all__ = [
     "EnsurePublicationNavigation",
     "EnsurePublicationNavigationOutcome",
     "EnsurePublicationNavigationResult",
     "OpenPublicationNavigationResult",
-    "PublicationNavigationSourceChangedError",
 ]

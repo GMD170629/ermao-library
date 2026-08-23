@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, Self
 
 from app.contracts.local_metadata import validate_local_metadata_priority
 from app.modules.organize.application.dto import PreparedOrganizePolicyUpdate
@@ -24,7 +24,7 @@ class OrganizeWriteTransaction:
     def __init__(self, unit_of_work: OrganizeUnitOfWork) -> None:
         self._unit_of_work = unit_of_work
 
-    def __enter__(self) -> OrganizeWriteTransaction:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(
@@ -32,7 +32,7 @@ class OrganizeWriteTransaction:
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
         traceback: TracebackType | None,
-    ) -> bool:
+    ) -> Literal[False]:
         del exception, traceback
         if exception_type is None:
             self._unit_of_work.commit()
@@ -96,6 +96,17 @@ def prepare_organize_policy_update(
             if settings_changed or not old_next
             else old_next
         )
+    if "nextRunAt" in payload:
+        supplied_next_run = payload["nextRunAt"]
+        if supplied_next_run is None:
+            next_run_at = None
+        elif isinstance(supplied_next_run, datetime):
+            next_run_at = supplied_next_run
+        else:
+            try:
+                next_run_at = datetime.fromisoformat(str(supplied_next_run))
+            except ValueError as exc:
+                raise ValueError("下次执行时间格式不正确") from exc
     return PreparedOrganizePolicyUpdate(
         enabled=enabled,
         schedule_mode=schedule_mode,

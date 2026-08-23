@@ -72,7 +72,7 @@ class LibraryFilterSchemaOptions:
     formats: tuple[LibraryFilterOption, ...]
     import_statuses: tuple[LibraryFilterOption, ...]
     origins: tuple[LibraryFilterOption, ...]
-    monitor_folders: tuple[LibraryFilterOption, ...]
+    libraries: tuple[LibraryFilterOption, ...]
     shelves: tuple[LibraryFilterOption, ...]
 
 
@@ -109,47 +109,47 @@ class LibraryFilterQueryPort(Protocol):
 
 
 FILTER_FIELD_DEFINITIONS = (
-    LibraryFilterFieldDefinition("title", "书名", "作品元数据", "text", TEXT_OPERATORS),
+    LibraryFilterFieldDefinition("title", "书名", "图书元数据", "text", TEXT_OPERATORS),
     LibraryFilterFieldDefinition(
         "author",
         "作者",
-        "作品元数据",
+        "图书元数据",
         "select",
         SELECT_OPERATORS,
         "authors",
         True,
     ),
     LibraryFilterFieldDefinition(
-        "tag", "标签", "作品元数据", "select", SELECT_OPERATORS, "tags", True
+        "tag", "标签", "图书元数据", "select", SELECT_OPERATORS, "tags", True
     ),
     LibraryFilterFieldDefinition(
         "series",
         "丛书",
-        "作品元数据",
+        "图书元数据",
         "select",
         SELECT_OPERATORS,
         "series",
         True,
     ),
     LibraryFilterFieldDefinition(
-        "description", "简介", "作品元数据", "text", TEXT_OPERATORS
+        "description", "简介", "图书元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
-        "seriesIndex", "丛书序号", "作品元数据", "number", NUMBER_OPERATORS
+        "seriesIndex", "丛书序号", "图书元数据", "number", NUMBER_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "metadataQuality",
         "元数据完整度",
-        "作品元数据",
+        "图书元数据",
         "number",
         NUMBER_OPERATORS,
         unit="%",
     ),
     LibraryFilterFieldDefinition(
-        "volumeTitle", "卷册名称", "卷册元数据", "text", TEXT_OPERATORS
+        "resourceTitle", "资源名称", "资源元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
-        "narrator", "演播者", "卷册元数据", "text", TEXT_OPERATORS
+        "narrator", "演播者", "资源元数据", "text", TEXT_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "mediaKind",
@@ -193,7 +193,7 @@ FILTER_FIELD_DEFINITIONS = (
         value_scale=60000,
     ),
     LibraryFilterFieldDefinition(
-        "volumeCount", "卷册数量", "格式与文件", "number", NUMBER_OPERATORS
+        "resourceCount", "资源数量", "格式与文件", "number", NUMBER_OPERATORS
     ),
     LibraryFilterFieldDefinition(
         "readingStatus",
@@ -243,12 +243,12 @@ FILTER_FIELD_DEFINITIONS = (
         "shelf", "所在普通书架", "来源与归档", "select", SELECT_OPERATORS, "shelves"
     ),
     LibraryFilterFieldDefinition(
-        "monitorFolder",
-        "监控文件夹",
+        "library",
+        "书库",
         "来源与归档",
         "select",
         SELECT_OPERATORS,
-        "monitorFolders",
+        "libraries",
     ),
     LibraryFilterFieldDefinition(
         "sourcePath", "原始文件路径", "来源与归档", "text", TEXT_OPERATORS
@@ -326,7 +326,7 @@ class GetLibraryFilterSchema:
             "formats": dynamic.formats,
             "importStatuses": dynamic.import_statuses,
             "origins": dynamic.origins,
-            "monitorFolders": dynamic.monitor_folders,
+            "libraries": dynamic.libraries,
             "shelves": dynamic.shelves,
         }
         return LibraryFilterSchema(

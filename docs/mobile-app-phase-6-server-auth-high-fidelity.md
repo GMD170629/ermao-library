@@ -207,7 +207,7 @@ unsafe-ssl-alert(profileId?)
 
 - Setup 与普通登录互斥，只在登录意图的 setup status 检查确认未初始化时出现；
 - 移动端只创建首位管理员，字段为用户名、登录邮箱、登录密码和确认密码；
-- 不配置服务器/NAS 目录、监控文件夹、导入或元数据；
+- 不配置服务器/NAS 书库根目录、组织方式、扫描导入或元数据；
 - 成功建立 Cookie 会话并继续 `/me`；只有 `/me` 成功后才按 hostname 自动保存 profile；
 - setup 409 重新检查状态后回到 `server.entry`，回填刚才的服务器与账号，不跳到旧网格或独立 Login 页。
 

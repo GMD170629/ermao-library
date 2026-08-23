@@ -19,7 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/apps/api-python
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends libmobi-tools ffmpeg unar ca-certificates \
+  && apt-get install -y --no-install-recommends ffmpeg unar ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./
@@ -34,4 +34,4 @@ RUN pip install --no-cache-dir . \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python -m app.bootstrap.startup_data_migrations && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -m app.bootstrap.prestart && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

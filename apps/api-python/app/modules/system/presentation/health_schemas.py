@@ -6,11 +6,10 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi.responses import StreamingResponse
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
-from app.core.time import timestamp_ms_to_iso
 
 
 class HealthCheck(HttpContractModel):
@@ -88,6 +87,16 @@ class QueueHealthDetails(HttpContractModel):
     oldest_pending_at: datetime | None = Field(alias="oldestPendingAt")
 
 
+class LibraryImportTaskHealthDetails(HttpContractModel):
+    """Import health is a read-only projection of task states only."""
+
+    queue: Literal["import"]
+    pending: int
+    running: int
+    failed: int
+    oldest_pending_at: datetime | None = Field(alias="oldestPendingAt")
+
+
 class SmtpHealthDetails(HttpContractModel):
     recipient_count: int = Field(alias="recipientCount")
     configured: bool
@@ -114,6 +123,7 @@ HealthItemDetails = (
     EmptyDetails
     | DirectoryHealthDetails
     | DatabaseHealthDetails
+    | LibraryImportTaskHealthDetails
     | QueueHealthDetails
     | SmtpHealthDetails
     | ProviderHealthDetails
@@ -167,35 +177,6 @@ class HealthRunPayload(HttpContractModel):
     created: bool | None = None
 
 
-class QueueOperation(HttpContractModel):
-    id: str
-    queue_name: str = Field(alias="queueName")
-    action: str
-    status: str
-    actor_user_id: str = Field(alias="actorUserId")
-    message_code: str = Field(alias="messageCode")
-    requested_at: str = Field(alias="requestedAt")
-    started_at: str | None = Field(alias="startedAt")
-    finished_at: str | None = Field(alias="finishedAt")
-    updated_at: str = Field(alias="updatedAt")
-
-    @field_validator(
-        "requested_at",
-        "started_at",
-        "finished_at",
-        "updated_at",
-        mode="before",
-    )
-    @classmethod
-    def normalize_timestamp(cls, value: object) -> str | None:
-        return timestamp_ms_to_iso(value)
-
-
-class QueueOperationPayload(HttpContractModel):
-    operation: QueueOperation
-    created: bool | None = None
-
-
 class EventStorage(HttpContractModel):
     size_bytes: int = Field(alias="sizeBytes")
     max_bytes: int = Field(alias="maxBytes")
@@ -246,46 +227,6 @@ class HealthRunNotFoundError(HttpContractError[HealthRunNotFoundBody]):
     body_model = HealthRunNotFoundBody
 
 
-class QueueOperationNotFoundBody(HttpContractModel):
-    message: str
-    code: Literal["QUEUE_OPERATION_NOT_FOUND"] = "QUEUE_OPERATION_NOT_FOUND"
-
-
-class QueueOperationNotFoundError(HttpContractError[QueueOperationNotFoundBody]):
-    status_code = 404
-    body_model = QueueOperationNotFoundBody
-
-
-class QueueOperationConflictBody(HttpContractModel):
-    message: str
-    code: Literal["QUEUE_OPERATION_CONFLICT"] = "QUEUE_OPERATION_CONFLICT"
-
-
-class QueueOperationConflictError(HttpContractError[QueueOperationConflictBody]):
-    status_code = 409
-    body_model = QueueOperationConflictBody
-
-
-class HealthRunActiveBody(HttpContractModel):
-    message: str
-    code: Literal["HEALTH_RUN_ACTIVE"] = "HEALTH_RUN_ACTIVE"
-
-
-class HealthRunActiveError(HttpContractError[HealthRunActiveBody]):
-    status_code = 409
-    body_model = HealthRunActiveBody
-
-
-class ImportQueueOfflineBody(HttpContractModel):
-    message: str
-    code: Literal["IMPORT_QUEUE_OFFLINE"] = "IMPORT_QUEUE_OFFLINE"
-
-
-class ImportQueueOfflineError(HttpContractError[ImportQueueOfflineBody]):
-    status_code = 409
-    body_model = ImportQueueOfflineBody
-
-
 class InvalidLogMaxBytesBody(HttpContractModel):
     message: str
     code: Literal["INVALID_LOG_MAX_BYTES"] = "INVALID_LOG_MAX_BYTES"
@@ -300,5 +241,4 @@ ServiceHealthResponse = SuccessEnvelope[ServiceHealthPayload]
 SystemHealthResponse = SuccessEnvelope[SystemHealthPayload]
 DatabasePingResponse = SuccessEnvelope[DatabasePingPayload]
 HealthRunResponse = SuccessEnvelope[HealthRunPayload]
-QueueOperationResponse = SuccessEnvelope[QueueOperationPayload]
 LogSettingsResponse = SuccessEnvelope[LogSettingsPayload]

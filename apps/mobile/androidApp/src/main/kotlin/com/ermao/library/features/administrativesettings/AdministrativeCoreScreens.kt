@@ -97,7 +97,6 @@ private fun AdministrativeSettingsRoute.group(): ManagementGroup = when (this) {
     AdministrativeSettingsRoute.OrganizeCandidates,
     AdministrativeSettingsRoute.OrganizeRuns,
     AdministrativeSettingsRoute.RecognitionPolicy,
-    AdministrativeSettingsRoute.Duplicates,
     AdministrativeSettingsRoute.LibraryOperations,
     is AdministrativeSettingsRoute.CategoryGovernance,
     AdministrativeSettingsRoute.MetadataProviders,
@@ -142,7 +141,6 @@ private fun AdministrativeSettingsRoute.title(): AdministrativeCopy = when (this
     AdministrativeSettingsRoute.OrganizeRuns,
     -> AdministrativeCopy.SmartOrganization
     AdministrativeSettingsRoute.RecognitionPolicy -> AdministrativeCopy.RecognitionPolicy
-    AdministrativeSettingsRoute.Duplicates -> AdministrativeCopy.DuplicatesAndCategories
     AdministrativeSettingsRoute.LibraryOperations -> AdministrativeCopy.OperationHistory
     is AdministrativeSettingsRoute.CategoryGovernance -> AdministrativeCopy.CategoryGovernance
     AdministrativeSettingsRoute.MetadataProviders,
@@ -166,8 +164,7 @@ private fun AdministrativeSettingsRoute.icon(): ImageVector = when (this) {
     AdministrativeSettingsRoute.OrganizeRuns,
     -> Icons.Outlined.SettingsSuggest
     AdministrativeSettingsRoute.RecognitionPolicy -> Icons.Outlined.Tune
-    AdministrativeSettingsRoute.Duplicates, AdministrativeSettingsRoute.LibraryOperations,
-    is AdministrativeSettingsRoute.CategoryGovernance,
+    AdministrativeSettingsRoute.LibraryOperations, is AdministrativeSettingsRoute.CategoryGovernance,
     -> Icons.AutoMirrored.Outlined.MergeType
     AdministrativeSettingsRoute.MetadataProviders, is AdministrativeSettingsRoute.MetadataProviderEdit, is AdministrativeSettingsRoute.MetadataPipeline -> Icons.Outlined.Storage
     AdministrativeSettingsRoute.Users, is AdministrativeSettingsRoute.UserEdit, is AdministrativeSettingsRoute.UserAccess -> Icons.Outlined.ManageAccounts

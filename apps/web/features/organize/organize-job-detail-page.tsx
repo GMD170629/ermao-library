@@ -27,8 +27,8 @@ function valueLabel(value: unknown) {
 
 function metadataChecks(job: OrganizeJobView) {
   const book = job.book;
-  const volumes = book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes);
-  const publishedAt = volumes.map((volume) => volume.publishedAt).find(Boolean) ?? null;
+  const resources = book.resources;
+  const publishedAt = resources.map((resource) => resource.publishedAt).find(Boolean) ?? null;
   return [
     { key: 'title', label: '标题', complete: Boolean(book.title.trim()), value: book.title },
     { key: 'author', label: '作者', complete: Boolean(book.author.trim() && book.author !== '未知作者'), value: book.author },
@@ -72,6 +72,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
 
   if (loading) return <div className="shuku-loading-panel p-8 text-sm" role="status" aria-live="polite"><I18nText>正在读取整理任务...</I18nText></div>;
   if (!job) return <div className="rounded-3xl border border-red-100 bg-red-50 p-8 text-sm text-red-700">{error || i18nAttribute("整理任务不存在")}</div>;
+  const sourceAsset = job.book.resources.flatMap((resource) => resource.assets)[0];
 
   return (
     <div className={embedded ? 'space-y-5' : 'space-y-6'}>
@@ -93,7 +94,7 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
             <Cover book={job.book} className="h-40 w-28" />
             <div data-i18n-skip className="min-w-0">
               <h2 className="line-clamp-2 text-lg font-semibold text-slate-900">{job.book.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">{job.book.author} · {job.book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).map((volume) => volume.format).join(' / ')}</p>
+              <p className="mt-1 text-sm text-slate-500">{job.book.author} · {job.book.resources.map((resource) => resource.format).join(' / ')}</p>
               <div className="mt-3 flex flex-wrap gap-1">
                 <Badge tone={job.statusCategory === 'SUCCESS' ? 'green' : job.statusCategory === 'FAILED' ? 'red' : job.statusCategory === 'RECOGNIZING' ? 'blue' : 'amber'}>{organizeStatusLabel(job.statusCategory ?? organizeStatusCategory(job.status, job.metadataLookupStatus))}</Badge>
                 {!embedded ? <Badge tone={job.book.metadataQuality >= 80 ? 'green' : 'blue'}><I18nText>质量 </I18nText>{job.book.metadataQuality}</Badge> : null}
@@ -101,13 +102,13 @@ export function OrganizeJobDetailPage({ jobId, embedded = false }: { jobId: stri
             </div>
           </div>
           <dl className="mt-5 space-y-3 text-sm">
-            <div><dt className="text-slate-500"><I18nText>文件路径</I18nText></dt><dd className="mt-1 break-all text-slate-800">{job.book.mediaVersions.flatMap((mediaVersion) => mediaVersion.volumes).flatMap((volume) => volume.files)[0]?.path || i18nAttribute("未记录")}</dd></div>
+            <div><dt className="text-slate-500"><I18nText>源资产</I18nText></dt><dd className="mt-1 break-all text-slate-800">{sourceAsset ? <a className="font-medium text-[#D94322] hover:underline" href={sourceAsset.downloadUrl}><I18nText>下载附件</I18nText></a> : i18nAttribute("未记录")}</dd></div>
             <div><dt className="text-slate-500"><I18nText>导入时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.book.addedAt).toLocaleString(locale)}</dd></div>
             <div><dt className="text-slate-500"><I18nText>任务更新时间</I18nText></dt><dd className="mt-1 text-slate-800">{new Date(job.updatedAt).toLocaleString(locale)}</dd></div>
             <div><dt className="text-slate-500"><I18nText>整理摘要</I18nText></dt><dd className="mt-1 text-slate-800">{job.summary ?? i18nAttribute("暂无整理摘要")}</dd></div>
           </dl>
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button variant="secondary" icon={ExternalLink} onClick={() => router.push(`/works/${job.book.id}`)}><I18nText>打开读物详情</I18nText></Button>
+            <Button variant="secondary" icon={ExternalLink} onClick={() => router.push(`/books/${job.book.id}`)}><I18nText>打开读物详情</I18nText></Button>
           </div>
         </section>
 

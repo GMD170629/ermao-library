@@ -16,7 +16,7 @@ function runStartupDataMigrations(env) {
   return new Promise((resolve, reject) => {
     const migration = spawn(
       'uv',
-      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.startup_data_migrations'],
+      ['run', '--extra', 'dev', 'python', '-m', 'app.bootstrap.prestart'],
       {
         cwd: apiRoot,
         env,
@@ -80,9 +80,8 @@ async function main() {
     SESSION_SECRET: 'runtime-smoke-session-secret-32chars',
     STORAGE_ROOT: storageRoot,
     DOWNLOAD_INBOX_PATH: inbox,
-    SCAN_WORKER_READY_FILE: readyFile,
-    MONITOR_REFRESH_INTERVAL_MS: '10000',
-    MONITOR_FILE_STABLE_DELAY_MS: '100'
+    IMPORT_WORKER_READY_FILE: readyFile,
+    IMPORT_QUEUE_INTERVAL_SECONDS: '1'
   };
 
   let child;
@@ -112,30 +111,12 @@ async function main() {
     if (!/^\d+$/.test(pidText)) {
       throw new Error(`ready file did not contain a process id: ${pidText}`);
     }
-    if (!runtimeOutput.includes('[import-worker] ready')) {
-      throw new Error(`worker did not print ready marker. Output: ${runtimeOutput}`);
+    if (!migrationOutput.includes('prestart outcome=success')) {
+      throw new Error(`prestart did not report success. Output: ${migrationOutput}`);
     }
-    const startupMigrations = [
-      'library_facet_index_data_migration',
-      'comic_page_index_data_migration'
-    ];
-    for (const migration of startupMigrations) {
-      const startedVisible = migrationOutput.includes(`${migration} outcome=started`);
-      const successVisible = migrationOutput.includes(`${migration} outcome=success`);
-      if (!startedVisible || !successVisible) {
-        throw new Error(`${migration} lifecycle was not visible before worker launch. Output: ${migrationOutput}`);
-      }
+    if (!runtimeOutput.includes('schema_barrier outcome=ready')) {
+      throw new Error(`worker did not verify the current schema. Output: ${runtimeOutput}`);
     }
-    if (!migrationOutput.includes('startup_data_migrations outcome=success')) {
-      throw new Error(`startup migration barrier did not report success. Output: ${migrationOutput}`);
-    }
-    if (!runtimeOutput.includes('startup_data_migration_barrier outcome=ready')) {
-      throw new Error(`worker did not verify the completed migration barrier. Output: ${runtimeOutput}`);
-    }
-    if (runtimeOutput.includes('data_migration outcome=started')) {
-      throw new Error(`worker reran data migrations after process launch. Output: ${runtimeOutput}`);
-    }
-
     child.kill('SIGTERM');
     const exit = await waitForExit(child);
     if (exit.code !== 0 && exit.signal !== 'SIGTERM') {
@@ -154,7 +135,7 @@ async function main() {
       .split(/\r?\n/)
       .filter((line) =>
         line.includes('data_migration') ||
-        line.includes('[import-worker] ready') ||
+        line.includes('readable_resource.worker.ready') ||
         line.includes('unavailable') ||
         line.includes('retrying later') ||
         line.includes('signal')

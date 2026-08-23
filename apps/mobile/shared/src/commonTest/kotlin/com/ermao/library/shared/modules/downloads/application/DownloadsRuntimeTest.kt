@@ -11,39 +11,14 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
 import com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision
 import com.ermao.library.shared.modules.downloads.domain.ReaderAccessRequest
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlinx.coroutines.runBlocking
 
 class DownloadsRuntimeTest {
     @Test
-    fun rehomesCompletedArtifactWithoutChangingItsLocalFile() = runBlocking {
-        val catalog = InMemoryDownloadCatalogRepository()
-        val runtime = DownloadsRuntime(catalog)
-        val artifact = artifact()
-        catalog.saveArtifact(artifact)
-
-        val moved = runtime.rehomeCompletedArtifact(
-            namespace = artifact.identity.namespace,
-            volumeId = artifact.identity.volumeId,
-            targetWorkId = "work-b",
-            targetMediaVersionId = "media-b",
-            targetMediaKind = "COMIC",
-            targetWorkTitle = "Moved work",
-            targetWorkAuthor = "Author B",
-            targetCoverApiPath = "/api/works/work-b/cover",
-        )
-
-        assertEquals("work-b", moved?.identity?.workId)
-        assertEquals("media-b", moved?.descriptor?.mediaVersionId)
-        assertEquals("COMIC", moved?.descriptor?.mediaKind)
-        assertEquals(artifact.localReference, moved?.localReference)
-        assertEquals(listOf(moved), catalog.listArtifacts(artifact.identity.namespace))
-    }
-
-    @Test
-    fun completingTaskPublishesArtifactOnlyAfterExplicitCompletion() = runBlocking {
+    fun completingTaskPublishesBookResourceAssetOnlyAfterExplicitCompletion() = runBlocking {
         val repository = InMemoryDownloadCatalogRepository()
         val runtime = DownloadsRuntime(repository)
         val task = DownloadTask("task", descriptor())
@@ -51,7 +26,7 @@ class DownloadsRuntimeTest {
 
         runtime.transitionTask(namespace, "task", DownloadTaskEvent.Start)
         runtime.transitionTask(namespace, "task", DownloadTaskEvent.BytesTransferred(10))
-        assertEquals(emptyList(), runtime.downloadedWorks(namespace))
+        assertEquals(emptyList(), runtime.downloadedBooks(namespace))
 
         val completed = runtime.transitionTask(
             namespace,
@@ -59,10 +34,13 @@ class DownloadsRuntimeTest {
             DownloadTaskEvent.Complete(artifact()),
         )
         assertEquals(DownloadTaskStatus.Completed, completed.status)
-        assertEquals(listOf("work"), runtime.downloadedWorks(namespace).map { it.workId })
+        val book = runtime.downloadedBooks(namespace).single()
+        assertEquals("book", book.bookId)
+        assertEquals(listOf("resource"), book.resources.map { it.resourceId })
+        assertEquals(listOf("asset"), book.artifacts.map { it.identity.assetId })
         assertIs<ReaderAccessDecision.LocalArtifact>(
             runtime.readerAccess(
-                ReaderAccessRequest(namespace, "volume", DownloadReaderType.Reflowable, false),
+                ReaderAccessRequest(namespace, "resource", DownloadReaderType.Reflowable, false),
             ),
         )
         Unit
@@ -71,15 +49,15 @@ class DownloadsRuntimeTest {
     private val namespace = DownloadNamespace("server", "user", 1)
 
     private fun descriptor() = DownloadDescriptor(
-        DownloadIdentity(namespace, "work", "volume"),
-        "Book",
-        "Author",
-        "/api/works/work/cover",
-        "Volume",
-        "EPUB",
-        DownloadReaderType.Reflowable,
-        DownloadSource("/api/volumes/volume/file", "application/epub+zip", 10),
+        identity = DownloadIdentity(namespace, "book", "resource", "asset"),
+        bookTitle = "Book",
+        bookAuthor = "Author",
+        coverApiPath = "/api/books/book/cover",
+        resourceTitle = "Resource",
+        format = "epub",
+        readerType = DownloadReaderType.Reflowable,
+        source = DownloadSource("/api/assets/asset", "application/epub+zip", 10),
     )
 
-    private fun artifact() = CompletedDownloadArtifact(descriptor(), "local://volume", 10, 1)
+    private fun artifact() = CompletedDownloadArtifact(descriptor(), "local://asset", 10, 1)
 }

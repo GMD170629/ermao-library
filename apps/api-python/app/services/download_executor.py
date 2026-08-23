@@ -29,8 +29,10 @@ from app.modules.download.infrastructure.tasks import (
     get_download_task,
     system_setting_value,
 )
+from app.modules.imports.domain.reflowable_formats import (
+    REFLOWABLE_SOURCE_EXTENSIONS,
+)
 from app.modules.imports.public import SUPPORTED_AUDIO_EXTS
-from app.services.text_conversion import CONVERTIBLE_TEXT_EXTS
 
 ALLOWED_EXTENSIONS = {
     ".epub",
@@ -42,7 +44,7 @@ ALLOWED_EXTENSIONS = {
     ".7z",
     ".torrent",
     *SUPPORTED_AUDIO_EXTS,
-    *CONVERTIBLE_TEXT_EXTS,
+    *REFLOWABLE_SOURCE_EXTENSIONS,
 }
 BLOCKED_EXTENSIONS = {
     ".exe",
