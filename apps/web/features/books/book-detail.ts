@@ -1,4 +1,5 @@
 import type { ReadableResourceView, BookView } from '../../types/book';
+import { resumeResourceForBook } from './model/book-action-menu';
 
 export function bookDetailReturnHref(value: unknown): string {
   if (typeof value !== 'string' || (!value.startsWith('/library?') && value !== '/library')) {
@@ -53,10 +54,7 @@ export function formatDuration(durationMs: number | null | undefined): string {
 export function selectedResourceForBook(book: BookView, requestedResourceId?: string | null): ReadableResourceView | null {
   const resources = allVisibleResources(book);
   return resources.find((resource) => resource.id === requestedResourceId)
-    ?? resources.find((resource) => resource.id === book.continueResourceId)
-    ?? resources.find((resource) => resource.progress <= 0)
-    ?? resources[0]
-    ?? null;
+    ?? resumeResourceForBook(book);
 }
 
 export function allVisibleResources(book: BookView): ReadableResourceView[] {

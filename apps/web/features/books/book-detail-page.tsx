@@ -20,7 +20,7 @@ import {
   fetchResourceDetail,
   regenerateResourceCover,
   updateResource,
-  updateResourceReadingStatus,
+  updateBookReadingStatus,
   uploadResourceCover
 } from './api/client';
 import { KindleSendModal } from './kindle-send-modal';
@@ -34,6 +34,8 @@ import { BookContentBrowser } from './ui/book-content-browser';
 import { ResourceDetailView } from './ui/resource-detail-view';
 import { SourceNodeMetadataEditor, SourceNodeMetadataRecognitionDialog } from './ui/source-node-metadata-dialogs';
 import { readableResourceActionIds, type ReadableResourceActionId } from './model/readable-resource-action-menu';
+import { bookReadingStatus, resumeResourceForBook } from './model/book-action-menu';
+import { BookActionController, type BookActionMenuRequest } from './ui/book-action-controller';
 
 type ResourceForm = Readonly<{
   title: string;
@@ -196,6 +198,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [sourceNodeEditorTarget, setSourceNodeEditorTarget] = useState<BookContentEntry | null>(null);
   const [sourceNodeRecognitionTarget, setSourceNodeRecognitionTarget] = useState<BookContentEntry | null>(null);
   const [readingStatusBusy, setReadingStatusBusy] = useState(false);
+  const [bookActionRequest, setBookActionRequest] = useState<BookActionMenuRequest | null>(null);
   const [resourceDetail, setResourceDetail] = useState<ResourceDetailPage | null>(null);
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
   const [resourceDetailError, setResourceDetailError] = useState('');
@@ -282,20 +285,12 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       ?? nestedResources[0]
       ?? null
     : selectedBookResource;
-  const displayedTitle = nestedNode?.title ?? book?.title ?? '';
-  const displayedDescription = nestedNode?.description ?? (nestedNode ? '' : book?.description ?? '');
-  const displayedCoverUrl = activeResource?.coverUrl || book?.coverUrl || '';
-  const displayedProgress = nestedNode && nestedResources.length > 0
-    ? nestedResources.reduce((total, resource) => total + resource.progress, 0) / nestedResources.length
-    : activeResource?.progress ?? 0;
-  const displayedCompleted = nestedNode
-    ? nestedResources.length > 0 && nestedResources.every((resource) => resource.progress >= 100)
-    : book?.completed === true;
-  const activeCopy = activeResource ? consumptionCopy(activeResource.readerType) : null;
-  const activeReaderHref = activeResource?.readable ? readerHref(activeResource) : null;
-  const activeProgress = displayedProgress;
-  const activeStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
-  const activeResourceActions = activeResource ? readableResourceActionIds({ canManage, kindleSendAvailable: activeResource.kindleSendAvailable }) : [];
+  const bookResumeResource = book ? resumeResourceForBook(book) : null;
+  const bookCopy = bookResumeResource ? consumptionCopy(bookResumeResource.readerType) : null;
+  const bookProgress = book?.completed
+    ? 100
+    : book?.continueResourceProgress ?? bookResumeResource?.progress ?? 0;
+  const bookStatus = book ? bookReadingStatus(book) : 'UNREAD';
 
   const playAudioResource = (resource: ReadableResourceView, assetId?: string, chapterTitle?: string) => {
     if (!book) return;
@@ -315,13 +310,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     });
   };
 
-  const consumeActiveResource = () => {
-    if (!activeResource?.readable) return;
-    if (activeResource.readerType === 'audio') {
-      playAudioResource(activeResource);
+  const consumeBook = () => {
+    if (!bookResumeResource?.readable) return;
+    if (bookResumeResource.readerType === 'audio') {
+      playAudioResource(bookResumeResource);
       return;
     }
-    router.push(readerHref(activeResource));
+    router.push(readerHref(bookResumeResource));
   };
 
   useEffect(() => {
@@ -355,10 +350,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   };
 
   const changeReadingStatus = async (status: string) => {
-    if (!activeResource || (status !== 'UNREAD' && status !== 'FINISHED')) return;
+    if (!book || (status !== 'UNREAD' && status !== 'FINISHED')) return;
     setReadingStatusBusy(true);
     try {
-      await updateResourceReadingStatus(activeResource.id, status);
+      await updateBookReadingStatus(book.id, status);
       await refresh();
       feedback.success(t(status === 'FINISHED' ? '已标记为已读' : '已标记为未读'));
     } catch (reason) {
@@ -366,6 +361,17 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     } finally {
       setReadingStatusBusy(false);
     }
+  };
+
+  const openBookMenu = (anchor: HTMLButtonElement) => {
+    if (!book) return;
+    const bounds = anchor.getBoundingClientRect();
+    setBookActionRequest({
+      target: { id: book.id, title: book.title, status: bookStatus },
+      position: { x: bounds.right, y: bounds.bottom + 6 },
+      anchor,
+      book
+    });
   };
 
   const openResourceMenu = (resource: ReadableResourceView, anchor: HTMLButtonElement) => {
@@ -467,23 +473,23 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-950"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
     <section className="rounded-[22px] border border-[#f1ddd3] bg-[#fffaf7] p-5 sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[150px_minmax(0,1fr)_230px]">
-        <Cover book={{ id: nestedNode?.sourceNodeId ?? book.id, title: displayedTitle, author: book.author, coverUrl: coverRevision > 0 && displayedCoverUrl ? `${displayedCoverUrl}${displayedCoverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : displayedCoverUrl, gradient: book.gradient, coverStatus: activeResource ? '' : book.coverStatus }} className="mx-auto aspect-[2/3] w-24 max-w-[150px] rounded-xl shadow-md sm:w-[150px] lg:mx-0" size="small" priority />
+        <Cover book={{ ...book, coverUrl: coverRevision > 0 && book.coverUrl ? `${book.coverUrl}${book.coverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : book.coverUrl }} className="mx-auto aspect-[2/3] w-24 max-w-[150px] rounded-xl shadow-md sm:w-[150px] lg:mx-0" size="small" priority />
         <div className="flex min-w-0 flex-col py-1">
-          {displayedCompleted ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
-          <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]">{displayedTitle}</h1>
+          {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
+          <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]">{book.title}</h1>
           <p data-i18n-skip className="mt-3 text-base text-stone-600">{book.author}</p>
-          {displayedDescription ? <p data-i18n-skip className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600">{displayedDescription}</p> : <p className="mt-5 text-sm text-stone-400"><I18nText>暂无简介</I18nText></p>}
-          {activeCopy ? <div className="mt-7 max-w-3xl">
-            <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-stone-700">{t(activeCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[#ff4f26]" style={{ width: `${activeProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(activeProgress)}%</span></div>
-            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(activeCopy.position)}</span><span data-i18n-skip className="text-stone-800">{activeResource ? currentPositionLabel(activeResource, requestedResource?.id === activeResource.id ? resourceDetail : null, t) : ''}</span></div>
+          {book.description ? <p data-i18n-skip className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600">{book.description}</p> : <p className="mt-5 text-sm text-stone-400"><I18nText>暂无简介</I18nText></p>}
+          {bookCopy ? <div className="mt-7 max-w-3xl">
+            <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-stone-700">{t(bookCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[#ff4f26]" style={{ width: `${bookProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(bookProgress)}%</span></div>
+            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(bookCopy.position)}</span><span data-i18n-skip className="text-stone-800">{bookResumeResource ? currentPositionLabel(bookResumeResource, requestedResource?.id === bookResumeResource.id ? resourceDetail : null, t) : ''}</span></div>
           </div> : null}
           {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end lg:col-start-2 xl:col-start-3 xl:flex-col xl:justify-end">
-          {activeCopy ? <Button disabled={!activeReaderHref} loading={activeResource?.readerType === 'audio' && audioPlayback.pendingResourceId === activeResource.id && !audioPlayback.loadError} loadingText="正在准备有声书…" icon={activeResource?.readerType === 'audio' ? Headphones : activeResource?.readerType === 'comic' ? Images : BookOpen} onClick={consumeActiveResource} className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420]">{t(activeProgress > 0 ? activeCopy.resume : activeCopy.start)}</Button> : null}
+          {bookCopy ? <Button disabled={!bookResumeResource} loading={bookResumeResource?.readerType === 'audio' && audioPlayback.pendingResourceId === bookResumeResource.id && !audioPlayback.loadError} loadingText="正在准备有声书…" icon={bookResumeResource?.readerType === 'audio' ? Headphones : bookResumeResource?.readerType === 'comic' ? Images : BookOpen} onClick={consumeBook} className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420]">{t(bookProgress > 0 ? bookCopy.resume : bookCopy.start)}</Button> : null}
           <div className="flex w-full gap-2">
-            {activeCopy && activeResource ? <Select value={activeStatus} options={[{ value: 'READING', label: '在读', disabled: activeStatus !== 'READING' }, { value: 'UNREAD', label: '未读' }, { value: 'FINISHED', label: '已读' }]} onChange={(status) => void changeReadingStatus(status)} ariaLabel={t(activeCopy.status)} disabled={readingStatusBusy} className="min-w-0 flex-1" /> : null}
-            {activeResource && activeResourceActions.length ? <button type="button" onClick={(event) => openResourceMenu(activeResource, event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); openResourceMenu(activeResource, event.currentTarget); }} className="ml-auto flex h-11 w-12 shrink-0 items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600 transition hover:bg-white hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200" aria-label={t('管理当前可读资源 {value0}', { value0: activeResource.title })} aria-haspopup="menu"><Ellipsis size={20} /></button> : null}
+            {bookCopy ? <Select value={bookStatus} options={[{ value: 'READING', label: '在读', disabled: bookStatus !== 'READING' }, { value: 'UNREAD', label: '未读' }, { value: 'FINISHED', label: '已读' }]} onChange={(status) => void changeReadingStatus(status)} ariaLabel={t('图书阅读状态')} disabled={readingStatusBusy} className="min-w-0 flex-1" /> : null}
+            <button type="button" onClick={(event) => openBookMenu(event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); openBookMenu(event.currentTarget); }} className="ml-auto flex h-11 w-12 shrink-0 items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600 transition hover:bg-white hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200" aria-label={t('管理图书 {value0}', { value0: book.title })} aria-haspopup="menu"><Ellipsis size={20} /></button>
           </div>
         </div>
       </div>
@@ -559,6 +565,19 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onClose={() => { setResourceMenuPosition(null); setResourceActionTarget(null); }}
       onSelect={(action) => { void invokeResourceAction(action); }}
     /> : null}
+
+    <BookActionController
+      request={bookActionRequest}
+      canManage={canManage}
+      onRequestClose={() => setBookActionRequest(null)}
+      onChanged={async (nextBook) => {
+        if (nextBook) setBook(nextBook);
+        else await refresh();
+        setCoverRevision(Date.now());
+        setContentsRevision((value) => value + 1);
+      }}
+      onDeleted={() => { router.push(returnHref); }}
+    />
 
     <ResourceEditor book={book} resource={resources.find((resource) => resource.id === resourceEditorId) ?? null} onClose={() => setResourceEditorId(null)} onSaved={refresh} />
     <SourceNodeMetadataEditor

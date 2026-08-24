@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { useToast } from '../../components/ui/feedback';
 import { Select } from '../../components/ui/select';
+import { BookActionController, type BookActionMenuRequest } from '../books/public';
 import {
   fetchLibraryBooksPage,
   type BookshelfBookSummary,
@@ -112,6 +113,7 @@ export function LibraryPage() {
   const [selectedBookIds, setSelectedBookIds] = useState<string[]>([]);
   const [batchDialogAction, setBatchDialogAction] = useState<LibraryBatchAction | null>(null);
   const [batchContextPosition, setBatchContextPosition] = useState<{ x: number; y: number } | null>(null);
+  const [bookActionRequest, setBookActionRequest] = useState<BookActionMenuRequest | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const requestedScopeRef = useRef('');
   const requestedReloadKeyRef = useRef(reloadKey);
@@ -472,11 +474,13 @@ export function LibraryPage() {
     setReloadKey((key) => key + 1);
   }
 
-  function openBookAction(book: ManagementBookSummary, action: LibraryBatchAction) {
-    if (!canUseLibraryBatchAction(action, canManageSystem)) return;
-    setSelectedBookIds([book.id]);
-    setBatchContextPosition(null);
-    setBatchDialogAction(action);
+  function openBookActions(book: ManagementBookSummary, anchor: HTMLButtonElement) {
+    const bounds = anchor.getBoundingClientRect();
+    setBookActionRequest({
+      target: { id: book.id, title: book.title, status: book.statusValue },
+      position: { x: bounds.right, y: bounds.bottom + 6 },
+      anchor
+    });
   }
 
   return (
@@ -634,8 +638,7 @@ export function LibraryPage() {
                   onSelectAll={togglePageSelection}
                   onSelectionChange={setSelectedBookIds}
                   onContextMenu={(_book, position) => setBatchContextPosition(position)}
-                  onEdit={canManageSystem ? (book) => openBookAction(book, 'metadata') : undefined}
-                  onDelete={canManageSystem ? (book) => openBookAction(book, 'delete') : undefined}
+                  onActions={openBookActions}
                   sort={sort}
                   sortDirection={sortDirection}
                   onSort={updateSort}
@@ -651,6 +654,17 @@ export function LibraryPage() {
 
       <LibraryBatchContextMenu position={batchContextPosition} selectedCount={selectedBookIds.length} canManageSystem={canManageSystem} onClose={() => setBatchContextPosition(null)} onSelect={openBatchAction} />
       <LibraryBatchDialog action={batchDialogAction} selectedIds={selectedBookIds} canManageSystem={canManageSystem} onActionChange={setBatchDialogAction} onClose={() => setBatchDialogAction(null)} onApplied={finishBatchAction} />
+      <BookActionController
+        request={bookActionRequest}
+        canManage={canManageSystem}
+        onRequestClose={() => setBookActionRequest(null)}
+        onChanged={() => { setReloadKey((key) => key + 1); }}
+        onDeleted={(bookId) => {
+          setBooks((current) => current.filter((book) => book.id !== bookId));
+          setSelectedBookIds((current) => current.filter((id) => id !== bookId));
+          setReloadKey((key) => key + 1);
+        }}
+      />
     </div>
   );
 }

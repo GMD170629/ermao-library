@@ -256,26 +256,13 @@ test('book detail resource covers support selection, keyboard-accessible context
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
-  const topResourceActions = page.getByRole('button', { name: '管理当前可读资源 第一资源', exact: true });
-  await topResourceActions.click();
-  const topResourceMenu = page.getByRole('menu', { name: '管理可读资源' });
-  await expect(topResourceMenu.getByRole('menuitem')).toHaveCount(6);
-  await expect(topResourceMenu.getByRole('menuitem', { name: '编辑', exact: true })).toBeVisible();
-  await expect(topResourceMenu.getByRole('menuitem', { name: '上传封面', exact: true })).toBeVisible();
-  await expect(topResourceMenu.getByRole('menuitem', { name: '重新生成封面', exact: true })).toBeVisible();
-  await expect(topResourceMenu.getByRole('menuitem', { name: '识别', exact: true })).toBeVisible();
-  await expect(topResourceMenu.getByRole('menuitem', { name: '发送到 Kindle', exact: true })).toBeVisible();
-  await expect(topResourceMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true })).toBeVisible();
-  await topResourceMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
-  const resourceEditor = page.getByRole('dialog', { name: '编辑可读资源' });
-  await expect(resourceEditor.getByRole('textbox', { name: '卷标题' })).toHaveValue('第一资源');
-  await expect(resourceEditor.getByRole('spinbutton', { name: '卷号' })).toHaveValue('1');
-  await resourceEditor.getByRole('textbox', { name: '卷标题' }).fill('第一资源：修订');
-  await resourceEditor.getByRole('spinbutton', { name: '卷号' }).fill('2.5');
-  await resourceEditor.getByRole('textbox', { name: '简介' }).fill('卷册简介');
-  await resourceEditor.getByRole('button', { name: '保存', exact: true }).click();
-  await expect(resourceEditor).toBeHidden();
-  expect(resourcePatchBody).toMatchObject({ title: '第一资源：修订', resourceIndex: 2.5, description: '卷册简介' });
+  const topBookActions = page.getByRole('button', { name: '管理图书 右键菜单测试图书', exact: true });
+  await topBookActions.click();
+  const topBookMenu = page.getByRole('menu', { name: '管理图书' });
+  await expect(topBookMenu.getByRole('menuitem')).toHaveCount(6);
+  await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await page.keyboard.press('Escape');
+  await expect(topBookActions).toBeFocused();
   await page.getByRole('button', { name: '返回图书内容', exact: true }).click();
   const sourcePath = page.getByRole('navigation', { name: '来源目录路径' });
   await expect(sourcePath).toBeVisible();
@@ -290,9 +277,10 @@ test('book detail resource covers support selection, keyboard-accessible context
   await expect(sourceNodeMenu.getByRole('menuitem', { name: /^重新扫描文件/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '打开来源目录 测试目录标题' }).click();
-  await expect(page.getByRole('heading', { name: '测试目录标题', level: 1 })).toBeVisible();
-  await expect(page.getByText('目录简介', { exact: true })).toBeVisible();
-  await expect(page.getByText('90%', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: book.title, level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '测试目录标题', level: 1 })).toHaveCount(0);
+  await expect(page.getByText('目录简介', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('80%', { exact: true })).toBeVisible();
   await expect(sourcePath.getByRole('button', { name: book.title, exact: true })).toBeVisible();
   await expect(sourcePath.getByRole('button', { name: sourceNodeEntry.title, exact: true })).toBeVisible();
   await page.getByRole('button', { name: book.title, exact: true }).click();
@@ -323,8 +311,17 @@ test('book detail resource covers support selection, keyboard-accessible context
   await expect(cardMenu.getByRole('menuitem', { name: '识别', exact: true })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: '发送到 Kindle', exact: true })).toBeVisible();
   await expect(cardMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true })).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(firstActions).toBeFocused();
+  await cardMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
+  const resourceEditor = page.getByRole('dialog', { name: '编辑可读资源' });
+  await expect(resourceEditor.getByRole('textbox', { name: '卷标题' })).toHaveValue('第一资源');
+  await expect(resourceEditor.getByRole('spinbutton', { name: '卷号' })).toHaveValue('1');
+  await resourceEditor.getByRole('textbox', { name: '卷标题' }).fill('第一资源：修订');
+  await resourceEditor.getByRole('spinbutton', { name: '卷号' }).fill('2.5');
+  await resourceEditor.getByRole('textbox', { name: '简介' }).fill('卷册简介');
+  await resourceEditor.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(resourceEditor).toBeHidden();
+  expect(resourcePatchBody).toMatchObject({ title: '第一资源：修订', resourceIndex: 2.5, description: '卷册简介' });
+  await page.locator('[data-resource-card="true"]').filter({ hasText: '第一资源' }).hover();
   await firstActions.click({ button: 'right' });
   await expect(cardMenu).toBeVisible();
   await page.keyboard.press('Escape');
@@ -348,7 +345,7 @@ test('book detail resource covers support selection, keyboard-accessible context
   await page.getByRole('button', { name: '可读资源 2，阅读进度 100%' }).click();
   await expect(page).toHaveURL(/resourceId=context-resource-2/);
   await page.getByRole('button', { name: '继续看', exact: true }).click();
-  await expect(page).toHaveURL(/\/reader\/context-resource-2$/);
+  await expect(page).toHaveURL(/\/reader\/context-resource-1$/);
 });
 
 test('book detail requests a selected readable resource through the direct contract', async ({ page }) => {
@@ -1333,9 +1330,16 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.getByRole('button', { name: '加入时间排序，当前倒序' }).click();
   await expect.poll(() => requestedSorts.at(-1)).toEqual({ sort: 'recent_import', direction: 'asc' });
 
+  await tableViewport.evaluate((element) => { element.scrollTop = 0; });
   const managedBookRow = page.locator('[data-book-id="desktop-list-book"]');
   await expect(managedBookRow.getByRole('button', { name: '查看《桌面列表入口测试》', exact: true })).toHaveCount(0);
-  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toHaveCount(1);
+  const managedBookActions = managedBookRow.getByRole('button', { name: '管理《桌面列表入口测试》', exact: true });
+  await expect(managedBookActions).toHaveCount(1);
+  await managedBookActions.click();
+  const managedBookMenu = page.getByRole('menu', { name: '管理图书' });
+  await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await page.keyboard.press('Escape');
+  await expect(managedBookActions).toBeFocused();
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
@@ -1359,4 +1363,8 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await page.goto('/library');
   await page.getByRole('button', { name: '查看《桌面列表入口测试》详情' }).click();
   await expect(page).toHaveURL((url) => url.pathname === '/books/desktop-list-book' && url.searchParams.get('returnTo') === '/library');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/library');
+  await expect(page.getByTestId('book-list-mobile-card').first().getByRole('button', { name: /管理《/ })).toBeVisible();
 });

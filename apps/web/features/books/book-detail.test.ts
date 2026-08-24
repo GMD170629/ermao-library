@@ -79,7 +79,7 @@ test('resource selection prefers URL, continue, first unfinished, then first res
   const value = book([resource('finished', 100), resource('continue', 20), resource('unfinished')], 'continue');
   assert.equal(selectedResourceForBook(value, 'unfinished')?.id, 'unfinished');
   assert.equal(selectedResourceForBook(value)?.id, 'continue');
-  assert.equal(selectedResourceForBook({ ...value, continueResourceId: null })?.id, 'unfinished');
+  assert.equal(selectedResourceForBook({ ...value, continueResourceId: null })?.id, 'continue');
   assert.deepEqual(allVisibleResources({ ...value, resources: [...value.resources, resource('hidden', 0, true)] }).map((item) => item.id), ['finished', 'continue', 'unfinished']);
 });
 

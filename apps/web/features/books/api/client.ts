@@ -544,6 +544,54 @@ export async function uploadBookCover(book: Pick<BookView, 'id' | 'sourceNodeId'
   });
 }
 
+export async function removeBookCover(book: Pick<BookView, 'id' | 'sourceNodeId' | 'title' | 'description'>): Promise<void> {
+  await updateSourceNodePresentation(book.id, book.sourceNodeId, {
+    title: book.title,
+    description: book.description || null,
+    cover: null,
+    removeCover: true
+  });
+}
+
+export async function replaceBookTags(bookId: string, currentTags: readonly string[], nextTags: readonly string[]): Promise<void> {
+  const current = new Map(currentTags.map((tag) => [tag.trim().toLocaleLowerCase(), tag.trim()]));
+  const next = new Map(nextTags.map((tag) => [tag.trim().toLocaleLowerCase(), tag.trim()]));
+  const addTags = [...next].filter(([key]) => !current.has(key)).map(([, tag]) => tag);
+  const removeTags = [...current].filter(([key]) => !next.has(key)).map(([, tag]) => tag);
+  if (addTags.length === 0 && removeTags.length === 0) return;
+  await apiJson('/api/library/operations/books/metadata', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [bookId], fields: {}, addTags, removeTags })
+  });
+}
+
+export async function regenerateBookImage(bookId: string): Promise<void> {
+  const form = new FormData();
+  form.set('ids', JSON.stringify([bookId]));
+  form.set('action', 'regenerate');
+  form.set('ratio', '2:3');
+  form.set('quality', '82');
+  form.set('maxDimension', '1600');
+  await apiJson('/api/library/operations/books/covers', { method: 'POST', body: form });
+}
+
+export async function updateBookReadingStatus(bookId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
+  await apiJson('/api/library/operations/books/reading-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [bookId], status })
+  });
+}
+
+export async function deleteBookSources(bookId: string): Promise<void> {
+  await apiJson('/api/library/operations/books/delete-sources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [bookId], confirmation: 'DELETE_SOURCE_FILES' })
+  });
+}
+
 export async function regenerateBookCover(bookId: string, anchoredResourceId: string): Promise<void> {
   await regenerateResourceCover(bookId, anchoredResourceId);
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Ellipsis } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
@@ -29,8 +29,7 @@ export function BookTable({
   onSelectAll,
   onSelectionChange,
   onContextMenu,
-  onEdit,
-  onDelete,
+  onActions,
   sort,
   sortDirection = 'asc',
   onSort
@@ -43,8 +42,7 @@ export function BookTable({
   onSelectAll?: (selected: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
   onContextMenu?: (book: ManagementBookSummary, position: { x: number; y: number }) => void;
-  onEdit?: (book: ManagementBookSummary) => void;
-  onDelete?: (book: ManagementBookSummary) => void;
+  onActions?: (book: ManagementBookSummary, anchor: HTMLButtonElement) => void;
   sort?: string;
   sortDirection?: SortDirection;
   onSort?: (sort: string, direction: SortDirection) => void;
@@ -180,7 +178,7 @@ export function BookTable({
                   if (selectable) onSelect?.(book);
                 }}
               >
-                <div className="flex w-full min-w-0 items-start gap-3">
+                <div className="flex w-full min-w-0 items-start gap-3 pr-10">
                   {selectable ? <input type="checkbox" checked={selectedIds.includes(book.id)} onChange={() => onSelect?.(book)} onClick={(event) => event.stopPropagation()} className="sr-only" aria-label={i18nAttribute(selectedIds.includes(book.id) ? "取消选择《{value0}》" : "选择《{value0}》", { value0: book.title })} /> : null}
                   <button type="button" onClick={(event) => openMobileBookDetails(event, book)} className="shrink-0 rounded-md outline-none transition hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》封面", { value0: book.title })}>
                     <Cover book={book} className="h-20 w-14 shrink-0 rounded-md" small />
@@ -195,6 +193,7 @@ export function BookTable({
                     </span>
                   </span>
                 </div>
+                {onActions ? <button type="button" data-selection-ignore="true" onClick={(event) => { event.stopPropagation(); onActions(book, event.currentTarget); }} className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl text-[#716A64] transition hover:bg-black/[0.05] hover:text-[#2F2A27] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EFAE9B]" aria-label={i18nAttribute("管理《{value0}》", { value0: book.title })} aria-haspopup="menu"><Ellipsis size={18} /></button> : null}
               </div>
             </article>
           );
@@ -213,7 +212,7 @@ export function BookTable({
             <th className="w-[70px]"><I18nText>状态</I18nText></th>
             <th className="w-[104px]">{sortableHeader('最近阅读', 'recent_read', 'desc')}</th>
             <th className="w-[104px]">{sortableHeader('加入时间', 'recent_import', 'desc')}</th>
-            <th className="w-[150px] px-2"><I18nText>操作</I18nText></th>
+            <th className="w-[64px] px-2 text-center"><I18nText>操作</I18nText></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
@@ -256,10 +255,7 @@ export function BookTable({
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.lastReadAt, '', locale)}</td>
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, '', locale)}</td>
                 <td className="px-2">
-                  {onEdit || onDelete ? <div className="flex items-center gap-1">
-                    {onEdit ? <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(book); }} className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-[#625D58] transition hover:bg-black/[0.045] hover:text-[#272421]" aria-label={i18nAttribute("编辑《{value0}》", { value0: book.title })}><Pencil size={13} /><I18nText>编辑</I18nText></button> : null}
-                    {onDelete ? <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(book); }} className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-[#A94435] transition hover:bg-red-50 hover:text-red-700" aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })}><Trash2 size={13} /><I18nText>删除</I18nText></button> : null}
-                  </div> : <span className="text-[#AAA39C]">—</span>}
+                  {onActions ? <button type="button" data-selection-ignore="true" onClick={(event) => { event.stopPropagation(); onActions(book, event.currentTarget); }} className="mx-auto flex h-9 w-10 items-center justify-center rounded-xl text-[#716A64] transition hover:bg-black/[0.05] hover:text-[#2F2A27] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#EFAE9B]" aria-label={i18nAttribute("管理《{value0}》", { value0: book.title })} aria-haspopup="menu"><Ellipsis size={19} /></button> : <span className="block text-center text-[#AAA39C]">—</span>}
                 </td>
               </tr>
             );

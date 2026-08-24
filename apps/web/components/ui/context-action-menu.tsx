@@ -46,7 +46,13 @@ export function ContextActionMenu<Action extends string>({
   useEffect(() => {
     if (!position) return;
     const focusableItems = () => Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[data-context-menu-level="root"]:not(:disabled)') ?? []);
-    const frame = window.requestAnimationFrame(() => focusableItems()[0]?.focus());
+    let scrollListenerFrame = 0;
+    const frame = window.requestAnimationFrame(() => {
+      focusableItems()[0]?.focus();
+      scrollListenerFrame = window.requestAnimationFrame(() => {
+        window.addEventListener('scroll', closeOnViewportChange, true);
+      });
+    });
     function closeOnPointer(event: MouseEvent) {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
     }
@@ -76,9 +82,9 @@ export function ContextActionMenu<Action extends string>({
     document.addEventListener('mousedown', closeOnPointer);
     document.addEventListener('keydown', handleKey);
     window.addEventListener('resize', closeOnViewportChange);
-    window.addEventListener('scroll', closeOnViewportChange, true);
     return () => {
       window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(scrollListenerFrame);
       document.removeEventListener('mousedown', closeOnPointer);
       document.removeEventListener('keydown', handleKey);
       window.removeEventListener('resize', closeOnViewportChange);

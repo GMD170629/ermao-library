@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assetDownloadUrl, fetchBook, fetchResourceDetail, mapBookView, uploadResourceCover } from './client';
+import {
+  assetDownloadUrl,
+  deleteBookSources,
+  fetchBook,
+  fetchResourceDetail,
+  mapBookView,
+  regenerateBookImage,
+  removeBookCover,
+  replaceBookTags,
+  updateBookReadingStatus,
+  uploadResourceCover
+} from './client';
 
 const resource = (id: string, bookId = 'book-1') => ({
   id,
@@ -105,6 +116,77 @@ test('uploads a custom cover to the selected readable resource', async () => {
   }
   assert.equal(requestedUrl, '/api/books/book%2F1/resources/resource%2F3/cover');
   assert.equal(requestedMethod, 'PUT');
+});
+
+test('replaces Book tags through a one-book metadata operation', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown = null;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ ok: true, data: { updated: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await replaceBookTags('book-1', ['Fantasy', 'Old'], ['fantasy', 'New']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(requestBody, { ids: ['book-1'], fields: {}, addTags: ['New'], removeTags: ['Old'] });
+});
+
+test('uses aggregate Book operations for reading status and source deletion', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; body: unknown }> = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await updateBookReadingStatus('book-1', 'FINISHED');
+    await deleteBookSources('book-1');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(requests, [
+    { url: '/api/library/operations/books/reading-status', body: { ids: ['book-1'], status: 'FINISHED' } },
+    { url: '/api/library/operations/books/delete-sources', body: { ids: ['book-1'], confirmation: 'DELETE_SOURCE_FILES' } }
+  ]);
+});
+
+test('regenerates the Book image through a one-book cover operation', async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedFields: Record<string, string> = {};
+  globalThis.fetch = async (_input, init) => {
+    assert.ok(init?.body instanceof FormData);
+    init.body.forEach((value, key) => { requestedFields[key] = String(value); });
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await regenerateBookImage('book-1');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestedFields.ids, '["book-1"]');
+  assert.equal(requestedFields.action, 'regenerate');
+});
+
+test('removes the custom Book cover through the Book source presentation contract', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  const requestedFields: Record<string, string> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    assert.ok(init?.body instanceof FormData);
+    init.body.forEach((value, key) => { requestedFields[key] = String(value); });
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await removeBookCover({ id: 'book/1', sourceNodeId: 'source/1', title: 'Updated', description: 'Description' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestedUrl, '/api/books/book%2F1/source-nodes/source%2F1');
+  assert.equal(requestedFields.removeCover, 'true');
+  assert.equal(requestedFields.title, 'Updated');
 });
 
 test('validates and maps a unified paginated resource detail response', async () => {
