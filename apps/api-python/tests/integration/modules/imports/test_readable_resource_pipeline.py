@@ -215,6 +215,7 @@ def _pipeline(
         continue_import=base.continue_import,
         scan_library_source_tree=base.scan_library_source_tree,
         process_import_task=process,
+        delete_book_sources=base.delete_book_sources,
         delete_source_node=base.delete_source_node,
         change_library_organization_mode=base.change_library_organization_mode,
         relocate_library_root=base.relocate_library_root,
@@ -535,18 +536,26 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
             album = root / "album"
             album.mkdir()
             (album / "01.mp3").write_bytes(b"audio")
-            (album / "01.cover.png").write_bytes(
+            (album / "metadata.cover.png").write_bytes(
                 base64.b64decode(
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
                 )
             )
-            (album / "01.opf").write_text(
+            (album / "metadata.opf").write_text(
                 """<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
                 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                   <dc:title>Sidecar audiobook</dc:title>
                   <meta name="cover" content="cover-image" />
                 </metadata>
-                <manifest><item id="cover-image" href="01.cover.png" media-type="image/png" /></manifest>
+                <manifest><item id="cover-image" href="metadata.cover.png" media-type="image/png" /></manifest>
+                </package>""",
+                encoding="utf-8",
+            )
+            (album / "01.opf").write_text(
+                """<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+                <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                  <dc:title>单轨标题不得覆盖资源</dc:title>
+                </metadata>
                 </package>""",
                 encoding="utf-8",
             )

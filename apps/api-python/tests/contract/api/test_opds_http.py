@@ -66,7 +66,6 @@ def _seed_opds_book(db: Session) -> User:
         source_node_id=resource_node.id,
         adapter_id="comic-archive",
         adapter_version="1",
-        media_kind="COMIC",
         format="CBZ",
         enablement_state="ENABLED",
         import_state="READY",

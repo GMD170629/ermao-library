@@ -114,10 +114,6 @@ class SqlAlchemyBookContentsQueries:
         limit: int,
         offset: int,
     ) -> tuple[tuple[BookContentNode, ...], int]:
-        child = aliased(LibrarySourceNode)
-        has_children = exists(
-            select(child.id).where(child.parent_id == LibrarySourceNode.id)
-        )
         readable_resource = exists(
             select(LibraryReadableResource.id).where(
                 LibraryReadableResource.book_id == book_id,
@@ -143,7 +139,6 @@ class SqlAlchemyBookContentsQueries:
             select(
                 LibrarySourceNode,
                 LibrarySourceNodeMetadata,
-                has_children.label("has_children"),
             )
             .outerjoin(
                 LibrarySourceNodeMetadata,
@@ -206,12 +201,19 @@ class SqlAlchemyBookContentsQueries:
             )
             for node in nodes
         }
+        has_nested_resources = {
+            node.id: any(
+                relative_path.startswith(f"{node.relative_path.rstrip('/')}/")
+                for _resource_id, relative_path in resource_rows
+            )
+            for node in nodes
+        }
         return (
             tuple(
                 self._node(
                     node,
                     metadata=row[1],
-                    has_children=bool(row[2]),
+                    has_children=has_nested_resources[node.id],
                     resource_id=resource_ids.get(node.id),
                     representative_resource_id=representative_ids.get(node.id),
                 )

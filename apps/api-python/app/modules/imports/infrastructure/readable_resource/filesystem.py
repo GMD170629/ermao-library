@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -148,6 +149,38 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
             return resolved.is_dir() and os.access(resolved, os.R_OK | os.X_OK)
         except OSError:
             return False
+
+    def delete_source(
+        self,
+        *,
+        root: Path,
+        relative_path: str,
+        physical_kind: SourceNodePhysicalKind,
+    ) -> None:
+        root_resolved = root.expanduser().resolve(strict=True)
+        candidate = root_resolved / relative_path
+        if candidate.is_symlink():
+            raise ValueError("refuse_to_delete_symlink_source")
+        target = candidate.resolve(strict=False)
+        try:
+            target.relative_to(root_resolved)
+        except ValueError as error:
+            raise ValueError("path_escapes_library_root") from error
+        if target == root_resolved:
+            raise ValueError("refuse_to_delete_library_root")
+        if not target.exists():
+            return
+        if physical_kind is SourceNodePhysicalKind.DIRECTORY:
+            if not target.is_dir():
+                raise ValueError("source_kind_changed")
+            shutil.rmtree(target)
+            return
+        if physical_kind is SourceNodePhysicalKind.REGULAR_FILE:
+            if not target.is_file():
+                raise ValueError("source_kind_changed")
+            target.unlink()
+            return
+        raise ValueError("unsupported_source_kind")
 
     def _physical_kind(self, entry: os.DirEntry[str]) -> SourceNodePhysicalKind:
         try:

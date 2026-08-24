@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import case, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.time import timestamp_ms_to_datetime, to_timestamp_ms
@@ -133,26 +133,6 @@ def select_eligible_books(
     result: list[dict[str, Any]] = []
     for entity, metadata in books:
         book = book_entity_record(entity, metadata)
-        media_kind = LibraryReadableResource.media_kind
-        book["availableMediaKinds"] = list(
-            db.scalars(
-                select(media_kind.label("media_kind"))
-                .select_from(LibraryReadableResource)
-                .where(
-                    LibraryReadableResource.book_id == entity.id,
-                    LibraryReadableResource.enablement_state == "ENABLED",
-                )
-                .group_by(media_kind)
-                .order_by(
-                    case(
-                        (media_kind == "EBOOK", 0),
-                        (media_kind == "COMIC", 1),
-                        (media_kind == "AUDIOBOOK", 2),
-                        else_=3,
-                    )
-                )
-            ).all()
-        )
         reasons = reason_codes_for_book(book, rules, force_selected=force_selected)
         if reasons:
             result.append({**book, "reasonCodes": reasons})
@@ -161,8 +141,7 @@ def select_eligible_books(
 
 def first_resource_selection_for_book(
     db: Session, book_id: str, preferred_resource_id: str | None = None
-) -> tuple[str, str, str | None] | None:
-    media_kind = LibraryReadableResource.media_kind
+) -> tuple[str, str] | None:
     filters = [
         LibraryReadableResource.book_id == book_id,
         LibraryReadableResource.enablement_state == "ENABLED",
@@ -173,12 +152,6 @@ def first_resource_selection_for_book(
         select(LibraryReadableResource)
         .where(*filters)
         .order_by(
-            case(
-                (media_kind == "EBOOK", 0),
-                (media_kind == "COMIC", 1),
-                (media_kind == "AUDIOBOOK", 2),
-                else_=3,
-            ),
             LibraryReadableResource.created_at.asc(),
             LibraryReadableResource.id.asc(),
         )
@@ -187,4 +160,4 @@ def first_resource_selection_for_book(
     if row is None:
         return None
     resource = row[0]
-    return (str(resource.id), str(resource.media_kind), str(resource.id))
+    return (str(resource.id), str(resource.format))

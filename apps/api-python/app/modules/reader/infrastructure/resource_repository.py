@@ -66,7 +66,6 @@ def _resource_dto(
         book_id=resource.book_id,
         source_node_id=resource.source_node_id,
         title=title,
-        media_kind=resource.media_kind,
         format=resource.format,
         resource_index=(
             resource_metadata.resource_index if resource_metadata is not None else None

@@ -8,7 +8,7 @@ import type {
   RenderTask,
   TextLayer
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { PdfReaderAdapter } from './pdf-adapter';
+import { PdfReaderAdapter, resolvedPdfPageRotation } from './pdf-adapter';
 import { MemoryReaderStorage } from '../../../../lib/reader/memory-storage';
 
 type FakeListener = (event: Event) => void;
@@ -60,6 +60,14 @@ function pdfRangeFixture() {
     }
   };
 }
+
+test('PDF page rotation preserves each page intrinsic orientation and adds the reader preference', () => {
+  assert.equal(resolvedPdfPageRotation(0, 0), 0);
+  assert.equal(resolvedPdfPageRotation(180, 0), 180);
+  assert.equal(resolvedPdfPageRotation(270, 90), 0);
+  assert.equal(resolvedPdfPageRotation(-90, 180), 90);
+  assert.equal(resolvedPdfPageRotation(Number.NaN, 270), 270);
+});
 
 class FakeStyle {
   [key: string]: unknown;

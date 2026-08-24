@@ -35,7 +35,7 @@ def test_metadata_search_closes_reads_and_defers_busy_cache_write(
 
     context = {
         "book": {"title": "Short transaction search"},
-        "resources": [{"format": "EPUB", "classificationSource": "AUTO"}],
+        "resources": [{"format": "EPUB"}],
         "assets": [],
         "metadata": [],
     }

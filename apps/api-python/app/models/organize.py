@@ -712,46 +712,6 @@ class MetadataProviderExecution(Base):
     )
 
 
-class MetadataProviderPipeline(Base):
-    __tablename__ = "MetadataProviderPipeline"
-    __table_args__ = (
-        Index(
-            "MetadataProviderPipeline_mediaKind_position_idx",
-            "mediaKind",
-            "included",
-            "position",
-        ),
-    )
-
-    media_kind: Mapped[str] = mapped_column("mediaKind", String(191), primary_key=True)
-    provider_id: Mapped[str] = mapped_column(
-        "providerId", String(191), primary_key=True
-    )
-    included: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default="1"
-    )
-    enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default="0"
-    )
-    position: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=100, server_default="100"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        "createdAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        server_default=timestamp_ms_server_default(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        "updatedAt",
-        TimestampMilliseconds(),
-        nullable=False,
-        default=db_timestamp,
-        onupdate=db_timestamp,
-    )
-
-
 class MetadataSuggestion(Base):
     __tablename__ = "MetadataSuggestion"
     __table_args__ = (

@@ -93,7 +93,6 @@ def _login_and_resource(
         source_node_id=source_node.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",

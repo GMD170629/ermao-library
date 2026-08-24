@@ -31,4 +31,3 @@ export {
   librarySourceHref,
   type LibraryNavigationSource
 } from './model/library-source-navigation';
-export { mediaKindsLabel, orderedMediaKinds } from './model/media-kind-label';

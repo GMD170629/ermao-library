@@ -12,7 +12,6 @@ from urllib.request import urlopen
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import write_prepared_system_events
-from app.modules.library.domain.media_kinds import effective_media_kind
 from app.modules.metadata.application.commands import MetadataWriteTransaction
 from app.modules.metadata.application.rate_limits import AutomaticMetadataRequestGate
 from app.modules.metadata.domain.providers import BUILTIN_MANIFESTS, ProviderManifest
@@ -21,10 +20,8 @@ from app.modules.metadata.infrastructure.providers import (
     execute_prepared_provider_write,
     get_provider_source,
     list_enabled_provider_ids,
-    list_included_pipelines,
     list_metadata_sources,
-    list_pipelines_for_provider,
-    prepare_pipeline_update_write,
+    prepare_provider_order_write,
     prepare_provider_update_write,
     update_source_test_result,
 )
@@ -32,12 +29,8 @@ from app.modules.system.public import PreparedSystemEvent
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
-METADATA_MEDIA_KINDS = ("EBOOK", "COMIC", "AUDIOBOOK")
-
-
 @dataclass(frozen=True, slots=True)
-class PreparedMetadataProviderPipelineUpdate:
-    media_kind: str
+class PreparedMetadataProviderOrderUpdate:
     provider_ids: tuple[str, ...]
     write: PreparedMetadataProviderWrite
 
@@ -46,8 +39,6 @@ class PreparedMetadataProviderPipelineUpdate:
 class PreparedMetadataProviderUpdate:
     provider_id: str
     provider_name: str
-    enabled: bool
-    priority: int
     write: PreparedMetadataProviderWrite
 
 
@@ -242,55 +233,10 @@ def _default_config(manifest: ProviderManifest) -> dict[str, Any]:
     }
 
 
-def list_metadata_provider_pipelines(db: Session) -> list[dict[str, Any]]:
-    providers = {str(item["id"]): item for item in list_metadata_providers(db)}
-    rows = list_included_pipelines(db)
-    by_kind: dict[str, list[dict[str, Any]]] = {
-        media_kind: [] for media_kind in METADATA_MEDIA_KINDS
-    }
-    for row in rows:
-        provider = providers.get(str(row.get("providerId")))
-        media_kind = str(row.get("mediaKind") or "")
-        if not provider or media_kind not in by_kind:
-            continue
-        by_kind[media_kind].append(
-            {
-                "providerId": provider["id"],
-                "name": provider["name"],
-                "description": provider["description"],
-                "enabled": bool(row.get("enabled")),
-                "position": int(row.get("position") or 0),
-                "lastTestStatus": provider.get("lastTestStatus"),
-                "lastError": provider.get("lastError"),
-            }
-        )
-    return [
-        {"mediaKind": media_kind, "providers": by_kind[media_kind]}
-        for media_kind in METADATA_MEDIA_KINDS
-    ]
-
-
-def _provider_pipeline_state(rows: list[dict[str, Any]]) -> tuple[bool, int]:
-    enabled = any(bool(item.get("enabled")) for item in rows)
-    enabled_positions = [
-        int(item.get("position") or 9999) for item in rows if item.get("enabled")
-    ]
-    priority = (
-        min(enabled_positions)
-        if enabled_positions
-        else min([int(item.get("position") or 9999) for item in rows] or [9999])
-    )
-    return enabled, priority
-
-
-def prepare_metadata_provider_pipeline_update(
-    db: Session, media_kind: str, items: list[dict[str, Any]]
-) -> PreparedMetadataProviderPipelineUpdate:
-    normalized = str(media_kind or "").strip().upper()
-    if normalized not in METADATA_MEDIA_KINDS:
-        raise ValueError("不支持的读物类型")
+def prepare_metadata_provider_order_update(
+    db: Session, items: list[dict[str, Any]]
+) -> PreparedMetadataProviderOrderUpdate:
     if not isinstance(items, list):
-        # Preserve the established provider-validation error contract.
         raise ValueError("数据源顺序格式不正确")  # noqa: TRY004
     registry = metadata_provider_registry()
     provider_ids = [
@@ -304,10 +250,13 @@ def prepare_metadata_provider_pipeline_update(
         or len(set(provider_ids)) != len(provider_ids)
     ):
         raise ValueError("数据源列表包含无效或重复项目")
+    expected_ids = {str(plugin.manifest.id) for plugin in registry.all()}
+    if set(provider_ids) != expected_ids:
+        raise ValueError("数据源列表必须包含全部可用数据源")
     for item, provider_id in zip(items, provider_ids):
         plugin = registry.get(provider_id)
-        if not plugin or normalized not in plugin.manifest.media_kinds:
-            raise ValueError(f"数据源 {provider_id} 不支持{normalized}")
+        if not plugin:
+            raise ValueError(f"不支持的数据源：{provider_id}")
         if bool(item.get("enabled")):
             source = _provider_source(db, provider_id)
             errors = _validate_config(
@@ -315,62 +264,36 @@ def prepare_metadata_provider_pipeline_update(
             )
             if errors:
                 raise ValueError(f"{plugin.manifest.name}：{'；'.join(errors)}")
-    provider_states: dict[str, tuple[bool, int]] = {}
-    for current_provider_id in {str(plugin.manifest.id) for plugin in registry.all()}:
-        rows = [
-            row
-            for row in list_pipelines_for_provider(db, current_provider_id)
-            if str(row.get("mediaKind")) != normalized
-        ]
-        rows.extend(
-            {
-                "enabled": bool(item.get("enabled")),
-                "position": index * 100,
-            }
-            for index, (item, provider_id) in enumerate(
-                zip(items, provider_ids), start=1
-            )
-            if provider_id == current_provider_id
-        )
-        provider_states[current_provider_id] = _provider_pipeline_state(rows)
-    db.close()
     now = _now()
-    pipeline_rows = tuple(
+    provider_rows = tuple(
         {
             "provider_id": provider_id,
             "enabled": bool(item.get("enabled")),
-            "position": index * 100,
+            "priority": index * 100,
         }
         for index, (item, provider_id) in enumerate(zip(items, provider_ids), start=1)
     )
-    write = prepare_pipeline_update_write(
-        media_kind=normalized,
-        rows=pipeline_rows,
-        provider_states=provider_states,
-        now=now,
-    )
-    return PreparedMetadataProviderPipelineUpdate(
-        media_kind=normalized,
+    return PreparedMetadataProviderOrderUpdate(
         provider_ids=tuple(provider_ids),
-        write=write,
+        write=prepare_provider_order_write(rows=provider_rows, now=now),
     )
 
 
-def persist_metadata_provider_pipeline_update(
+def persist_metadata_provider_order_update(
     db: Session,
-    prepared: PreparedMetadataProviderPipelineUpdate,
+    prepared: PreparedMetadataProviderOrderUpdate,
     *,
     event: PreparedSystemEvent | None = None,
 ) -> list[dict[str, Any]]:
     _persist_provider_write(db, prepared.write, event)
-    return list_metadata_provider_pipelines(db)
+    return list_metadata_providers(db)
 
 
-def update_metadata_provider_pipeline(
-    db: Session, media_kind: str, items: list[dict[str, Any]]
+def update_metadata_provider_order(
+    db: Session, items: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    prepared = prepare_metadata_provider_pipeline_update(db, media_kind, items)
-    return persist_metadata_provider_pipeline_update(db, prepared)
+    prepared = prepare_metadata_provider_order_update(db, items)
+    return persist_metadata_provider_order_update(db, prepared)
 
 
 def _provider_source(db: Session, provider_id: str) -> dict[str, Any] | None:
@@ -405,7 +328,6 @@ def _provider_public_view(
         "version": manifest.version,
         "description": manifest.description,
         "mode": manifest.mode,
-        "mediaKinds": list(manifest.media_kinds),
         "fields": list(manifest.fields),
         "capabilities": list(manifest.capabilities),
         "automaticRateLimit": (
@@ -483,48 +405,19 @@ def prepare_metadata_provider_update(
     for key in clear_secrets:
         if str(key) in _secret_fields(plugin.manifest):
             next_config.pop(str(key), None)
-    enabled = bool(payload.get("enabled", source.get("enabled")))
+    enabled = bool(source.get("enabled"))
     errors = _validate_config(plugin.manifest, next_config, enabled)
     if errors:
         raise ValueError("；".join(errors))
-    try:
-        priority = int(
-            payload.get(
-                "priority", source.get("priority") or plugin.manifest.default_priority
-            )
-        )
-    except (TypeError, ValueError):
-        raise ValueError("插件优先级格式不正确") from None
-    priority = min(max(priority, 1), 9999)
-    update_pipelines = "enabled" in payload
-    pipeline_state = (
-        _provider_pipeline_state(
-            [
-                {**row, "enabled": enabled}
-                for row in list_pipelines_for_provider(db, provider_id)
-            ]
-        )
-        if update_pipelines
-        else None
-    )
-    db.close()
     now = _now()
-    if pipeline_state is not None:
-        enabled, priority = pipeline_state
     write = prepare_provider_update_write(
         source_id=str(source["id"]),
-        provider_id=provider_id,
-        enabled=enabled,
-        priority=priority,
         config_json=_json_text(next_config),
-        update_pipelines=update_pipelines,
         now=now,
     )
     return PreparedMetadataProviderUpdate(
         provider_id=provider_id,
         provider_name=plugin.manifest.name,
-        enabled=enabled,
-        priority=priority,
         write=write,
     )
 
@@ -593,23 +486,12 @@ def test_metadata_provider(
     return result, provider or {}
 
 
-def provider_supports_media_kind(
-    manifest: ProviderManifest, media_kind: str | None
-) -> bool:
-    value = str(media_kind or "").strip().upper()
-    return value in manifest.media_kinds
-
-
-def enabled_metadata_provider_ids(
-    db: Session, media_kind: str | None = None
-) -> list[str]:
-    if media_kind is None:
-        return list_enabled_provider_ids(db)
-    return list_enabled_provider_ids(db, str(media_kind).strip().upper())
+def enabled_metadata_provider_ids(db: Session) -> list[str]:
+    return list_enabled_provider_ids(db)
 
 
 def metadata_provider_runtime_config(
-    db: Session, provider_id: str, media_kind: str | None = None
+    db: Session, provider_id: str
 ) -> dict[str, Any] | None:
     """Return the canonical configuration only when the provider is enabled."""
 
@@ -617,12 +499,7 @@ def metadata_provider_runtime_config(
     source = _provider_source(db, provider_id)
     if not source:
         return None
-    enabled = (
-        provider_id in enabled_metadata_provider_ids(db, media_kind)
-        if media_kind
-        else bool(source.get("enabled"))
-    )
-    return _source_config(source, plugin.manifest) if enabled else None
+    return _source_config(source, plugin.manifest) if source.get("enabled") else None
 
 
 def search_with_metadata_provider(
@@ -636,17 +513,14 @@ def search_with_metadata_provider(
     automatic_request_gate: AutomaticMetadataRequestGate | None = None,
 ) -> dict[str, Any]:
     plugin = metadata_provider_registry().require(provider_id)
-    media_kind = _context_media_kind(context)
-    config = metadata_provider_runtime_config(
-        db, provider_id, str(media_kind) if media_kind else None
-    )
+    config = metadata_provider_runtime_config(db, provider_id)
     if config is None:
         return {
             "provider": provider_id,
             "enabled": False,
             "added": 0,
             "cacheHit": False,
-            "message": f"{plugin.manifest.name}未在当前读物类型中启用",
+            "message": f"{plugin.manifest.name}未启用",
             "candidates": [],
             "suggestions": [],
         }
@@ -664,30 +538,6 @@ def search_with_metadata_provider(
     return plugin.search(
         db, context, query, config=config, force=force, use_cache=use_cache
     )
-
-
-def _context_media_kind(context: dict[str, Any]) -> str | None:
-    resources = context.get("resources")
-    if not isinstance(resources, list):
-        return None
-    for raw_resource in resources:
-        if not isinstance(raw_resource, dict) or raw_resource.get("hidden") is True:
-            continue
-        resource_format = str(raw_resource.get("format") or "").strip()
-        if not resource_format:
-            continue
-        return effective_media_kind(
-            format=resource_format,
-            classification_source=str(
-                raw_resource.get("classificationSource") or "AUTO"
-            ),
-            suggested_media_kind=(
-                str(raw_resource["suggestedMediaKind"])
-                if raw_resource.get("suggestedMediaKind")
-                else None
-            ),
-        )
-    return None
 
 
 def reset_metadata_provider_registry_for_tests() -> None:

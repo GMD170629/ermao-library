@@ -51,9 +51,7 @@ const LABELS: Record<string, string> = {
   'health.item.kindleQueue': 'Kindle 发送队列',
   'health.item.metadataQueue': '元数据识别队列',
   'health.item.smtp': 'Kindle / SMTP 配置',
-  'health.item.ebookProviders': '电子书数据源',
-  'health.item.comicProviders': '漫画数据源',
-  'health.item.audiobookProviders': '有声书数据源'
+  'health.item.metadataProviders': '元数据数据源'
 };
 
 const MESSAGES: Record<string, string> = {
@@ -77,7 +75,7 @@ const MESSAGES: Record<string, string> = {
   'health.smtp.connectionFailed': 'SMTP 连接或认证失败',
   'health.smtp.noRecipients': 'SMTP 正常，但尚无用户配置 Kindle 邮箱',
   'health.smtp.ok': 'SMTP 连接、加密与认证正常',
-  'health.providers.noneEnabled': '当前类型未启用数据源',
+  'health.providers.noneEnabled': '尚未启用元数据数据源',
   'health.providers.failed': '一个或多个数据源连接失败',
   'health.providers.ok': '已启用的数据源连接正常',
   'health.check.failed': '检查执行失败',

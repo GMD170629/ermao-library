@@ -297,7 +297,6 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             assert settings_by_key == {
                 "language": "zh-CN",
                 "systemName": "二毛图书",
-                "workDetail.tabOrder": '["EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE"]',
             }
             sources = db.scalars(
                 select(Source)
@@ -327,17 +326,19 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 3
-    assert script.get_heads() == ["0003_audio_asset_title"]
-    assert head_revision() == "0003_audio_asset_title"
+    assert len(revisions) == 4
+    assert script.get_heads() == ["0004_remove_media_kind"]
+    assert head_revision() == "0004_remove_media_kind"
     assert [revision.revision for revision in revisions] == [
+        "0004_remove_media_kind",
         "0003_audio_asset_title",
         "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0002_library_scan_queue_uniqueness"
-    assert revisions[1].down_revision == "0001_library_topology_baseline"
-    assert revisions[2].down_revision is None
+    assert revisions[0].down_revision == "0003_audio_asset_title"
+    assert revisions[1].down_revision == "0002_library_scan_queue_uniqueness"
+    assert revisions[2].down_revision == "0001_library_topology_baseline"
+    assert revisions[3].down_revision is None
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -346,7 +347,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0003_audio_asset_title"
+        assert _current_revision(engine) == "0004_remove_media_kind"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -510,7 +511,7 @@ def test_seed_is_insert_only_and_safe_across_concurrent_sessions(tmp_path) -> No
             douban = db.scalar(select(Source).where(Source.provider_type == "douban"))
             assert douban is not None
             assert (douban.name, douban.enabled) == ("自定义豆瓣", False)
-            assert len(db.scalars(select(SystemSetting)).all()) == 4
+            assert len(db.scalars(select(SystemSetting)).all()) == 3
             assert (
                 len(db.scalars(select(Source).where(Source.kind == "metadata")).all())
                 == 3
@@ -612,7 +613,7 @@ def test_backup_uses_current_revision_and_restores_current_schema(tmp_path) -> N
             backup = create_backup(db, settings)
             with zipfile.ZipFile(backup_path(settings, backup.id)) as archive:
                 metadata = json.loads(archive.read("metadata.json"))
-            assert metadata["version"] == 4
+            assert metadata["version"] == 5
             assert metadata["databaseRevision"] == head_revision(engine)
 
             guard = db.get(SystemSetting, "backup.guard")
@@ -721,7 +722,6 @@ def test_backup_restore_round_trip_preserves_fresh_source_topology(
                 source_node_id=resource_node_id,
                 adapter_id="epub-file",
                 adapter_version="1",
-                media_kind="EBOOK",
                 format="EPUB",
                 enablement_state="ENABLED",
                 import_state="READY",
@@ -770,7 +770,7 @@ def test_backup_restore_round_trip_preserves_fresh_source_topology(
                     archive.read("database-export.json").decode("utf-8")
                 )
                 metadata = json.loads(archive.read("metadata.json").decode("utf-8"))
-            assert metadata["version"] == 4
+            assert metadata["version"] == 5
             assert database_export["sourceNodes"]
             assert database_export["sourceNodeMetadata"]
             assert database_export["sourceNodeInterpretations"]

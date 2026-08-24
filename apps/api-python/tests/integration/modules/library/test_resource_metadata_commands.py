@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import hash_password
@@ -65,7 +64,6 @@ def _resource_graph(db: Session) -> tuple[LibraryBook, list[LibraryReadableResou
             source_node_id=source_node.id,
             adapter_id="epub-file",
             adapter_version="1",
-            media_kind="EBOOK",
             format="EPUB",
             import_state="READY",
         )
@@ -134,59 +132,3 @@ def test_resource_metadata_update_preserves_identity_owned_fields(
     assert updated.publisher == "Publisher"
     assert updated.title == "Resource 1"
     assert updated.resource_index == 1
-
-
-def test_batch_resource_classification_preserves_book_resource_topology(
-    client, db_session: Session
-) -> None:
-    _login_admin(client, db_session)
-    book, resources = _resource_graph(db_session)
-    before = db_session.scalar(
-        select(LibraryReadableResource.id).where(
-            LibraryReadableResource.book_id == book.id
-        )
-    )
-    assert before is not None
-    db_session.commit()
-
-    response = client.post(
-        f"/api/books/{book.id}/resources/batch",
-        json={
-            "action": "SET_MEDIA_KIND",
-            "resourceIds": [resources[1].id, resources[0].id],
-            "targetMediaKind": "COMIC",
-        },
-    )
-
-    assert response.status_code == 200, response.text
-    payload = response.json()["data"]
-    assert set(payload["affectedResourceIds"]) == {item.id for item in resources}
-    assert len(payload["operationIds"]) == 2
-    db_session.expire_all()
-    assert [
-        db_session.get(LibraryReadableResource, item.id).media_kind
-        for item in resources
-    ] == ["COMIC", "COMIC"]
-    assert all(
-        db_session.get(LibraryReadableResource, item.id).book_id == book.id
-        for item in resources
-    )
-
-
-def test_batch_structural_action_is_rejected_by_resource_contract(
-    client, db_session: Session
-) -> None:
-    _login_admin(client, db_session)
-    book, resources = _resource_graph(db_session)
-    db_session.commit()
-
-    response = client.post(
-        f"/api/books/{book.id}/resources/batch",
-        json={
-            "action": "DELETE",
-            "resourceIds": [resources[0].id],
-            "targetMediaKind": "EBOOK",
-        },
-    )
-
-    assert response.status_code == 422

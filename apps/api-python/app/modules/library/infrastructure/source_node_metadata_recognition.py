@@ -69,8 +69,6 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             {
                 "format": resource.format,
                 "hidden": resource.enablement_state != "ENABLED",
-                "classificationSource": "AUTO",
-                "suggestedMediaKind": resource.media_kind,
             }
             for resource in self._db.scalars(
                 select(LibraryReadableResource)

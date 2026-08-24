@@ -12,18 +12,16 @@ from app.contracts.metadata_writeback import MetadataWritebackOperationContract
 ProviderConfigValue = str | bool | int | float | list[str] | None
 
 
-class MetadataProviderPipelineItemRequest(HttpContractModel):
+class MetadataProviderOrderItemRequest(HttpContractModel):
     provider_id: str = Field(alias="providerId", min_length=1)
     enabled: bool = False
 
 
-class UpdateMetadataProviderPipelineRequest(HttpContractModel):
-    items: list[MetadataProviderPipelineItemRequest]
+class UpdateMetadataProviderOrderRequest(HttpContractModel):
+    items: list[MetadataProviderOrderItemRequest]
 
 
 class UpdateMetadataProviderRequest(HttpContractModel):
-    enabled: bool | None = None
-    priority: int | str | None = None
     config: dict[str, ProviderConfigValue] | None = None
     clear_secrets: list[str] | None = Field(default=None, alias="clearSecrets")
 
@@ -51,7 +49,6 @@ class MetadataProvider(HttpContractModel):
     version: str
     description: str
     mode: str
-    media_kinds: list[str] = Field(alias="mediaKinds")
     fields: list[str]
     capabilities: list[str]
     automatic_rate_limit: ProviderAutomaticRateLimit | None = Field(
@@ -67,24 +64,8 @@ class MetadataProvider(HttpContractModel):
     last_error: str | None = Field(alias="lastError")
 
 
-class PipelineProvider(HttpContractModel):
-    provider_id: str = Field(alias="providerId")
-    name: str
-    description: str
-    enabled: bool
-    position: int
-    last_test_status: str | None = Field(alias="lastTestStatus")
-    last_error: str | None = Field(alias="lastError")
-
-
-class MetadataPipeline(HttpContractModel):
-    media_kind: str = Field(alias="mediaKind")
-    providers: list[PipelineProvider]
-
-
 class ProvidersPayload(HttpContractModel):
     providers: list[MetadataProvider]
-    pipelines: list[MetadataPipeline]
 
 
 class ProviderPayload(HttpContractModel):

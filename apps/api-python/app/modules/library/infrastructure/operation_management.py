@@ -7,14 +7,13 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import (
     LibraryBookFacet,
     LibraryFacet,
     LibraryOperation,
-    LibraryReadableResource,
     LibraryReadableResourceFacet,
 )
 from app.modules.library.application.management_commands import (
@@ -28,7 +27,7 @@ from app.modules.library.infrastructure.books import entity_record
 
 _FACET_ACTIONS = {"MERGE_FACETS", "RENAME_FACET", "DELETE_FACET"}
 _BULK_METADATA_ACTIONS = {"BULK_UPDATE_METADATA", "BULK_FIND_REPLACE"}
-_SUPPORTED_ACTIONS = {*_FACET_ACTIONS, *_BULK_METADATA_ACTIONS, "RECLASSIFY_RESOURCE"}
+_SUPPORTED_ACTIONS = {*_FACET_ACTIONS, *_BULK_METADATA_ACTIONS}
 
 
 def _now() -> datetime:
@@ -180,27 +179,6 @@ def _restore_bulk_metadata(db: Session, inverse: dict[str, Any]) -> None:
     _delete_new_orphan_facets(db, current_facet_ids - snapshot_facet_ids)
 
 
-def _restore_resource_classification(db: Session, inverse: dict[str, Any]) -> None:
-    resources = _mapping_rows(inverse, "resources")
-    if not resources:
-        raise InvalidLibraryOperationError("撤销快照不完整")
-    for row in resources:
-        resource_id = str(row.get("id") or "")
-        media_kind = str(row.get("mediaKind") or "")
-        if not resource_id or not media_kind:
-            raise InvalidLibraryOperationError("撤销快照不完整")
-        result = db.execute(
-            update(LibraryReadableResource)
-            .where(LibraryReadableResource.id == resource_id)
-            .values(
-                media_kind=media_kind,
-                **({"updated_at": row["updatedAt"]} if "updatedAt" in row else {}),
-            )
-        )
-        if getattr(result, "rowcount", 0) != 1:
-            raise InvalidLibraryOperationError("撤销目标已不存在")
-
-
 class SqlAlchemyLibraryOperationManagement(LibraryOperationManagementGateway):
     """Undo supported metadata operations without owning the transaction."""
 
@@ -241,8 +219,6 @@ class SqlAlchemyLibraryOperationManagement(LibraryOperationManagementGateway):
             _restore_facet_operation(self._db, action=action, inverse=inverse)
         elif action in _BULK_METADATA_ACTIONS:
             _restore_bulk_metadata(self._db, inverse)
-        else:
-            _restore_resource_classification(self._db, inverse)
         if not operation_store.mark_operation_undone(
             self._db,
             operation_id=operation.id,

@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models.common import db_timestamp
 from app.models.import_pipeline import Source
-from app.models.organize import MetadataProviderPipeline
 from app.modules.metadata.domain.providers import ProviderManifest
 
 METADATA_SOURCE_KIND = "metadata"
@@ -28,13 +27,11 @@ class BuiltinProviderSeedRow:
     priority: int
     config_json: str
     capabilities_json: str
-    media_kinds: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedMetadataSourceSeedWrite:
     source_statements: tuple[Insert, ...]
-    pipeline_statements: tuple[Insert, ...]
 
 
 def prepare_builtin_provider_seed_rows(
@@ -56,7 +53,6 @@ def prepare_builtin_provider_seed_rows(
                 }
             ),
             capabilities_json=_json_text(list(manifest.capabilities)),
-            media_kinds=tuple(manifest.media_kinds),
         )
         for manifest in manifests
     )
@@ -95,19 +91,6 @@ def prepare_metadata_source_seed_write(
         }
         for row in rows
     )
-    pipeline_rows = tuple(
-        {
-            "media_kind": media_kind,
-            "provider_id": row.provider_id,
-            "included": True,
-            "enabled": row.enabled,
-            "position": row.priority,
-            "created_at": now,
-            "updated_at": now,
-        }
-        for row in rows
-        for media_kind in row.media_kinds
-    )
     source_statements = tuple(
         (
             sqlite_insert(Source)
@@ -116,22 +99,8 @@ def prepare_metadata_source_seed_write(
         )
         for chunk in sqlite_parameter_chunks(source_rows, parameters_per_row=11)
     )
-    pipeline_statements = tuple(
-        (
-            sqlite_insert(MetadataProviderPipeline)
-            .values(list(chunk))
-            .on_conflict_do_nothing(
-                index_elements=[
-                    MetadataProviderPipeline.media_kind,
-                    MetadataProviderPipeline.provider_id,
-                ]
-            )
-        )
-        for chunk in sqlite_parameter_chunks(pipeline_rows, parameters_per_row=7)
-    )
     return PreparedMetadataSourceSeedWrite(
         source_statements=source_statements,
-        pipeline_statements=pipeline_statements,
     )
 
 
@@ -141,8 +110,6 @@ def execute_metadata_source_seed_write(
     """Execute only prebuilt expressions inside the bootstrap transaction."""
 
     for statement in prepared.source_statements:
-        db.execute(statement)
-    for statement in prepared.pipeline_statements:
         db.execute(statement)
 
 

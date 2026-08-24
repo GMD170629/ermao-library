@@ -121,7 +121,7 @@ export function ImportFileManager() {
         <Button variant="secondary" icon={RefreshCw} loading={loadingPath === (selectedPath || '__root__')} loadingText={i18nAttribute('刷新中')} onClick={() => void loadNode(selectedPath || undefined)}><I18nText>刷新目录</I18nText></Button>
       </div>
       <div className="rounded-[16px] border border-[#F0DED5] bg-[#FFF8F4] px-4 py-3 text-sm leading-6 text-[#6D625B]">
-        <div className="font-semibold text-[#3D3732]"><I18nText>有声书推荐目录</I18nText></div>
+        <div className="font-semibold text-[#3D3732]"><I18nText>音频推荐目录</I18nText></div>
         <p className="mt-1"><I18nText>单卷使用“书名/音轨”，多卷使用“书名/卷名/音轨”；Disc、CD、Disk 目录只作为分轨层。目录名内嵌的作者可以识别，独立的“作者/书名”层级不会作为作者信息。</I18nText></p>
       </div>
 

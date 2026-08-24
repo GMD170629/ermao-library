@@ -105,7 +105,6 @@ def _add_book(
             source_node_id=source_node.id,
             adapter_id="epub-file",
             adapter_version="1",
-            media_kind="EBOOK",
             format="EPUB",
             import_state="READY",
         )
@@ -322,6 +321,81 @@ def test_book_contents_browses_source_tree_with_resource_overlay(
     )
     assert outside_response.status_code == 404
     assert outside_response.json()["error"]["code"] == "BOOK_CONTENTS_NOT_FOUND"
+
+
+def test_book_contents_marks_directory_resource_tracks_as_non_nested(
+    client, db_session
+) -> None:
+    _login(client, db_session, email="directory-resource@example.com")
+    book, resources = _add_book(db_session, resource_count=1)
+    for asset in db_session.scalars(
+        select(LibraryResourceAsset).where(
+            LibraryResourceAsset.resource_id == resources[0].id
+        )
+    ):
+        db_session.delete(asset)
+    db_session.flush()
+    resource_node = db_session.get(LibrarySourceNode, resources[0].source_node_id)
+    assert resource_node is not None
+    resource_node.parent_id = book.source_node_id
+    resource_node.parent_physical_kind = "DIRECTORY"
+    resource_node.physical_kind = "DIRECTORY"
+    resource_node.observed_size_bytes = None
+    resource_node.relative_path = "detail-book/第一卷"
+    resource_node.path_key = _path_key(resource_node.relative_path)
+    resource_node.name = "第一卷"
+    track = _source_node(
+        "track-01",
+        "detail-book/第一卷/01.mp3",
+        parent_id=resource_node.id,
+    )
+    db_session.add(track)
+    db_session.commit()
+
+    payload = client.get(f"/api/books/{book.id}/contents").json()["data"]
+    entry = payload["entries"][0]
+    assert entry["kind"] == "FOLDER"
+    assert entry["resourceId"] == resources[0].id
+    assert entry["hasChildren"] is False
+
+
+def test_book_contents_preserves_navigation_to_nested_resources(
+    client, db_session
+) -> None:
+    _login(client, db_session, email="nested-resource@example.com")
+    book, resources = _add_book(db_session, resource_count=2)
+    for asset in db_session.scalars(
+        select(LibraryResourceAsset).where(
+            LibraryResourceAsset.resource_id.in_(
+                [resource.id for resource in resources]
+            )
+        )
+    ):
+        db_session.delete(asset)
+    db_session.flush()
+    parent_node = db_session.get(LibrarySourceNode, resources[0].source_node_id)
+    child_node = db_session.get(LibrarySourceNode, resources[1].source_node_id)
+    assert parent_node is not None and child_node is not None
+    parent_node.parent_id = book.source_node_id
+    parent_node.parent_physical_kind = "DIRECTORY"
+    parent_node.physical_kind = "DIRECTORY"
+    parent_node.observed_size_bytes = None
+    parent_node.relative_path = "detail-book/混合分卷"
+    parent_node.path_key = _path_key(parent_node.relative_path)
+    parent_node.name = "混合分卷"
+    child_node.physical_kind = "DIRECTORY"
+    child_node.observed_size_bytes = None
+    child_node.parent_id = parent_node.id
+    child_node.parent_physical_kind = "DIRECTORY"
+    child_node.relative_path = "detail-book/混合分卷/子分卷"
+    child_node.path_key = _path_key(child_node.relative_path)
+    child_node.name = "子分卷"
+    db_session.commit()
+
+    payload = client.get(f"/api/books/{book.id}/contents").json()["data"]
+    entry = payload["entries"][0]
+    assert entry["resourceId"] == resources[0].id
+    assert entry["hasChildren"] is True
 
 
 def test_source_node_edit_respects_opf_setting_and_publishes_its_own_cover(
@@ -624,7 +698,6 @@ def test_image_directory_details_and_previews_are_naturally_sorted_and_cached(
     resource = resources[0]
     resource.format = "IMAGE_DIR"
     resource.adapter_id = "image-directory"
-    resource.media_kind = "COMIC"
     library = db_session.get(Library, "test-library")
     assert library is not None
     library_root = tmp_path / "library"

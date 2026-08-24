@@ -73,7 +73,6 @@ def _graph(db_session, book_id: str, resource_id: str, resource_format: str) -> 
             source_node_id=resource_node.id,
             adapter_id="audio-file" if resource_format == "AUDIO" else "epub-file",
             adapter_version="1",
-            media_kind="AUDIOBOOK" if resource_format == "AUDIO" else "EBOOK",
             format=resource_format,
             import_state="READY",
         )

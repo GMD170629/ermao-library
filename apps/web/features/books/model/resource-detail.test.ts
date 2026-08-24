@@ -6,7 +6,7 @@ import { resourceDetailItemHref, resourceDetailPageSize, resourcePreviewRetryUrl
 function resource(overrides: Partial<ReadableResourceView>): ReadableResourceView {
   return {
     id: 'resource-1', bookId: 'book-1', sourceNodeId: 'node-1', title: 'Resource', description: '', resourceIndex: null,
-    sortOrder: 0, format: 'EPUB', readerType: 'reflowable', classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: null },
+    sortOrder: 0, format: 'EPUB', readerType: 'reflowable',
     publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null,
     importStatus: 'READY', importError: null, coverUrl: '', sizeBytes: 0, pageCount: null, chapterCount: null,
     durationMs: null, trackCount: null, progress: 0, lastReadAt: null, hidden: false, readable: true, kindleSendAvailable: false, assets: [],

@@ -8,11 +8,23 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from app.modules.library.domain.organization_modes import TargetLibraryOrganizationMode
 from app.modules.library.domain.readable_resource_states import ResourceEnablementState
+from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
+
+
+@dataclass(frozen=True, slots=True)
+class ManagedBookSourceTarget:
+    book_id: str
+    source_node_id: str
+    library_id: str
+    library_root: Path
+    relative_path: str
+    physical_kind: SourceNodePhysicalKind
 
 
 class ManagedSourceNodeView(Protocol):
@@ -51,6 +63,16 @@ class ManageFilesystemPort(Protocol):
     def path_is_readable_directory(self, path: Path) -> bool: ...
 
 
+class ManageSourceDeletionFilesystemPort(Protocol):
+    def delete_source(
+        self,
+        *,
+        root: Path,
+        relative_path: str,
+        physical_kind: SourceNodePhysicalKind,
+    ) -> None: ...
+
+
 class ManageSourceNodePort(Protocol):
     def get(self, source_node_id: str) -> ManagedSourceNodeView | None: ...
 
@@ -60,6 +82,10 @@ class ManageSourceNodePort(Protocol):
 
 
 class ManageBookResourcePort(Protocol):
+    def source_targets_for_books(
+        self, book_ids: Sequence[str]
+    ) -> tuple[ManagedBookSourceTarget, ...]: ...
+
     def get_resource(self, resource_id: str) -> ManagedResourceView | None: ...
 
     def set_enablement(

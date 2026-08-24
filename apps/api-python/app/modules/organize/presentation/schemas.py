@@ -64,7 +64,6 @@ class OrganizeCandidate(HttpContractModel):
     id: str
     title: str | None
     author: str | None
-    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
     cover_path: str | None = Field(alias="coverPath")
     metadata_quality: int = Field(alias="metadataQuality")
     reason_codes: list[str] = Field(alias="reasonCodes")
@@ -154,7 +153,6 @@ class OrganizeJobListBook(HttpContractModel):
     id: str
     title: str
     author: str
-    available_media_kinds: list[str] = Field(alias="availableMediaKinds")
 
 
 class OrganizeJobListItem(HttpContractModel):

@@ -292,7 +292,6 @@ export type ReaderResourceSummary = {
   resourceIndex?: number | null;
   sortOrder: number;
   format: string;
-  mediaKind: string;
   readerType: "reflowable" | "comic" | "pdf" | "audio";
   pageCount?: number | null;
   chapterCount?: number | null;

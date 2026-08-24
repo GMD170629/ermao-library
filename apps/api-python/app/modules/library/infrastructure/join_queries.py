@@ -29,7 +29,6 @@ def get_resource_context(db: Session, resource_id: str) -> dict[str, Any] | None
     payload = entity_record(resource)
     payload.update(
         bookId=book.id,
-        mediaKind=resource.media_kind,
         resourceId=resource.id,
     )
     return payload
@@ -55,7 +54,6 @@ def get_unit_context(db: Session, unit_id: str) -> dict[str, Any] | None:
     payload = entity_record(unit)
     payload.update(
         bookId=book.id,
-        mediaKind=resource.media_kind,
         resourceId=resource.id,
         format=resource.format,
     )

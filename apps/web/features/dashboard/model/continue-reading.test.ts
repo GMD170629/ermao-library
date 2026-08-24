@@ -8,7 +8,6 @@ test('maps the dashboard resume resource from the API contract', () => {
     title: 'Book',
     author: 'Author',
     coverUrl: '/cover',
-    mediaKind: 'EBOOK',
     resourceFormat: 'EPUB',
     readerType: 'reflowable',
     resumeResourceId: 'resource-1',
@@ -24,6 +23,6 @@ test('maps the dashboard resume resource from the API contract', () => {
 });
 
 test('rejects malformed continue-reading records at the API boundary', () => {
-  assert.equal(mapContinueReadingItem({ bookId: '', mediaKind: 'EBOOK' }), null);
-  assert.equal(mapContinueReadingItem({ bookId: 'book-1', mediaKind: 'VIDEO' }), null);
+  assert.equal(mapContinueReadingItem({ bookId: '' }), null);
+  assert.equal(mapContinueReadingItem({ bookId: 'book-1', readerType: 'unknown' }), null);
 });

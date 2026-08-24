@@ -13,7 +13,6 @@ import { PageTitle } from '../../components/ui/page-title';
 import {
   applicableSmartFilterRules,
   fetchLibraryFilterSchema,
-  mediaKindsLabel,
   serializableSmartFilterRules,
   SmartFilterBuilder,
   type SmartFilterField,
@@ -56,7 +55,7 @@ async function readPayload<T extends { ok: boolean; error?: { message: string } 
 }
 
 export function ShelvesPage() {
-  const { t: i18nAttribute, locale } = useAttributeI18n();
+  const { t: i18nAttribute } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentSearch = searchParams.toString();
@@ -809,7 +808,7 @@ export function ShelvesPage() {
                       <Cover book={book} className="h-16 w-11 shrink-0" small />
                       <div data-i18n-skip className="min-w-0 flex-1">
                         <div className="line-clamp-1 text-sm font-medium text-[#2A2825]">{book.title}</div>
-                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")} · {mediaKindsLabel(book.availableMediaKinds ?? [], locale)}</div>
+                        <div className="mt-1 line-clamp-1 text-xs text-[#8B847E]">{book.author || i18nAttribute("未知作者")}</div>
                       </div>
                       {checked ? <Check size={16} className="shrink-0 text-[#D94724]" /> : null}
                     </label>

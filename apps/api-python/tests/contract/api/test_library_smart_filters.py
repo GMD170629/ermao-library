@@ -31,7 +31,6 @@ REMOVED_LIBRARY_FILTER_FIELDS = {
     "volumeTitle",
     "resourceTitle",
     "narrator",
-    "mediaKind",
     "fileSize",
     "pageCount",
     "chapterCount",
@@ -133,7 +132,6 @@ def _ready_resource(
         source_node_id=node.id,
         adapter_id="pdf-file",
         adapter_version="1",
-        media_kind="EBOOK",
         format="PDF",
         import_state="READY",
     )
@@ -177,10 +175,9 @@ def test_book_list_search_is_deterministic_and_keeps_empty_books(
     assert payload["total"] == 1
     assert payload["books"][0]["author"] is None
     assert payload["books"][0]["statusValue"] == "UNREAD"
-    assert payload["books"][0]["availableMediaKinds"] == []
 
 
-def test_book_list_projections_expose_nullable_author_and_ready_media(
+def test_book_list_projections_expose_nullable_author_and_ready_resource(
     client: TestClient, db_session: Session
 ) -> None:
     _login(client, db_session)
@@ -199,7 +196,6 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
         "title": "Ready Book",
         "author": None,
         "coverUrl": "/api/books/ready-book/cover?size=medium",
-        "availableMediaKinds": ["EBOOK"],
         "resourceImportSummary": {"ready": 1, "pending": 0, "failed": 0},
         "progress": 0.0,
     }
@@ -218,7 +214,6 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
     assert management.status_code == 200, management.text
     management_item = management.json()["data"]["books"][0]
     assert management_item["author"] is None
-    assert management_item["availableMediaKinds"] == ["EBOOK"]
     assert management_item["resourceImportSummary"] == {
         "ready": 1,
         "pending": 0,
@@ -233,7 +228,6 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
     full_item = full.json()["data"]["books"][0]
     assert full_item["author"] is None
     assert [resource["id"] for resource in full_item["resources"]] == ["ready-resource"]
-    assert full_item["availableMediaKinds"] == ["EBOOK"]
     assert full_item["resourceImportSummary"] == {
         "ready": 1,
         "pending": 0,
@@ -271,10 +265,6 @@ def test_library_filter_contract_removes_retired_dimensions_and_media_queries(
         ]
     }
     assert book_query_parameters.isdisjoint({"type", "media"})
-    shelf_rule_properties = openapi_response.json()["components"]["schemas"][
-        "ShelfRules"
-    ]["properties"]
-    assert "mediaKinds" not in shelf_rule_properties
 
     for field in REMOVED_LIBRARY_FILTER_FIELDS:
         response = client.get(

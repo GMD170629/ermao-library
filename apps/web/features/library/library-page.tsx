@@ -472,6 +472,13 @@ export function LibraryPage() {
     setReloadKey((key) => key + 1);
   }
 
+  function openBookAction(book: ManagementBookSummary, action: LibraryBatchAction) {
+    if (!canUseLibraryBatchAction(action, canManageSystem)) return;
+    setSelectedBookIds([book.id]);
+    setBatchContextPosition(null);
+    setBatchDialogAction(action);
+  }
+
   return (
     <div>
       <header className="flex items-start justify-between gap-6">
@@ -597,7 +604,7 @@ export function LibraryPage() {
       {!loading && !error && books.length === 0 ? (
         <div className="mt-10 flex min-h-[260px] flex-col items-start justify-center rounded-2xl bg-black/[0.025] px-8">
           <div className="text-lg font-medium text-[#3A3632]"><I18nText>没有找到图书</I18nText></div>
-          <p className="mt-2 text-sm text-[#817B75]">{canManageSystem ? <I18nText>调整搜索或筛选条件，也可以上传电子书、漫画或有声书文件。</I18nText> : <I18nText>调整搜索或筛选条件，或联系管理员开通更多书库范围。</I18nText>}</p>
+          <p className="mt-2 text-sm text-[#817B75]">{canManageSystem ? <I18nText>调整搜索或筛选条件，也可以上传支持的图书文件格式。</I18nText> : <I18nText>调整搜索或筛选条件，或联系管理员开通更多书库范围。</I18nText>}</p>
           {canManageSystem ? <button type="button" onClick={openUploadDialog} className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-[#EF4D2F]"><UploadCloud size={17} /><I18nText>上传读物</I18nText></button> : null}
         </div>
       ) : null}
@@ -618,7 +625,21 @@ export function LibraryPage() {
           ) : (
             <div data-testid="library-management-viewport" className={cn('mt-8 lg:flex lg:min-h-[26rem] lg:flex-col', !filtersOpen && 'lg:h-[calc(100dvh-15.75rem)] lg:overflow-hidden')}>
               <div className="lg:min-h-0 lg:flex-1">
-                <BookTable books={books.filter((book): book is ManagementBookSummary => book.projection === 'management')} onOpen={(book) => router.push(bookDetailHref(book.id))} selectable selectedIds={selectedBookIds} onSelect={(book) => toggleSelection(book.id)} onSelectAll={togglePageSelection} onSelectionChange={setSelectedBookIds} onContextMenu={(_book, position) => setBatchContextPosition(position)} sort={sort} sortDirection={sortDirection} onSort={updateSort} />
+                <BookTable
+                  books={books.filter((book): book is ManagementBookSummary => book.projection === 'management')}
+                  onOpen={(book) => router.push(bookDetailHref(book.id))}
+                  selectable
+                  selectedIds={selectedBookIds}
+                  onSelect={(book) => toggleSelection(book.id)}
+                  onSelectAll={togglePageSelection}
+                  onSelectionChange={setSelectedBookIds}
+                  onContextMenu={(_book, position) => setBatchContextPosition(position)}
+                  onEdit={canManageSystem ? (book) => openBookAction(book, 'metadata') : undefined}
+                  onDelete={canManageSystem ? (book) => openBookAction(book, 'delete') : undefined}
+                  sort={sort}
+                  sortDirection={sortDirection}
+                  onSort={updateSort}
+                />
               </div>
               <Pagination page={page} total={meta.total} totalPages={meta.totalPages} loading={loading} pageSize={pageSize} onPage={setPage} onPageSize={(nextPageSize) => { setPage(1); setPageSize(nextPageSize); }} />
             </div>

@@ -130,7 +130,6 @@ def _seed_catalog(
         source_node_id=file_nodes[0].id,
         adapter_id=fmt.lower(),
         adapter_version="1",
-        media_kind="AUDIOBOOK" if fmt == "AUDIO" else "EBOOK",
         format=fmt,
         enablement_state="ENABLED",
         import_state="READY",

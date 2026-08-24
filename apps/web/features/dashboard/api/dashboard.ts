@@ -1,5 +1,4 @@
 import type { BookshelfItem } from '../../../components/book/bookshelf';
-import type { MediaKind } from '../../../types/book';
 import { mapContinueReadingItem, type ContinueReadingItem } from '../model/continue-reading';
 
 type JsonObject = Record<string, unknown>;
@@ -13,13 +12,6 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function mediaKinds(value: unknown): MediaKind[] {
-  if (!Array.isArray(value)) throw new Error('Invalid dashboard field: availableMediaKinds');
-  return value.filter((kind): kind is MediaKind => (
-    kind === 'EBOOK' || kind === 'COMIC' || kind === 'AUDIOBOOK'
-  ));
-}
-
 function parseBook(value: unknown): BookshelfItem {
   if (!isObject(value)) throw new Error('Invalid dashboard book');
   if (typeof value.progress !== 'number' || !Number.isFinite(value.progress)) {
@@ -30,7 +22,6 @@ function parseBook(value: unknown): BookshelfItem {
     title: requiredString(value.title, 'book.title'),
     author: value.author === null ? null : requiredString(value.author, 'book.author'),
     coverUrl: requiredString(value.coverUrl, 'book.coverUrl'),
-    availableMediaKinds: mediaKinds(value.availableMediaKinds),
     progress: Math.max(0, Math.min(100, value.progress))
   };
 }

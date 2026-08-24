@@ -31,7 +31,6 @@ class ReaderResourceDto:
     book_id: str
     source_node_id: str
     title: str
-    media_kind: str
     format: str
     resource_index: float | None
     sort_order: int

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from app.modules.imports.infrastructure.sidecar_opf import (
+    discover_directory_sidecar_opf,
+)
 from app.modules.metadata.application.opf import OpfMetadataError, parse_opf_metadata
 
 
@@ -71,6 +76,20 @@ def test_calibre_series_index_wins_over_epub3_group_position() -> None:
 
     assert metadata.series_index == 2
     assert metadata.volume_index == 2
+
+
+def test_directory_sidecar_does_not_inherit_parent_metadata(tmp_path: Path) -> None:
+    work = tmp_path / "作品"
+    volume = work / "第一卷"
+    volume.mkdir(parents=True)
+    (work / "metadata.opf").write_bytes(_opf(title="作品级标题"))
+
+    assert discover_directory_sidecar_opf(volume) is None
+
+    (volume / "metadata.opf").write_bytes(_opf(title="分卷级标题"))
+    result = discover_directory_sidecar_opf(volume)
+    assert result is not None
+    assert result.metadata.volume_title == "分卷级标题"
 
 
 @pytest.mark.parametrize(

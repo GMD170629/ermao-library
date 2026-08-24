@@ -3,23 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event, select, update
+from sqlalchemy import event, update
 from sqlalchemy.orm import Session
 
 from app.bootstrap.system import prepare_system_event
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.organize import MetadataProviderPipeline
 from app.models.settings import SystemSetting
 from app.services.metadata_provider_registry import (
     get_metadata_provider,
-    list_metadata_provider_pipelines,
     list_metadata_providers,
     metadata_provider_registry,
     persist_metadata_provider_update,
     prepare_metadata_provider_update,
-    update_metadata_provider_pipeline,
+    update_metadata_provider_order,
 )
 from app.services.metadata_provider_registry import (
     test_metadata_provider as run_metadata_provider_test,
@@ -59,26 +57,17 @@ def test_provider_queries_remain_readable_while_another_writer_holds_lock(
 
         with Session(reader_engine) as reader:
             providers = list_metadata_providers(reader)
-            pipelines = list_metadata_provider_pipelines(reader)
 
         assert {provider["id"] for provider in providers} == {
             "ai",
             "bangumi",
             "douban",
         }
-        assert {pipeline["mediaKind"] for pipeline in pipelines} == {
-            "AUDIOBOOK",
-            "COMIC",
-            "EBOOK",
-        }
         assert not any(
             statement.startswith(("INSERT", "UPDATE", "DELETE"))
             for statement in statements
         )
         blocker.rollback()
-
-        with Session(regular_engine) as db:
-            assert len(db.scalars(select(MetadataProviderPipeline)).all()) == 7
     finally:
         event.remove(reader_engine, "before_cursor_execute", capture_statement)
         blocker.close()
@@ -110,7 +99,7 @@ def test_provider_network_test_runs_after_the_read_transaction_is_closed(
         engine.dispose()
 
 
-def test_pipeline_update_uses_bounded_set_based_dml(tmp_path: Path) -> None:
+def test_provider_order_update_uses_bounded_set_based_dml(tmp_path: Path) -> None:
     settings = Settings(storage_root=str(tmp_path / "storage"))
     engine = create_sqlite_engine(settings.database_path)
     bootstrap_database(engine, settings)
@@ -131,9 +120,8 @@ def test_pipeline_update_uses_bounded_set_based_dml(tmp_path: Path) -> None:
     event.listen(engine, "before_cursor_execute", capture_statement)
     try:
         with Session(engine) as db:
-            pipelines = update_metadata_provider_pipeline(
+            providers = update_metadata_provider_order(
                 db,
-                "EBOOK",
                 [
                     {"providerId": "douban", "enabled": False},
                     {"providerId": "bangumi", "enabled": False},
@@ -142,13 +130,12 @@ def test_pipeline_update_uses_bounded_set_based_dml(tmp_path: Path) -> None:
             )
 
         assert len(statements) <= 3
-        ebook = next(row for row in pipelines if row["mediaKind"] == "EBOOK")
-        assert [provider["providerId"] for provider in ebook["providers"]] == [
+        assert [provider["id"] for provider in providers] == [
             "douban",
             "bangumi",
             "ai",
         ]
-        assert all(not provider["enabled"] for provider in ebook["providers"])
+        assert all(not provider["enabled"] for provider in providers)
     finally:
         event.remove(engine, "before_cursor_execute", capture_statement)
         engine.dispose()
@@ -167,7 +154,7 @@ def test_provider_state_and_audit_event_roll_back_together(
             prepared = prepare_metadata_provider_update(
                 db,
                 "douban",
-                {"priority": 777},
+                {"config": {"baseUrl": "https://example.invalid"}},
             )
             audit_event = prepare_system_event(
                 source="system",
@@ -187,6 +174,6 @@ def test_provider_state_and_audit_event_roll_back_together(
 
             after = get_metadata_provider(db, "douban")
             assert after is not None
-            assert after["priority"] == before["priority"]
+            assert after["config"] == before["config"]
     finally:
         engine.dispose()

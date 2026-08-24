@@ -22,11 +22,28 @@ class SidecarOpfResult:
 
 
 def discover_sidecar_opf(source: Path) -> SidecarOpfResult | None:
-    candidates = (
-        source.with_suffix(".opf"),
-        source.parent / "metadata.opf",
-        source.parent / f"{source.parent.name}.opf",
+    return _discover_candidates(
+        (
+            source.with_suffix(".opf"),
+            source.parent / "metadata.opf",
+            source.parent / f"{source.parent.name}.opf",
+        )
     )
+
+
+def discover_directory_sidecar_opf(source: Path) -> SidecarOpfResult | None:
+    """Read metadata owned by a directory without inheriting its parent OPF."""
+
+    return _discover_candidates(
+        (
+            source / "metadata.opf",
+            source / f"{source.name}.opf",
+            source.with_suffix(".opf"),
+        )
+    )
+
+
+def _discover_candidates(candidates: tuple[Path, ...]) -> SidecarOpfResult | None:
     for candidate in candidates:
         if not candidate.is_file() or candidate.is_symlink():
             continue
@@ -73,4 +90,8 @@ def _image_signature(content: bytes) -> bool:
     ) or (prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP")
 
 
-__all__ = ["SidecarOpfResult", "discover_sidecar_opf"]
+__all__ = [
+    "SidecarOpfResult",
+    "discover_directory_sidecar_opf",
+    "discover_sidecar_opf",
+]

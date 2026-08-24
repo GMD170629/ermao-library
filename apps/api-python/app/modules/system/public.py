@@ -18,16 +18,13 @@ from app.modules.system.domain.queue import (
     safe_runtime_error,
 )
 from app.modules.system.domain.settings_policy import (
-    DETAIL_TAB_KEYS,
     RETIRED_SYSTEM_SETTING_KEYS,
     SENSITIVE_SYSTEM_SETTING_KEYS,
-    normalize_detail_tab_order,
     public_system_settings,
 )
 
 __all__ = [
     "DEFAULT_MAX_EVENT_BYTES",
-    "DETAIL_TAB_KEYS",
     "LOG_MAX_BYTES_SETTING",
     "MAX_MAX_EVENT_BYTES",
     "MIN_MAX_EVENT_BYTES",
@@ -38,7 +35,6 @@ __all__ = [
     "PreparedSystemEvent",
     "SystemUnitOfWork",
     "is_database_busy_error",
-    "normalize_detail_tab_order",
     "normalize_health_run_snapshot",
     "public_system_settings",
     "safe_runtime_error",

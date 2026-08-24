@@ -33,10 +33,6 @@ def test_resource_metadata_contract_excludes_directory_owned_fields() -> None:
 
     assert "sortOrder" not in properties
     assert "hidden" not in properties
-    batch_schema = schema["paths"]["/api/books/{book_id}/resources/batch"]["post"][
-        "requestBody"
-    ]["content"]["application/json"]["schema"]
-    assert batch_schema == {"$ref": "#/components/schemas/ResourceBatchRequest"}
 
 
 def test_bulk_delete_is_rejected_as_directory_topology_mutation(

@@ -59,6 +59,7 @@ from app.modules.imports.infrastructure.readable_resource.worker import (
 )
 from app.modules.library.application.commands.manage_source_tree import (
     ChangeLibraryOrganizationMode,
+    DeleteBookSources,
     DeleteSourceNode,
     DisableReadableResource,
     EnableReadableResource,
@@ -88,6 +89,7 @@ class ReadableResourcePipeline:
     continue_import: ContinueImport
     scan_library_source_tree: ScanLibrarySourceTree
     process_import_task: ProcessReadableResourceImportTask
+    delete_book_sources: DeleteBookSources
     delete_source_node: DeleteSourceNode
     change_library_organization_mode: ChangeLibraryOrganizationMode
     relocate_library_root: RelocateLibraryRoot
@@ -159,18 +161,27 @@ def build_readable_resource_pipeline(
         request_library_scan=request_scan,
     )
 
+    delete_source_node = DeleteSourceNode(
+        source_nodes=source_nodes,
+        books_resources=books_resources,
+        import_tasks=queue,
+        uow=uow,
+        log=log,
+    )
     return ReadableResourcePipeline(
         continue_import=continue_import,
         request_library_scan=request_scan,
         scan_library_source_tree=scan,
         process_import_task=process_import,
-        delete_source_node=DeleteSourceNode(
+        delete_book_sources=DeleteBookSources(
+            filesystem=filesystem,
             source_nodes=source_nodes,
             books_resources=books_resources,
             import_tasks=queue,
             uow=uow,
             log=log,
         ),
+        delete_source_node=delete_source_node,
         change_library_organization_mode=ChangeLibraryOrganizationMode(
             libraries=libraries,
             books_resources=books_resources,

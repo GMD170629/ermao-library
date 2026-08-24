@@ -8,7 +8,7 @@ from typing import Any, Literal, cast
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from app.contracts.media_capabilities import reader_type_for_format
+from app.contracts.media_capabilities import require_reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,
@@ -35,7 +35,6 @@ from app.modules.library.application.dashboard import (
 )
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 from app.modules.library.infrastructure.books import entity_record
-from app.modules.reader.public import MediaKind
 
 
 def _visible_book_filter(context: AuthorizationContext):
@@ -53,21 +52,6 @@ def dashboard_summary(
         db.scalar(select(func.count()).select_from(LibraryBook).where(*visible_book))
         or 0
     )
-
-    def media_kind_book_count(media_kind: MediaKind) -> int:
-        return int(
-            db.scalar(
-                select(func.count(func.distinct(LibraryReadableResource.book_id)))
-                .select_from(LibraryReadableResource)
-                .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
-                .where(
-                    LibraryReadableResource.media_kind == media_kind.value,
-                    *visible_book,
-                    resource_visibility_predicate(context),
-                )
-            )
-            or 0
-        )
 
     latest_progress_at = db.scalar(
         select(ReaderResourceProgress.updated_at)
@@ -108,9 +92,6 @@ def dashboard_summary(
     )
     return {
         "totalBooks": total_books,
-        "ebookBooks": media_kind_book_count(MediaKind.EBOOK),
-        "comicBooks": media_kind_book_count(MediaKind.COMIC),
-        "audiobookBooks": media_kind_book_count(MediaKind.AUDIOBOOK),
         "storageUsedBytes": storage,
         "libraryCount": library_count,
         "lastImportAt": None,
@@ -217,7 +198,6 @@ def continue_reading_progress(
                 LibraryReadableResourceMetadata.title.label("resource_title"),
                 LibraryReadableResourceMetadata.narrator,
                 LibraryReadableResource.format.label("resource_format"),
-                LibraryReadableResource.media_kind,
                 LibraryBook.id.label("book_id"),
                 LibraryBookMetadata.title.label("book_title"),
                 LibraryBookMetadata.author,
@@ -266,7 +246,7 @@ def continue_reading_progress(
         .preferred_paths((str(selected.book_id),))
         .get(str(selected.book_id))
     )
-    reader_type = reader_type_for_format(str(selected.resource_format))
+    reader_type = require_reader_type_for_format(str(selected.resource_format))
     return {
         "bookId": selected.book_id,
         "title": selected.book_title,
@@ -274,9 +254,8 @@ def continue_reading_progress(
         "coverPath": cover_path or selected.cover_path,
         "coverStatus": "READY" if cover_path else selected.cover_status,
         "bookUpdatedAt": selected.book_updated_at,
-        "mediaKind": selected.media_kind,
         "resourceFormat": selected.resource_format,
-        "readerType": reader_type.value if reader_type else "reflowable",
+        "readerType": reader_type.value,
         "resourceId": selected.resource_id,
         "resourceTitle": selected.resource_title,
         "narrator": selected.narrator,
@@ -360,27 +339,12 @@ def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, An
         .limit(limit)
     ).all()
     book_ids = [str(row.id) for row in rows]
-    kinds_by_book: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
-    if book_ids:
-        media_rows = db.execute(
-            select(LibraryReadableResource.book_id, LibraryReadableResource.media_kind)
-            .where(LibraryReadableResource.book_id.in_(book_ids))
-            .group_by(
-                LibraryReadableResource.book_id, LibraryReadableResource.media_kind
-            )
-        ).all()
-        priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
-        for book_id, media_kind in media_rows:
-            kinds_by_book[str(book_id)].append(str(media_kind))
-        for media_kinds in kinds_by_book.values():
-            media_kinds.sort(key=lambda kind: (priority.get(kind, 3), kind))
     return [
         {
             "id": row.id,
             "title": row.title,
             "author": row.author,
             "seriesName": row.series_name,
-            "availableMediaKinds": kinds_by_book[str(row.id)],
             "libraryId": row.library_id,
             "visibilityState": row.visibility_state,
             "updatedAt": row.updated_at,
@@ -435,9 +399,6 @@ class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
             book_id=str(row["bookId"]),
             title=str(row["title"]),
             author=str(row.get("author") or "未知作者"),
-            media_kind=cast(
-                Literal["EBOOK", "COMIC", "AUDIOBOOK"], str(row["mediaKind"])
-            ),
             resource_format=str(row["resourceFormat"]),
             reader_type=cast(
                 Literal["reflowable", "comic", "pdf", "audio"],

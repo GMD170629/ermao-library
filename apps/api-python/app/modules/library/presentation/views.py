@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.bootstrap.library import get_book as load_book
 from app.contracts.media_capabilities import (
     kindle_send_available_for_format,
-    reader_type_for_format,
+    require_reader_type_for_format,
 )
 from app.core.natural_sort import natural_sort_key
 from app.models import (
@@ -142,7 +142,7 @@ def _resource_view(
     sort_order: int = 0,
 ) -> dict[str, Any]:
     format_value = str(resource.format)
-    reader_type = reader_type_for_format(format_value)
+    reader_type = require_reader_type_for_format(format_value)
     assets = _asset_rows(db, resource.id) if include_assets else []
     asset_titles = resolve_asset_display_titles(
         AssetTitleCandidate(
@@ -183,7 +183,6 @@ def _resource_view(
         for item in asset_views
         if isinstance(item.get("sizeBytes"), (int, float, str))
     )
-    media_kind = str(resource.media_kind)
     return {
         "id": resource.id,
         "bookId": resource.book_id,
@@ -193,13 +192,7 @@ def _resource_view(
         "resourceIndex": metadata.resource_index if metadata else None,
         "sortOrder": sort_order,
         "format": format_value,
-        "mediaKind": media_kind,
-        "readerType": reader_type.value if reader_type else "reflowable",
-        "classification": {
-            "source": "AUTO",
-            "reason": "FORMAT_DEFAULT",
-            "suggestedMediaKind": media_kind,
-        },
+        "readerType": reader_type.value,
         "kindleSendAvailable": kindle_send_available_for_format(format_value),
         "publisher": metadata.publisher if metadata else None,
         "publishedAt": _dt(metadata.published_at) if metadata else None,
@@ -267,10 +260,14 @@ def book_view(
         for index, (resource, metadata) in enumerate(_resource_rows(db, book_id))
     ]
     unfinished = [item for item in resources if item["progress"] < 100]
-    selected = max(
-        (item for item in resources if item["lastReadAt"] is not None),
-        key=lambda item: item["lastReadAt"],
-        default=None,
+    candidates = unfinished or resources
+    with_history = [item for item in candidates if item["lastReadAt"] is not None]
+    selected = (
+        max(with_history, key=lambda item: (item["lastReadAt"], -int(item["sortOrder"])))
+        if with_history
+        else min(candidates, key=lambda item: (int(item["sortOrder"]), str(item["id"])))
+        if candidates
+        else None
     )
     return {
         **book,
@@ -282,7 +279,6 @@ def book_view(
         "gradient": "",
         "coverUrl": _cover_url("books", book_id, book, size="medium"),
         "resources": resources,
-        "availableMediaKinds": sorted({str(item["mediaKind"]) for item in resources}),
         "completed": bool(resources) and not unfinished,
         "continueResourceId": selected["id"] if selected else None,
         "continueResourceTitle": selected["title"] if selected else None,
@@ -368,7 +364,6 @@ def bookshelf_item_view(item: BookshelfItemSummary) -> dict[str, Any]:
         "title": item.title,
         "author": item.author,
         "coverUrl": _cover_url("books", item.id, size="medium"),
-        "availableMediaKinds": list(item.available_media_kinds),
         "progress": float(item.progress),
     }
 
@@ -383,16 +378,12 @@ def bookshelf_book_list_view(item: dict[str, object]) -> dict[str, object]:
     """Map the ORM list projection to the public bookshelf wire shape."""
 
     book_id = str(item["id"])
-    media_kinds = item.get("availableMediaKinds")
     progress = item.get("progress")
     return {
         "id": book_id,
         "title": str(item["title"]),
         "author": item.get("author"),
         "coverUrl": _cover_url("books", book_id, size="medium"),
-        "availableMediaKinds": (
-            list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
-        ),
         "resourceImportSummary": item.get("resourceImportSummary"),
         "progress": (
             float(progress) if isinstance(progress, (int, float, str)) else 0.0
@@ -405,7 +396,6 @@ def management_book_list_view(item: dict[str, object]) -> dict[str, object]:
 
     book_id = str(item["id"])
     tags = item.get("tags")
-    media_kinds = item.get("availableMediaKinds")
     return {
         "id": book_id,
         "title": str(item["title"]),
@@ -415,9 +405,6 @@ def management_book_list_view(item: dict[str, object]) -> dict[str, object]:
         "coverUrl": _cover_url("books", book_id, size="medium"),
         "seriesName": item.get("seriesName"),
         "tags": list(tags) if isinstance(tags, (list, tuple)) else [],
-        "availableMediaKinds": (
-            list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
-        ),
         "resourceImportSummary": item.get("resourceImportSummary"),
         "statusValue": str(item.get("statusValue") or "UNREAD"),
         "lastReadAt": item.get("lastReadAt"),

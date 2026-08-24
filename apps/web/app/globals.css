@@ -4,6 +4,23 @@
 @tailwind components;
 @tailwind utilities;
 
+.resource-cover-control {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-resource-card='true'] .resource-cover-control {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-resource-card='true']:hover .resource-cover-control,
+  [data-resource-card='true']:focus-within .resource-cover-control {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 :root {
   --shuku-safe-area-top: env(safe-area-inset-top, 0px);
   --shuku-safe-area-right: env(safe-area-inset-right, 0px);

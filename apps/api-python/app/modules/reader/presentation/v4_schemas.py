@@ -387,7 +387,6 @@ class ReaderResourceSummary(ReaderWireModel):
     resource_index: float | None = Field(default=None, alias="resourceIndex")
     sort_order: int = Field(alias="sortOrder")
     format: str
-    media_kind: str = Field(alias="mediaKind")
     reader_type: ReaderFormat = Field(alias="readerType")
     page_count: int | None = Field(default=None, alias="pageCount")
     chapter_count: int | None = Field(default=None, alias="chapterCount")

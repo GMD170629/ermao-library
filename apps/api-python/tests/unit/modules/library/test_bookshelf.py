@@ -28,7 +28,6 @@ class FakeBookshelfItemQueries(BookshelfItemQueryPort):
                 author="Author",
                 cover_path=None,
                 updated_at=datetime(2026, 8, 10, tzinfo=UTC),
-                available_media_kinds=("EBOOK",),
                 progress=25,
             )
             for book_id in book_ids

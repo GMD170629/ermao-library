@@ -1,4 +1,4 @@
-import type { MediaKind, ResourceImportSummary } from '../../../types/book';
+import type { ResourceImportSummary } from '../../../types/book';
 
 type ReadingStatus = 'UNREAD' | 'READING' | 'FINISHED';
 type LibraryProjection = 'bookshelf' | 'management';
@@ -9,7 +9,6 @@ export type BookshelfBookSummary = Readonly<{
   title: string;
   author: string | null;
   coverUrl: string;
-  availableMediaKinds: MediaKind[];
   resourceImportSummary: ResourceImportSummary;
   progress: number;
 }>;
@@ -24,7 +23,6 @@ export type ManagementBookSummary = Readonly<{
   coverUrl: string;
   seriesName: string | null;
   tags: string[];
-  availableMediaKinds: MediaKind[];
   resourceImportSummary: ResourceImportSummary;
   statusValue: ReadingStatus;
   lastReadAt: string | null;
@@ -69,14 +67,6 @@ function progressPercent(value: unknown): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function parseMediaKinds(value: unknown): MediaKind[] {
-  if (!Array.isArray(value)) throw new Error('LIBRARY_BOOK_SUMMARY_INVALID_availableMediaKinds');
-  return value.map((kind) => {
-    if (kind === 'EBOOK' || kind === 'COMIC' || kind === 'AUDIOBOOK') return kind;
-    throw new Error('LIBRARY_BOOK_SUMMARY_INVALID_availableMediaKinds');
-  });
-}
-
 function parseResourceImportSummary(value: unknown): ResourceImportSummary {
   const summary = record(value);
   return {
@@ -94,7 +84,6 @@ function mapBookshelfBook(value: unknown): BookshelfBookSummary {
     title: requiredString(item.title, 'title'),
     author: optionalString(item.author),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
-    availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
     resourceImportSummary: parseResourceImportSummary(item.resourceImportSummary),
     progress: progressPercent(item.progress)
   };
@@ -118,7 +107,6 @@ function mapManagementBook(value: unknown): ManagementBookSummary {
     tags: Array.isArray(item.tags)
       ? item.tags.filter((tag): tag is string => typeof tag === 'string')
       : [],
-    availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
     resourceImportSummary: parseResourceImportSummary(item.resourceImportSummary),
     statusValue,
     lastReadAt: optionalString(item.lastReadAt),

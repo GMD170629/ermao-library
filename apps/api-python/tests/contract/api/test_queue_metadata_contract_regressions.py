@@ -141,7 +141,6 @@ def test_consumed_request_bodies_are_documented_in_openapi(
 ) -> None:
     schema = client.get("/openapi.json").json()
     operations = {
-        ("put", "/api/metadata/provider-pipelines/{media_kind}"),
         ("put", "/api/metadata/providers/{provider_id}"),
         ("patch", "/api/metadata/providers/{provider_id}"),
         ("post", "/api/libraries"),
@@ -171,7 +170,6 @@ def test_empty_bodies_never_escape_as_internal_errors(
 ) -> None:
     _login_admin(client, db_session)
     requests = (
-        ("PUT", "/api/metadata/provider-pipelines/EBOOK"),
         ("PUT", "/api/metadata/providers/douban"),
         ("PATCH", "/api/metadata/providers/douban"),
         ("POST", "/api/libraries"),

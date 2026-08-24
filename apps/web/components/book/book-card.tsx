@@ -8,20 +8,9 @@ import type { CoverBook } from './cover';
 import { allBookResources, resourceById, type BookView } from '../../types/book';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
-type CardMediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
-
-const mediaLabels: Record<CardMediaKind, string> = {
-  EBOOK: '电子书',
-  COMIC: '漫画',
-  AUDIOBOOK: '有声书'
-};
-
-function consumptionStatusLabel(status: string | undefined, mediaKinds: CardMediaKind[]) {
+function consumptionStatusLabel(status: string | undefined) {
   const normalized = status === 'FINISHED' ? 'FINISHED' : status === 'READING' ? 'READING' : 'UNREAD';
-  if (mediaKinds.length !== 1) return normalized === 'FINISHED' ? '已完成' : normalized === 'READING' ? '进行中' : '未开始';
-  if (mediaKinds[0] === 'AUDIOBOOK') return normalized === 'FINISHED' ? '听完' : normalized === 'READING' ? '在听' : '未听';
-  if (mediaKinds[0] === 'COMIC') return normalized === 'FINISHED' ? '看完' : normalized === 'READING' ? '在看' : '未看';
-  return normalized === 'FINISHED' ? '已读' : normalized === 'READING' ? '在读' : '未读';
+  return normalized === 'FINISHED' ? '已完成' : normalized === 'READING' ? '进行中' : '未开始';
 }
 
 export function BookCard({
@@ -44,9 +33,8 @@ export function BookCard({
   const { t: i18nAttribute } = useAttributeI18n();
   const authorLabel = book.author.trim() && book.author !== '未知作者' ? book.author.trim() : null;
   const continueResource = resourceById(book, book.continueResourceId);
-  const mediaKinds = (book.availableMediaKinds ?? []) as CardMediaKind[];
   const hasProgress = Boolean(continueResource && continueResource.progress > 0 && continueResource.progress < 100);
-  const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allBookResources(book).some((resource) => resource.progress > 0) ? 'READING' : 'UNREAD', mediaKinds);
+  const readingLabel = consumptionStatusLabel(book.completed ? 'FINISHED' : allBookResources(book).some((resource) => resource.progress > 0) ? 'READING' : 'UNREAD');
 
   function openBook(event: KeyboardEvent<HTMLDivElement>) {
     if (event.target !== event.currentTarget || !onClick || (event.key !== 'Enter' && event.key !== ' ')) return;
@@ -84,7 +72,6 @@ export function BookCard({
       <div className="mt-2">
         <div data-i18n-skip className={compact ? 'line-clamp-1 text-[13px] font-medium text-[#24211F]' : 'line-clamp-1 text-sm font-medium text-[#24211F]'}>{book.title}</div>
         {authorLabel ? <div data-i18n-skip className="mt-0.5 line-clamp-1 text-xs text-[#89837D]">{authorLabel}</div> : null}
-        <div className="mt-1 line-clamp-1 text-[11px] text-[#9A948E]">{mediaKinds.map((kind) => mediaLabels[kind]).join(' · ')}</div>
         {continueResource ? <div data-i18n-skip className="mt-1 line-clamp-1 text-[11px] text-[#8B857F]">{continueResource.title}</div> : null}
         {hasProgress && continueResource ? (
           <div className="mt-1.5 flex items-center gap-2">

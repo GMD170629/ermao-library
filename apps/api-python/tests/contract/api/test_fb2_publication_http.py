@@ -90,7 +90,6 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
         source_node_id=source_node.id,
         adapter_id="fb2",
         adapter_version="1",
-        media_kind="EBOOK",
         format="FB2",
         enablement_state="ENABLED",
         import_state="READY",

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assetDownloadUrl, fetchBook, fetchResourceDetail, mapBookView } from './client';
+import { assetDownloadUrl, fetchBook, fetchResourceDetail, mapBookView, uploadResourceCover } from './client';
 
 const resource = (id: string, bookId = 'book-1') => ({
   id,
@@ -12,7 +12,6 @@ const resource = (id: string, bookId = 'book-1') => ({
   sortOrder: 0,
   format: 'COMIC',
   readerType: 'comic',
-  classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: null },
   publisher: null,
   publishedAt: null,
   language: null,
@@ -82,6 +81,30 @@ test('requests book detail with an optional resource selector', async () => {
     globalThis.fetch = originalFetch;
   }
   assert.equal(requestedUrl, '/api/books/book%2F1?resourceId=resource%2F3');
+});
+
+test('uploads a custom cover to the selected readable resource', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  let requestedMethod = '';
+  let requestedCover: FormDataEntryValue | null = null;
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedMethod = init?.method ?? '';
+    const body = init?.body;
+    assert.ok(body instanceof FormData);
+    requestedCover = body.get('cover');
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const cover = new File(['cover'], 'volume.png', { type: 'image/png' });
+    await uploadResourceCover('book/1', 'resource/3', cover);
+    assert.equal(requestedCover, cover);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestedUrl, '/api/books/book%2F1/resources/resource%2F3/cover');
+  assert.equal(requestedMethod, 'PUT');
 });
 
 test('validates and maps a unified paginated resource detail response', async () => {

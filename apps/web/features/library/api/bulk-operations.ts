@@ -10,6 +10,11 @@ export type BulkBookCoverResult = {
   operationId: string;
 };
 
+export type BulkBookSourceDeleteResult = {
+  deleted: number;
+  deletedBookIds: string[];
+};
+
 export type BulkFindReplaceInput = {
   ids: string[];
   field: 'title' | 'author' | 'description' | 'seriesName' | 'tags' | 'resourceTitle';
@@ -124,6 +129,24 @@ export async function updateBulkBookMetadata(input: {
     input,
     '批量更新元数据失败'
   ));
+}
+
+export async function deleteBulkBookSources(input: {
+  ids: string[];
+  confirmation: 'DELETE_SOURCE_FILES';
+}): Promise<BulkBookSourceDeleteResult> {
+  const value = await postJson(
+    '/api/library/operations/books/delete-sources',
+    input,
+    '删除图书源文件失败'
+  );
+  if (!isObject(value) || !Array.isArray(value.deletedBookIds)) {
+    throw new Error('Invalid bulk source delete response');
+  }
+  return {
+    deleted: requiredNumber(value.deleted, 'deleted'),
+    deletedBookIds: value.deletedBookIds.map((bookId) => requiredString(bookId, 'deletedBookIds'))
+  };
 }
 
 export async function previewBulkBookFindReplace(

@@ -198,7 +198,6 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
                     source_node_id="n1",
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )
@@ -275,7 +274,6 @@ def test_import_task_kind_shape_and_asset_unique(tmp_path: Path) -> None:
                     source_node_id="n1",
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )
@@ -401,7 +399,6 @@ def test_composite_foreign_keys_reject_cross_library_links(tmp_path: Path) -> No
                     source_node_id="node-2",
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )
@@ -417,7 +414,6 @@ def test_composite_foreign_keys_reject_cross_library_links(tmp_path: Path) -> No
                     source_node_id="node-1",
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )

@@ -29,7 +29,6 @@ test('parses a shelf book with bounded reading progress', () => {
       title: 'Example',
       author: 'Author',
       coverUrl: '/api/books/book-1/cover',
-      availableMediaKinds: ['EBOOK'],
       progress: 37.5
     }],
     createdAt: '1970-01-01T00:00:00Z',

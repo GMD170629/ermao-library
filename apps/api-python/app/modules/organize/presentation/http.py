@@ -108,7 +108,6 @@ def _organize_job_list_view(job: OrganizeJobListItem) -> dict[str, object]:
             "id": job.book.id,
             "title": job.book.title,
             "author": job.book.author,
-            "availableMediaKinds": job.book.available_media_kinds,
         },
     }
 

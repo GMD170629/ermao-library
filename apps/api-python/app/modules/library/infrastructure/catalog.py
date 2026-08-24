@@ -275,7 +275,6 @@ class SqlAlchemyCatalogQueries(CatalogQueryPort):
         return CatalogResource(
             id=resource.id,
             title=metadata.title if metadata else "",
-            media_kind=resource.media_kind,
             format=resource.format,
             resource_index=metadata.resource_index if metadata else None,
             sort_order=int(metadata.resource_index or 0)

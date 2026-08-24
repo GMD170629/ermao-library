@@ -151,7 +151,6 @@ def organize_candidate_summary(db: Session) -> dict[str, Any]:
                 "id": book.get("id"),
                 "title": book.get("title"),
                 "author": book.get("author"),
-                "availableMediaKinds": book.get("availableMediaKinds") or [],
                 "coverPath": book.get("coverPath"),
                 "metadataQuality": int(book.get("metadataQuality") or 0),
                 "reasonCodes": book.get("reasonCodes") or [],
@@ -194,7 +193,7 @@ def create_organize_run(
         limit=limit,
         force_selected=bool(selected) and normalized_trigger == "MANUAL",
     )
-    selections: dict[str, tuple[str, str, str | None] | None] = {
+    selections: dict[str, tuple[str, str] | None] = {
         str(book["id"]): organize_eligibility.first_resource_selection_for_book(
             db, str(book["id"])
         )
@@ -207,8 +206,8 @@ def create_organize_run(
     )
     books = [book for book, _selection in selected_books]
     provider_plans = {
-        str(book["id"]): enabled_metadata_provider_ids(db, selection[1])
-        for book, selection in selected_books
+        str(book["id"]): enabled_metadata_provider_ids(db)
+        for book, _selection in selected_books
     }
     # All policy, eligibility, media and provider projections are detached
     # before dedupe/ID construction or the write unit of work begins.
@@ -296,8 +295,8 @@ def recognize_organize_job(db: Session, job_id: str) -> dict[str, Any]:
     )
     if selection is None:
         raise ValueError("图书没有可整理的资源")
-    _, media_kind, resource_id = selection
-    providers = enabled_metadata_provider_ids(db, media_kind)
+    resource_id, _resource_format = selection
+    providers = enabled_metadata_provider_ids(db)
     task_ids = organize_jobs.list_lookup_task_ids_for_job(db, job_id)
     new_task_id = _id("metadata_lookup")
     run_id = str(job.get("runId") or "") or None

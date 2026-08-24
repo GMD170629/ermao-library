@@ -179,8 +179,7 @@ test('book detail resource covers support selection, keyboard-accessible context
     hidden: false,
     readable: true,
     readerType: 'comic',
-    kindleSendAvailable: false,
-    classification: { suggestedMediaKind: 'COMIC', source: 'USER', reason: 'USER_SELECTED' },
+    kindleSendAvailable: sortOrder === 0,
     assets: [{ id: `${id}-asset`, resourceId: id, sourceNodeId: `${id}-source-node`, role: 'PRIMARY', mimeType: 'application/zip', sortOrder: 0, sizeBytes: 1024, size: '1 KB', url: `/api/assets/${id}-asset`, downloadUrl: `/api/assets/${id}-asset?download=true` }]
   });
   const resources = [resource('context-resource-1', '第一资源', 0), resource('context-resource-2', '第二资源', 1)];
@@ -211,9 +210,15 @@ test('book detail resource covers support selection, keyboard-accessible context
     completed: false,
     resources
   };
+  let resourcePatchBody: Record<string, unknown> | null = null;
   await page.unroute('**/api/**');
   await mockWebAppApi(page, async (route, url) => {
     if (!url.pathname.includes('/api/books/context-book')) return false;
+    if (route.request().method() === 'PATCH' && url.pathname.endsWith('/resources/context-resource-1')) {
+      resourcePatchBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ json: { ok: true, data: { resource: resources[0] } } });
+      return true;
+    }
     if (url.pathname.includes('/contents')) {
       const nested = url.searchParams.get('sourceNodeId') === sourceNodeEntry.sourceNodeId;
       const resourceEntries = resources.map((resource, index) => ({
@@ -251,6 +256,27 @@ test('book detail resource covers support selection, keyboard-accessible context
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
+  const topResourceActions = page.getByRole('button', { name: '管理当前可读资源 第一资源', exact: true });
+  await topResourceActions.click();
+  const topResourceMenu = page.getByRole('menu', { name: '管理可读资源' });
+  await expect(topResourceMenu.getByRole('menuitem')).toHaveCount(6);
+  await expect(topResourceMenu.getByRole('menuitem', { name: '编辑', exact: true })).toBeVisible();
+  await expect(topResourceMenu.getByRole('menuitem', { name: '上传封面', exact: true })).toBeVisible();
+  await expect(topResourceMenu.getByRole('menuitem', { name: '重新生成封面', exact: true })).toBeVisible();
+  await expect(topResourceMenu.getByRole('menuitem', { name: '识别', exact: true })).toBeVisible();
+  await expect(topResourceMenu.getByRole('menuitem', { name: '发送到 Kindle', exact: true })).toBeVisible();
+  await expect(topResourceMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true })).toBeVisible();
+  await topResourceMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
+  const resourceEditor = page.getByRole('dialog', { name: '编辑可读资源' });
+  await expect(resourceEditor.getByRole('textbox', { name: '卷标题' })).toHaveValue('第一资源');
+  await expect(resourceEditor.getByRole('spinbutton', { name: '卷号' })).toHaveValue('1');
+  await resourceEditor.getByRole('textbox', { name: '卷标题' }).fill('第一资源：修订');
+  await resourceEditor.getByRole('spinbutton', { name: '卷号' }).fill('2.5');
+  await resourceEditor.getByRole('textbox', { name: '简介' }).fill('卷册简介');
+  await resourceEditor.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(resourceEditor).toBeHidden();
+  expect(resourcePatchBody).toMatchObject({ title: '第一资源：修订', resourceIndex: 2.5, description: '卷册简介' });
+  await page.getByRole('button', { name: '返回图书内容', exact: true }).click();
   const sourcePath = page.getByRole('navigation', { name: '来源目录路径' });
   await expect(sourcePath).toBeVisible();
   await expect(page.getByRole('heading', { name: '来源目录与可读资源' })).toHaveCount(0);
@@ -285,13 +311,18 @@ test('book detail resource covers support selection, keyboard-accessible context
   expect(progressRatio).toBeCloseTo(0.8, 2);
 
   const firstActions = page.getByRole('button', { name: '管理 第一资源', exact: true });
+  await expect(firstActions).toHaveCSS('opacity', '0');
+  await page.locator('[data-resource-card="true"]').filter({ hasText: '第一资源' }).hover();
+  await expect(firstActions).toHaveCSS('opacity', '1');
   await firstActions.click();
   const cardMenu = page.getByRole('menu', { name: '管理可读资源' });
-  await expect(cardMenu.getByRole('menuitem')).toHaveCount(4);
-  await expect(cardMenu.getByRole('menuitem', { name: /^编辑/ })).toBeVisible();
-  await expect(cardMenu.getByRole('menuitem', { name: /^重新生成封面/ })).toBeVisible();
-  await expect(cardMenu.getByRole('menuitem', { name: /^识别/ })).toBeVisible();
-  await expect(cardMenu.getByRole('menuitem', { name: /^删除/ })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem')).toHaveCount(6);
+  await expect(cardMenu.getByRole('menuitem', { name: '编辑', exact: true })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: '上传封面', exact: true })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: '重新生成封面', exact: true })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: '识别', exact: true })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: '发送到 Kindle', exact: true })).toBeVisible();
+  await expect(cardMenu.getByRole('menuitem', { name: '永久删除源文件', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(firstActions).toBeFocused();
   await firstActions.click({ button: 'right' });
@@ -312,9 +343,11 @@ test('book detail resource covers support selection, keyboard-accessible context
   await expect(first).toBeVisible();
   await page.getByRole('button', { name: '返回全部图书', exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === '/library' && url.searchParams.get('status') === 'READING' && url.searchParams.get('sort') === 'title');
-  await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
+  await page.goto('/books/context-book?returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
   await expect(page.getByRole('button', { name: '返回全部图书', exact: true })).toBeVisible();
-  await second.click();
+  await page.getByRole('button', { name: '可读资源 2，阅读进度 100%' }).click();
+  await expect(page).toHaveURL(/resourceId=context-resource-2/);
+  await page.getByRole('button', { name: '继续看', exact: true }).click();
   await expect(page).toHaveURL(/\/reader\/context-resource-2$/);
 });
 
@@ -346,7 +379,6 @@ test('book detail requests a selected readable resource through the direct contr
     readable: true,
     readerType: 'pdf',
     kindleSendAvailable: false,
-    classification: { suggestedMediaKind: 'EBOOK', source: 'USER', reason: 'USER_SELECTED' },
     assets: [{ id: 'resource-2-asset', resourceId: 'resource-2', sourceNodeId: 'resource-2-source-node', role: 'PRIMARY', mimeType: 'application/pdf', sortOrder: 0, sizeBytes: 1024, size: '1 KB', url: '/api/assets/resource-2-asset', downloadUrl: '/api/assets/resource-2-asset?download=true' }]
   };
   const requestedResourceIds: Array<string | null> = [];
@@ -745,7 +777,6 @@ test('wide shelf details use responsive bookshelf rows and load more on scroll',
     status: '未读',
     statusValue: 'UNREAD',
     progress: 0,
-    availableMediaKinds: ['EBOOK'],
     tags: [],
     coverUrl: index === 0
       ? '/test-landscape-cover.svg'
@@ -990,7 +1021,6 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     organized: true,
     addedAt: '2026-07-17T08:30:00.000Z',
     updatedAt: '2026-07-17T08:30:00.000Z',
-    availableMediaKinds: ['EBOOK'],
     continueResourceId: 'mobile-resource',
     continueResourceTitle: '全本',
     continueResourceProgress: 42,
@@ -999,7 +1029,7 @@ test('mobile data-heavy views use cards instead of compressed desktop tables', a
     statusValue: 'UNREAD',
     lastReadAt: '2026-07-17T08:30:00.000Z',
     importedAt: '2026-07-17T08:30:00.000Z',
-    resources: [{ id: 'mobile-resource', bookId: 'mobile-book', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: 'EBOOK' }, publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, kindleSendAvailable: false, assets: [] }]
+    resources: [{ id: 'mobile-resource', bookId: 'mobile-book', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', publisher: null, publishedAt: null, language: null, isbn: null, identifier: null, narrator: null, abridged: null, importStatus: 'READY', importError: null, coverUrl: '', pageCount: null, chapterCount: null, durationMs: null, trackCount: null, progress: 42, lastReadAt: '2026-07-17T08:30:00.000Z', hidden: false, readable: true, kindleSendAvailable: false, assets: [] }]
   };
 
   await page.route('**/api/books?**', async (route) => {
@@ -1136,7 +1166,6 @@ test('all-books shelves load the next batch while scrolling down', async ({ page
     status: '未读',
     statusValue: 'UNREAD',
     progress: 0,
-    availableMediaKinds: ['EBOOK'],
     tags: [],
     coverUrl: `/api/books/continuous-book-${index + 1}/cover?size=medium`,
     gradient: 'from-orange-100 to-stone-200'
@@ -1196,7 +1225,6 @@ test('desktop book list opens details from both the cover and title', async ({ p
     seriesName: '测试系列',
     coverUrl: '/api/books/desktop-list-book/cover',
     coverStatus: 'READY',
-    availableMediaKinds: ['EBOOK'],
     lastReadAt: null,
     importedAt: '2026-07-20T00:00:00.000Z',
     gradient: 'from-orange-100 to-stone-200'
@@ -1222,7 +1250,6 @@ test('desktop book list opens details from both the cover and title', async ({ p
           gradient: book.gradient,
           coverStatus: 'PENDING',
           coverUrl: book.coverUrl,
-          availableMediaKinds: book.availableMediaKinds,
           progress: 64
       }
       : book;
@@ -1308,21 +1335,21 @@ test('desktop book list opens details from both the cover and title', async ({ p
 
   const managedBookRow = page.locator('[data-book-id="desktop-list-book"]');
   await expect(managedBookRow.getByRole('button', { name: '查看《桌面列表入口测试》', exact: true })).toHaveCount(0);
-  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toHaveCount(0);
+  await expect(managedBookRow.getByRole('button', { name: '删除《桌面列表入口测试》', exact: true })).toHaveCount(1);
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
-  await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(0);
+  await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(1);
   await expect(batchDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
   await batchDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await page.locator('[data-book-id="desktop-list-book-2"]').getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const twoBookDialog = page.getByRole('dialog', { name: '批量更新元数据' });
   await expect(twoBookDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
-  await expect(twoBookDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(0);
+  await expect(twoBookDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(1);
   await twoBookDialog.getByRole('button', { name: '关闭批量操作' }).click();
   await managedBookRow.click({ button: 'right' });
-  await expect(page.getByRole('menuitem', { name: /批量删除图书/ })).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: /删除图书/ })).toHaveCount(1);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '清空', exact: true }).click();
 

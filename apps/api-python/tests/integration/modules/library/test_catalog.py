@@ -59,7 +59,6 @@ def _book_graph(
     *,
     library_id: str = "test-library",
     author: str = "Catalog Author",
-    media_kind: str = "EBOOK",
 ) -> LibraryBook:
     book_node = _node(
         f"{book_id}-node", f"{book_id}/", library_id=library_id, directory=True
@@ -78,10 +77,9 @@ def _book_graph(
         library_id=library_id,
         book_id=book_id,
         source_node_id=resource_node.id,
-        adapter_id="audio-file" if media_kind == "AUDIOBOOK" else "book-file",
+        adapter_id="book-file",
         adapter_version="1",
-        media_kind=media_kind,
-        format={"AUDIOBOOK": "AUDIO", "COMIC": "CBZ"}.get(media_kind, "EPUB"),
+        format="EPUB",
         import_state="READY",
     )
     db.add_all([book_node, resource_node])
@@ -134,7 +132,7 @@ def test_catalog_lists_authorized_books_resources_assets_and_facets(
         role="admin",
     )
     _book_graph(db_session, "ebook", "Alpha")
-    _book_graph(db_session, "audio", "Audio", media_kind="AUDIOBOOK")
+    _book_graph(db_session, "audio", "Audio")
     facet = LibraryFacet(
         id="facet-catalog-author",
         kind="AUTHOR",
@@ -162,7 +160,6 @@ def test_catalog_lists_authorized_books_resources_assets_and_facets(
     assert page.total == 1
     assert [book.id for book in page.books] == ["ebook"]
     assert page.books[0].resources[0].asset.id == "ebook-resource-asset"
-    assert page.books[0].resources[0].media_kind == "EBOOK"
 
     facet_page = ListCatalogFacets(queries).execute(
         context=context, kind="AUTHOR", page=1, page_size=10

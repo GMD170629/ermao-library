@@ -396,7 +396,6 @@ def _resource_summary(
         resourceIndex=resource.resource_index,
         sortOrder=resource.sort_order,
         format=resource.format,
-        mediaKind=resource.media_kind,
         readerType=reader_type.value,
         pageCount=resource.page_count,
         chapterCount=resource.chapter_count,

@@ -127,7 +127,6 @@ def test_book_and_resource_anchors_are_unique_source_node_slots(
                     source_node_id=node.id,
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )
@@ -141,7 +140,6 @@ def test_book_and_resource_anchors_are_unique_source_node_slots(
                     source_node_id=node.id,
                     adapter_id="epub-file",
                     adapter_version="1",
-                    media_kind="EBOOK",
                     format="EPUB",
                 )
             )
@@ -192,7 +190,6 @@ def test_same_source_node_can_be_asset_of_multiple_resources(
                         source_node_id="directory",
                         adapter_id="audio-directory",
                         adapter_version="1",
-                        media_kind="AUDIO",
                         format="AUDIOBOOK_DIR",
                     ),
                     LibraryReadableResource(
@@ -202,7 +199,6 @@ def test_same_source_node_can_be_asset_of_multiple_resources(
                         source_node_id="track",
                         adapter_id="audio-file",
                         adapter_version="1",
-                        media_kind="AUDIO",
                         format="MP3",
                     ),
                 ]

@@ -8,7 +8,7 @@ import { Select } from '../../../components/ui/select';
 import { useToast } from '../../../components/ui/feedback';
 import { I18nText, useI18n } from '../../../i18n/provider';
 import type { BookView } from '../../../types/book';
-import { searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
+import { fetchMetadataProviders, searchSourceNodeMetadata, updateSourceNodeMetadata, updateSourceNodePresentation } from '../api/client';
 import type { BookContentEntry, SourceNodeMetadataCandidate } from '../model/book-contents';
 
 type SharedProps = Readonly<{
@@ -98,7 +98,8 @@ export function SourceNodeMetadataEditor({ bookId, book, entry, fallbackCoverUrl
 export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, onSaved }: SharedProps) {
   const feedback = useToast();
   const { t } = useI18n();
-  const [providerId, setProviderId] = useState('douban');
+  const [providerId, setProviderId] = useState('');
+  const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
   const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState<SourceNodeMetadataCandidate[]>([]);
   const [message, setMessage] = useState('');
@@ -108,7 +109,22 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     setQuery(entry?.title ?? '');
     setCandidates([]);
     setMessage('');
-  }, [entry]);
+    setProviders([]);
+    setProviderId('');
+    if (!entry) return;
+    const controller = new AbortController();
+    void fetchMetadataProviders(controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const enabledProviders = result.providers.filter((provider) => provider.enabled);
+        setProviders(enabledProviders);
+        setProviderId(enabledProviders[0]?.id ?? '');
+      })
+      .catch((reason: unknown) => {
+        if (!controller.signal.aborted) feedback.error(reason instanceof Error ? reason.message : t('元数据识别失败'));
+      });
+    return () => controller.abort();
+  }, [entry, feedback, t]);
   if (!entry) return null;
 
   const search = async () => {
@@ -146,9 +162,9 @@ export function SourceNodeMetadataRecognitionDialog({ bookId, entry, onClose, on
     <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>识别来源目录元数据</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-        <Select value={providerId} ariaLabel="元数据来源" options={[{ value: 'douban', label: '豆瓣图书' }, { value: 'bangumi', label: 'Bangumi 漫画' }, { value: 'ai', label: 'AI 元数据识别' }]} onChange={setProviderId} className="sm:w-44" />
+        <Select value={providerId} ariaLabel={t('元数据来源')} options={providers.map((provider) => ({ value: provider.id, label: provider.name }))} onChange={setProviderId} className="sm:w-44" disabled={!providers.length} />
         <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 rounded-xl border border-stone-200 px-3 py-2.5" aria-label={t('识别关键词')} />
-        <Button icon={Search} loading={busy} disabled={!query.trim()} onClick={() => void search()}><I18nText>搜索</I18nText></Button>
+        <Button icon={Search} loading={busy} disabled={!query.trim() || !providerId} onClick={() => void search()}><I18nText>搜索</I18nText></Button>
       </div>
       {message ? <p className="mt-4 text-sm text-stone-500">{message}</p> : null}
       <div className="mt-4 grid gap-3">{candidates.map((candidate) => <article key={`${candidate.source}:${candidate.id}`} className="rounded-2xl border border-stone-200 p-4"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 data-i18n-skip className="font-semibold text-stone-900">{candidate.title || entry.title}</h3>{candidate.description ? <p data-i18n-skip className="mt-2 line-clamp-3 text-sm leading-6 text-stone-600">{candidate.description}</p> : null}<p data-i18n-skip className="mt-2 text-xs text-stone-400">{candidate.source}</p></div><Button variant="secondary" disabled={busy} onClick={() => void apply(candidate)}><I18nText>应用</I18nText></Button></div></article>)}</div>

@@ -13,7 +13,6 @@ from app.core.time import to_timestamp_ms
 from app.modules.system.application.projections import serialize_system_event
 from app.modules.system.domain.settings_policy import (
     SENSITIVE_SYSTEM_SETTING_KEYS,
-    normalize_detail_tab_order,
     public_system_settings,
     retired_setting_keys_in,
 )
@@ -99,8 +98,6 @@ def prepare_system_settings_update(
             value is None or not str(value).strip()
         ):
             continue
-        if key == "workDetail.tabOrder":
-            value = normalize_detail_tab_order(value)
         if key in import_preference_keys:
             value = normalize_import_setting_value(key, value)
         saved[key] = value

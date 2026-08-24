@@ -44,7 +44,6 @@ from app.modules.library.infrastructure.filter_query import (
     resolve_library_roots,
 )
 from app.modules.reader.public import (
-    MediaKind,
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
@@ -54,7 +53,6 @@ from app.modules.reader.public import (
 @dataclass(frozen=True, slots=True)
 class _ResourceSummary:
     resource_id: str
-    media_kind: MediaKind
     sort_order: int
     percent: float
     last_read_at: datetime | None
@@ -232,7 +230,6 @@ def _resource_summaries(
         select(
             LibraryReadableResource.book_id,
             LibraryReadableResource.id.label("resource_id"),
-            LibraryReadableResource.media_kind,
             LibraryReadableResourceMetadata.resource_index,
             ReaderResourceProgress.percent,
             ReaderResourceProgress.updated_at.label("progress_updated_at"),
@@ -261,15 +258,10 @@ def _resource_summaries(
     ).all()
     result: dict[str, list[_ResourceSummary]] = {book_id: [] for book_id in book_ids}
     for row in rows:
-        try:
-            media_kind = MediaKind(str(row.media_kind))
-        except ValueError:
-            continue
         percent = min(100.0, max(0.0, float(row.percent or 0)))
         result[str(row.book_id)].append(
             _ResourceSummary(
                 resource_id=str(row.resource_id),
-                media_kind=media_kind,
                 sort_order=int(row.resource_index or 0),
                 percent=percent,
                 last_read_at=row.progress_updated_at,
@@ -311,7 +303,6 @@ def _reading_summary(
     states = [
         ResourceReadingState(
             resource_id=resource.resource_id,
-            media_kind=resource.media_kind,
             sort_order=resource.sort_order,
             percent=int(resource.percent),
             last_read_at=resource.last_read_at,
@@ -374,15 +365,10 @@ def _project_books(
     )
     tags_by_book = _tag_names(db, book_ids=book_ids)
     projected: list[dict[str, Any]] = []
-    media_priority = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
     for book, metadata in rows:
         book_id = str(book.id)
         resources = resources_by_book[book_id]
         status, progress, last_read_at = _reading_summary(resources)
-        media_kinds = sorted(
-            {resource.media_kind.value for resource in resources},
-            key=lambda kind: (media_priority.get(kind, 99), kind),
-        )
         title = (
             str(metadata.title).strip()
             if metadata is not None and str(metadata.title).strip()
@@ -405,7 +391,6 @@ def _project_books(
             ),
             "seriesName": metadata.series_name if metadata is not None else None,
             "tags": tags_by_book[book_id],
-            "availableMediaKinds": media_kinds,
             "resourceImportSummary": import_summaries[book_id].as_record(),
         }
         if projection == "bookshelf":

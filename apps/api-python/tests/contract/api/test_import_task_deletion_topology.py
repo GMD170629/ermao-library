@@ -108,7 +108,6 @@ def test_import_task_delete_does_not_mutate_source_owned_topology(
         source_node_id=asset_node.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         import_state="READY",
     )

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  AlertTriangle,
   BookCheck,
   Braces,
   Check,
@@ -14,6 +15,7 @@ import {
   RotateCcw,
   Scissors,
   Tags,
+  Trash2,
   UserRound,
   X
 } from 'lucide-react';
@@ -33,6 +35,7 @@ import {
 } from './model/library-batch-action';
 import {
   applyBulkBookFindReplace,
+  deleteBulkBookSources,
   previewBulkBookFindReplace,
   updateBulkBookMetadata,
   updateBulkBookCovers,
@@ -52,7 +55,8 @@ const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: str
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
   { value: 'shelves', label: '加入或移除书架', shortLabel: '书架', description: '管理普通书架中的批量归属', icon: LibraryBig },
   { value: 'reading_status', label: '设置阅读状态', shortLabel: '阅读状态', description: '清空进度或统一设为 100%', icon: BookCheck },
-  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images }
+  { value: 'covers', label: '批量设置封面', shortLabel: '封面', description: '裁剪、重新生成、压缩或替换', icon: Images },
+  { value: 'delete', label: '删除图书', shortLabel: '删除', description: '永久删除源文件和书库节点', icon: Trash2 }
 ];
 
 const inputClass = 'h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3.5 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
@@ -99,7 +103,7 @@ export function LibraryBatchContextMenu({
       label: i18nAttribute(item.label),
       description: i18nAttribute(item.description),
       icon: item.icon,
-      destructive: false
+      destructive: item.value === 'delete'
     }))}
     footer={i18nAttribute('拖动经过行可连续选择；按 Shift 点击可选择区间。')}
     onClose={onClose}
@@ -183,8 +187,10 @@ export function LibraryBatchDialog({
   const [coverQuality, setCoverQuality] = useState('82');
   const [coverMaxDimension, setCoverMaxDimension] = useState('1600');
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
 
   const activeAction = actions.find((item) => item.value === action);
+  const deleteConfirmationPhrase = i18nAttribute('永久删除');
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
   const previewCurrent = preview !== null && previewSignature === findReplaceSignature;
   const metadataReady = authorEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
@@ -210,6 +216,10 @@ export function LibraryBatchDialog({
       document.body.style.overflow = previousOverflow;
     };
   }, [action, onClose, saving]);
+
+  useEffect(() => {
+    if (action !== 'delete') setDeleteConfirmation('');
+  }, [action]);
 
   useEffect(() => {
     if (action !== 'shelves' || shelves.length > 0) return;
@@ -297,6 +307,14 @@ export function LibraryBatchDialog({
     return `已处理 ${result.updated} 本图书的封面${result.skipped.length ? `，跳过 ${result.skipped.length} 本` : ''}`;
   }
 
+  async function applyDelete() {
+    const result = await deleteBulkBookSources({
+      ids: selectedIds,
+      confirmation: 'DELETE_SOURCE_FILES'
+    });
+    return `已删除 ${result.deleted} 本图书及其源文件`;
+  }
+
   async function submit() {
     setSaving(true);
     try {
@@ -310,7 +328,9 @@ export function LibraryBatchDialog({
               ? await applyReadingStatus()
               : action === 'covers'
                 ? await applyCovers()
-                : '';
+                : action === 'delete'
+                  ? await applyDelete()
+                  : '';
       toast.success(message);
       onApplied(message);
     } catch (reason) {
@@ -324,7 +344,8 @@ export function LibraryBatchDialog({
     || (action === 'metadata' && !metadataReady)
     || (action === 'find_replace' && (!previewCurrent || (preview?.changedBooks ?? 0) === 0))
     || (action === 'shelves' && !shelfId)
-    || (action === 'covers' && coverAction === 'replace' && !coverFile);
+    || (action === 'covers' && coverAction === 'replace' && !coverFile)
+    || (action === 'delete' && deleteConfirmation !== deleteConfirmationPhrase);
 
   return createPortal(
     <div
@@ -503,7 +524,33 @@ export function LibraryBatchDialog({
                   </label>
                 </div>
               ) : null}
-              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按媒介优先级和资源顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+              {coverAction === 'regenerate' ? <div className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-sm leading-6 text-[#706963]"><I18nText>系统会按资源顺序恢复已提取的封面；找不到可用封面时使用默认封面。上传的自定义封面会被替换。</I18nText></div> : null}
+            </div>
+          ) : null}
+
+          {action === 'delete' ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={22} className="mt-0.5 shrink-0 text-red-600" />
+                  <div>
+                    <h3 className="text-base font-semibold"><I18nText>永久删除图书和源文件</I18nText></h3>
+                    <p className="mt-2 text-sm leading-6 text-red-800"><I18nText>将删除已选择图书对应的原始文件或整个源目录，以及其中包含的全部文件。源文件删除成功后，系统才会删除书库节点、资源和阅读记录。</I18nText></p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-black/[0.08] bg-white p-5">
+                <div className="text-sm font-semibold text-[#393531]"><I18nText>确认删除 </I18nText>{selectedIds.length} <I18nText>本图书</I18nText></div>
+                <p className="mt-2 text-sm leading-6 text-[#777069]"><I18nText>此操作不可撤销。请输入下方显示的确认短语。</I18nText></p>
+                <div className="mt-3 rounded-lg bg-[#F6F3EF] px-3 py-2 font-mono text-sm text-[#5E5853]">{deleteConfirmationPhrase}</div>
+                <input
+                  value={deleteConfirmation}
+                  onChange={(event) => setDeleteConfirmation(event.target.value)}
+                  className={cn(inputClass, 'mt-4 border-red-200 focus:border-red-400 focus:ring-red-100')}
+                  placeholder={deleteConfirmationPhrase}
+                  autoComplete="off"
+                />
+              </div>
             </div>
           ) : null}
 
@@ -513,8 +560,8 @@ export function LibraryBatchDialog({
           <div className="text-xs leading-5 text-[#837C75]"><I18nText>仅处理当前已选择的 </I18nText>{selectedIds.length} <I18nText>本图书；未选择的项目不会变化。</I18nText></div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" disabled={saving} onClick={onClose}><I18nText>取消</I18nText></Button>
-            <Button type="button" variant="primary" loading={saving} loadingText={i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
-              {action === 'find_replace' ? i18nAttribute("确认替换") : i18nAttribute("应用更改")}
+            <Button type="button" variant={action === 'delete' ? 'danger' : 'primary'} loading={saving} loadingText={i18nAttribute("正在处理")} disabled={disabled} onClick={() => void submit()}>
+              {action === 'find_replace' ? i18nAttribute("确认替换") : action === 'delete' ? i18nAttribute("删除源文件") : i18nAttribute("应用更改")}
             </Button>
           </div>
         </footer>

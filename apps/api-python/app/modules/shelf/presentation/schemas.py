@@ -6,7 +6,6 @@ from typing import Literal
 from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
-from app.modules.reader.public import MediaKind
 
 FilterValue = str | int | float | bool | list[str] | None
 
@@ -47,7 +46,6 @@ class ShelfBook(HttpContractModel):
     title: str
     author: str
     cover_url: str = Field(alias="coverUrl")
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     progress: float = Field(ge=0, le=100)
 
 

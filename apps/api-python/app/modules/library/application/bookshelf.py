@@ -16,7 +16,6 @@ class BookshelfItemSummary:
     author: str
     cover_path: str | None
     updated_at: datetime
-    available_media_kinds: tuple[str, ...]
     progress: float
 
 

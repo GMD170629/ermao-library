@@ -24,13 +24,7 @@ from app.modules.library.application.bookshelf import (
     BookshelfItemSummary,
 )
 from app.modules.library.infrastructure.book_covers import effective_book_cover_path
-from app.modules.reader.public import (
-    MediaKind,
-    ResourceReadingState,
-    choose_continue_resource_id,
-)
-
-_MEDIA_KIND_ORDER = {"EBOOK": 0, "COMIC": 1, "AUDIOBOOK": 2}
+from app.modules.reader.public import ResourceReadingState, choose_continue_resource_id
 
 
 class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
@@ -73,7 +67,6 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
         rows = self._db.execute(
             select(
                 LibraryReadableResource.book_id,
-                LibraryReadableResource.media_kind,
                 LibraryReadableResource.id.label("resource_id"),
                 LibraryReadableResourceMetadata.resource_index,
                 ReaderResourceProgress.percent,
@@ -102,20 +95,16 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryReadableResource.id.asc(),
             )
         ).all()
-        media_kinds_by_book: dict[str, set[str]] = defaultdict(set)
         states_by_book: dict[str, list[ResourceReadingState]] = defaultdict(list)
         percent_by_resource: dict[str, float] = {}
         for row in rows:
             book_id = str(row.book_id)
-            media_kind = MediaKind(str(row.media_kind))
-            media_kinds_by_book[book_id].add(media_kind.value)
             percent = min(100.0, max(0.0, float(row.percent or 0)))
             resource_id = str(row.resource_id)
             percent_by_resource[resource_id] = percent
             states_by_book[book_id].append(
                 ResourceReadingState(
                     resource_id=resource_id,
-                    media_kind=media_kind,
                     sort_order=int(row.resource_index or 0),
                     percent=int(percent),
                     last_read_at=row.progress_updated_at,
@@ -133,12 +122,6 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                     author=str(book.author or "未知作者"),
                     cover_path=book.effective_cover_path or book.cover_path,
                     updated_at=book.updated_at,
-                    available_media_kinds=tuple(
-                        sorted(
-                            media_kinds_by_book[book_id],
-                            key=lambda kind: _MEDIA_KIND_ORDER.get(kind, 99),
-                        )
-                    ),
                     progress=(
                         percent_by_resource.get(continue_resource_id, 0.0)
                         if continue_resource_id is not None

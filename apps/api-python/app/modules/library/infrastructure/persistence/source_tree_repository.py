@@ -13,6 +13,9 @@ from app.contracts.publication_metadata import PublicationMetadata
 from app.core.natural_sort import natural_sort_key
 from app.models.common import cuid
 from app.models.library import Library, ReadableResourceNavigationUnit
+from app.modules.library.application.commands.manage_ports import (
+    ManagedBookSourceTarget,
+)
 from app.modules.library.application.source_tree_ports import (
     AdapterIdentity,
     BookResourceRepositoryPort,
@@ -313,6 +316,30 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
 
 
 class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
+    def source_targets_for_books(
+        self, book_ids: Sequence[str]
+    ) -> tuple[ManagedBookSourceTarget, ...]:
+        rows = self._session.execute(
+            select(LibraryBook, LibrarySourceNode, Library)
+            .join(LibrarySourceNode, LibrarySourceNode.id == LibraryBook.source_node_id)
+            .join(Library, Library.id == LibraryBook.library_id)
+            .where(LibraryBook.id.in_(book_ids))
+        ).all()
+        by_book_id = {
+            book.id: ManagedBookSourceTarget(
+                book_id=book.id,
+                source_node_id=node.id,
+                library_id=book.library_id,
+                library_root=Path(library.root_path),
+                relative_path=node.relative_path,
+                physical_kind=SourceNodePhysicalKind(node.physical_kind),
+            )
+            for book, node, library in rows
+        }
+        return tuple(
+            by_book_id[book_id] for book_id in book_ids if book_id in by_book_id
+        )
+
     def __init__(self, session: Session) -> None:
         self._session = session
 
@@ -443,7 +470,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             source_node_id=source_node_id,
             adapter_id=adapter.adapter_id,
             adapter_version=adapter.adapter_version,
-            media_kind=adapter.media_kind,
             format=adapter.format_label,
             enablement_state=ResourceEnablementState.ENABLED.value,
             import_state=ResourceImportState.PENDING.value,
@@ -932,7 +958,6 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             source_node_id=row.source_node_id,
             adapter_id=row.adapter_id,
             adapter_version=row.adapter_version,
-            media_kind=row.media_kind,
             format=row.format,
             enablement_state=ResourceEnablementState(row.enablement_state),
             import_state=ResourceImportState(row.import_state),

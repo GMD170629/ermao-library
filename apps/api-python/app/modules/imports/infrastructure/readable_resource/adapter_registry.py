@@ -40,7 +40,10 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
     ResourceAdapterSpec,
 )
-from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
+from app.modules.imports.infrastructure.sidecar_opf import (
+    discover_directory_sidecar_opf,
+    discover_sidecar_opf,
+)
 from app.modules.library.domain.readable_resource_states import AssetRole
 from app.modules.library.public import is_transparent_audiobook_directory_name
 from app.modules.metadata.public import parse_opf_metadata
@@ -145,12 +148,11 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
             else absolute_path
         )
-        sidecar = discover_sidecar_opf(metadata_source)
-        if (
-            sidecar is None
-            and adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
-        ):
-            sidecar = discover_sidecar_opf(absolute_path)
+        sidecar = (
+            discover_directory_sidecar_opf(metadata_source)
+            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+            else discover_sidecar_opf(metadata_source)
+        )
         path_titles = titles_from_local_source(
             metadata_source.name if metadata_source.is_dir() else metadata_source.stem
         )

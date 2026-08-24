@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, BookOpen, CheckCircle2, Edit3, Ellipsis, Headphones, Images, LoaderCircle, RefreshCw, ScanSearch, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, Edit3, Ellipsis, Headphones, ImagePlus, Images, LoaderCircle, RefreshCw, ScanSearch, Send, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -17,13 +17,11 @@ import {
   fetchBook,
   fetchBookContents,
   fetchResourceDetail,
-  regenerateBookCover,
   regenerateResourceCover,
   updateResource,
   updateResourceReadingStatus,
-  uploadBookCover
+  uploadResourceCover
 } from './api/client';
-import { BookMetadataEditor } from './ui/book-metadata-editor';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
 import { allVisibleResources, selectedResourceForBook, bookDetailHref, bookDetailReturnHref, resourcePageFromQuery, singleReadableResourceForBook } from './book-detail';
@@ -34,9 +32,12 @@ import { currentPositionLabel } from './model/current-position-label';
 import { BookContentBrowser } from './ui/book-content-browser';
 import { ResourceDetailView } from './ui/resource-detail-view';
 import { SourceNodeMetadataEditor, SourceNodeMetadataRecognitionDialog } from './ui/source-node-metadata-dialogs';
-import { bookActionIds, type BookActionId } from './model/book-action-menu';
+import { readableResourceActionIds, type ReadableResourceActionId } from './model/readable-resource-action-menu';
 
 type ResourceForm = Readonly<{
+  title: string;
+  resourceIndex: string;
+  description: string;
   publisher: string;
   publishedAt: string;
   language: string;
@@ -45,7 +46,6 @@ type ResourceForm = Readonly<{
   narrator: string;
 }>;
 
-type ResourceCardActionId = 'edit' | 'regenerate-cover' | 'recognize' | 'delete';
 type ResourceCardActionTarget = Readonly<{
   resourceId: string;
   title: string;
@@ -61,15 +61,20 @@ const SOURCE_NODE_ACTION_DETAILS: Record<SourceNodeActionId, { label: string; de
   rescan: { label: '重新扫描文件', description: '重新扫描该来源目录下的文件变化', icon: ScanSearch }
 };
 
-const RESOURCE_CARD_ACTION_DETAILS: Record<ResourceCardActionId, { label: string; description: string; icon: LucideIcon; destructive?: boolean }> = {
-  edit: { label: '编辑', description: '修改所选可读资源的出版元数据', icon: Edit3 },
-  'regenerate-cover': { label: '重新生成封面', description: '从可读资源内容重新提取或生成封面', icon: RefreshCw },
-  recognize: { label: '识别', description: '识别所选可读资源的出版元数据', icon: Sparkles },
-  delete: { label: '删除', description: '永久删除对应的真实源资产', icon: Trash2, destructive: true }
+const RESOURCE_ACTION_DETAILS: Record<ReadableResourceActionId, { label: string; icon: LucideIcon; destructive?: boolean }> = {
+  edit: { label: '编辑', icon: Edit3 },
+  'upload-cover': { label: '上传封面', icon: ImagePlus },
+  'regenerate-cover': { label: '重新生成封面', icon: RefreshCw },
+  recognize: { label: '识别', icon: Sparkles },
+  kindle: { label: '发送到 Kindle', icon: Send },
+  delete: { label: '永久删除源文件', icon: Trash2, destructive: true }
 };
 
 function formForResource(resource: ReadableResourceView): ResourceForm {
   return {
+    title: resource.title,
+    resourceIndex: resource.resourceIndex === null ? '' : String(resource.resourceIndex),
+    description: resource.description ?? '',
     publisher: resource.publisher ?? '',
     publishedAt: resource.publishedAt?.slice(0, 10) ?? '',
     language: resource.language ?? '',
@@ -114,6 +119,9 @@ function ResourceEditor({
     setSaving(true);
     try {
       await updateResource(book.id, resource.id, {
+        title: form.title.trim(),
+        resourceIndex: form.resourceIndex.trim() ? Number(form.resourceIndex) : null,
+        description: form.description.trim() || null,
         publisher: form.publisher.trim() || null,
         publishedAt: form.publishedAt.trim() || null,
         language: form.language.trim() || null,
@@ -132,10 +140,12 @@ function ResourceEditor({
   };
 
   return <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/45 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={t('编辑可读资源')}>
-    <div className="w-full max-w-xl rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
+    <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl md:rounded-3xl">
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold"><I18nText>编辑可读资源</I18nText></h2><button type="button" onClick={onClose} aria-label={t('关闭')}><X size={20} /></button></div>
-      <p data-i18n-skip className="mt-1 text-sm text-stone-500">{resource.title}</p>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <label className="text-sm text-stone-600"><I18nText>卷标题</I18nText><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
+        <label className="text-sm text-stone-600"><I18nText>卷号</I18nText><input type="number" step="any" value={form.resourceIndex} onChange={(event) => setForm({ ...form, resourceIndex: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5 tabular-nums" /></label>
+        <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>简介</I18nText><textarea rows={4} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="mt-1.5 w-full resize-y rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>出版社</I18nText><input value={form.publisher} onChange={(event) => setForm({ ...form, publisher: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>出版时间</I18nText><input type="date" value={form.publishedAt} onChange={(event) => setForm({ ...form, publishedAt: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         <label className="text-sm text-stone-600"><I18nText>语言</I18nText><input value={form.language} onChange={(event) => setForm({ ...form, language: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
@@ -143,18 +153,10 @@ function ResourceEditor({
         <label className="text-sm text-stone-600"><I18nText>标识符</I18nText><input value={form.identifier} onChange={(event) => setForm({ ...form, identifier: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label>
         {resource.readerType === 'audio' ? <label className="text-sm text-stone-600 sm:col-span-2"><I18nText>朗读者</I18nText><input value={form.narrator} onChange={(event) => setForm({ ...form, narrator: event.target.value })} className="mt-1.5 w-full rounded-xl border border-stone-200 px-3 py-2.5" /></label> : null}
       </div>
-      <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button><Button loading={saving} onClick={() => void save()}><I18nText>保存</I18nText></Button></div>
+      <div className="mt-6 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button><Button loading={saving} disabled={!form.title.trim() || (form.resourceIndex.trim() !== '' && !Number.isFinite(Number(form.resourceIndex)))} onClick={() => void save()}><I18nText>保存</I18nText></Button></div>
     </div>
   </div>;
 }
-
-const ACTION_LABELS: Record<BookActionId, string> = {
-  edit: '编辑信息',
-  metadata: '元数据识别',
-  'upload-cover': '上传自定义封面',
-  'regenerate-cover': '重新生成封面',
-  kindle: '发送到 Kindle'
-};
 
 export function BookDetailPage({ bookId }: { bookId: string }) {
   const router = useRouter();
@@ -175,16 +177,16 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [contentsLoading, setContentsLoading] = useState(true);
   const [contentsError, setContentsError] = useState('');
   const [contentsRevision, setContentsRevision] = useState(0);
-  const [metadataOpen, setMetadataOpen] = useState(false);
   const [metadataLookupOpen, setMetadataLookupOpen] = useState(false);
   const [metadataResourceId, setMetadataResourceId] = useState<string | null>(null);
   const [kindleOpen, setKindleOpen] = useState(false);
+  const [kindleResourceId, setKindleResourceId] = useState<string | null>(null);
   const [coverRevision, setCoverRevision] = useState(0);
   const [resourceEditorId, setResourceEditorId] = useState<string | null>(null);
   const [resourceMenuPosition, setResourceMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [resourceMenuAnchor, setResourceMenuAnchor] = useState<HTMLButtonElement | null>(null);
   const [resourceActionTarget, setResourceActionTarget] = useState<ResourceCardActionTarget | null>(null);
-  const [resourceActionBusy, setResourceActionBusy] = useState<ResourceCardActionId | null>(null);
+  const [resourceActionBusy, setResourceActionBusy] = useState<ReadableResourceActionId | null>(null);
   const [sourceNodeActionTarget, setSourceNodeActionTarget] = useState<BookContentEntry | null>(null);
   const [sourceNodeMenuPosition, setSourceNodeMenuPosition] = useState<ContextMenuPosition | null>(null);
   const [sourceNodeMenuAnchor, setSourceNodeMenuAnchor] = useState<HTMLButtonElement | null>(null);
@@ -195,7 +197,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const [resourceDetail, setResourceDetail] = useState<ResourceDetailPage | null>(null);
   const [resourceDetailLoading, setResourceDetailLoading] = useState(false);
   const [resourceDetailError, setResourceDetailError] = useState('');
-  const coverInputRef = useRef<HTMLInputElement>(null);
+  const resourceCoverInputRef = useRef<HTMLInputElement>(null);
+  const [coverUploadResourceId, setCoverUploadResourceId] = useState<string | null>(null);
   const requestedResourceId = searchParams.get('resourceId')?.trim() || null;
   const requestedResourcePage = resourcePageFromQuery(searchParams.get('resourcePage'));
   const returnHref = bookDetailReturnHref(searchParams.get('returnTo'));
@@ -256,9 +259,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
   const resources = useMemo(() => book ? allVisibleResources(book) : [], [book]);
   const singleReadableResource = book ? singleReadableResourceForBook(book) : null;
-  const bookAnchoredResource = book
-    ? resources.find((resource) => resource.sourceNodeId === book.sourceNodeId) ?? null
-    : null;
   const selectedBookResource = book ? selectedResourceForBook(book, requestedResourceId) : null;
   const requestedResource = requestedResourceId
     ? resources.find((resource) => resource.id === requestedResourceId && resource.readable) ?? null
@@ -293,7 +293,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const activeReaderHref = activeResource?.readable ? readerHref(activeResource) : null;
   const activeProgress = displayedProgress;
   const activeStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
-  const actions = book ? bookActionIds({ canManage, canRegenerateCover: bookAnchoredResource !== null, kindleSendAvailable: resources.some((resource) => resource.kindleSendAvailable) }) : [];
+  const activeResourceActions = activeResource ? readableResourceActionIds({ canManage, kindleSendAvailable: activeResource.kindleSendAvailable }) : [];
 
   useEffect(() => {
     if (!book || requestedResourceId || !singleReadableResource) return;
@@ -339,26 +339,14 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     }
   };
 
-  const invokeAction = async (action: BookActionId) => {
-    if (!book) return;
-    if (action === 'edit') { setMetadataOpen(true); return; }
-    if (action === 'metadata') { setMetadataLookupOpen(true); return; }
-    if (action === 'upload-cover') { coverInputRef.current?.click(); return; }
-    if (action === 'kindle') { setKindleOpen(true); return; }
-    try {
-      if (action === 'regenerate-cover') {
-        if (!bookAnchoredResource) throw new Error(t('图书来源节点没有可重新提取封面的资源'));
-        await regenerateBookCover(book.id, bookAnchoredResource.id);
-        setCoverRevision(Date.now());
-        feedback.success(t('封面已重新生成'));
-      }
-      await refresh();
-    } catch (reason) {
-      feedback.error(reason instanceof Error ? reason.message : t('操作失败'));
-    }
+  const openResourceMenu = (resource: ReadableResourceView, anchor: HTMLButtonElement) => {
+    const bounds = anchor.getBoundingClientRect();
+    setResourceActionTarget({ resourceId: resource.id, title: resource.title, assetCount: resource.assets.length });
+    setResourceMenuAnchor(anchor);
+    setResourceMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
   };
 
-  const invokeResourceCardAction = async (action: ResourceCardActionId) => {
+  const invokeResourceAction = async (action: ReadableResourceActionId) => {
     const target = resourceActionTarget;
     if (!book || !target) return;
     setResourceMenuPosition(null);
@@ -367,15 +355,25 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       setResourceEditorId(target.resourceId);
       return;
     }
+    if (action === 'upload-cover') {
+      setCoverUploadResourceId(target.resourceId);
+      resourceCoverInputRef.current?.click();
+      return;
+    }
     if (action === 'recognize') {
       setMetadataResourceId(target.resourceId);
       setMetadataLookupOpen(true);
       return;
     }
+    if (action === 'kindle') {
+      setKindleResourceId(target.resourceId);
+      setKindleOpen(true);
+      return;
+    }
     if (action === 'delete') {
       const confirmed = await feedback.confirm({
-        title: '永久删除源资产',
-        description: t('将永久删除“{value0}”关联的 {value1} 个真实源资产，此操作无法恢复。', { value0: target.title, value1: target.assetCount }),
+        title: '永久删除源文件',
+        description: t('将永久删除“{value0}”关联的 {value1} 个源文件，此操作无法恢复。', { value0: target.title, value1: target.assetCount }),
         confirmLabel: '永久删除',
         tone: 'danger',
         confirmationText: target.title
@@ -389,7 +387,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         feedback.success(t('封面已重新生成'));
       } else if (action === 'delete') {
         await deleteResourceSource(book.id, target.resourceId, target.title);
-        feedback.success(t('源资产已永久删除'));
+        feedback.success(t('源文件已永久删除'));
       }
       await refresh();
       setContentsRevision((value) => value + 1);
@@ -456,14 +454,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {activeCopy ? <Button disabled={!activeReaderHref} icon={activeResource?.readerType === 'audio' ? Headphones : activeResource?.readerType === 'comic' ? Images : BookOpen} onClick={() => activeReaderHref && router.push(activeReaderHref)} className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420]">{t(activeProgress > 0 ? activeCopy.resume : activeCopy.start)}</Button> : null}
           <div className="flex w-full gap-2">
             {activeCopy && activeResource ? <Select value={activeStatus} options={[{ value: 'READING', label: '在读', disabled: activeStatus !== 'READING' }, { value: 'UNREAD', label: '未读' }, { value: 'FINISHED', label: '已读' }]} onChange={(status) => void changeReadingStatus(status)} ariaLabel={t(activeCopy.status)} disabled={readingStatusBusy} className="min-w-0 flex-1" /> : null}
-            {actions.length ? <div className="relative ml-auto"><details className="group"><summary className="flex h-11 w-12 cursor-pointer list-none items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600" aria-label={t('更多图书操作')}><Ellipsis size={20} /></summary><div className="absolute right-0 top-full z-40 mt-2 w-60 rounded-[18px] border border-stone-200 bg-white p-2 shadow-xl">{actions.map((action) => <button key={action} type="button" onClick={() => void invokeAction(action)} className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm text-stone-700 hover:bg-stone-50"><span>{t(ACTION_LABELS[action])}</span></button>)}</div></details></div> : null}
+            {activeResource && activeResourceActions.length ? <button type="button" onClick={(event) => openResourceMenu(activeResource, event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); openResourceMenu(activeResource, event.currentTarget); }} className="ml-auto flex h-11 w-12 shrink-0 items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600 transition hover:bg-white hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200" aria-label={t('管理当前可读资源 {value0}', { value0: activeResource.title })} aria-haspopup="menu"><Ellipsis size={20} /></button> : null}
           </div>
         </div>
       </div>
     </section>
 
-    <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void uploadBookCover(book, file).then(() => { setCoverRevision(Date.now()); return refresh(); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))); event.currentTarget.value = ''; }} />
-    <BookMetadataEditor book={book} open={metadataOpen} onClose={() => setMetadataOpen(false)} onSaved={(nextBook) => { setBook(nextBook); setMetadataOpen(false); }} />
+    <input ref={resourceCoverInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; const resourceId = coverUploadResourceId; event.currentTarget.value = ''; if (!file || !resourceId) return; setResourceActionBusy('upload-cover'); void uploadResourceCover(book.id, resourceId, file).then(async () => { setCoverRevision(Date.now()); await refresh(); setContentsRevision((value) => value + 1); feedback.success(t('封面已上传')); }).catch((reason) => feedback.error(reason instanceof Error ? reason.message : t('操作失败'))).finally(() => { setResourceActionBusy(null); setCoverUploadResourceId(null); }); }} />
 
     {requestedResource ? <ResourceDetailView
       resource={requestedResource}
@@ -491,12 +488,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       }}
       onPageChange={setContentPage}
       onOpenResource={(resource) => updateResourceLocation(resource.id, 1)}
-      onManageResource={(resource, anchor) => {
-        const bounds = anchor.getBoundingClientRect();
-        setResourceActionTarget({ resourceId: resource.id, title: resource.title, assetCount: resource.assets.length });
-        setResourceMenuAnchor(anchor);
-        setResourceMenuPosition({ x: bounds.right, y: bounds.bottom + 6 });
-      }}
+      onManageResource={openResourceMenu}
       onManageSourceNode={(entry, anchor) => {
         const bounds = anchor.getBoundingClientRect();
         setSourceNodeActionTarget(entry);
@@ -521,22 +513,21 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       onSelect={(action) => { void invokeSourceNodeAction(action); }}
     /> : null}
 
-    {canManage && resourceActionTarget ? <ContextActionMenu<ResourceCardActionId>
+    {resourceActionTarget ? <ContextActionMenu<ReadableResourceActionId>
       position={resourceMenuPosition}
       ariaLabel={t('管理可读资源')}
       title={resourceActionTarget.title}
-      items={(Object.entries(RESOURCE_CARD_ACTION_DETAILS) as Array<[ResourceCardActionId, (typeof RESOURCE_CARD_ACTION_DETAILS)[ResourceCardActionId]]>).map(([action, details]) => ({
+      items={readableResourceActionIds({ canManage, kindleSendAvailable: resources.find((resource) => resource.id === resourceActionTarget.resourceId)?.kindleSendAvailable === true }).map((action) => ({
         action,
-        label: t(details.label),
-        description: t(details.description),
-        icon: details.icon,
-        destructive: details.destructive,
+        label: t(RESOURCE_ACTION_DETAILS[action].label),
+        icon: RESOURCE_ACTION_DETAILS[action].icon,
+        destructive: RESOURCE_ACTION_DETAILS[action].destructive,
         disabled: resourceActionBusy !== null,
         separatorBefore: action === 'delete'
       }))}
       returnFocusTo={resourceMenuAnchor}
       onClose={() => { setResourceMenuPosition(null); setResourceActionTarget(null); }}
-      onSelect={(action) => { void invokeResourceCardAction(action); }}
+      onSelect={(action) => { void invokeResourceAction(action); }}
     /> : null}
 
     <ResourceEditor book={book} resource={resources.find((resource) => resource.id === resourceEditorId) ?? null} onClose={() => setResourceEditorId(null)} onSaved={refresh} />
@@ -550,6 +541,6 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     />
     <SourceNodeMetadataRecognitionDialog bookId={book.id} entry={sourceNodeRecognitionTarget} onClose={() => setSourceNodeRecognitionTarget(null)} onSaved={() => setContentsRevision((value) => value + 1)} />
     <MetadataLookupModal book={book} currentResourceId={metadataResourceId ?? activeResource?.id ?? null} fixedScope={metadataResourceId ? 'resource' : null} open={metadataLookupOpen} onClose={() => { setMetadataLookupOpen(false); setMetadataResourceId(null); }} onApplied={refresh} />
-    <KindleSendModal book={book} open={kindleOpen} preferredResourceId={activeResource?.id ?? null} onClose={() => setKindleOpen(false)} />
+    <KindleSendModal book={book} open={kindleOpen} preferredResourceId={kindleResourceId ?? activeResource?.id ?? null} onClose={() => { setKindleOpen(false); setKindleResourceId(null); }} />
   </div>;
 }

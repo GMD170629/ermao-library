@@ -104,7 +104,7 @@ export function UploadBookDialog({ open, onClose, onImported, onError }: UploadB
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EA] text-[#D9563B]"><FileText size={18} /></span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-[#393531]">{selectedUploadFiles.length > 0 ? i18nAttribute('已选择 {value0} 个文件', { value0: selectedUploadFiles.length }) : i18nAttribute('选择图书文件')}</span>
-                <span className="mt-0.5 block text-xs text-[#8A847E]">{selectedUploadFiles.length > 0 ? formatFileSize(selectedUploadSize) : i18nAttribute('电子书、漫画和有声书文件')}</span>
+                <span className="mt-0.5 block text-xs text-[#8A847E]">{selectedUploadFiles.length > 0 ? formatFileSize(selectedUploadSize) : i18nAttribute('支持的图书文件格式')}</span>
               </span>
               <span className="shrink-0 text-xs font-medium text-[#D9563B]">{selectedUploadFiles.length > 0 ? i18nAttribute('重新选择') : i18nAttribute('浏览')}</span>
               <input

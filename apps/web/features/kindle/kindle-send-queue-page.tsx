@@ -13,7 +13,6 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 export type KindleSendTask = {
   id: string;
   bookId: string | null;
-  mediaKind: 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
   resourceId: string;
   assetId: string | null;
   bookTitle: string;
@@ -189,7 +188,6 @@ export function KindleSendQueuePage({ embedded = false }: { embedded?: boolean }
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#6F6962]">
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.resourceTitle ?? task.assetName}</span>
-                        <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.mediaKind}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{task.assetName}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1">{formatBytes(task.sizeBytes)}</span>
                         <span className="rounded-full bg-[#F3F0EC] px-2.5 py-1"><I18nText>尝试 </I18nText>{task.attemptCount} <I18nText>次</I18nText></span>

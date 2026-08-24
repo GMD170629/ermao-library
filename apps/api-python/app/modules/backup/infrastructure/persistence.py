@@ -46,7 +46,6 @@ from app.models import (
     LibrarySourceNodeInterpretation,
     LibrarySourceNodeMetadata,
     MetadataLookupTask,
-    MetadataProviderPipeline,
     MetadataSuggestion,
     OrganizeJob,
     OrganizeRun,
@@ -114,7 +113,6 @@ TABLE_MODELS: dict[str, type[Base]] = {
     "ReaderProgressMutation": ReaderProgressMutation,
     "LibraryOperation": LibraryOperation,
     "Source": Source,
-    "MetadataProviderPipeline": MetadataProviderPipeline,
     "SystemSetting": SystemSetting,
 }
 

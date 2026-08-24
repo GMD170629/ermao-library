@@ -16,7 +16,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.contracts.media_capabilities import reader_type_for_format
+from app.contracts.media_capabilities import require_reader_type_for_format
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
 from app.models import (
     LibraryBook,
@@ -755,9 +755,9 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                     "id": cuid(),
                     "user_id": command.context.user_id,
                     "resource_id": str(row.id),
-                    "reader_type": str(
-                        reader_type_for_format(str(row.format)) or "reflowable"
-                    ),
+                    "reader_type": require_reader_type_for_format(
+                        str(row.format)
+                    ).value,
                     "position": "0",
                     "percent": 100.0,
                     "extra": "{}",

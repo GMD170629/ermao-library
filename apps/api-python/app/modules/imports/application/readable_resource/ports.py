@@ -86,7 +86,6 @@ def adapter_identity(
     return AdapterIdentity(
         adapter_id=spec.adapter_id.value,
         adapter_version=spec.adapter_version,
-        media_kind=spec.media_kind,
         format_label=source_format,
     )
 

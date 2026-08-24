@@ -17,6 +17,6 @@ test('right click preserves an existing group and replaces an outside target', (
   assert.deepEqual([...contextResourceSelection(new Set(['one', 'two']), 'three')], ['three']);
 });
 
-test('prunes resources that leave the active media tab', () => {
+test('prunes resources that are no longer available', () => {
   assert.deepEqual([...pruneResourceSelection(new Set(['one', 'two']), ['two', 'three'])], ['two']);
 });

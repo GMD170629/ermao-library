@@ -10,11 +10,18 @@ from app.modules.library.application.bulk_operations import ExecuteBulkCovers
 from app.modules.library.application.resource_cover import (
     RegenerateResourceCover,
     ResourceSourceContinuationPort,
+    UploadResourceCover,
 )
 from app.modules.library.infrastructure.bulk_operations import (
     SqlAlchemyBulkBookOperations,
 )
-from app.modules.library.infrastructure.resource_cover import SqlAlchemyResourceCover
+from app.modules.library.infrastructure.resource_commands import (
+    SqlAlchemyResourceMetadata,
+)
+from app.modules.library.infrastructure.resource_cover import (
+    FilesystemResourceCoverPublication,
+    SqlAlchemyResourceCover,
+)
 
 
 class ReadableResourceSourceContinuation(ResourceSourceContinuationPort):
@@ -37,6 +44,17 @@ def regenerate_resource_cover(db: Session) -> RegenerateResourceCover:
     )
 
 
+def upload_resource_cover(
+    db: Session, settings: Settings
+) -> UploadResourceCover:
+    return UploadResourceCover(
+        SqlAlchemyResourceMetadata(db),
+        SqlAlchemyResourceCover(db),
+        FilesystemResourceCoverPublication(settings.resolved_storage_root),
+        db,
+    )
+
+
 def bulk_covers(db: Session, settings: Settings) -> ExecuteBulkCovers:
     return ExecuteBulkCovers(
         SqlAlchemyBulkBookOperations(
@@ -54,4 +72,5 @@ __all__ = [
     "ReadableResourceSourceContinuation",
     "bulk_covers",
     "regenerate_resource_cover",
+    "upload_resource_cover",
 ]

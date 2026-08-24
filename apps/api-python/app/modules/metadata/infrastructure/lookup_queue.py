@@ -425,7 +425,6 @@ def get_resource(db: Session, resource_id: str | None) -> dict[str, Any] | None:
     return {
         "id": resource.id,
         "format": resource.format,
-        "mediaKind": resource.media_kind,
         "coverPath": metadata.cover_path if metadata else None,
         "publishedAt": metadata.published_at if metadata else None,
         "language": metadata.language if metadata else None,

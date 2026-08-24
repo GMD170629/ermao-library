@@ -85,7 +85,6 @@ def _add_book_graph(
         source_node_id=resource_node.id,
         adapter_id="epub-file",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         import_state="READY",
     )

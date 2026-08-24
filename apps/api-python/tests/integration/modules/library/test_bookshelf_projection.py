@@ -69,7 +69,6 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
         source_node_id=first_node.id,
         adapter_id="epub-file",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         import_state="READY",
         created_at=now,
@@ -82,7 +81,6 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
         source_node_id=second_node.id,
         adapter_id="epub-file",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         import_state="READY",
         created_at=now,
@@ -199,5 +197,4 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
 
     assert len(result) == 1
     assert result[0].id == book.id
-    assert result[0].available_media_kinds == ("EBOOK",)
     assert result[0].progress == 35.5

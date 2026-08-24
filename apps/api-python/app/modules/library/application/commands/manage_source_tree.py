@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.core.authorization import AuthorizationContext
 from app.modules.library.application.commands.manage_ports import (
     ManageBookResourcePort,
     ManageFilesystemPort,
     ManageLibraryConfigPort,
     ManageLibraryImportTasksPort,
     ManagePipelineLogPort,
+    ManageSourceDeletionFilesystemPort,
     ManageSourceNodePort,
     ManageUnitOfWorkPort,
 )
@@ -25,6 +27,23 @@ from app.modules.library.domain.readable_resource_states import ResourceEnableme
 class ManagementResult:
     ok: bool
     code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteBookSourcesResult:
+    ok: bool
+    deleted_book_ids: tuple[str, ...] = ()
+    code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteBookSourcesCommand:
+    context: AuthorizationContext
+    book_ids: tuple[str, ...]
+
+
+class SourceFileDeletionError(RuntimeError):
+    pass
 
 
 class DeleteSourceNode:
@@ -66,6 +85,79 @@ class DeleteSourceNode:
                 outcome="ok",
             )
             return ManagementResult(ok=True)
+        except Exception:
+            self._uow.rollback()
+            raise
+
+
+class DeleteBookSources:
+    """Delete original sources first, then remove their library topology."""
+
+    def __init__(
+        self,
+        *,
+        filesystem: ManageSourceDeletionFilesystemPort,
+        source_nodes: ManageSourceNodePort,
+        books_resources: ManageBookResourcePort,
+        import_tasks: ManageLibraryImportTasksPort,
+        uow: ManageUnitOfWorkPort,
+        log: ManagePipelineLogPort,
+    ) -> None:
+        self._filesystem = filesystem
+        self._source_nodes = source_nodes
+        self._books_resources = books_resources
+        self._import_tasks = import_tasks
+        self._uow = uow
+        self._log = log
+
+    def execute(self, command: DeleteBookSourcesCommand) -> DeleteBookSourcesResult:
+        unique_book_ids = tuple(dict.fromkeys(command.book_ids))
+        targets = self._books_resources.source_targets_for_books(unique_book_ids)
+        if len(targets) != len(unique_book_ids):
+            return DeleteBookSourcesResult(ok=False, code="BOOK_NOT_FOUND")
+        allowed_library_ids = set(command.context.library_ids)
+        if not command.context.is_admin and any(
+            target.library_id not in allowed_library_ids for target in targets
+        ):
+            return DeleteBookSourcesResult(ok=False, code="BOOK_NOT_FOUND")
+
+        try:
+            self._uow.release_before_io()
+            for target in targets:
+                try:
+                    self._filesystem.delete_source(
+                        root=target.library_root,
+                        relative_path=target.relative_path,
+                        physical_kind=target.physical_kind,
+                    )
+                except (OSError, ValueError) as error:
+                    raise SourceFileDeletionError(target.book_id) from error
+
+            with self._uow.transaction():
+                for target in targets:
+                    node = self._source_nodes.get(target.source_node_id)
+                    if node is None:
+                        continue
+                    subtree = self._source_nodes.list_subtree_ids(target.source_node_id)
+                    affected_resources = (
+                        self._books_resources.delete_assets_for_source_nodes(subtree)
+                    )
+                    self._import_tasks.delete_tasks_for_source_nodes(subtree)
+                    self._source_nodes.delete_subtree(target.source_node_id)
+                    self._books_resources.reevaluate_ready_after_asset_loss(
+                        affected_resources
+                    )
+            for target in targets:
+                self._log.emit(
+                    "book_source.delete.completed",
+                    library_id=target.library_id,
+                    stage="delete_source",
+                    outcome="ok",
+                )
+            return DeleteBookSourcesResult(
+                ok=True,
+                deleted_book_ids=unique_book_ids,
+            )
         except Exception:
             self._uow.rollback()
             raise

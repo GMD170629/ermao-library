@@ -1,7 +1,6 @@
 import type { BookshelfItem } from '../../../components/book/bookshelf';
 import type { SmartShelfCondition, SmartShelfRules } from '../smart-shelf-rules';
 import type { ShelfKind, ShelfView } from '../model/types';
-import type { MediaKind } from '../../../types/book';
 
 type JsonObject = Record<string, unknown>;
 
@@ -43,14 +42,6 @@ function shelfKind(value: unknown): ShelfKind {
   throw new Error('Invalid shelf kind');
 }
 
-function mediaKinds(value: unknown): MediaKind[] {
-  if (!Array.isArray(value)) throw new Error('Invalid shelf book media kinds');
-  return value.map((item) => {
-    if (item === 'EBOOK' || item === 'COMIC' || item === 'AUDIOBOOK') return item;
-    throw new Error('Invalid shelf book media kind');
-  });
-}
-
 function parseBook(value: unknown): BookshelfItem {
   if (!isObject(value)) throw new Error('Invalid shelf book');
   return {
@@ -58,7 +49,6 @@ function parseBook(value: unknown): BookshelfItem {
     title: requiredString(value.title, 'book.title'),
     author: typeof value.author === 'string' ? value.author : '',
     coverUrl: optionalString(value.coverUrl),
-    availableMediaKinds: mediaKinds(value.availableMediaKinds),
     progress: progressPercent(value.progress),
     gradient: optionalString(value.gradient),
     coverStatus: optionalString(value.coverStatus)

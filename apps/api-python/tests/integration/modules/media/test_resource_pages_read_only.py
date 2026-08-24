@@ -119,7 +119,6 @@ def _seed_comic(engine: Engine, settings: Settings) -> tuple[datetime, str]:
             source_node_id=source_node.id,
             adapter_id="comic",
             adapter_version="1",
-            media_kind="COMIC",
             format="CBZ",
             enablement_state="ENABLED",
             import_state="READY",

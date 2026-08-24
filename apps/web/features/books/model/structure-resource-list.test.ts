@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { COLLAPSED_STRUCTURE_RESOURCE_LIMIT, structureResourceList, structureResourceShowsAssetDetails } from './structure-resource-list';
+import { COLLAPSED_STRUCTURE_RESOURCE_LIMIT, structureResourceList } from './structure-resource-list';
 
 const resources = Array.from({ length: 12 }, (_, index) => `resource-${index + 1}`);
 
@@ -24,10 +24,4 @@ test('content structure does not offer a toggle for ten or fewer resources', () 
 
   assert.deepEqual(result.visibleResources, resources.slice(0, 10));
   assert.equal(result.canToggle, false);
-});
-
-test('content structure hides source file details for audiobook resources', () => {
-  assert.equal(structureResourceShowsAssetDetails('AUDIOBOOK'), false);
-  assert.equal(structureResourceShowsAssetDetails('EBOOK'), true);
-  assert.equal(structureResourceShowsAssetDetails('COMIC'), true);
 });

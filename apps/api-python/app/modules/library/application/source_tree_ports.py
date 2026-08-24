@@ -28,7 +28,6 @@ class AdapterIdentity:
 
     adapter_id: str
     adapter_version: str
-    media_kind: str
     format_label: str
 
 
@@ -119,7 +118,6 @@ class ReadableResourceRecord:
     source_node_id: str
     adapter_id: str
     adapter_version: str
-    media_kind: str
     format: str
     enablement_state: ResourceEnablementState
     import_state: ResourceImportState

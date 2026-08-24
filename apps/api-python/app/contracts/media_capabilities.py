@@ -35,6 +35,7 @@ _FORMAT_CAPABILITIES = {
         MediaFormatCapability("PRC", ReaderType.REFLOWABLE),
         MediaFormatCapability("TXT", ReaderType.REFLOWABLE),
         MediaFormatCapability("FB2", ReaderType.REFLOWABLE),
+        MediaFormatCapability("KINDLE", ReaderType.REFLOWABLE),
         MediaFormatCapability("CBZ", ReaderType.COMIC),
         MediaFormatCapability("ZIP", ReaderType.COMIC),
         MediaFormatCapability("CBR", ReaderType.COMIC),
@@ -61,6 +62,13 @@ def capability_for_format(resource_format: str) -> MediaFormatCapability | None:
 def reader_type_for_format(resource_format: str) -> ReaderType | None:
     capability = capability_for_format(resource_format)
     return capability.reader_type if capability is not None else None
+
+
+def require_reader_type_for_format(resource_format: str) -> ReaderType:
+    reader_type = reader_type_for_format(resource_format)
+    if reader_type is None:
+        raise ValueError(f"unsupported resource format: {resource_format}")
+    return reader_type
 
 
 def kindle_send_available_for_format(resource_format: str) -> bool:

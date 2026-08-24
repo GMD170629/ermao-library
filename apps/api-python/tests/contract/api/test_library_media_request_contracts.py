@@ -9,9 +9,7 @@ from app.models.auth import User
 BODY_OPERATIONS = (
     ("POST", "/api/books/import"),
     ("PATCH", "/api/books/book-id"),
-    ("POST", "/api/books/book-id/resources/batch"),
     ("PATCH", "/api/books/book-id/resources/resource-id"),
-    ("POST", "/api/books/book-id/resources/resource-id/reclassify"),
     ("DELETE", "/api/books/book-id/resources/resource-id/source"),
     ("POST", "/api/shelves"),
     ("PATCH", "/api/shelves/shelf-id"),
@@ -23,9 +21,7 @@ def test_library_and_shelf_write_bodies_are_documented() -> None:
     templated_operations = (
         ("post", "/api/books/import"),
         ("patch", "/api/books/{book_id}"),
-        ("post", "/api/books/{book_id}/resources/batch"),
         ("patch", "/api/books/{book_id}/resources/{resource_id}"),
-        ("post", "/api/books/{book_id}/resources/{resource_id}/reclassify"),
         ("delete", "/api/books/{book_id}/resources/{resource_id}/source"),
         ("post", "/api/shelves"),
         ("patch", "/api/shelves/{shelf_id}"),

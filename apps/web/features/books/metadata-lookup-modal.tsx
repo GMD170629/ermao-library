@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
-import type { MediaKind, ReadableResourceView, BookView } from '../../types/book';
+import type { ReadableResourceView, BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { completeMetadataApply } from './application/metadata-apply-completion';
@@ -16,7 +16,6 @@ import {
   updateResource,
   updateSourceNodeMetadata
 } from './api/client';
-import { mediaKindOfResource } from './book-detail';
 import type { SourceNodeMetadataCandidate } from './model/book-contents';
 
 type MetadataSource = string;
@@ -73,13 +72,8 @@ function defaultFields(book: BookView, candidate: MetadataCandidate | null, avai
   });
 }
 
-function initialSource(resource: ReadableResourceView | undefined): MetadataSource {
-  return resource && mediaKindOfResource(resource) === 'COMIC' ? 'bangumi' : 'douban';
-}
-
-type MetadataProviderOption = { id: string; name: string; enabled: boolean; mediaKinds: string[]; mode: string };
-function selectedMediaKind(resource: ReadableResourceView | undefined): MediaKind {
-  return resource ? mediaKindOfResource(resource) : 'EBOOK';
+function initialSource(providers: ReadonlyArray<{ id: string; enabled: boolean }>): MetadataSource {
+  return providers.find((provider) => provider.enabled)?.id ?? '';
 }
 
 export function MetadataLookupModal({ book, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
@@ -87,17 +81,17 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const targetResource = useMemo(() => book.resources.find((resource) => resource.id === currentResourceId)
     ?? book.resources.find((resource) => resource.id === book.continueResourceId)
     ?? book.resources[0] ?? null, [book.continueResourceId, book.resources, currentResourceId]);
-  const [source, setSource] = useState<MetadataSource>(() => initialSource(targetResource ?? undefined));
+  const [source, setSource] = useState<MetadataSource>('');
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
   const selectedTargetResource = fixedScope === 'resource' ? targetResource : undefined;
-  const kindResource = selectedTargetResource ?? targetResource;
+  const lookupResource = selectedTargetResource ?? targetResource;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [providers, setProviders] = useState<MetadataProviderOption[]>([]);
+  const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
 
   const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
@@ -105,14 +99,13 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     value: provider.id,
     label: provider.name,
     translate: false,
-    disabled: !enabledProviderIds.includes(provider.id) || !provider.mediaKinds.includes(selectedMediaKind(kindResource))
-  })), [enabledProviderIds, kindResource, providers]);
+    disabled: !enabledProviderIds.includes(provider.id)
+  })), [enabledProviderIds, providers]);
   const sourceReady = options.some((option) => option.value === source && !option.disabled);
 
   useEffect(() => {
     if (!open) return;
-    const fallbackSource = initialSource(kindResource);
-    setSource(fallbackSource);
+    setSource('');
     setQuery(book.title);
     setCandidates([]);
     setSelectedId('');
@@ -121,18 +114,15 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
     setError('');
     const controller = new AbortController();
     void fetchMetadataProviders(controller.signal)
-      .then(({ providers: nextProviders, pipelines }) => {
-        const mediaKind = selectedMediaKind(kindResource);
-        const pipeline = pipelines.find((item) => item.mediaKind === mediaKind);
-        const nextEnabledProviderIds = (pipeline?.providers ?? []).filter((item) => item.enabled).map((item) => item.providerId);
+      .then(({ providers: nextProviders }) => {
+        const nextEnabledProviderIds = nextProviders.filter((provider) => provider.enabled).map((provider) => provider.id);
         setProviders(nextProviders);
         setEnabledProviderIds(nextEnabledProviderIds);
-        const applicable = nextProviders.find((provider) => nextEnabledProviderIds.includes(provider.id) && provider.mediaKinds.includes(mediaKind));
-        if (applicable) setSource(applicable.id);
+        setSource(initialSource(nextProviders));
       })
       .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '读取元数据插件失败'); });
     return () => controller.abort();
-  }, [book, kindResource, open]);
+  }, [book, lookupResource, open]);
 
   useEffect(() => {
     if (!open) return;

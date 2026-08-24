@@ -54,7 +54,6 @@ def _seed_lookup_graph(db_session) -> tuple[LibraryBook, LibraryReadableResource
         source_node_id=resource_node.id,
         adapter_id="txt",
         adapter_version="1",
-        media_kind="EBOOK",
         format="TXT",
         enablement_state="ENABLED",
         import_state="READY",

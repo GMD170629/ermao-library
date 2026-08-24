@@ -15,7 +15,6 @@ from app.models import (
     LibraryBook,
     LibraryBookMetadata,
     LibraryImportTask,
-    LibraryOperation,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
@@ -108,7 +107,6 @@ def _book_graph(
         source_node_id=resource_source.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",
@@ -163,37 +161,6 @@ def _add_book_graph(db_session: Session, graph: tuple[object, ...]) -> None:
     db_session.add(resource_metadata)
     db_session.add(asset)
     db_session.flush()
-
-
-def _seed_cross_library_book_pair(
-    db_session: Session,
-    *,
-    prefix: str,
-) -> tuple[LibraryBook, LibraryReadableResource, LibraryBook]:
-    library_a = Library(
-        id=f"{prefix}-lib-a",
-        name="A",
-        root_path=f"/{prefix}-a",
-        organization_mode="FLAT",
-    )
-    library_b = Library(
-        id=f"{prefix}-lib-b",
-        name="B",
-        root_path=f"/{prefix}-b",
-        organization_mode="FLAT",
-    )
-    graph_a = _book_graph(
-        book_id=f"{prefix}-book-a", library_id=library_a.id, title="三体"
-    )
-    graph_b = _book_graph(
-        book_id=f"{prefix}-book-b", library_id=library_b.id, title="地球往事"
-    )
-    db_session.add_all([library_a, library_b])
-    db_session.flush()
-    _add_book_graph(db_session, graph_a)
-    _add_book_graph(db_session, graph_b)
-    db_session.commit()
-    return graph_a[1], graph_a[4], graph_b[1]
 
 
 def test_patch_library_organization_mode_persists_enum_value(
@@ -440,31 +407,3 @@ def test_download_inside_library_schedules_library_scan_task(
     assert scan_task.kind == "SCAN_LIBRARY"
     assert scan_task.state == "QUEUED"
     assert db_session.scalar(select(func.count()).select_from(LibraryImportTask)) == 1
-
-
-def test_batch_resource_classification_rejects_cross_book_resource(
-    client: TestClient,
-    db_session: Session,
-) -> None:
-    _login_admin(client, db_session)
-    book_a, resource_a, book_b = _seed_cross_library_book_pair(
-        db_session, prefix="batch-transfer"
-    )
-
-    transferred = client.post(
-        f"/api/books/{book_a.id}/resources/batch",
-        json={
-            "action": "SET_MEDIA_KIND",
-            "resourceIds": [f"resource-{book_b.id}"],
-            "targetMediaKind": "COMIC",
-        },
-    )
-    assert transferred.status_code == 404
-
-    db_session.expire_all()
-    persisted = db_session.get(LibraryReadableResource, resource_a.id)
-    assert persisted is not None
-    assert persisted.media_kind == "EBOOK"
-    assert db_session.get(LibraryBook, book_a.id) is not None
-    assert db_session.get(LibraryBook, book_b.id) is not None
-    assert db_session.scalar(select(func.count()).select_from(LibraryOperation)) == 0

@@ -1,4 +1,4 @@
-import type { MediaKind, ReadableResourceView, BookView } from '../../types/book';
+import type { ReadableResourceView, BookView } from '../../types/book';
 
 export function bookDetailReturnHref(value: unknown): string {
   if (typeof value !== 'string' || (!value.startsWith('/library?') && value !== '/library')) {
@@ -66,11 +66,4 @@ export function allVisibleResources(book: BookView): ReadableResourceView[] {
 export function singleReadableResourceForBook(book: BookView): ReadableResourceView | null {
   const readableResources = allVisibleResources(book).filter((resource) => resource.readable);
   return readableResources.length === 1 ? readableResources[0] ?? null : null;
-}
-
-export function mediaKindOfResource(resource: ReadableResourceView): MediaKind {
-  if (resource.classification.suggestedMediaKind) return resource.classification.suggestedMediaKind;
-  if (resource.readerType === 'audio') return 'AUDIOBOOK';
-  if (resource.readerType === 'comic') return 'COMIC';
-  return 'EBOOK';
 }

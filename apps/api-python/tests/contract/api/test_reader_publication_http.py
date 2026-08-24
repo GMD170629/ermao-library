@@ -122,13 +122,6 @@ def _seed_resource(
         source_node_id=source_node.id,
         adapter_id=fmt.lower(),
         adapter_version="1",
-        media_kind=(
-            "COMIC"
-            if fmt.upper() in {"CBZ", "ZIP", "CBR", "RAR"}
-            else "AUDIOBOOK"
-            if fmt.upper() in {"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"}
-            else "EBOOK"
-        ),
         format=fmt,
         enablement_state="ENABLED",
         import_state="READY",

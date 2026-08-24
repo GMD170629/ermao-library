@@ -276,7 +276,6 @@ def _pipeline(source: Path, sidecar: SidecarWritebackPort, uow: _Uow):
         source_node_id=node.id,
         adapter_id=adapter.adapter_id.value,
         adapter_version=adapter.adapter_version,
-        media_kind=adapter.media_kind,
         format=adapter.format_label,
         enablement_state=ResourceEnablementState.ENABLED,
         import_state=ResourceImportState.PENDING,

@@ -44,10 +44,8 @@ import { useAudioPlayback } from '../../features/audio/audio-playback-provider';
 import {
   fetchLibraryNavigationSources,
   librarySourceHref,
-  mediaKindsLabel,
   type LibraryNavigationSource
 } from '../../features/library/public';
-import type { MediaKind } from '../../types/book';
 import {
   fetchShelves,
   topLevelShelves,
@@ -93,7 +91,6 @@ type BookSearchItem = {
   title: string;
   author: string | null;
   coverUrl: string;
-  availableMediaKinds: MediaKind[];
 };
 
 type SessionStatus = 'checking' | 'authenticated' | 'unavailable' | 'redirecting';
@@ -797,7 +794,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Cover book={book} size="small" className="h-14 w-10 shrink-0 rounded-md shadow-sm" small />
                     <span data-i18n-skip className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-[#252321]">{book.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author?.trim() || i18nAttribute("未知作者")} · {mediaKindsLabel(book.availableMediaKinds, locale)}</span>
+                      <span className="mt-1 block truncate text-xs text-[#817C76]">{book.author?.trim() || i18nAttribute("未知作者")}</span>
                     </span>
                   </button>
                 ))}

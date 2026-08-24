@@ -40,7 +40,6 @@ class ProviderManifest:
     version: str
     description: str
     mode: str
-    media_kinds: tuple[str, ...]
     fields: tuple[str, ...]
     capabilities: tuple[str, ...]
     config_fields: tuple[ProviderConfigField, ...]
@@ -54,9 +53,8 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         id="douban",
         name="豆瓣图书",
         version="builtin",
-        description="用于电子书和有声书，通过豆瓣读书网页获取图书信息。",
+        description="通过豆瓣读书网页获取图书信息。",
         mode="search",
-        media_kinds=("EBOOK", "AUDIOBOOK"),
         fields=(
             "title",
             "author",
@@ -89,11 +87,10 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
     ),
     ProviderManifest(
         id="bangumi",
-        name="Bangumi 漫画",
+        name="Bangumi",
         version="builtin",
-        description="用于电子书和漫画，通过 Bangumi 官方 API 获取条目与别名。",
+        description="通过 Bangumi 官方 API 获取条目与别名。",
         mode="search",
-        media_kinds=("EBOOK", "COMIC"),
         fields=(
             "title",
             "author",
@@ -137,7 +134,6 @@ BUILTIN_MANIFESTS: tuple[ProviderManifest, ...] = (
         version="builtin",
         description="使用 OpenAI-compatible Chat Completions 推断缺失元数据。",
         mode="infer",
-        media_kinds=("EBOOK", "COMIC", "AUDIOBOOK"),
         fields=(
             "title",
             "author",

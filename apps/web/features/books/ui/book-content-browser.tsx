@@ -9,7 +9,7 @@ import { cn } from '../../../components/ui/cn';
 import { Select } from '../../../components/ui/select';
 import { I18nText, useI18n } from '../../../i18n/provider';
 import type { BookView, ReadableResourceView } from '../../../types/book';
-import type { BookContentEntry, BookContentLayout, BookContentSort, BookContentsPage } from '../model/book-contents';
+import { isDirectResourceEntry, isSourceDirectoryEntry, type BookContentEntry, type BookContentLayout, type BookContentSort, type BookContentsPage } from '../model/book-contents';
 
 type Props = Readonly<{
   book: BookView;
@@ -46,24 +46,29 @@ function SourceNodeCard({ book, entry, resource, position, canManage, onOpen, on
   </article>;
 }
 
-function ResourceCard({ book, resource, position, canManage, onOpen, onManage }: { book: BookView; resource: ReadableResourceView; position: number; canManage: boolean; onOpen: () => void; onManage: (anchor: HTMLButtonElement) => void }) {
-  const { t } = useI18n();
+function ResourceCard({ book, resource, position, canManage, onOpen, onBrowseContents, onManage }: { book: BookView; resource: ReadableResourceView; position: number; canManage: boolean; onOpen: () => void; onBrowseContents?: () => void; onManage: (anchor: HTMLButtonElement) => void }) {
+  const { formatNumber, t } = useI18n();
   const progress = coverReadingProgressState(resource.progress);
   const number = position + 1;
+  const volumeNumber = resource.resourceIndex ?? number;
+  const showsResourceMenu = canManage || resource.kindleSendAvailable;
   return <article className="group relative min-w-0 w-full sm:w-[150px]" data-resource-card="true">
-    <button type="button" onClick={onOpen} disabled={!resource.readable} aria-label={progress.visible ? t(resource.readerType === 'audio' ? '可读资源 {value0}，收听进度 {value1}%' : '可读资源 {value0}，阅读进度 {value1}%', { value0: number, value1: progress.roundedValue }) : t('可读资源 {value0}', { value0: number })} className={cn('block w-full text-left', !resource.readable && 'cursor-not-allowed opacity-50')}>
+    <button type="button" onClick={onOpen} disabled={!resource.readable} aria-label={progress.visible ? t(resource.readerType === 'audio' ? '可读资源 {value0}，收听进度 {value1}%' : '可读资源 {value0}，阅读进度 {value1}%', { value0: volumeNumber, value1: progress.roundedValue }) : t('可读资源 {value0}', { value0: volumeNumber })} className={cn('block w-full text-left', !resource.readable && 'cursor-not-allowed opacity-50')}>
       <div className="relative overflow-hidden rounded-xl bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[#ff4f2a]">
         <Cover book={{ id: resource.id, title: resource.title, author: book.author, coverUrl: resource.coverUrl, gradient: book.gradient, coverStatus: '' }} className="aspect-[2/3] w-full rounded-none" size="small" />
-        <span className="absolute left-2 top-2 rounded-full bg-stone-950/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white shadow-sm backdrop-blur-sm">{String(number).padStart(2, '0')}</span>
+        <span className="resource-cover-control absolute left-2 top-2 rounded-full bg-stone-950/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white shadow-sm backdrop-blur-sm">{formatNumber(volumeNumber, { maximumFractionDigits: 3 })}</span>
         {progress.roundedValue >= 100 ? <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm"><Check size={14} strokeWidth={3} /></span> : null}
         <CoverReadingProgress progress={resource.progress} surface="resource" />
       </div>
     </button>
-    {canManage ? <button type="button" onClick={(event: ReactMouseEvent<HTMLButtonElement>) => onManage(event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); onManage(event.currentTarget); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onManage(event.currentTarget); } }} className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-stone-950/55 text-white shadow-sm backdrop-blur-sm transition hover:bg-stone-950/75" aria-label={t('管理 {value0}', { value0: resource.title })}><MoreVertical size={17} /></button> : null}
-    <button type="button" onClick={onOpen} disabled={!resource.readable} className="mt-2 block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-not-allowed">
-      <span data-i18n-skip className="block line-clamp-2 text-sm font-medium leading-5 text-stone-900">{resource.title}</span>
-      <span className="mt-1 block truncate text-xs text-stone-500" data-i18n-skip>{[resource.format, resource.publisher, resource.language, resource.narrator].filter(Boolean).join(' · ')}</span>
-    </button>
+    {showsResourceMenu ? <button type="button" onClick={(event: ReactMouseEvent<HTMLButtonElement>) => onManage(event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); onManage(event.currentTarget); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); onManage(event.currentTarget); } }} className="resource-cover-control absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-stone-950/55 text-white shadow-sm backdrop-blur-sm transition hover:bg-stone-950/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white" aria-label={t('管理 {value0}', { value0: resource.title })} aria-haspopup="menu"><MoreVertical size={17} /></button> : null}
+    <div className="mt-2 flex items-start gap-1">
+      <button type="button" onClick={onOpen} disabled={!resource.readable} className="min-w-0 flex-1 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200 disabled:cursor-not-allowed">
+        <span data-i18n-skip className="block line-clamp-2 text-sm font-medium leading-5 text-stone-900">{resource.title}</span>
+        <span className="mt-1 block truncate text-xs text-stone-500" data-i18n-skip>{[resource.format, resource.publisher, resource.language, resource.narrator].filter(Boolean).join(' · ')}</span>
+      </button>
+      {onBrowseContents ? <button type="button" onClick={onBrowseContents} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200" aria-label={t('浏览 {value0} 的下级资源', { value0: resource.title })}><ChevronRight size={16} /></button> : null}
+    </div>
   </article>;
 }
 
@@ -71,8 +76,9 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
   const { t } = useI18n();
   const resourcesById = new Map(resources.map((resource) => [resource.id, resource]));
   const currentResource = contents?.currentResourceId ? resourcesById.get(contents.currentResourceId) : undefined;
-  const sourceNodes = (contents?.entries ?? []).filter((entry) => entry.kind === 'FOLDER');
-  const childResources = (contents?.entries ?? []).flatMap((entry) => entry.kind === 'FILE' && entry.resourceId ? [resourcesById.get(entry.resourceId)].filter((resource): resource is ReadableResourceView => resource !== undefined) : []);
+  const sourceNodes = (contents?.entries ?? []).filter(isSourceDirectoryEntry);
+  const directResourceEntries = new Map((contents?.entries ?? []).flatMap((entry) => isDirectResourceEntry(entry) && entry.resourceId ? [[entry.resourceId, entry] as const] : []));
+  const childResources = [...directResourceEntries.keys()].flatMap((resourceId) => [resourcesById.get(resourceId)].filter((resource): resource is ReadableResourceView => resource !== undefined));
   const visibleResources = currentResource ? [currentResource, ...childResources.filter((resource) => resource.id !== currentResource.id)] : childResources;
   const itemCount = sourceNodes.length + visibleResources.length;
   const importSummary = book.resourceImportSummary;
@@ -104,12 +110,12 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
 
     {!loading && itemCount > 0 && layout === 'grid' ? <div className="mt-6 grid grid-cols-2 items-start gap-x-5 gap-y-7 sm:grid-cols-[repeat(auto-fill,150px)]">
       {sourceNodes.map((entry, index) => <SourceNodeCard key={entry.sourceNodeId} book={book} entry={entry} resource={entry.representativeResourceId ? resourcesById.get(entry.representativeResourceId) : undefined} position={index} canManage={canManage} onOpen={() => onNavigate(entry.sourceNodeId, entry)} onManage={(anchor) => onManageSourceNode(entry, anchor)} />)}
-      {visibleResources.map((resource, index) => <ResourceCard key={resource.id} book={book} resource={resource} position={index} canManage={canManage} onOpen={() => onOpenResource(resource)} onManage={(anchor) => onManageResource(resource, anchor)} />)}
+      {visibleResources.map((resource, index) => { const entry = directResourceEntries.get(resource.id); return <ResourceCard key={resource.id} book={book} resource={resource} position={index} canManage={canManage} onOpen={() => onOpenResource(resource)} onBrowseContents={entry?.kind === 'FOLDER' && entry.hasChildren ? () => onNavigate(entry.sourceNodeId, entry) : undefined} onManage={(anchor) => onManageResource(resource, anchor)} />; })}
     </div> : null}
 
     {!loading && itemCount > 0 && layout === 'list' ? <div className="mt-6 overflow-hidden rounded-2xl border border-stone-200 bg-white">
       {sourceNodes.map((entry, index) => { const representative = entry.representativeResourceId ? resourcesById.get(entry.representativeResourceId) : undefined; return <div key={entry.sourceNodeId} className="flex items-center gap-3 border-b border-stone-100 px-4 py-3 hover:bg-[#fffaf7]"><button type="button" onClick={() => onNavigate(entry.sourceNodeId, entry)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><Cover book={{ id: entry.sourceNodeId, title: entry.title, author: book.author, coverUrl: entry.coverUrl || representative?.coverUrl || book.coverUrl, gradient: book.gradient, coverStatus: entry.coverUrl || representative ? '' : book.coverStatus }} className="h-14 w-10 shrink-0 rounded-md" size="small" /><span className="min-w-0 flex-1"><span data-i18n-skip className="block truncate text-sm font-semibold text-stone-900">{entry.title}</span><span className="mt-1 block text-xs text-stone-500">{t('来源目录 {value0}', { value0: index + 1 })}</span></span><ChevronRight size={17} className="text-stone-400" /></button>{canManage ? <button type="button" onClick={(event) => onManageSourceNode(entry, event.currentTarget)} className="ml-2 flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('管理 {value0}', { value0: entry.title })}><MoreVertical size={17} /></button> : null}</div>; })}
-      {visibleResources.map((resource, index) => <div key={resource.id} className="flex items-center gap-3 border-b border-stone-100 px-4 py-3 last:border-b-0 hover:bg-[#fffaf7]"><button type="button" onClick={() => onOpenResource(resource)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><Cover book={{ id: resource.id, title: resource.title, author: book.author, coverUrl: resource.coverUrl, gradient: book.gradient, coverStatus: '' }} className="h-14 w-10 shrink-0 rounded-md" size="small" /><span className="min-w-0 flex-1"><span data-i18n-skip className="block truncate text-sm font-medium text-stone-900">{resource.title}</span><span className="mt-1 block text-xs text-stone-500">{t('可读资源 {value0}', { value0: index + 1 })} · <span data-i18n-skip>{resource.format}</span></span></span><span className="text-sm tabular-nums text-stone-500">{Math.round(resource.progress)}%</span><BookOpen size={17} className="text-[#d94322]" /></button>{canManage ? <button type="button" onClick={(event) => onManageResource(resource, event.currentTarget)} className="ml-2 flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('管理 {value0}', { value0: resource.title })}><MoreVertical size={17} /></button> : null}</div>)}
+      {visibleResources.map((resource, index) => { const entry = directResourceEntries.get(resource.id); const browseContents = entry?.kind === 'FOLDER' && entry.hasChildren ? () => onNavigate(entry.sourceNodeId, entry) : null; const showsResourceMenu = canManage || resource.kindleSendAvailable; return <div key={resource.id} className="flex items-center gap-3 border-b border-stone-100 px-4 py-3 last:border-b-0 hover:bg-[#fffaf7]"><button type="button" onClick={() => onOpenResource(resource)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><Cover book={{ id: resource.id, title: resource.title, author: book.author, coverUrl: resource.coverUrl, gradient: book.gradient, coverStatus: '' }} className="h-14 w-10 shrink-0 rounded-md" size="small" /><span className="min-w-0 flex-1"><span data-i18n-skip className="block truncate text-sm font-medium text-stone-900">{resource.title}</span><span className="mt-1 block text-xs text-stone-500">{t('可读资源 {value0}', { value0: resource.resourceIndex ?? index + 1 })} · <span data-i18n-skip>{resource.format}</span></span></span><span className="text-sm tabular-nums text-stone-500">{Math.round(resource.progress)}%</span><BookOpen size={17} className="text-[#d94322]" /></button>{browseContents ? <button type="button" onClick={browseContents} className="flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('浏览 {value0} 的下级资源', { value0: resource.title })}><ChevronRight size={17} /></button> : null}{showsResourceMenu ? <button type="button" onClick={(event) => onManageResource(resource, event.currentTarget)} className="ml-2 flex h-9 w-9 items-center justify-center rounded-lg text-stone-500 hover:bg-stone-100" aria-label={t('管理 {value0}', { value0: resource.title })} aria-haspopup="menu"><MoreVertical size={17} /></button> : null}</div>; })}
     </div> : null}
 
     {contents && contents.totalPages > 1 ? <div className="mt-5 flex items-center justify-end gap-2"><Button variant="secondary" icon={ChevronLeft} disabled={contents.page <= 1 || loading} onClick={() => onPageChange(contents.page - 1)}><I18nText>上一页</I18nText></Button><span className="px-2 text-sm tabular-nums text-stone-500">{t('第 {value0} / {value1} 页', { value0: contents.page, value1: contents.totalPages })}</span><Button variant="secondary" disabled={contents.page >= contents.totalPages || loading} onClick={() => onPageChange(contents.page + 1)}><I18nText>下一页</I18nText></Button></div> : null}

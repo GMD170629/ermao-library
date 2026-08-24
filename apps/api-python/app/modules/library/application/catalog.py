@@ -25,7 +25,6 @@ class CatalogAsset:
 class CatalogResource:
     id: str
     title: str
-    media_kind: str
     format: str
     resource_index: float | None
     sort_order: int

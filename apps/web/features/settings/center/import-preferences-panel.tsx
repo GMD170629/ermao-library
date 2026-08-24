@@ -19,10 +19,10 @@ const allExtensions = allImportExtensions;
 type FormatGroupId = (typeof formatGroups)[number]['id'];
 
 function formatGroupLabel(id: FormatGroupId, translate: (message: string) => string) {
-  if (id === 'ebook') return translate('电子书');
-  if (id === 'document-comic') return translate('文档与漫画');
-  if (id === 'common-audio') return translate('常用 Web 音频');
-  return translate('专业/兼容音频');
+  if (id === 'ebook') return translate('可重排文档');
+  if (id === 'document-comic') return translate('固定版式与图像文档');
+  if (id === 'common-audio') return translate('常用音频格式');
+  return translate('兼容音频格式');
 }
 
 type ImportPreferences = {

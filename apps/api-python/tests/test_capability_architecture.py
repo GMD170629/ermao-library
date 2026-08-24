@@ -384,6 +384,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0001_library_topology_baseline.py",
         "0002_library_scan_queue_uniqueness.py",
         "0003_audio_asset_title.py",
+        "0004_remove_media_kind.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
@@ -727,14 +728,6 @@ def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
         source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
         assert "app.models" in source, relative_path
 
-    for relative_path in (
-        "modules/organize/infrastructure/eligibility.py",
-        "modules/organize/infrastructure/job_queries.py",
-    ):
-        source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
-        assert "LibraryReadableResource.media_kind" in source, relative_path
-
-
 _LEGACY_IDENTITY_NAMES = frozenset(
     {
         "LibraryWork",
@@ -748,7 +741,6 @@ _LEGACY_IDENTITY_NAMES = frozenset(
         "WorkRecordMutation",
         "UpdateWorkRecord",
         "ApplyWorkMetadata",
-        "VolumeMediaKindSource",
         "IMPLICIT_VERSION_SOURCE_KEY",
         "sync_work_facets",
         "metadata_context_for_work",

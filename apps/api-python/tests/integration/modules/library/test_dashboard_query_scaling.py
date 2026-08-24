@@ -118,7 +118,6 @@ def _seed_manual_library(db: Session, *, book_count: int) -> None:
                     "source_node_id": f"scale-resource-node-{index:06d}",
                     "adapter_id": "epub-file",
                     "adapter_version": "1",
-                    "media_kind": "EBOOK",
                     "format": "EPUB",
                     "enablement_state": "ENABLED",
                     "import_state": "READY",

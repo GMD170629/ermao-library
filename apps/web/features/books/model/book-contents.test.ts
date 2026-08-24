@@ -1,13 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mapBookContentsPage } from '../api/client';
-import { bookContentSortQuery } from './book-contents';
+import { bookContentSortQuery, isDirectResourceEntry, isSourceDirectoryEntry, type BookContentEntry } from './book-contents';
 
 test('book content controls map to stable server sorting', () => {
   assert.deepEqual(bookContentSortQuery('name-asc'), { sort: 'name', direction: 'asc' });
   assert.deepEqual(bookContentSortQuery('name-desc'), { sort: 'name', direction: 'desc' });
   assert.deepEqual(bookContentSortQuery('updated-desc'), { sort: 'updated', direction: 'desc' });
   assert.deepEqual(bookContentSortQuery('size-desc'), { sort: 'size', direction: 'desc' });
+});
+
+test('directory-anchored readable resources are resources instead of source folders', () => {
+  const entry: BookContentEntry = {
+    sourceNodeId: 'volume-1', parentSourceNodeId: 'book-1', name: '第一卷', title: '第一卷', description: null,
+    kind: 'FOLDER', physicalKind: 'DIRECTORY', sizeBytes: null, observedAt: '2026-08-24T00:00:00Z',
+    hasChildren: false, resourceId: 'resource-1', representativeResourceId: 'resource-1', coverUrl: null
+  };
+
+  assert.equal(isDirectResourceEntry(entry), true);
+  assert.equal(isSourceDirectoryEntry(entry), false);
 });
 
 test('book contents remain usable when a rolling-upgrade response omits currentNode', () => {

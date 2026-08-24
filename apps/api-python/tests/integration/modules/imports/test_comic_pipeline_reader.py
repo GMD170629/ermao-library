@@ -92,7 +92,6 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     resource = db_session.scalar(select(LibraryReadableResource))
     assert resource is not None
     assert resource.adapter_id == "comic-archive"
-    assert resource.media_kind == "COMIC"
     assert resource.format == "CBZ"
     assert resource.import_state == "READY"
     assert db_session.scalar(select(LibraryBook)) is not None
@@ -112,7 +111,6 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert book_response.status_code == 200, book_response.text
     book_resource = book_response.json()["data"]["book"]["resources"][0]
     assert book_resource["format"] == "CBZ"
-    assert book_resource["mediaKind"] == "COMIC"
     assert book_resource["readerType"] == "comic"
     bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
     assert bootstrap_response.status_code == 200, bootstrap_response.text
@@ -159,7 +157,6 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
         )
     )
     assert resource is not None
-    assert resource.media_kind == "COMIC"
     page_assets = db_session.scalars(
         select(LibraryResourceAsset).where(
             LibraryResourceAsset.resource_id == resource.id,

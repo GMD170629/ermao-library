@@ -4,7 +4,6 @@ import pytest
 
 from app.modules.imports.application.readable_resource.ports import adapter_identity
 from app.modules.imports.domain.resource_adapters import (
-    ADAPTER_SPECS,
     ResourceAdapterId,
     match_directory_adapters_for_samples,
     match_file_adapters,
@@ -94,17 +93,6 @@ def test_comic_archive_source_format_is_concrete(
     assert source_format_for_filename(adapter, filename) == expected_format
 
 
-def test_comic_media_kind_is_not_a_concrete_source_format() -> None:
-    adapter = next(
-        spec
-        for spec in ADAPTER_SPECS
-        if spec.adapter_id is ResourceAdapterId.COMIC_ARCHIVE
-    )
-    assert adapter.media_kind == "COMIC"
-    assert adapter.format_label == "COMIC"
-    assert source_format_for_filename(adapter, "issue.cbz") != adapter.media_kind
-
-
 @pytest.mark.parametrize(
     ("filename", "expected_format"),
     (
@@ -121,5 +109,4 @@ def test_adapter_identity_persists_concrete_comic_format(
     assert adapter is not None
     identity = adapter_identity(adapter, source_name=filename)
     assert identity.adapter_id == ResourceAdapterId.COMIC_ARCHIVE.value
-    assert identity.media_kind == "COMIC"
     assert identity.format_label == expected_format

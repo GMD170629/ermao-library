@@ -24,7 +24,6 @@ test('bookshelf projection validates and preserves cover progress', () => {
     title: 'Example',
     author: 'Author',
     coverUrl: '/api/books/book-1/cover',
-    availableMediaKinds: ['EBOOK'],
     progress: 42.5
   }, 'bookshelf');
 
@@ -39,7 +38,6 @@ test('bookshelf projection preserves a missing author as null', () => {
     title: 'Untitled',
     author: null,
     coverUrl: '/api/books/book-without-author/cover?size=medium',
-    availableMediaKinds: ['EBOOK'],
     progress: 0
   }, 'bookshelf');
 
@@ -59,7 +57,6 @@ test('management projection maps media and progress summaries', () => {
     seriesName: 'Series',
     tags: ['tag'],
     type: 'ebook',
-    availableMediaKinds: ['EBOOK', 'AUDIOBOOK'],
     statusValue: 'READING',
     lastReadAt: '2026-08-01T00:00:00Z',
     importedAt: '2026-07-31T00:00:00Z'
@@ -67,9 +64,7 @@ test('management projection maps media and progress summaries', () => {
 
   assert.equal(book.projection, 'management');
   if (book.projection !== 'management') assert.fail('expected management projection');
-  assert.deepEqual(book.availableMediaKinds, ['EBOOK', 'AUDIOBOOK']);
   assert.equal(book.statusValue, 'READING');
-  assert.equal(book.availableMediaKinds.length, 2);
 });
 
 test('management projection accepts nullable author and an omitted gradient', () => {
@@ -79,7 +74,6 @@ test('management projection accepts nullable author and an omitted gradient', ()
     author: null,
     coverStatus: 'PENDING',
     coverUrl: '/api/books/book-without-author/cover?size=medium',
-    availableMediaKinds: ['EBOOK'],
     statusValue: 'UNREAD',
     lastReadAt: null,
     importedAt: null

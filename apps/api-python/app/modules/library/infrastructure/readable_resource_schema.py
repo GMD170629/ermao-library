@@ -480,7 +480,6 @@ class LibraryReadableResource(Base):
     adapter_version: Mapped[str] = mapped_column(
         "adapterVersion", String(64), nullable=False
     )
-    media_kind: Mapped[str] = mapped_column("mediaKind", String(32), nullable=False)
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     enablement_state: Mapped[str] = mapped_column(
         "enablementState",

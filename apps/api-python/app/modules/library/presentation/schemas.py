@@ -9,7 +9,6 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 
-MediaKind = Literal["EBOOK", "COMIC", "AUDIOBOOK"]
 FacetKind = Literal["AUTHOR", "TAG", "SERIES"]
 
 
@@ -135,6 +134,16 @@ class BulkBookReadingStatusRequest(HttpContractModel):
     status: Literal["UNREAD", "FINISHED"]
 
 
+class BulkBookSourceDeleteRequest(HttpContractModel):
+    ids: list[str] = Field(min_length=1, max_length=500)
+    confirmation: Literal["DELETE_SOURCE_FILES"]
+
+
+class BulkBookSourceDeletePayload(HttpContractModel):
+    deleted: int = Field(ge=0)
+    deleted_book_ids: list[str] = Field(alias="deletedBookIds")
+
+
 class BulkBookOperationPayload(HttpContractModel):
     updated: int = Field(ge=0)
     changed_values: int = Field(alias="changedValues", ge=0)
@@ -236,11 +245,9 @@ class ResourceView(HttpContractModel):
     resource_index: float | None = Field(default=None, alias="resourceIndex")
     sort_order: int = Field(default=0, alias="sortOrder")
     format: str
-    media_kind: MediaKind = Field(alias="mediaKind")
     reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
         alias="readerType"
     )
-    classification: dict[str, str | None] = Field(default_factory=dict)
     kindle_send_available: bool = Field(alias="kindleSendAvailable")
     publisher: str | None = None
     published_at: datetime | None = Field(default=None, alias="publishedAt")
@@ -302,7 +309,6 @@ class BookView(HttpContractModel):
         default_factory=ResourceImportSummary,
         alias="resourceImportSummary",
     )
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     completed: bool
     continue_resource_id: str | None = Field(default=None, alias="continueResourceId")
     continue_resource_title: str | None = Field(
@@ -318,7 +324,6 @@ class BookSummary(HttpContractModel):
     title: str
     author: str | None = None
     cover_url: str = Field(alias="coverUrl")
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     progress: float = Field(ge=0, le=100)
 
 
@@ -331,7 +336,6 @@ class ManagementBookSummary(HttpContractModel):
     title: str
     author: str | None = None
     library_id: str = Field(alias="libraryId")
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     series_name: str | None = Field(alias="seriesName")
     curation_state: str = Field(alias="curationState")
     visibility_state: str = Field(alias="visibilityState")
@@ -345,7 +349,6 @@ class BookshelfBookSummary(HttpContractModel):
     title: str
     author: str | None = None
     cover_url: str = Field(alias="coverUrl")
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     resource_import_summary: ResourceImportSummary = Field(
         default_factory=ResourceImportSummary,
         alias="resourceImportSummary",
@@ -364,7 +367,6 @@ class ManagementBookListSummary(HttpContractModel):
     cover_url: str = Field(alias="coverUrl")
     series_name: str | None = Field(default=None, alias="seriesName")
     tags: list[str] = Field(default_factory=list)
-    available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     resource_import_summary: ResourceImportSummary = Field(
         default_factory=ResourceImportSummary,
         alias="resourceImportSummary",
@@ -376,9 +378,6 @@ class ManagementBookListSummary(HttpContractModel):
 
 class DashboardSummaryPayload(HttpContractModel):
     total_books: int = Field(alias="totalBooks")
-    ebook_books: int = Field(alias="ebookBooks")
-    comic_books: int = Field(alias="comicBooks")
-    audiobook_books: int = Field(alias="audiobookBooks")
     storage_used_bytes: int = Field(alias="storageUsedBytes")
     library_count: int = Field(alias="libraryCount")
     last_import_at: datetime | None = Field(alias="lastImportAt")
@@ -390,7 +389,6 @@ class ContinueReadingItem(HttpContractModel):
     title: str
     author: str | None = None
     cover_url: str = Field(alias="coverUrl")
-    media_kind: MediaKind = Field(alias="mediaKind")
     resource_format: str = Field(alias="resourceFormat")
     reader_type: Literal["reflowable", "comic", "pdf", "audio"] = Field(
         alias="readerType"
@@ -434,17 +432,6 @@ class UpdateResourceRequest(HttpContractModel):
 
 class ResourceSourceDeleteRequest(HttpContractModel):
     confirmation: str
-
-
-class ReclassifyResourceRequest(HttpContractModel):
-    target_media_kind: MediaKind = Field(alias="targetMediaKind")
-    apply_to: Literal["RESOURCE", "SAME_MEDIA_KIND"] = Field(alias="applyTo")
-
-
-class ResourceBatchRequest(HttpContractModel):
-    action: Literal["SET_MEDIA_KIND"]
-    resource_ids: list[str] = Field(alias="resourceIds", min_length=1)
-    target_media_kind: MediaKind = Field(alias="targetMediaKind")
 
 
 class BooksPayload(HttpContractModel):
@@ -665,6 +652,10 @@ class ResourceImportAcceptedResponse(SuccessEnvelope[ResourceImportAcceptedPaylo
 
 
 class ResourceDeletedResponse(SuccessEnvelope[ResourceDeletedPayload]):
+    pass
+
+
+class BulkBookSourceDeleteResponse(SuccessEnvelope[BulkBookSourceDeletePayload]):
     pass
 
 

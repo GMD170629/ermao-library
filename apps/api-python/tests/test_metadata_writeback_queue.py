@@ -68,7 +68,6 @@ def _seed_book_resource(
         source_node_id=resource_node.id,
         adapter_id="txt",
         adapter_version="1",
-        media_kind="EBOOK",
         format="TXT",
         enablement_state="ENABLED",
         import_state="READY",

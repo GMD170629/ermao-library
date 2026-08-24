@@ -3,7 +3,6 @@ import { expect, test, type Page } from '@playwright/test';
 const epubResource = {
   id: 'resource-epub', bookId: 'book-1', sourceNodeId: 'epub-node', title: 'EPUB resource', description: '',
   resourceIndex: 1, sortOrder: 0, format: 'EPUB', readerType: 'reflowable',
-  classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: 'EBOOK' },
   importStatus: 'READY', coverUrl: '', sizeBytes: 1024, progress: 10, hidden: false, readable: true,
   kindleSendAvailable: false, assets: []
 };
@@ -16,7 +15,7 @@ const secondEpubResource = {
   sortOrder: 1
 };
 
-async function mockBookDetailApi(page: Page, resources = [epubResource]) {
+async function mockBookDetailApi(page: Page, resources = [epubResource], directoryAnchors = false) {
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/api/auth/me')) {
@@ -28,7 +27,7 @@ async function mockBookDetailApi(page: Page, resources = [epubResource]) {
       return;
     }
     if (url.pathname.endsWith('/api/books/book-1/contents')) {
-      const entries = resources.map((resource, index) => ({ sourceNodeId: resource.sourceNodeId, parentSourceNodeId: 'book-node', name: `book-${index + 1}.epub`, title: resource.title, kind: 'FILE', physicalKind: 'REGULAR_FILE', observedAt: '2026-08-23T00:00:00Z', hasChildren: false, resourceId: resource.id, representativeResourceId: null, coverUrl: null }));
+      const entries = resources.map((resource, index) => ({ sourceNodeId: resource.sourceNodeId, parentSourceNodeId: 'book-node', name: directoryAnchors ? resource.title : `book-${index + 1}.epub`, title: resource.title, kind: directoryAnchors ? 'FOLDER' : 'FILE', physicalKind: directoryAnchors ? 'DIRECTORY' : 'REGULAR_FILE', observedAt: '2026-08-23T00:00:00Z', hasChildren: false, resourceId: resource.id, representativeResourceId: resource.id, coverUrl: null }));
       await route.fulfill({ json: { ok: true, data: { bookId: 'book-1', currentSourceNodeId: 'book-node', currentResourceId: null, currentResourceIds: resources.map((resource) => resource.id), parentSourceNodeId: null, breadcrumbs: [], entries, page: 1, pageSize: 100, total: entries.length, totalPages: 1 } } });
       return;
     }
@@ -105,4 +104,14 @@ test('multiple readable resources still open from their cards and can return to 
   await expect(page).not.toHaveURL(/resourceId=/);
   await expect(page).toHaveURL(/returnTo=%2Flibrary%3Fstatus%3DREADING/);
   await expect(page.getByRole('button', { name: /可读资源 1/ }).first()).toBeVisible();
+});
+
+test('directory-anchored audiobook resources open directly without a folder drill-down', async ({ page }) => {
+  await page.unroute('**/api/**');
+  await mockBookDetailApi(page, [epubResource, secondEpubResource], true);
+  await page.goto('/books/book-1');
+
+  await expect(page.getByRole('button', { name: /打开来源目录/ })).toHaveCount(0);
+  await page.getByRole('button', { name: /可读资源 1/ }).first().click();
+  await expect(page).toHaveURL(/resourceId=resource-epub/);
 });

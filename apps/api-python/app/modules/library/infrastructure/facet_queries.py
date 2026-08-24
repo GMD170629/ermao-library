@@ -10,14 +10,12 @@ from sqlalchemy.orm import Session
 from app.core.authorization import (
     AuthorizationContext,
     book_visibility_predicate,
-    resource_visibility_predicate,
 )
 from app.models import (
     LibraryBook,
     LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
-    LibraryReadableResource,
 )
 from app.modules.library.infrastructure.books import entity_record
 
@@ -42,23 +40,6 @@ def list_visible_books(
             "seriesName": metadata.series_name if metadata else None,
         }
         for book, metadata in rows
-    ]
-
-
-def media_kind_counts(
-    db: Session, context: AuthorizationContext
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        select(
-            LibraryReadableResource.media_kind.label("value"),
-            func.count(func.distinct(LibraryReadableResource.book_id)).label("count"),
-        )
-        .select_from(LibraryReadableResource)
-        .where(resource_visibility_predicate(context))
-        .group_by(LibraryReadableResource.media_kind)
-    ).all()
-    return [
-        {"value": row.value, "count": int(row._mapping["count"] or 0)} for row in rows
     ]
 
 

@@ -79,7 +79,6 @@ def _add_audiobook(db_session) -> tuple[LibraryBook, LibraryReadableResource]:
         source_node_id=resource_node.id,
         adapter_id="audio-file",
         adapter_version="1",
-        media_kind="AUDIOBOOK",
         format="M4B",
         import_state="READY",
     )
@@ -310,7 +309,6 @@ def test_audiobook_resource_is_published_through_canonical_book_api(
 
     assert response.status_code == 200, response.text
     book = response.json()["data"]["book"]
-    assert book["availableMediaKinds"] == ["AUDIOBOOK"]
     assert [item["id"] for item in book["resources"]] == [resource.id]
     assert book["resources"][0]["readerType"] == "audio"
     assert book["resources"][0]["durationMs"] == 3_600_000

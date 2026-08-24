@@ -14,7 +14,6 @@ function resource(id: string, progress = 0, hidden = false): ReadableResourceVie
     sortOrder: 0,
     format: 'EPUB',
     readerType: 'reflowable',
-    classification: { source: 'AUTO', reason: 'FORMAT_DEFAULT', suggestedMediaKind: null },
     publisher: null,
     publishedAt: null,
     language: null,

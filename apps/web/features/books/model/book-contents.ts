@@ -49,3 +49,11 @@ export function bookContentSortQuery(sort: BookContentSort): Readonly<{ sort: 'n
   if (sort === 'size-desc') return { sort: 'size', direction: 'desc' };
   return { sort: 'name', direction: 'asc' };
 }
+
+export function isDirectResourceEntry(entry: BookContentEntry): boolean {
+  return Boolean(entry.resourceId);
+}
+
+export function isSourceDirectoryEntry(entry: BookContentEntry): boolean {
+  return entry.kind === 'FOLDER' && !isDirectResourceEntry(entry);
+}

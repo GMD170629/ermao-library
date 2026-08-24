@@ -48,10 +48,6 @@ class QueueOptions(HttpContractModel):
     enabled: bool
 
 
-class ProviderOptions(HttpContractModel):
-    media_kind: Literal["EBOOK", "COMIC", "AUDIOBOOK"] = Field(alias="mediaKind")
-
-
 class DirectoryHealthDetails(HttpContractModel):
     path: str
     writable_required: bool = Field(alias="writableRequired")
@@ -110,7 +106,6 @@ class ProviderProbe(HttpContractModel):
 
 
 class ProviderHealthDetails(HttpContractModel):
-    media_kind: str = Field(alias="mediaKind")
     providers: list[ProviderProbe]
 
 
@@ -118,7 +113,7 @@ class QueueSkippedDetails(HttpContractModel):
     queue: str
 
 
-HealthItemOptions = EmptyDetails | DirectoryOptions | QueueOptions | ProviderOptions
+HealthItemOptions = EmptyDetails | DirectoryOptions | QueueOptions
 HealthItemDetails = (
     EmptyDetails
     | DirectoryHealthDetails

@@ -166,13 +166,6 @@ def _add_resource(
         size_bytes=size_bytes,
         mtime_ms=mtime_ms,
     )
-    media_kind = (
-        "COMIC"
-        if fmt.upper() in {"CBZ", "ZIP", "CBR", "RAR"}
-        else "AUDIOBOOK"
-        if fmt.upper() in {"AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3"}
-        else "EBOOK"
-    )
     resource = LibraryReadableResource(
         id=resource_id,
         library_id="test-library",
@@ -180,7 +173,6 @@ def _add_resource(
         source_node_id=source_node.id,
         adapter_id=fmt.lower(),
         adapter_version="1",
-        media_kind=media_kind,
         format=fmt,
         enablement_state="ENABLED",
         import_state="READY",
@@ -520,7 +512,6 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     assert bootstrap["sourceFormat"] == "pdf"
     assert bootstrap["readerType"] == "pdf"
     assert bootstrap["resource"]["bookId"] == "book-reader-v4"
-    assert "mediaKind" not in bootstrap["book"]
 
     nullable_locator = _exact_pdf_locator(page_index=2, page_progression=0.25)
     nullable_locator["engineLocator"] = None
@@ -558,7 +549,6 @@ def test_reader_v4_validates_comic_progress_against_canonical_page_index(
     _login(client, db_session)
     resource, asset = _ebook_resource(db_session)
     resource.format = "CBZ"
-    resource.media_kind = "COMIC"
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
     metadata.page_count = 15
@@ -591,7 +581,6 @@ def test_reader_v4_validates_comic_progress_against_canonical_page_index(
     )
     assert book_resource["format"] == "CBZ"
     assert book_resource["readerType"] == "comic"
-    assert book_resource["mediaKind"] == "COMIC"
 
     accepted = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
@@ -699,7 +688,6 @@ def test_reader_v4_bootstraps_audiobook_directory_assets(
         title="目录有声书",
         duration_ms=60_000,
     )
-    resource.media_kind = "AUDIOBOOK"
     asset.role = "TRACK"
     db_session.commit()
 
@@ -887,7 +875,7 @@ def test_resource_reading_status_updates_book_detail_and_isolated_progress(
         "percent": 100.0,
     }
     detail = client.get("/api/books/book-reader-v4").json()["data"]["book"]
-    assert detail["continueResourceId"] == first.id
+    assert detail["continueResourceId"] == second.id
     assert {item["id"] for item in detail["resources"]} == {first.id, second.id}
     assert (
         next(item for item in detail["resources"] if item["id"] == first.id)[
@@ -1516,7 +1504,6 @@ def test_reader_v4_reader_type_follows_resource_format(
     _login(client, db_session)
     resource, _asset = _ebook_resource(db_session)
     resource.format = "AUDIO"
-    resource.media_kind = "AUDIO"
     db_session.commit()
 
     bootstrap = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap").json()[
@@ -1525,7 +1512,6 @@ def test_reader_v4_reader_type_follows_resource_format(
 
     assert bootstrap["readerType"] == "audio"
     assert bootstrap["sourceFormat"] == "audio"
-    assert bootstrap["resource"]["mediaKind"] == "AUDIO"
     assert bootstrap["resource"]["id"] == resource.id
 
 

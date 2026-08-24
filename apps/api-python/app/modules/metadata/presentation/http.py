@@ -32,7 +32,7 @@ from app.modules.metadata.presentation.schemas import (
     ProvidersResponse,
     ProviderTestPayload,
     ProviderTestResponse,
-    UpdateMetadataProviderPipelineRequest,
+    UpdateMetadataProviderOrderRequest,
     UpdateMetadataProviderRequest,
 )
 from app.services.metadata_file_writeback import (
@@ -42,11 +42,10 @@ from app.services.metadata_file_writeback import (
 )
 from app.services.metadata_provider_registry import (
     get_metadata_provider,
-    list_metadata_provider_pipelines,
     list_metadata_providers,
-    persist_metadata_provider_pipeline_update,
+    persist_metadata_provider_order_update,
     persist_metadata_provider_update,
-    prepare_metadata_provider_pipeline_update,
+    prepare_metadata_provider_order_update,
     prepare_metadata_provider_update,
     test_metadata_provider,
 )
@@ -111,16 +110,14 @@ def list_registered_metadata_providers(
         data=ProvidersPayload.model_validate(
             {
                 "providers": list_metadata_providers(db),
-                "pipelines": list_metadata_provider_pipelines(db),
             }
         )
     )
 
 
-@router.put("/metadata/provider-pipelines/{media_kind}")
-async def update_registered_metadata_provider_pipeline(
-    media_kind: str,
-    payload: UpdateMetadataProviderPipelineRequest,
+@router.put("/metadata/provider-order")
+async def update_registered_metadata_provider_order(
+    payload: UpdateMetadataProviderOrderRequest,
     request: Request,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
@@ -131,7 +128,7 @@ async def update_registered_metadata_provider_pipeline(
     user = _auth(db, request, settings)
     items = [item.model_dump(by_alias=True) for item in payload.items]
     try:
-        prepared = prepare_metadata_provider_pipeline_update(db, media_kind, items)
+        prepared = prepare_metadata_provider_order_update(db, items)
     except ValueError as exc:
         raise BasicBadRequestError(MessageError(message=str(exc))) from exc
     event = prepare_system_event(
@@ -139,13 +136,13 @@ async def update_registered_metadata_provider_pipeline(
         source="system",
         actor_type="admin",
         actor_id=user.id,
-        action="metadata_provider_pipeline.updated",
-        target_type="metadataProviderPipeline",
-        target_id=prepared.media_kind,
-        message=f"更新{prepared.media_kind}数据源组合",
+        action="metadata_provider_order.updated",
+        target_type="metadataProviderOrder",
+        target_id="global",
+        message="更新全局元数据来源顺序",
         metadata={"providerIds": list(prepared.provider_ids)},
     )
-    pipelines = persist_metadata_provider_pipeline_update(
+    providers = persist_metadata_provider_order_update(
         db,
         prepared,
         event=event,
@@ -153,8 +150,7 @@ async def update_registered_metadata_provider_pipeline(
     return ProvidersResponse(
         data=ProvidersPayload.model_validate(
             {
-                "pipelines": pipelines,
-                "providers": list_metadata_providers(db),
+                "providers": providers,
             }
         )
     )
@@ -213,10 +209,7 @@ async def update_registered_metadata_provider(
         target_type="metadataProvider",
         target_id=provider_id,
         message=f"更新元数据插件：{prepared.provider_name}",
-        metadata={
-            "enabled": prepared.enabled,
-            "priority": prepared.priority,
-        },
+        metadata={"providerId": provider_id},
     )
     provider = persist_metadata_provider_update(db, prepared, event=event)
     return ProviderResponse(

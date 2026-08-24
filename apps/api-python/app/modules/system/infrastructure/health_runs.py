@@ -270,25 +270,10 @@ def _initial_items(db: Session, settings: Settings) -> list[dict[str, Any]]:
             ),
             _item("config:smtp", "configuration", "health.item.smtp", "smtp"),
             _item(
-                "config:providers:ebook",
+                "config:providers",
                 "configuration",
-                "health.item.ebookProviders",
+                "health.item.providers",
                 "providers",
-                options={"mediaKind": "EBOOK"},
-            ),
-            _item(
-                "config:providers:comic",
-                "configuration",
-                "health.item.comicProviders",
-                "providers",
-                options={"mediaKind": "COMIC"},
-            ),
-            _item(
-                "config:providers:audiobook",
-                "configuration",
-                "health.item.audiobookProviders",
-                "providers",
-                options={"mediaKind": "AUDIOBOOK"},
             ),
         ]
     )
@@ -597,17 +582,14 @@ def _smtp_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     )
 
 
-def _providers_result(
-    db: Session, options: dict[str, Any]
-) -> tuple[str, str, dict[str, Any]]:
+def _providers_result(db: Session) -> tuple[str, str, dict[str, Any]]:
     from app.services.metadata_provider_registry import (
         enabled_metadata_provider_ids,
         test_metadata_provider,
     )
 
-    media_kind = str(options["mediaKind"])
-    provider_ids = enabled_metadata_provider_ids(db, media_kind)
-    details: dict[str, Any] = {"mediaKind": media_kind, "providers": []}
+    provider_ids = enabled_metadata_provider_ids(db)
+    details: dict[str, Any] = {"providers": []}
     if not provider_ids:
         return "warning", "health.providers.noneEnabled", details
     failed = 0
@@ -657,7 +639,7 @@ def _execute_item(
             return _queue_result(db, options)
         if kind == "smtp":
             return _smtp_result(db)
-        return _providers_result(db, options)
+        return _providers_result(db)
     finally:
         db.close()
 

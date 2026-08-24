@@ -43,7 +43,6 @@ def resource_entity_as_dict(entity: LibraryReadableResource) -> dict[str, Any]:
         "bookId": entity.book_id,
         "sourceNodeId": entity.source_node_id,
         "format": entity.format,
-        "mediaKind": entity.media_kind,
         "enablementState": entity.enablement_state,
         "importState": entity.import_state,
         "createdAt": entity.created_at,

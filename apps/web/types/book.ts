@@ -2,9 +2,7 @@ export type ResourceFormat =
   | 'COMIC' | 'CBZ' | 'CBR' | 'RAR' | 'ZIP' | 'EPUB' | 'PDF' | 'AUDIO'
   | 'MP3' | 'M4A' | 'M4B' | 'MOBI' | 'AZW' | 'AZW3' | 'PRC' | 'FB2' | 'TXT'
   | 'IMAGE_DIR' | 'AUDIOBOOK_DIR';
-export type MediaKind = 'EBOOK' | 'COMIC' | 'AUDIOBOOK';
 export type ReaderType = 'reflowable' | 'comic' | 'pdf' | 'audio';
-export type ClassificationSource = 'AUTO' | 'LIBRARY_RULE' | 'USER';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 
@@ -44,11 +42,6 @@ export type ReadableResourceView = Readonly<{
   sortOrder: number;
   format: ResourceFormat;
   readerType: ReaderType;
-  classification: Readonly<{
-    source: ClassificationSource;
-    reason: string;
-    suggestedMediaKind: MediaKind | null;
-  }>;
   publisher: string | null;
   publishedAt: string | null;
   language: string | null;
@@ -98,7 +91,6 @@ export type BookView = Readonly<{
   completed: boolean;
   resources: ReadableResourceView[];
   resourceImportSummary: ResourceImportSummary;
-  availableMediaKinds?: MediaKind[];
 }>;
 
 export function allBookResources(book: BookView): ReadableResourceView[] {

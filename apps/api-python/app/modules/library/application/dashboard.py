@@ -18,7 +18,6 @@ class DashboardContinueReading:
     book_id: str
     title: str
     author: str
-    media_kind: Literal["EBOOK", "COMIC", "AUDIOBOOK"]
     resource_format: str
     reader_type: Literal["reflowable", "comic", "pdf", "audio"]
     resource_id: str

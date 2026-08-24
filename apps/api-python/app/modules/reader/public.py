@@ -22,14 +22,12 @@ from app.modules.reader.domain.progress import (
     reader_unit_index_at_position,
 )
 from app.modules.reader.domain.resource_progress import (
-    MediaKind,
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
 )
 
 __all__ = [
-    "MediaKind",
     "ReaderAccessScope",
     "ReaderExternalProgressDto",
     "ReaderProgressDateConflict",

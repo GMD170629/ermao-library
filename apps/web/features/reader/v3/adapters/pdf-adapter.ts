@@ -89,6 +89,14 @@ function clampPage(page: number, pageCount: number) {
   return Math.max(1, Math.min(Math.max(1, pageCount), Math.round(page || 1)));
 }
 
+export function resolvedPdfPageRotation(
+  pageRotation: number,
+  userRotation: ReaderPreferences['pdf']['rotation']
+): number {
+  const intrinsicRotation = Number.isFinite(pageRotation) ? pageRotation : 0;
+  return ((intrinsicRotation + userRotation) % 360 + 360) % 360;
+}
+
 const pdfTextLayerStyles = `
   .shuku-pdf-page .textLayer {
     position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1;
@@ -646,7 +654,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       throw new PdfAdapterFailure('PDF_PAGE_LOAD_FAILED', 'PDF 页面加载失败', { cause });
     }
     this.assertRenderActive(generation, epoch, signal);
-    const baseViewport = page.getViewport({ scale: 1, rotation: preferences.pdf.rotation });
+    const rotation = resolvedPdfPageRotation(page.rotate, preferences.pdf.rotation);
+    const baseViewport = page.getViewport({ scale: 1, rotation });
     const visibleContainerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
     const containerWidth = effectiveReaderPageWidth(preferences.pdf.pageWidth, visibleContainerWidth);
     const containerHeight = Math.max(1, this.container.clientHeight || window.innerHeight || baseViewport.height);
@@ -658,7 +667,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       fit: preferences.pdf.fit,
       zoom: preferences.pdf.zoom
     });
-    const viewport = page.getViewport({ scale, rotation: preferences.pdf.rotation });
+    const viewport = page.getViewport({ scale, rotation });
     const cropBox = preferences.pdf.cropMargins === 'auto'
       ? await this.resolveCropBox(pageNumber, page, generation, epoch, signal)
       : null;
@@ -749,7 +758,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     if (this.cropBoxes.has(pageNumber)) return this.cropBoxes.get(pageNumber) ?? null;
     const pdfjs = this.pdfjs;
     if (!pdfjs) return null;
-    const viewport = page.getViewport({ scale: 0.2, rotation: this.preferences?.pdf.rotation ?? 0 });
+    const rotation = resolvedPdfPageRotation(page.rotate, this.preferences?.pdf.rotation ?? 0);
+    const viewport = page.getViewport({ scale: 0.2, rotation });
     const canvas = documentOwner(this.container).createElement('canvas');
     canvas.width = Math.max(1, Math.round(viewport.width));
     canvas.height = Math.max(1, Math.round(viewport.height));

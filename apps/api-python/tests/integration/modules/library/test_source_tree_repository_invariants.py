@@ -102,7 +102,6 @@ def _adapter() -> AdapterIdentity:
     return AdapterIdentity(
         adapter_id="epub",
         adapter_version="1",
-        media_kind="TEXT",
         format_label="EPUB",
     )
 
@@ -637,7 +636,6 @@ def test_asset_scope_ready_count_and_multi_resource_share(tmp_path: Path) -> Non
                 adapter=AdapterIdentity(
                     adapter_id="audiobook-directory",
                     adapter_version="1",
-                    media_kind="AUDIO",
                     format_label="AUDIOBOOK_DIR",
                 ),
             )
@@ -809,7 +807,6 @@ def test_schema_uniques_and_metadata_cascade(tmp_path: Path) -> None:
                     source_node_id="n1",
                     adapter_id="epub",
                     adapter_version="1",
-                    media_kind="TEXT",
                     format="EPUB",
                     enablement_state="ENABLED",
                     import_state="READY",
@@ -847,7 +844,6 @@ def test_schema_uniques_and_metadata_cascade(tmp_path: Path) -> None:
                         source_node_id="n1",
                         adapter_id="epub",
                         adapter_version="1",
-                        media_kind="TEXT",
                         format="EPUB",
                         enablement_state="ENABLED",
                         import_state="PENDING",

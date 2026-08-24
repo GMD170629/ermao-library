@@ -1,10 +1,10 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useEffect, useRef } from 'react';
-import { mediaKindsLabel, type ManagementBookSummary } from '../../features/library/public';
+import type { ManagementBookSummary } from '../../features/library/public';
 import { useI18n } from '../../i18n/provider';
 import { Badge } from '../ui/badge';
 import type { BadgeTone } from '../ui/badge';
@@ -29,6 +29,8 @@ export function BookTable({
   onSelectAll,
   onSelectionChange,
   onContextMenu,
+  onEdit,
+  onDelete,
   sort,
   sortDirection = 'asc',
   onSort
@@ -41,6 +43,8 @@ export function BookTable({
   onSelectAll?: (selected: boolean) => void;
   onSelectionChange?: (ids: string[]) => void;
   onContextMenu?: (book: ManagementBookSummary, position: { x: number; y: number }) => void;
+  onEdit?: (book: ManagementBookSummary) => void;
+  onDelete?: (book: ManagementBookSummary) => void;
   sort?: string;
   sortDirection?: SortDirection;
   onSort?: (sort: string, direction: SortDirection) => void;
@@ -125,20 +129,16 @@ export function BookTable({
     openBook(book);
   }
 
-  function mediaLabel(book: ManagementBookSummary) {
+  function resourceStatusLabel(book: ManagementBookSummary) {
     if (book.resourceImportSummary.ready === 0 && book.resourceImportSummary.pending > 0) return i18nAttribute('导入中');
     if (book.resourceImportSummary.ready === 0 && book.resourceImportSummary.failed > 0) return i18nAttribute('导入失败');
     if (book.resourceImportSummary.ready === 0) return i18nAttribute('无可读资源');
-    return mediaKindsLabel(book.availableMediaKinds, locale) || '—';
+    return i18nAttribute('可读资源 {value0}', { value0: book.resourceImportSummary.ready });
   }
 
   function statusLabel(book: ManagementBookSummary) {
-    const kinds = book.availableMediaKinds;
     const status = book.statusValue;
-    if (kinds.length !== 1) return status === 'FINISHED' ? '已完成' : status === 'READING' ? '进行中' : '未开始';
-    if (kinds[0] === 'AUDIOBOOK') return status === 'FINISHED' ? '听完' : status === 'READING' ? '在听' : '未听';
-    if (kinds[0] === 'COMIC') return status === 'FINISHED' ? '看完' : status === 'READING' ? '在看' : '未看';
-    return status === 'FINISHED' ? '已读' : status === 'READING' ? '在读' : '未读';
+    return status === 'FINISHED' ? '已完成' : status === 'READING' ? '进行中' : '未开始';
   }
 
   function statusTone(book: ManagementBookSummary): BadgeTone {
@@ -189,7 +189,7 @@ export function BookTable({
                     <button data-i18n-skip type="button" onClick={(event) => openMobileBookDetails(event, book)} className="line-clamp-2 w-full rounded-sm text-left font-medium leading-5 text-[#272421] outline-none transition hover:text-[#D94724] hover:underline focus-visible:ring-2 focus-visible:ring-[#F6B7A5]" aria-label={i18nAttribute("查看《{value0}》详情", { value0: book.title })}>{book.title}</button>
                     <span data-i18n-skip className="mt-1 block truncate text-xs text-[#8A847E]">{authorLabel}</span>
                     <span data-testid="book-list-mobile-metadata" className="mt-2 flex min-w-0 flex-nowrap gap-1.5 overflow-hidden">
-                      <Badge className="shrink-0 whitespace-nowrap">{mediaLabel(book)}</Badge>
+                      <Badge className="shrink-0 whitespace-nowrap">{resourceStatusLabel(book)}</Badge>
                       <Badge className="shrink-0 whitespace-nowrap" tone={statusTone(book)}>{statusLabel(book)}</Badge>
                       {(book.tags ?? []).slice(0, 1).map((tag) => <Badge key={tag} className="min-w-0 truncate whitespace-nowrap" translate={false}>{tag}</Badge>)}
                     </span>
@@ -209,11 +209,11 @@ export function BookTable({
             <th className="w-[250px] p-2">{sortableHeader('标题', 'title')}</th>
             <th className="w-[86px]">{sortableHeader('作者', 'author')}</th>
             <th className="w-[140px]">{sortableHeader('系列', 'series')}</th>
-            <th className="w-[66px]"><I18nText>类型</I18nText></th>
             <th className="w-[118px]"><I18nText>标签</I18nText></th>
             <th className="w-[70px]"><I18nText>状态</I18nText></th>
             <th className="w-[104px]">{sortableHeader('最近阅读', 'recent_read', 'desc')}</th>
             <th className="w-[104px]">{sortableHeader('加入时间', 'recent_import', 'desc')}</th>
+            <th className="w-[150px] px-2"><I18nText>操作</I18nText></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-black/[0.05]">
@@ -243,7 +243,6 @@ export function BookTable({
                 </td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]">{authorLabel}</td>
                 <td data-i18n-skip className="truncate px-2 text-[#5F5954]" title={book.seriesName?.trim() || undefined}>{book.seriesName?.trim() || '—'}</td>
-                <td className="truncate px-2">{mediaLabel(book)}</td>
                 <td className="overflow-hidden px-2">
                   <div className="flex gap-1 overflow-hidden">
                     {(book.tags ?? []).slice(0, 2).map((tag) => (
@@ -256,6 +255,12 @@ export function BookTable({
                 </td>
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.lastReadAt, '', locale)}</td>
                 <td className="truncate px-2 text-[#817B75]">{localDateLabel(book.importedAt, '', locale)}</td>
+                <td className="px-2">
+                  {onEdit || onDelete ? <div className="flex items-center gap-1">
+                    {onEdit ? <button type="button" onClick={(event) => { event.stopPropagation(); onEdit(book); }} className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-[#625D58] transition hover:bg-black/[0.045] hover:text-[#272421]" aria-label={i18nAttribute("编辑《{value0}》", { value0: book.title })}><Pencil size={13} /><I18nText>编辑</I18nText></button> : null}
+                    {onDelete ? <button type="button" onClick={(event) => { event.stopPropagation(); onDelete(book); }} className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-[#A94435] transition hover:bg-red-50 hover:text-red-700" aria-label={i18nAttribute("删除《{value0}》", { value0: book.title })}><Trash2 size={13} /><I18nText>删除</I18nText></button> : null}
+                  </div> : <span className="text-[#AAA39C]">—</span>}
+                </td>
               </tr>
             );
           })}

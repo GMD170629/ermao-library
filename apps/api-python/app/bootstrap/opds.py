@@ -23,6 +23,7 @@ from app.bootstrap.media import (
     media_streaming,
 )
 from app.bootstrap.reader import reader_resource_service
+from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
     authorization_context,
@@ -378,7 +379,8 @@ class SqlAlchemyOpdsCatalog:
                     else None
                 ),
             )
-            if resource.media_kind == "COMIC" and (resource.page_count or 0) > 0
+            if reader_type_for_format(resource.format) is ReaderType.COMIC
+            and (resource.page_count or 0) > 0
             else None
         )
         return OpdsEntryDto(
@@ -460,7 +462,7 @@ class SqlAlchemyOpdsCatalog:
                 pse_media_types = {
                     resource.id: self._pse_media_type(resource.id)
                     for resource in book.resources
-                    if resource.media_kind == "COMIC"
+                    if reader_type_for_format(resource.format) is ReaderType.COMIC
                 }
                 entries = tuple(
                     self._resource_entry(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 SENSITIVE_SYSTEM_SETTING_KEYS = frozenset(
@@ -35,33 +34,6 @@ RETIRED_SYSTEM_SETTING_KEYS = frozenset(
         "download.qbittorrent.savePath",
     }
 )
-
-DETAIL_TAB_KEYS = ("EBOOK", "COMIC", "AUDIOBOOK", "STRUCTURE")
-
-
-def _parse_json(value: Any, fallback: Any) -> Any:
-    if value is None:
-        return fallback
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return fallback
-
-
-def normalize_detail_tab_order(value: Any) -> list[str]:
-    parsed = _parse_json(value, value)
-    if not isinstance(parsed, list):
-        parsed = []
-    result: list[str] = []
-    for raw in parsed:
-        key = str(raw or "").strip().upper()
-        if key in DETAIL_TAB_KEYS and key not in result:
-            result.append(key)
-    result.extend(key for key in DETAIL_TAB_KEYS if key not in result)
-    return result
-
 
 def public_system_settings(values: dict[str, Any]) -> dict[str, Any]:
     public: dict[str, Any] = {

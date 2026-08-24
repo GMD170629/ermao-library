@@ -91,7 +91,6 @@ def _seed_book_resource(
         source_node_id=resource_node.id,
         adapter_id="epub-file",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",

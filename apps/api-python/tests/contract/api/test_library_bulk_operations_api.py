@@ -96,7 +96,6 @@ def _add_book(db_session, *, index: int) -> None:
             source_node_id=node.id,
             adapter_id="epub-file",
             adapter_version="1",
-            media_kind="EBOOK",
             format="EPUB",
             import_state="READY",
         )
@@ -442,29 +441,6 @@ def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
         assert resource_metadata.cover_path is None
         assert resource_metadata.cover_status == "PENDING"
         assert source_metadata is not None and source_metadata.cover_status == "PENDING"
-
-
-def test_resource_reclassification_operation_restores_structural_media_kind(
-    client, db_session
-) -> None:
-    _login(client, db_session)
-    _seed_books(db_session)
-
-    changed = client.post(
-        "/api/books/bulk-book-1/resources/bulk-resource-1/reclassify",
-        json={"targetMediaKind": "COMIC", "applyTo": "RESOURCE"},
-    )
-    assert changed.status_code == 200, changed.text
-    operation_id = changed.json()["data"]["operation"]["id"]
-    db_session.expire_all()
-    resource = db_session.get(LibraryReadableResource, "bulk-resource-1")
-    assert resource is not None and resource.media_kind == "COMIC"
-
-    undone = client.post(f"/api/library/operations/{operation_id}/undo")
-    assert undone.status_code == 200, undone.text
-    db_session.expire_all()
-    resource = db_session.get(LibraryReadableResource, "bulk-resource-1")
-    assert resource is not None and resource.media_kind == "EBOOK"
 
 
 def test_operation_owner_is_enforced_for_non_manager(client, db_session) -> None:

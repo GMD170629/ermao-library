@@ -10,7 +10,7 @@ from typing import Any, cast
 from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
+from app.models import LibraryBook, LibraryBookMetadata
 from app.models.organize import (
     MetadataLookupTask,
     MetadataProviderExecution,
@@ -283,10 +283,6 @@ def list_filtered_job_rows(
         )
         .join(LibraryBook, LibraryBook.id == OrganizeJob.book_id)
         .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-        .outerjoin(
-            LibraryReadableResource,
-            LibraryReadableResource.id == OrganizeJob.resource_id,
-        )
     )
     predicates = _filter_predicates(
         db, status=status, search=search, provider_ids=provider_ids
@@ -302,33 +298,6 @@ def list_filtered_job_rows(
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
-    book_ids = list(dict.fromkeys(str(row.book_id) for row in rows))
-    media_kinds_by_book: dict[str, list[str]] = {book_id: [] for book_id in book_ids}
-    if book_ids:
-        media_kind = LibraryReadableResource.media_kind
-        media_rows = db.execute(
-            select(
-                LibraryReadableResource.book_id,
-                media_kind.label("media_kind"),
-            )
-            .select_from(LibraryReadableResource)
-            .where(
-                LibraryReadableResource.book_id.in_(book_ids),
-                LibraryReadableResource.enablement_state == "ENABLED",
-            )
-            .group_by(LibraryReadableResource.book_id, media_kind)
-            .order_by(
-                LibraryReadableResource.book_id.asc(),
-                case(
-                    (media_kind == "EBOOK", 0),
-                    (media_kind == "COMIC", 1),
-                    (media_kind == "AUDIOBOOK", 2),
-                    else_=3,
-                ),
-            )
-        ).all()
-        for book_id, media_kind in media_rows:
-            media_kinds_by_book[str(book_id)].append(str(media_kind))
     return [
         OrganizeJobListItem(
             id=str(row.id),
@@ -346,7 +315,6 @@ def list_filtered_job_rows(
                 id=str(row.book_id),
                 title=str(row.title or "未命名图书"),
                 author=str(row.author or "未知作者"),
-                available_media_kinds=media_kinds_by_book[str(row.book_id)],
             ),
         )
         for row in rows

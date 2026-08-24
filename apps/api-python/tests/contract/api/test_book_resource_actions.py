@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from base64 import b64decode
 from datetime import UTC, datetime
 
 from app.core.auth import hash_password
@@ -61,7 +62,6 @@ def _add_graph(db_session, book_id: str, resource_id: str) -> None:
             source_node_id=resource_node.id,
             adapter_id="pdf-file",
             adapter_version="1",
-            media_kind="EBOOK",
             format="PDF",
             import_state="READY",
         )
@@ -115,13 +115,31 @@ def test_resource_metadata_update_uses_resource_identity(client, db_session) -> 
 
     response = client.patch(
         "/api/books/metadata-book/resources/metadata-resource",
-        json={"publisher": "New Publisher", "language": "zh-CN"},
+        json={
+            "title": "Volume title",
+            "resourceIndex": 2.5,
+            "description": "Volume description",
+            "publisher": "New Publisher",
+            "language": "zh-CN",
+        },
     )
 
     assert response.status_code == 200, response.text
     metadata = db_session.get(LibraryReadableResourceMetadata, "metadata-resource")
     assert metadata is not None
-    assert (metadata.publisher, metadata.language) == ("New Publisher", "zh-CN")
+    assert (
+        metadata.title,
+        metadata.resource_index,
+        metadata.description,
+        metadata.publisher,
+        metadata.language,
+    ) == (
+        "Volume title",
+        2.5,
+        "Volume description",
+        "New Publisher",
+        "zh-CN",
+    )
     assert response.json()["data"]["resource"]["id"] == "metadata-resource"
 
 
@@ -165,6 +183,71 @@ def test_resource_cover_regeneration_commits_pending_state_before_enqueue(
     metadata = db_session.get(LibraryReadableResourceMetadata, "cover-resource")
     assert metadata is not None
     assert (metadata.cover_path, metadata.cover_status) == (None, "PENDING")
+
+
+def test_resource_cover_upload_publishes_validated_resource_cover(
+    client, db_session, test_settings
+) -> None:
+    _login(client, db_session)
+    _add_graph(db_session, "upload-cover-book", "upload-cover-resource")
+    db_session.commit()
+    png = b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+        "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    response = client.put(
+        "/api/books/upload-cover-book/resources/upload-cover-resource/cover",
+        files={"cover": ("cover.png", png, "image/png")},
+    )
+
+    assert response.status_code == 200, response.text
+    db_session.expire_all()
+    metadata = db_session.get(
+        LibraryReadableResourceMetadata, "upload-cover-resource"
+    )
+    assert metadata is not None
+    assert metadata.cover_path == "covers/resources/upload-cover-resource.png"
+    assert metadata.cover_status == "READY"
+    assert (
+        test_settings.resolved_storage_root / metadata.cover_path
+    ).read_bytes() == png
+    assert response.json()["data"]["resource"]["id"] == "upload-cover-resource"
+
+
+def test_resource_cover_upload_rejects_invalid_content_without_changing_cover(
+    client, db_session, test_settings
+) -> None:
+    _login(client, db_session)
+    _add_graph(db_session, "invalid-cover-book", "invalid-cover-resource")
+    metadata = db_session.get(
+        LibraryReadableResourceMetadata, "invalid-cover-resource"
+    )
+    assert metadata is not None
+    metadata.cover_path = "covers/resources/existing.png"
+    metadata.cover_status = "READY"
+    existing = test_settings.resolved_storage_root / metadata.cover_path
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_bytes(b"existing-cover")
+    db_session.commit()
+
+    response = client.put(
+        "/api/books/invalid-cover-book/resources/invalid-cover-resource/cover",
+        files={"cover": ("cover.txt", b"not-an-image", "text/plain")},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "INVALID_RESOURCE_COVER"
+    db_session.expire_all()
+    metadata = db_session.get(
+        LibraryReadableResourceMetadata, "invalid-cover-resource"
+    )
+    assert metadata is not None
+    assert (metadata.cover_path, metadata.cover_status) == (
+        "covers/resources/existing.png",
+        "READY",
+    )
+    assert existing.read_bytes() == b"existing-cover"
 
 
 def test_resource_asset_delete_marks_resource_failed_when_last_asset_is_removed(

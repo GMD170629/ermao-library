@@ -11,7 +11,7 @@ const PROJECT_URL = 'https://github.com/GMD170629/ermao-library';
 
 const projectDetails = [
   { label: '运行方式', value: '自托管 Web 应用 / PWA', icon: Layers3 },
-  { label: '支持格式', value: 'EPUB、漫画、PDF、文本与有声书', icon: BookOpen },
+  { label: '支持格式', value: 'EPUB、CBZ/CBR、PDF、TXT 与音频', icon: BookOpen },
   { label: '开源许可', value: 'MIT License', icon: Scale }
 ];
 

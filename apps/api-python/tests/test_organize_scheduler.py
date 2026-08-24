@@ -18,8 +18,7 @@ from app.models import (
 from app.models.organize import OrganizeJob
 from app.services.metadata_provider_registry import (
     enabled_metadata_provider_ids,
-    list_metadata_provider_pipelines,
-    update_metadata_provider,
+    update_metadata_provider_order,
 )
 from app.services.organize_scheduler import (
     create_organize_run,
@@ -83,7 +82,6 @@ def _seed_book(
         source_node_id=resource_node.id,
         adapter_id="epub",
         adapter_version="1",
-        media_kind="EBOOK",
         format="EPUB",
         enablement_state="ENABLED",
         import_state="READY",
@@ -187,28 +185,34 @@ def test_deleting_organize_job_does_not_delete_its_book_or_resource(db_session) 
     assert db_session.get(LibraryReadableResource, resource.id) is not None
 
 
-def test_metadata_provider_enablement_is_scoped_by_resource_media_kind(
-    db_session,
-) -> None:
+def test_metadata_provider_enablement_uses_global_order(db_session) -> None:
     _seed_book(db_session, "provider-book")
     seed_baseline_data(db_session)
-    update_metadata_provider(db_session, "douban", {"enabled": True})
-
-    enabled = enabled_metadata_provider_ids(db_session, "EBOOK")
-    pipelines = next(
-        row
-        for row in list_metadata_provider_pipelines(db_session)
-        if row["mediaKind"] == "EBOOK"
+    update_metadata_provider_order(
+        db_session,
+        [
+            {"providerId": "douban", "enabled": True},
+            {"providerId": "bangumi", "enabled": False},
+            {"providerId": "ai", "enabled": False},
+        ],
     )
 
-    assert "douban" in enabled
-    assert any(row["providerId"] == "douban" for row in pipelines["providers"])
+    enabled = enabled_metadata_provider_ids(db_session)
+
+    assert enabled == ["douban"]
 
 
 def test_interval_schedule_respects_next_run_boundary(db_session) -> None:
     _seed_book(db_session, "scheduled-book")
     seed_baseline_data(db_session)
-    update_metadata_provider(db_session, "douban", {"enabled": True})
+    update_metadata_provider_order(
+        db_session,
+        [
+            {"providerId": "douban", "enabled": True},
+            {"providerId": "bangumi", "enabled": False},
+            {"providerId": "ai", "enabled": False},
+        ],
+    )
     policy = update_organize_policy(
         db_session,
         {

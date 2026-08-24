@@ -42,6 +42,7 @@ from app.bootstrap.library import (
 from app.bootstrap.library_resource_actions import (
     bulk_covers,
     regenerate_resource_cover,
+    upload_resource_cover,
 )
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
@@ -75,6 +76,10 @@ from app.modules.library.application.bulk_operations import (
     InvalidBulkBookOperationError,
 )
 from app.modules.library.application.catalog import ListCatalogFacets
+from app.modules.library.application.commands.manage_source_tree import (
+    DeleteBookSourcesCommand,
+    SourceFileDeletionError,
+)
 from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
     parse_filter_expression,
@@ -91,13 +96,12 @@ from app.modules.library.application.resource_commands import (
     LibraryAuthorizationError,
     ResourceMetadataChanges,
     ResourceNotFoundError,
-    SetResourceMediaKindsCommand,
-    reclassify_resource,
-    set_resource_media_kinds,
     update_resource,
 )
 from app.modules.library.application.resource_cover import (
+    MAX_RESOURCE_COVER_BYTES,
     RegenerateResourceCoverCommand,
+    UploadResourceCoverCommand,
 )
 from app.modules.library.application.resource_details import (
     ResourceDetailAccessScope,
@@ -134,6 +138,9 @@ from app.modules.library.presentation.schemas import (
     BulkBookOperationResponse,
     BulkBookReadingStatusRequest,
     BulkBookShelfMembershipRequest,
+    BulkBookSourceDeletePayload,
+    BulkBookSourceDeleteRequest,
+    BulkBookSourceDeleteResponse,
     ContinueReadingItem,
     ContinueReadingPayload,
     ContinueReadingResponse,
@@ -159,15 +166,11 @@ from app.modules.library.presentation.schemas import (
     ManagementBookListSummary,
     MergeLibraryFacetsRequest,
     ReadingUnitsResponse,
-    ReclassifyResourceRequest,
     RenameLibraryFacetRequest,
     ResourceAssetView,
-    ResourceBatchRequest,
-    ResourceBatchResponse,
     ResourceDeletedResponse,
     ResourceImportAcceptedResponse,
     ResourcePayload,
-    ResourceReclassifyResponse,
     ResourceResponse,
     ResourceSourceDeleteRequest,
     ResourcesPayload,
@@ -244,6 +247,10 @@ def _book_response(value: object) -> BookResponse:
     return cast(BookResponse, value)
 
 
+def _bulk_source_delete_response(value: object) -> BulkBookSourceDeleteResponse:
+    return cast(BulkBookSourceDeleteResponse, value)
+
+
 def _books_response(value: object) -> BooksResponse:
     return cast(BooksResponse, value)
 
@@ -282,14 +289,6 @@ def _import_response(value: object) -> ResourceImportAcceptedResponse:
 
 def _deleted_response(value: object) -> ResourceDeletedResponse:
     return cast(ResourceDeletedResponse, value)
-
-
-def _reclassify_response(value: object) -> ResourceReclassifyResponse:
-    return cast(ResourceReclassifyResponse, value)
-
-
-def _batch_response(value: object) -> ResourceBatchResponse:
-    return cast(ResourceBatchResponse, value)
 
 
 def _reading_units_response(value: object) -> ReadingUnitsResponse:
@@ -428,7 +427,6 @@ def get_dashboard_continue_reading(
                     title=item.title,
                     author=item.author,
                     coverUrl=f"/api/books/{quote(item.book_id, safe='')}/cover?size=medium",
-                    mediaKind=item.media_kind,
                     resourceFormat=item.resource_format,
                     readerType=item.reader_type,
                     resumeResourceId=item.resource_id,
@@ -476,6 +474,49 @@ def execute_bulk_book_metadata(
         return _bulk_operation_response(_bulk_error(error))
     return BulkBookOperationResponse(
         data=BulkBookOperationPayload.model_validate(asdict(result))
+    )
+
+
+@router.post(
+    "/library/operations/books/delete-sources",
+    response_model=BulkBookSourceDeleteResponse,
+)
+def execute_bulk_book_source_delete(
+    payload: BulkBookSourceDeleteRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> BulkBookSourceDeleteResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _bulk_source_delete_response(auth_error)
+    manager_error = _require_manager(user)
+    if manager_error:
+        return _bulk_source_delete_response(manager_error)
+    try:
+        result = build_readable_resource_pipeline(db).delete_book_sources.execute(
+            DeleteBookSourcesCommand(
+                context=authorization_context(db, user),
+                book_ids=tuple(payload.ids),
+            )
+        )
+    except SourceFileDeletionError:
+        return _bulk_source_delete_response(
+            fail(
+                "源文件删除失败，书库节点未删除",
+                status_code=409,
+                code="SOURCE_FILE_DELETE_FAILED",
+            )
+        )
+    if not result.ok:
+        return _bulk_source_delete_response(
+            fail("图书不存在", status_code=404, code="BOOK_NOT_FOUND")
+        )
+    return BulkBookSourceDeleteResponse(
+        data=BulkBookSourceDeletePayload(
+            deleted=len(result.deleted_book_ids),
+            deletedBookIds=list(result.deleted_book_ids),
+        )
     )
 
 
@@ -1510,6 +1551,61 @@ def regenerate_library_resource_cover(
     )
 
 
+@router.put(
+    "/books/{book_id}/resources/{resource_id}/cover",
+    response_model=ResourceResponse,
+)
+async def upload_library_resource_cover(
+    book_id: str,
+    resource_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+    cover: Annotated[UploadFile, File()],
+) -> ResourceResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _resource_response(auth_error)
+    cover_content = await cover.read(MAX_RESOURCE_COVER_BYTES + 1)
+    await cover.close()
+    try:
+        upload_resource_cover(db, settings).execute(
+            UploadResourceCoverCommand(
+                actor=_actor(db, user),
+                book_id=book_id,
+                resource_id=resource_id,
+                content=cover_content,
+                now=datetime.now(UTC),
+            )
+        )
+    except LibraryAuthorizationError:
+        return _resource_response(
+            fail(
+                "需要系统管理权限",
+                status_code=403,
+                code="SYSTEM_MANAGER_REQUIRED",
+            )
+        )
+    except (BookNotFoundError, ResourceNotFoundError):
+        return _resource_response(
+            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
+        )
+    except ValueError:
+        return _resource_response(
+            fail(
+                "资源封面必须是不超过 10 MB 的 JPEG、PNG 或 WebP 图片",
+                status_code=400,
+                code="INVALID_RESOURCE_COVER",
+            )
+        )
+    updated = resource_view(db, resource_id, user.id)
+    if updated is None:
+        return _resource_response(
+            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
+        )
+    return ResourceResponse(data=ResourcePayload(resource=_resource_contract(updated)))
+
+
 @router.delete(
     "/books/{book_id}/resources/{resource_id}/source",
     response_model=ResourceDeletedResponse,
@@ -1551,96 +1647,6 @@ def delete_library_resource_source(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
     return _deleted_response(ok({"resourceId": resource_id, "deleted": True}))
-
-
-@router.post(
-    "/books/{book_id}/resources/{resource_id}/reclassify",
-    response_model=ResourceReclassifyResponse,
-)
-def reclassify_library_resource(
-    book_id: str,
-    resource_id: str,
-    payload: ReclassifyResourceRequest,
-    request: Request,
-    db: DatabaseSession,
-    settings: ApplicationSettings,
-) -> ResourceReclassifyResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return _reclassify_response(auth_error)
-    manager_error = _require_manager(user)
-    if manager_error:
-        return _reclassify_response(manager_error)
-    try:
-        outcome = reclassify_resource(
-            resource_metadata(db),
-            db,
-            actor=_actor(db, user),
-            book_id=book_id,
-            resource_id=resource_id,
-            target_media_kind=payload.target_media_kind,
-            apply_to=payload.apply_to,
-            now=datetime.now(UTC),
-        )
-    except (BookNotFoundError, ResourceNotFoundError):
-        return _reclassify_response(
-            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-        )
-    except (LibraryAuthorizationError, InvalidResourceChangeError) as exc:
-        return _reclassify_response(fail(str(exc) or "资源参数无效", status_code=400))
-    return _reclassify_response(
-        ok(
-            {
-                "affectedResourceIds": list(outcome.affected_resource_ids),
-                "operation": asdict(outcome.operation),
-            }
-        )
-    )
-
-
-@router.post(
-    "/books/{book_id}/resources/batch",
-    response_model=ResourceBatchResponse,
-)
-def batch_library_resource_action(
-    book_id: str,
-    payload: ResourceBatchRequest,
-    request: Request,
-    db: DatabaseSession,
-    settings: ApplicationSettings,
-) -> ResourceBatchResponse:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return _batch_response(auth_error)
-    manager_error = _require_manager(user)
-    if manager_error:
-        return _batch_response(manager_error)
-    try:
-        outcome = set_resource_media_kinds(
-            resource_metadata(db),
-            db,
-            actor=_actor(db, user),
-            book_id=book_id,
-            command=SetResourceMediaKindsCommand(
-                resource_ids=tuple(payload.resource_ids),
-                target_media_kind=payload.target_media_kind,
-            ),
-            now=datetime.now(UTC),
-        )
-    except (BookNotFoundError, ResourceNotFoundError):
-        return _batch_response(
-            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
-        )
-    except (LibraryAuthorizationError, InvalidResourceChangeError) as exc:
-        return _batch_response(fail(str(exc) or "资源参数无效", status_code=400))
-    return _batch_response(
-        ok(
-            {
-                "affectedResourceIds": list(outcome.affected_resource_ids),
-                "operationIds": list(outcome.operation_ids),
-            }
-        )
-    )
 
 
 @router.get(

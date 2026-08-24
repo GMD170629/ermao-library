@@ -1,4 +1,4 @@
-import type { ClassificationSource, MediaKind, ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
+import type { ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
 import type {
   ResourceChapterDetailUnit,
@@ -49,10 +49,6 @@ function positiveInteger(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
-function mediaKind(value: unknown): MediaKind | null {
-  return value === 'EBOOK' || value === 'COMIC' || value === 'AUDIOBOOK' ? value : null;
-}
-
 function resourceFormat(value: unknown): ResourceFormat | null {
   return value === 'COMIC' || value === 'CBZ' || value === 'CBR' || value === 'RAR' || value === 'ZIP' || value === 'EPUB' || value === 'PDF' || value === 'AUDIO' || value === 'MP3' || value === 'M4A' || value === 'M4B' || value === 'MOBI' || value === 'AZW' || value === 'AZW3' || value === 'PRC' || value === 'FB2' || value === 'TXT' || value === 'IMAGE_DIR' || value === 'AUDIOBOOK_DIR' ? value : null;
 }
@@ -63,10 +59,6 @@ function readerType(value: unknown, format: ResourceFormat): ReaderType {
   if (format === 'COMIC' || format === 'CBZ' || format === 'CBR' || format === 'RAR' || format === 'ZIP' || format === 'IMAGE_DIR') return 'comic';
   if (format === 'AUDIO' || format === 'MP3' || format === 'M4A' || format === 'M4B' || format === 'AUDIOBOOK_DIR') return 'audio';
   return 'reflowable';
-}
-
-function classificationSource(value: unknown): ClassificationSource {
-  return value === 'AUTO' || value === 'LIBRARY_RULE' || value === 'USER' ? value : 'AUTO';
 }
 
 function mapResource(value: unknown): ReadableResourceView | null {
@@ -105,7 +97,6 @@ function mapResource(value: unknown): ReadableResourceView | null {
       downloadUrl
     }];
   });
-  const classification = record(item.classification);
   return {
     id,
     bookId,
@@ -116,11 +107,6 @@ function mapResource(value: unknown): ReadableResourceView | null {
     sortOrder: finiteNumber(item.sortOrder),
     format,
     readerType: readerType(item.readerType, format),
-    classification: {
-      source: classificationSource(classification.source),
-      reason: stringValue(classification.reason, 'FORMAT_DEFAULT'),
-      suggestedMediaKind: mediaKind(classification.suggestedMediaKind)
-    },
     publisher: nullableString(item.publisher),
     publishedAt: nullableString(item.publishedAt),
     language: nullableString(item.language),
@@ -375,18 +361,13 @@ export type MetadataProviderOption = Readonly<{
   id: string;
   name: string;
   enabled: boolean;
-  mediaKinds: string[];
+  priority: number;
   mode: string;
-}>;
-
-export type MetadataProviderPipeline = Readonly<{
-  mediaKind: string;
-  providers: ReadonlyArray<Readonly<{ providerId: string; enabled: boolean }>>;
 }>;
 
 export async function fetchMetadataProviders(
   signal?: AbortSignal,
-): Promise<Readonly<{ providers: MetadataProviderOption[]; pipelines: MetadataProviderPipeline[] }>> {
+): Promise<Readonly<{ providers: MetadataProviderOption[] }>> {
   const data = record(await apiJson('/api/metadata/providers', { signal }));
   const providers = (Array.isArray(data.providers) ? data.providers : []).flatMap((value) => {
     const item = record(value);
@@ -397,24 +378,36 @@ export async function fetchMetadataProviders(
       id,
       name,
       enabled: item.enabled === true,
-      mediaKinds: Array.isArray(item.mediaKinds)
-        ? item.mediaKinds.filter((kind): kind is string => typeof kind === 'string')
-        : [],
+      priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
       mode: stringValue(item.mode)
     }];
   });
-  const pipelines = (Array.isArray(data.pipelines) ? data.pipelines : []).flatMap((value) => {
+  providers.sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+  return { providers };
+}
+
+export async function updateMetadataProviderOrder(
+  items: ReadonlyArray<Readonly<{ providerId: string; enabled: boolean }>>
+): Promise<Readonly<{ providers: MetadataProviderOption[] }>> {
+  const data = record(await apiJson('/api/metadata/provider-order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items })
+  }));
+  const providers = (Array.isArray(data.providers) ? data.providers : []).flatMap((value) => {
     const item = record(value);
-    const mediaKind = stringValue(item.mediaKind).trim();
-    if (!mediaKind) return [];
-    const pipelineProviders = (Array.isArray(item.providers) ? item.providers : []).flatMap((providerValue) => {
-      const provider = record(providerValue);
-      const providerId = stringValue(provider.providerId).trim();
-      return providerId ? [{ providerId, enabled: provider.enabled === true }] : [];
-    });
-    return [{ mediaKind, providers: pipelineProviders }];
+    const id = stringValue(item.id).trim();
+    if (!id) return [];
+    return [{
+      id,
+      name: stringValue(item.name, id),
+      enabled: item.enabled === true,
+      priority: finiteNumber(item.priority, Number.MAX_SAFE_INTEGER),
+      mode: stringValue(item.mode)
+    }];
   });
-  return { providers, pipelines };
+  providers.sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+  return { providers };
 }
 
 function mapResourceDetailUnit(value: unknown): ResourceDetailUnit | null {
@@ -496,53 +489,21 @@ export async function regenerateResourceCover(bookId: string, resourceId: string
   await runResourceAction(bookId, resourceId, 'cover/regenerate');
 }
 
+export async function uploadResourceCover(bookId: string, resourceId: string, cover: File): Promise<void> {
+  const form = new FormData();
+  form.set('cover', cover);
+  await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/cover`, {
+    method: 'PUT',
+    body: form
+  });
+}
+
 export async function deleteResourceSource(bookId: string, resourceId: string, confirmation: string): Promise<void> {
   await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/source`, {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
     body: JSON.stringify({ confirmation })
   });
-}
-
-export async function reclassifyResource(
-  bookId: string,
-  resourceId: string,
-  targetMediaKind: MediaKind,
-  applyTo: 'RESOURCE' | 'SAME_MEDIA_KIND'
-): Promise<string | null> {
-  const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/reclassify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ targetMediaKind, applyTo })
-  }));
-  return nullableString(record(data.operation).id);
-}
-
-export async function undoLibraryOperation(operationId: string): Promise<void> {
-  await apiJson(`/api/library/operations/${encodeURIComponent(operationId)}/undo`, { method: 'POST' });
-}
-
-export type ResourceBatchRequest = Readonly<{
-  action: 'SET_MEDIA_KIND';
-  resourceIds: string[];
-  targetMediaKind: MediaKind;
-}>;
-
-export type ResourceBatchResult = Readonly<{
-  affectedResourceIds: string[];
-  operationIds: string[];
-}>;
-
-export async function runResourceBatchAction(bookId: string, request: ResourceBatchRequest): Promise<ResourceBatchResult> {
-  const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request)
-  }));
-  return {
-    affectedResourceIds: Array.isArray(data.affectedResourceIds) ? data.affectedResourceIds.filter((value): value is string => typeof value === 'string') : [],
-    operationIds: Array.isArray(data.operationIds) ? data.operationIds.filter((value): value is string => typeof value === 'string') : []
-  };
 }
 
 export function assetDownloadUrl(assetId: string): string {

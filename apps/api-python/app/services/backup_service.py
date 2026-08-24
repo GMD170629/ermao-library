@@ -74,10 +74,9 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerProgressMutations", "ReaderProgressMutation"),
     ("libraryOperations", "LibraryOperation"),
     ("sources", "Source"),
-    ("metadataProviderPipelines", "MetadataProviderPipeline"),
     ("systemSettings", "SystemSetting"),
 ]
-BACKUP_FORMAT_VERSION = 4
+BACKUP_FORMAT_VERSION = 5
 
 # The persistence adapter derives the actual order from ORM foreign keys.  This
 # list deliberately contains every exported table so the delete side clears
@@ -172,9 +171,6 @@ def counts_for_export(
         "organizeRuns": len(database_export.get("organizeRuns", [])),
         "libraryOperations": len(database_export.get("libraryOperations", [])),
         "sources": len(database_export.get("sources", [])),
-        "metadataProviderPipelines": len(
-            database_export.get("metadataProviderPipelines", [])
-        ),
         "systemSettings": len(database_export.get("systemSettings", [])),
         "coverIndexEntries": len(database_export.get("coverIndex", [])),
     }
@@ -234,7 +230,7 @@ def create_backup(
         "format": "zip",
         "contents": ["metadata.json", "database-export.json", "settings.json"],
         "scope": [
-            "database-v4",
+            "database-v5",
             "system-settings",
             "library-metadata",
             "reading-metadata",
