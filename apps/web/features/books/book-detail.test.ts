@@ -61,6 +61,7 @@ function book(resources: ReadableResourceView[], continueResourceId: string | nu
     gradient: '',
     continueResourceId,
     completed: false,
+    resourceImportSummary: { ready: resources.length, pending: 0, failed: 0 },
     resources
   };
 }

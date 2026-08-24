@@ -266,6 +266,12 @@ class ResourceView(HttpContractModel):
     assets: list[ResourceAssetView] = Field(default_factory=list)
 
 
+class ResourceImportSummary(HttpContractModel):
+    ready: int = Field(default=0, ge=0)
+    pending: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+
+
 class BookView(HttpContractModel):
     id: str
     library_id: str = Field(alias="libraryId")
@@ -291,6 +297,10 @@ class BookView(HttpContractModel):
     updated_at: datetime | None = Field(default=None, alias="updatedAt")
     gradient: str = ""
     resources: list[ResourceView] = Field(default_factory=list)
+    resource_import_summary: ResourceImportSummary = Field(
+        default_factory=ResourceImportSummary,
+        alias="resourceImportSummary",
+    )
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
     completed: bool
     continue_resource_id: str | None = Field(default=None, alias="continueResourceId")
@@ -335,6 +345,10 @@ class BookshelfBookSummary(HttpContractModel):
     author: str | None = None
     cover_url: str = Field(alias="coverUrl")
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    resource_import_summary: ResourceImportSummary = Field(
+        default_factory=ResourceImportSummary,
+        alias="resourceImportSummary",
+    )
     progress: float = Field(ge=0, le=100)
 
 
@@ -350,6 +364,10 @@ class ManagementBookListSummary(HttpContractModel):
     series_name: str | None = Field(default=None, alias="seriesName")
     tags: list[str] = Field(default_factory=list)
     available_media_kinds: list[MediaKind] = Field(alias="availableMediaKinds")
+    resource_import_summary: ResourceImportSummary = Field(
+        default_factory=ResourceImportSummary,
+        alias="resourceImportSummary",
+    )
     status_value: Literal["UNREAD", "READING", "FINISHED"] = Field(alias="statusValue")
     last_read_at: datetime | None = Field(default=None, alias="lastReadAt")
     imported_at: datetime | None = Field(default=None, alias="importedAt")

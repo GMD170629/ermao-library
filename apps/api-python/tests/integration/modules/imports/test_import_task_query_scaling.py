@@ -78,7 +78,12 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
         event.remove(engine, "before_cursor_execute", count_selects)
 
     assert total == task_count
-    assert summary == {"completed": 75_000, "failed": 25_000}
+    assert summary == {
+        "queued": 0,
+        "running": 0,
+        "completed": 75_000,
+        "failed": 25_000,
+    }
     assert len(views) == 10
     assert all(
         set(view)
@@ -86,8 +91,13 @@ def test_import_task_page_has_fixed_query_count(db_session: Session) -> None:
             "id",
             "kind",
             "libraryId",
+            "libraryName",
             "resourceId",
+            "resourceTitle",
             "sourceNodeId",
+            "sourceName",
+            "sourceRelativePath",
+            "bookTitle",
             "role",
             "state",
             "errorSummary",

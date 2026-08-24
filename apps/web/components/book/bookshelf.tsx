@@ -11,11 +11,12 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from 'react';
-import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { I18nText, useI18n as useAttributeI18n } from '@/i18n/provider';
 import { Cover, type CoverBook } from './cover';
 import { CoverReadingProgress, coverReadingProgressState } from './cover-reading-progress';
+import type { ResourceImportSummary } from '../../types/book';
 
-export type BookshelfItem = CoverBook & { id: string; progress: number };
+export type BookshelfItem = CoverBook & { id: string; progress: number; resourceImportSummary?: ResourceImportSummary };
 
 function shelfRows<T extends BookshelfItem>(books: T[], columns: number) {
   const rows: T[][] = [];
@@ -225,6 +226,7 @@ function ShelfBook<T extends BookshelfItem>({
           }}
         />
         <CoverReadingProgress progress={book.progress} surface="bookshelf" />
+        {book.resourceImportSummary?.pending ? <span className="absolute inset-x-1 bottom-1 rounded bg-amber-950/80 px-1 py-0.5 text-center text-[10px] font-medium text-white"><I18nText>导入中</I18nText></span> : null}
       </span>
     </button>
   );

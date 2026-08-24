@@ -34,7 +34,10 @@ from app.modules.library.infrastructure.book_covers import (
     SqlAlchemyBookCoverQueries,
     effective_book_cover_exists,
 )
-from app.modules.library.infrastructure.books import _book_record
+from app.modules.library.infrastructure.books import (
+    _book_record,
+    resource_import_summaries,
+)
 from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     reading_status_predicate,
@@ -352,9 +355,15 @@ def _project_books(
 ) -> list[dict[str, Any]]:
     book_ids = tuple(str(book.id) for book, _metadata in rows)
     cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids)
+    import_summaries = resource_import_summaries(db, book_ids)
     if projection == "full":
         return [
-            _book_record(book, metadata, cover_paths.get(str(book.id)))
+            _book_record(
+                book,
+                metadata,
+                cover_paths.get(str(book.id)),
+                import_summaries[str(book.id)],
+            )
             for book, metadata in rows
         ]
     resources_by_book = _resource_summaries(
@@ -397,6 +406,7 @@ def _project_books(
             "seriesName": metadata.series_name if metadata is not None else None,
             "tags": tags_by_book[book_id],
             "availableMediaKinds": media_kinds,
+            "resourceImportSummary": import_summaries[book_id].as_record(),
         }
         if projection == "bookshelf":
             projected.append(

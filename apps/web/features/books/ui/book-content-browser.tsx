@@ -75,6 +75,7 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
   const childResources = (contents?.entries ?? []).flatMap((entry) => entry.kind === 'FILE' && entry.resourceId ? [resourcesById.get(entry.resourceId)].filter((resource): resource is ReadableResourceView => resource !== undefined) : []);
   const visibleResources = currentResource ? [currentResource, ...childResources.filter((resource) => resource.id !== currentResource.id)] : childResources;
   const itemCount = sourceNodes.length + visibleResources.length;
+  const importSummary = book.resourceImportSummary;
 
   return <section className="mt-6 border-t border-stone-200 pt-8">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -92,8 +93,14 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
     </div>
 
     {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+    {importSummary.pending > 0 ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800" role="status" aria-live="polite">
+      {importSummary.ready > 0
+        ? t('已有可读资源，另有 {value0} 个资源正在导入', { value0: importSummary.pending })
+        : t('资源正在导入，请稍候')}
+    </div> : null}
+    {importSummary.ready === 0 && importSummary.pending === 0 && importSummary.failed > 0 ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><I18nText>资源导入失败</I18nText></div> : null}
     {loading ? <div className="flex min-h-48 items-center justify-center"><span className="text-sm text-stone-500"><I18nText>正在加载图书内容</I18nText></span></div> : null}
-    {!loading && itemCount === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>当前目录没有可见的来源目录或可读资源</I18nText></div> : null}
+    {!loading && itemCount === 0 && importSummary.pending === 0 && importSummary.failed === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>没有可读资源</I18nText></div> : null}
 
     {!loading && itemCount > 0 && layout === 'grid' ? <div className="mt-6 grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {sourceNodes.map((entry, index) => <SourceNodeCard key={entry.sourceNodeId} book={book} entry={entry} resource={entry.representativeResourceId ? resourcesById.get(entry.representativeResourceId) : undefined} position={index} canManage={canManage} onOpen={() => onNavigate(entry.sourceNodeId, entry)} onManage={(anchor) => onManageSourceNode(entry, anchor)} />)}

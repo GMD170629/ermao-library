@@ -165,6 +165,8 @@ def list_library_import_tasks(
             "pageSize": page_size,
             "total": total,
             "totalPages": total_pages,
+            "queued": summary["queued"],
+            "running": summary["running"],
             "completed": summary["completed"],
             "failed": summary["failed"],
         }

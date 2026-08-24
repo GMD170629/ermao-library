@@ -109,6 +109,12 @@ def _parse_json(value: Any, fallback: Any) -> Any:
         return fallback
 
 
+def _mark_cover_fallback(response: Response) -> Response:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Shuku-Cover-Fallback"] = "1"
+    return response
+
+
 @router.get(
     "/assets/{asset_id}",
     response_class=MediaAssetResponse,
@@ -294,6 +300,7 @@ def get_cover(
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
     cover_path_value: str | None = None
     cover_path: Path | None = None
+    using_fallback = False
     if source_node_id is not None:
         if book_id is None:
             return fail("条目不存在", status_code=404, code="COVER_NOT_FOUND")
@@ -332,12 +339,13 @@ def get_cover(
     ):
         stored_default = ensure_default_cover(settings)
         cover_path = media_streaming.stored_path(stored_default, settings)
+        using_fallback = True
     if request.query_params.get("size") == "small" and cover_path is not None:
         response = media_streaming.small_cover_response(
             cover_path, request, user.id, settings
         )
         if response is not None:
-            return response
+            return _mark_cover_fallback(response) if using_fallback else response
         default_path = media_streaming.stored_path(
             ensure_default_cover(settings), settings
         )
@@ -346,14 +354,15 @@ def get_cover(
                 default_path, request, user.id, settings
             )
             if response is not None:
-                return response
-    return media_streaming.send_file(
+                return _mark_cover_fallback(response)
+    response = media_streaming.send_file(
         cover_path,
         request,
         user.id,
         route="cover",
         asset_id=cover_id,
     )
+    return _mark_cover_fallback(response) if using_fallback else response
 
 
 @router.get("/metadata/cover-proxy", response_class=MediaImageResponse)

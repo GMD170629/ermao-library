@@ -13,10 +13,12 @@ from sqlalchemy import (
     and_,
     cast,
     exists,
+    false,
     func,
     not_,
     or_,
     select,
+    true,
 )
 from sqlalchemy.orm import Session, aliased
 
@@ -344,8 +346,16 @@ def _condition(
             condition,
         )
     if field == "library":
-        expression = LibraryBook.library_id
-        return _text(expression, condition)
+        if condition.operator == "is_empty":
+            return false()
+        if condition.operator == "is_not_empty":
+            return true()
+        library_id_value = str(condition.value or "")
+        if condition.operator == "equals":
+            return LibraryBook.library_id == library_id_value
+        if condition.operator == "not_equals":
+            return LibraryBook.library_id != library_id_value
+        raise ValueError(f"Unsupported library filter operator: {condition.operator}")
     if field == "sourcePath":
         asset = aliased(LibraryResourceAsset)
         return _relation_text(

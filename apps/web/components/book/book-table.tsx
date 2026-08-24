@@ -126,6 +126,9 @@ export function BookTable({
   }
 
   function mediaLabel(book: ManagementBookSummary) {
+    if (book.resourceImportSummary.ready === 0 && book.resourceImportSummary.pending > 0) return i18nAttribute('导入中');
+    if (book.resourceImportSummary.ready === 0 && book.resourceImportSummary.failed > 0) return i18nAttribute('导入失败');
+    if (book.resourceImportSummary.ready === 0) return i18nAttribute('无可读资源');
     return mediaKindsLabel(book.availableMediaKinds, locale) || '—';
   }
 

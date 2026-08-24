@@ -138,7 +138,7 @@ class ProcessReadableResourceImportTask:
                 )
                 prepared_cover = None
 
-        schedule_sidecar = False
+        import_succeeded = False
         with self._uow.transaction():
             if parsed.ok and parsed.asset is not None:
                 asset_id = self._books_resources.upsert_asset(
@@ -178,8 +178,7 @@ class ProcessReadableResourceImportTask:
                             resource_id,
                             parsed.asset.technical.page_count,
                         )
-                self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
-                schedule_sidecar = True
+                import_succeeded = True
                 outcome = "ok"
             else:
                 summary = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
@@ -202,6 +201,14 @@ class ProcessReadableResourceImportTask:
                 )
                 outcome = "failed"
 
+        if (
+            not import_succeeded
+            and prepared_cover is not None
+            and self._covers is not None
+        ):
+            self._covers.discard(prepared_cover)
+            prepared_cover = None
+
         if prepared_cover is not None and self._covers is not None:
             try:
                 self._covers.publish(prepared_cover)
@@ -212,6 +219,13 @@ class ProcessReadableResourceImportTask:
                         resource_id=resource_id,
                         expected_path=prepared_cover.stored_path,
                     )
+                    self._queue.mark_failed(
+                        task_id,
+                        error_summary="COVER_PUBLISH_FAILED",
+                        finished_at=self._clock.now(),
+                    )
+                import_succeeded = False
+                outcome = "failed"
                 self._log.emit(
                     "readable_resource.local_cover.publish_failed",
                     library_id=library_id,
@@ -221,7 +235,9 @@ class ProcessReadableResourceImportTask:
                     outcome="infrastructure_failure",
                 )
 
-        if schedule_sidecar:
+        if import_succeeded:
+            with self._uow.transaction():
+                self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
             self._sidecar.schedule_after_commit(resource_id)
         self._log.emit(
             "readable_resource.task.finished",

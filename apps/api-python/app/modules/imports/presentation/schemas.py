@@ -120,8 +120,13 @@ class LibraryImportTaskView(HttpContractModel):
     id: str
     kind: Literal["SCAN_LIBRARY", "CONTINUE_SOURCE", "IMPORT_ASSET"]
     library_id: str = Field(alias="libraryId")
+    library_name: str | None = Field(default=None, alias="libraryName")
     resource_id: str | None = Field(default=None, alias="resourceId")
+    resource_title: str | None = Field(default=None, alias="resourceTitle")
     source_node_id: str | None = Field(default=None, alias="sourceNodeId")
+    source_name: str | None = Field(default=None, alias="sourceName")
+    source_relative_path: str | None = Field(default=None, alias="sourceRelativePath")
+    book_title: str | None = Field(default=None, alias="bookTitle")
     role: Literal["PRIMARY", "TRACK", "PAGE", "SIDECAR", "SUPPLEMENT"] | None = None
     state: Literal["QUEUED", "RUNNING", "SUCCEEDED", "FAILED"]
     error_summary: str | None = Field(default=None, alias="errorSummary")
@@ -136,6 +141,8 @@ class LibraryImportTaskListPayload(HttpContractModel):
     page_size: int = Field(alias="pageSize")
     total: int
     total_pages: int = Field(alias="totalPages")
+    queued: int
+    running: int
     completed: int
     failed: int
 

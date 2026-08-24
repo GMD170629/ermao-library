@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from sqlalchemy import ColumnElement, exists, func, select
+from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -20,7 +21,10 @@ from app.core.authorization import (
 )
 from app.models import (
     Library,
+    LibraryBookMetadata,
     LibraryImportTask,
+    LibraryReadableResource,
+    LibraryReadableResourceMetadata,
     LibrarySourceNode,
     UserLibraryAccess,
 )
@@ -125,13 +129,26 @@ def source_node_library_id(db: Session, source_node_id: str) -> str | None:
     )
 
 
-def _task_view(row: LibraryImportTask) -> dict[str, object]:
+def _task_view(
+    row: LibraryImportTask,
+    *,
+    library_name: str,
+    source_name: str | None,
+    source_relative_path: str | None,
+    resource_title: str | None,
+    book_title: str | None,
+) -> dict[str, object]:
     return {
         "id": row.id,
         "kind": row.kind,
         "libraryId": row.library_id,
+        "libraryName": library_name,
         "resourceId": row.resource_id,
+        "resourceTitle": resource_title,
         "sourceNodeId": row.source_node_id,
+        "sourceName": source_name,
+        "sourceRelativePath": source_relative_path,
+        "bookTitle": book_title,
         "role": row.role,
         "state": row.state,
         "errorSummary": row.error_summary,
@@ -141,27 +158,81 @@ def _task_view(row: LibraryImportTask) -> dict[str, object]:
     }
 
 
+def _task_projection_statement():
+    return (
+        select(
+            LibraryImportTask,
+            Library.name.label("library_name"),
+            LibrarySourceNode.name.label("source_name"),
+            LibrarySourceNode.relative_path.label("source_relative_path"),
+            LibraryReadableResourceMetadata.title.label("resource_title"),
+            LibraryBookMetadata.title.label("book_title"),
+        )
+        .join(Library, Library.id == LibraryImportTask.library_id)
+        .outerjoin(
+            LibrarySourceNode,
+            LibrarySourceNode.id == LibraryImportTask.source_node_id,
+        )
+        .outerjoin(
+            LibraryReadableResource,
+            LibraryReadableResource.id == LibraryImportTask.resource_id,
+        )
+        .outerjoin(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .outerjoin(
+            LibraryBookMetadata,
+            LibraryBookMetadata.book_id == LibraryReadableResource.book_id,
+        )
+    )
+
+
+def _project_task_row(
+    row: Row[
+        tuple[
+            LibraryImportTask,
+            str,
+            str | None,
+            str | None,
+            str | None,
+            str | None,
+        ]
+    ],
+) -> dict[str, object]:
+    (
+        task,
+        library_name,
+        source_name,
+        source_relative_path,
+        resource_title,
+        book_title,
+    ) = row
+    return _task_view(
+        task,
+        library_name=library_name,
+        source_name=source_name,
+        source_relative_path=source_relative_path,
+        resource_title=resource_title,
+        book_title=book_title,
+    )
+
+
 def get_import_task(
     db: Session,
     task_id: str,
     context: AuthorizationContext | None = None,
 ) -> dict[str, object] | None:
-    row = db.get(LibraryImportTask, task_id)
-    if row is None:
-        return None
+    filters = [LibraryImportTask.id == task_id]
     if context is not None:
-        visible = db.scalar(
-            select(LibraryImportTask.id).where(
-                LibraryImportTask.id == task_id,
-                library_visibility_predicate(
-                    context,
-                    cast(ColumnElement[str], LibraryImportTask.library_id),
-                ),
+        filters.append(
+            library_visibility_predicate(
+                context,
+                cast(ColumnElement[str], LibraryImportTask.library_id),
             )
         )
-        if visible is None:
-            return None
-    return _task_view(row)
+    row = db.execute(_task_projection_statement().where(*filters)).one_or_none()
+    return None if row is None else _project_task_row(row)
 
 
 def list_import_tasks_page(
@@ -177,9 +248,10 @@ def list_import_tasks_page(
         context,
         cast(ColumnElement[str], LibraryImportTask.library_id),
     )
-    filters = [scope]
+    scope_filters = [scope]
     if library_id is not None:
-        filters.append(LibraryImportTask.library_id == library_id)
+        scope_filters.append(LibraryImportTask.library_id == library_id)
+    filters = list(scope_filters)
     normalized_state = str(state or "").strip().upper()
     if normalized_state and normalized_state != "ALL":
         filters.append(LibraryImportTask.state == normalized_state)
@@ -187,35 +259,45 @@ def list_import_tasks_page(
         db.scalar(select(func.count()).select_from(LibraryImportTask).where(*filters))
         or 0
     )
-    completed = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryImportTask)
-            .where(*filters, LibraryImportTask.state == "SUCCEEDED")
+    summary = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
+    summary_keys = {
+        "QUEUED": "queued",
+        "RUNNING": "running",
+        "SUCCEEDED": "completed",
+        "FAILED": "failed",
+    }
+    summary_rows = db.execute(
+        select(
+            LibraryImportTask.kind,
+            LibraryImportTask.state,
+            func.count().label("task_count"),
         )
-        or 0
-    )
-    failed = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryImportTask)
-            .where(*filters, LibraryImportTask.state == "FAILED")
-        )
-        or 0
-    )
+        .where(*scope_filters)
+        .group_by(LibraryImportTask.kind, LibraryImportTask.state)
+    ).all()
+    for summary_row in summary_rows:
+        key = summary_keys.get(str(summary_row.state))
+        if key is not None:
+            summary[key] += int(summary_row.task_count or 0)
     total_pages = max(1, (total + page_size - 1) // page_size)
     normalized_page = min(max(1, page), total_pages)
-    rows = db.scalars(
-        select(LibraryImportTask)
+    page_task_ids = (
+        select(LibraryImportTask.id.label("task_id"))
         .where(*filters)
         .order_by(LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc())
         .limit(page_size)
         .offset((normalized_page - 1) * page_size)
+        .subquery()
+    )
+    rows = db.execute(
+        _task_projection_statement()
+        .join(page_task_ids, page_task_ids.c.task_id == LibraryImportTask.id)
+        .order_by(LibraryImportTask.created_at.desc(), LibraryImportTask.id.desc())
     ).all()
     return (
-        [_task_view(row) for row in rows],
+        [_project_task_row(row) for row in rows],
         total,
-        {"completed": completed, "failed": failed},
+        summary,
     )
 
 

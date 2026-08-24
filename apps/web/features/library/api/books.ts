@@ -1,4 +1,4 @@
-import type { MediaKind } from '../../../types/book';
+import type { MediaKind, ResourceImportSummary } from '../../../types/book';
 
 type ReadingStatus = 'UNREAD' | 'READING' | 'FINISHED';
 type LibraryProjection = 'bookshelf' | 'management';
@@ -10,6 +10,7 @@ export type BookshelfBookSummary = Readonly<{
   author: string | null;
   coverUrl: string;
   availableMediaKinds: MediaKind[];
+  resourceImportSummary: ResourceImportSummary;
   progress: number;
 }>;
 
@@ -24,6 +25,7 @@ export type ManagementBookSummary = Readonly<{
   seriesName: string | null;
   tags: string[];
   availableMediaKinds: MediaKind[];
+  resourceImportSummary: ResourceImportSummary;
   statusValue: ReadingStatus;
   lastReadAt: string | null;
   importedAt: string | null;
@@ -75,6 +77,15 @@ function parseMediaKinds(value: unknown): MediaKind[] {
   });
 }
 
+function parseResourceImportSummary(value: unknown): ResourceImportSummary {
+  const summary = record(value);
+  return {
+    ready: Math.max(0, Math.trunc(finiteNumber(summary.ready, 0))),
+    pending: Math.max(0, Math.trunc(finiteNumber(summary.pending, 0))),
+    failed: Math.max(0, Math.trunc(finiteNumber(summary.failed, 0)))
+  };
+}
+
 function mapBookshelfBook(value: unknown): BookshelfBookSummary {
   const item = record(value);
   return {
@@ -84,6 +95,7 @@ function mapBookshelfBook(value: unknown): BookshelfBookSummary {
     author: optionalString(item.author),
     coverUrl: requiredString(item.coverUrl, 'coverUrl'),
     availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
+    resourceImportSummary: parseResourceImportSummary(item.resourceImportSummary),
     progress: progressPercent(item.progress)
   };
 }
@@ -107,6 +119,7 @@ function mapManagementBook(value: unknown): ManagementBookSummary {
       ? item.tags.filter((tag): tag is string => typeof tag === 'string')
       : [],
     availableMediaKinds: parseMediaKinds(item.availableMediaKinds),
+    resourceImportSummary: parseResourceImportSummary(item.resourceImportSummary),
     statusValue,
     lastReadAt: optionalString(item.lastReadAt),
     importedAt: optionalString(item.importedAt)

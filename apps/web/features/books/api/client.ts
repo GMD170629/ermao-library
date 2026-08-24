@@ -1,4 +1,4 @@
-import type { ClassificationSource, MediaKind, ReaderType, ReadableResourceView, ResourceFormat, BookView } from '../../../types/book';
+import type { ClassificationSource, MediaKind, ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
 import type {
   ResourceChapterDetailUnit,
@@ -26,6 +26,15 @@ function nullableString(value: unknown): string | null {
 
 function finiteNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function resourceImportSummary(value: unknown): ResourceImportSummary {
+  const summary = record(value);
+  return {
+    ready: Math.max(0, Math.trunc(finiteNumber(summary.ready))),
+    pending: Math.max(0, Math.trunc(finiteNumber(summary.pending))),
+    failed: Math.max(0, Math.trunc(finiteNumber(summary.failed)))
+  };
 }
 
 function nullableNumber(value: unknown): number | null {
@@ -177,6 +186,7 @@ export function mapBookView(value: unknown): BookView {
     continueResourceProgress: Math.max(0, Math.min(100, finiteNumber(root.continueResourceProgress))),
     continueReaderType: root.continueReaderType === 'audio' || root.continueReaderType === 'comic' || root.continueReaderType === 'pdf' || root.continueReaderType === 'reflowable' ? root.continueReaderType : null,
     completed: root.completed === true,
+    resourceImportSummary: resourceImportSummary(root.resourceImportSummary),
     resources
   };
 }

@@ -200,6 +200,7 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
         "author": None,
         "coverUrl": "/api/books/ready-book/cover?size=medium",
         "availableMediaKinds": ["EBOOK"],
+        "resourceImportSummary": {"ready": 1, "pending": 0, "failed": 0},
         "progress": 0.0,
     }
 
@@ -218,6 +219,11 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
     management_item = management.json()["data"]["books"][0]
     assert management_item["author"] is None
     assert management_item["availableMediaKinds"] == ["EBOOK"]
+    assert management_item["resourceImportSummary"] == {
+        "ready": 1,
+        "pending": 0,
+        "failed": 0,
+    }
     assert management_item["statusValue"] == "UNREAD"
     assert management_item["gradient"] == ""
     assert management_item["coverStatus"] == "PENDING"
@@ -228,6 +234,11 @@ def test_book_list_projections_expose_nullable_author_and_ready_media(
     assert full_item["author"] is None
     assert [resource["id"] for resource in full_item["resources"]] == ["ready-resource"]
     assert full_item["availableMediaKinds"] == ["EBOOK"]
+    assert full_item["resourceImportSummary"] == {
+        "ready": 1,
+        "pending": 0,
+        "failed": 0,
+    }
 
 
 def test_book_list_rejects_unknown_projection(client: TestClient) -> None:

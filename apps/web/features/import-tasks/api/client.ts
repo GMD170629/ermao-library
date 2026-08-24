@@ -6,8 +6,13 @@ export type LibraryImportTask = Readonly<{
   id: string;
   kind: ImportTaskKind;
   libraryId: string;
+  libraryName: string | null;
   resourceId: string | null;
+  resourceTitle: string | null;
   sourceNodeId: string | null;
+  sourceName: string | null;
+  sourceRelativePath: string | null;
+  bookTitle: string | null;
   role: ImportTaskRole | null;
   state: ImportTaskState;
   errorSummary: string | null;
@@ -18,7 +23,7 @@ export type LibraryImportTask = Readonly<{
 
 export type ImportTasksPage = Readonly<{
   tasks: LibraryImportTask[];
-  summary: Readonly<{ completed: number; failed: number }>;
+  summary: Readonly<{ queued: number; running: number; completed: number; failed: number }>;
   page: number;
   pageSize: number;
   total: number;
@@ -55,6 +60,12 @@ function nullableString(value: unknown, field: string): string | null {
   return requiredString(value, field);
 }
 
+function nullableDisplayString(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new Error(`导入任务响应缺少 ${field}`);
+  return value.trim() ? value : null;
+}
+
 function nonNegativeInteger(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
 }
@@ -85,8 +96,13 @@ export function parseLibraryImportTask(value: unknown): LibraryImportTask {
     id: requiredString(value.id, 'id'),
     kind: taskKind(value.kind),
     libraryId: requiredString(value.libraryId, 'libraryId'),
+    libraryName: nullableDisplayString(value.libraryName, 'libraryName'),
     resourceId: nullableString(value.resourceId, 'resourceId'),
+    resourceTitle: nullableDisplayString(value.resourceTitle, 'resourceTitle'),
     sourceNodeId: nullableString(value.sourceNodeId, 'sourceNodeId'),
+    sourceName: nullableDisplayString(value.sourceName, 'sourceName'),
+    sourceRelativePath: nullableDisplayString(value.sourceRelativePath, 'sourceRelativePath'),
+    bookTitle: nullableDisplayString(value.bookTitle, 'bookTitle'),
     role: taskRole(value.role),
     state: taskState(value.state),
     errorSummary: nullableString(value.errorSummary, 'errorSummary'),
@@ -103,6 +119,8 @@ export function parseImportTasksPage(value: unknown): ImportTasksPage {
   return {
     tasks: value.tasks.map(parseLibraryImportTask),
     summary: {
+      queued: nonNegativeInteger(value.queued),
+      running: nonNegativeInteger(value.running),
       completed: nonNegativeInteger(value.completed),
       failed: nonNegativeInteger(value.failed)
     },

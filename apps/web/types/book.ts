@@ -8,6 +8,12 @@ export type ClassificationSource = 'AUTO' | 'LIBRARY_RULE' | 'USER';
 export type PublicationStatus = 'UNKNOWN' | 'ONGOING' | 'COMPLETED' | 'HIATUS' | 'CANCELLED';
 export type TrackingStatus = 'NOT_TRACKING' | 'TRACKING' | 'PAUSED' | 'IGNORED';
 
+export type ResourceImportSummary = Readonly<{
+  ready: number;
+  pending: number;
+  failed: number;
+}>;
+
 export type ResourceAssetView = Readonly<{
   id: string;
   resourceId: string;
@@ -91,6 +97,7 @@ export type BookView = Readonly<{
   continueReaderType?: ReaderType | null;
   completed: boolean;
   resources: ReadableResourceView[];
+  resourceImportSummary: ResourceImportSummary;
   availableMediaKinds?: MediaKind[];
 }>;
 

@@ -189,11 +189,12 @@ async function networkFirstApi(request) {
 }
 
 async function staleWhileRevalidate(request, cacheName) {
-  if (!cacheName) return fetch(request);
+  const refreshRequest = new Request(request, { cache: 'no-store' });
+  if (!cacheName) return fetch(refreshRequest);
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-  const refresh = fetch(request).then(async (response) => {
-    if (response.ok) {
+  const refresh = fetch(refreshRequest).then(async (response) => {
+    if (response.ok && response.headers.get('X-Shuku-Cover-Fallback') !== '1') {
       await cache.put(request, response.clone());
       await trimCache(cacheName, 'cover');
     }

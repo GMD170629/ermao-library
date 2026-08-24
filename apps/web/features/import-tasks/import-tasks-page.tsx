@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileArchive, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import type { BadgeTone } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -42,13 +42,41 @@ function statusLabel(state: ImportTaskState): string {
 function kindLabel(kind: LibraryImportTask['kind']): string {
   return {
     SCAN_LIBRARY: '扫描书库',
-    CONTINUE_SOURCE: '继续导入资源',
+    CONTINUE_SOURCE: '扫描来源',
     IMPORT_ASSET: '导入资源资产'
   }[kind];
 }
 
-function taskTarget(task: LibraryImportTask): string {
-  return task.resourceId ?? task.sourceNodeId ?? task.libraryId;
+function roleLabel(role: NonNullable<LibraryImportTask['role']>): string {
+  return {
+    PRIMARY: '主文件',
+    TRACK: '音轨',
+    PAGE: '页面',
+    SIDECAR: '元数据附属文件',
+    SUPPLEMENT: '补充文件'
+  }[role];
+}
+
+function taskTitle(task: LibraryImportTask): string {
+  if (task.kind === 'SCAN_LIBRARY') return task.libraryName ?? task.libraryId;
+  if (task.kind === 'CONTINUE_SOURCE') {
+    return task.sourceRelativePath ?? task.sourceName ?? task.sourceNodeId ?? task.libraryName ?? task.libraryId;
+  }
+  return task.sourceRelativePath ?? task.sourceName ?? task.resourceTitle ?? task.resourceId ?? task.sourceNodeId ?? task.libraryName ?? task.libraryId;
+}
+
+function taskContext(task: LibraryImportTask): string[] {
+  if (task.kind === 'SCAN_LIBRARY') return [];
+  if (task.kind === 'CONTINUE_SOURCE') return [task.libraryName].filter((value): value is string => Boolean(value));
+  return [task.bookTitle, task.resourceTitle, task.libraryName]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index && value !== taskTitle(task));
+}
+
+function completionLabel(kind: LibraryImportTask['kind']): string {
+  if (kind === 'SCAN_LIBRARY') return '书库扫描完成';
+  if (kind === 'CONTINUE_SOURCE') return '来源扫描完成';
+  return '本项导入完成';
 }
 
 function taskDate(value: string | null, locale: string): string {
@@ -64,7 +92,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
   const [selectedLibraryId, setSelectedLibraryId] = useState('');
   const [librariesLoading, setLibrariesLoading] = useState(true);
   const [tasks, setTasks] = useState<LibraryImportTask[]>([]);
-  const [summary, setSummary] = useState({ completed: 0, failed: 0 });
+  const [summary, setSummary] = useState({ queued: 0, running: 0, completed: 0, failed: 0 });
   const [page, setPage] = useState(1);
   const [stateFilter, setStateFilter] = useState<ImportTaskStateFilter>('ALL');
   const [pageSize, setPageSize] = useState<PageSize>(10);
@@ -97,17 +125,17 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     return () => controller.abort();
   }, [t, toast]);
 
-  const loadTasks = useCallback(async (targetPage: number, signal?: AbortSignal) => {
+  const loadTasks = useCallback(async (targetPage: number, signal?: AbortSignal, silent = false) => {
     const requestId = ++requestIdRef.current;
     if (!selectedLibraryId) {
       setTasks([]);
-      setSummary({ completed: 0, failed: 0 });
+      setSummary({ queued: 0, running: 0, completed: 0, failed: 0 });
       setTotal(0);
       setTotalPages(1);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const result = await fetchImportTasks(selectedLibraryId, targetPage, pageSize, stateFilter === 'ALL' ? null : stateFilter, signal);
       if (requestId !== requestIdRef.current) return;
@@ -121,10 +149,11 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     } catch (reason) {
       if (signal?.aborted || requestId !== requestIdRef.current) return;
       const message = reason instanceof Error ? reason.message : t('读取导入任务失败');
+      if (silent) return;
       setError(message);
       toast.error(t('读取导入任务失败'), message);
     } finally {
-      if (!signal?.aborted && requestId === requestIdRef.current) setLoading(false);
+      if (!silent && !signal?.aborted && requestId === requestIdRef.current) setLoading(false);
     }
   }, [pageSize, selectedLibraryId, stateFilter, t, toast]);
 
@@ -134,10 +163,30 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     return () => controller.abort();
   }, [loadTasks, page]);
 
-  const activeTask = useMemo(
-    () => tasks.find((task) => task.state === 'QUEUED' || task.state === 'RUNNING') ?? null,
-    [tasks]
-  );
+  const activeImportCount = summary.queued + summary.running;
+
+  useEffect(() => {
+    if (!selectedLibraryId || activeImportCount === 0) return;
+    let controller: AbortController | null = null;
+    const refreshActiveTasks = () => {
+      if (document.visibilityState !== 'visible') return;
+      controller?.abort();
+      controller = new AbortController();
+      void loadTasks(page, controller.signal, true);
+    };
+    const intervalId = window.setInterval(refreshActiveTasks, 2_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshActiveTasks();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshActiveTasks);
+    return () => {
+      controller?.abort();
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshActiveTasks);
+    };
+  }, [activeImportCount, loadTasks, page, selectedLibraryId]);
 
   async function continueTask(task: LibraryImportTask) {
     if (task.state !== 'FAILED' || !task.sourceNodeId) return;
@@ -225,11 +274,13 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       {!embedded ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           {[
+            { label: '等待中', value: summary.queued },
+            { label: '导入中', value: summary.running },
             { label: '已完成', value: summary.completed },
             { label: '失败', value: summary.failed },
-            { label: '当前页', value: total }
+            { label: '筛选结果', value: total }
           ].map(({ label, value }) => (
             <div key={label} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-xs text-slate-500">{t(label)}</div>
@@ -239,11 +290,11 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : null}
 
-      {activeTask ? (
+      {activeImportCount > 0 ? (
         <div className="rounded-[28px] border border-amber-100 bg-amber-50 p-5 text-amber-800">
-          <div className="flex items-center gap-2 font-semibold"><Clock size={18} /><I18nText>当前导入任务</I18nText></div>
-          <div className="mt-2 text-sm"><I18nText>{kindLabel(activeTask.kind)}</I18nText><span data-i18n-skip> · {taskTarget(activeTask)}</span></div>
-          <Badge tone={statusTone(activeTask.state)} className="mt-3">{t(statusLabel(activeTask.state))}</Badge>
+          <div className="flex items-center gap-2 font-semibold"><Clock size={18} /><I18nText>导入进行中</I18nText></div>
+          <div className="mt-2 text-sm">{t('还有 {value0} 个任务正在处理', { value0: activeImportCount })}</div>
+          <div className="mt-1 text-xs text-amber-700">{t('等待中 {value0} · 运行中 {value1}', { value0: summary.queued, value1: summary.running })}</div>
         </div>
       ) : null}
 
@@ -261,14 +312,18 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <span><I18nText>{kindLabel(task.kind)}</I18nText></span>
                     <Badge tone={statusTone(task.state)}>{t(statusLabel(task.state))}</Badge>
-                    {task.role ? <Badge>{task.role}</Badge> : null}
+                    {task.role ? <Badge>{t(roleLabel(task.role))}</Badge> : null}
                   </div>
-                  <div data-i18n-skip className="mt-2 break-all text-sm text-slate-500">{taskTarget(task)}</div>
-                  <div className="mt-1 break-all text-xs text-slate-400">
-                    <I18nText>书库</I18nText> · {task.libraryId}
-                    {task.resourceId ? <> · <I18nText>资源</I18nText> · {task.resourceId}</> : null}
-                    {task.sourceNodeId ? <> · <I18nText>源节点</I18nText> · {task.sourceNodeId}</> : null}
-                  </div>
+                  <div data-i18n-skip className="mt-2 break-all text-sm font-medium text-slate-700">{taskTitle(task)}</div>
+                  {taskContext(task).length > 0 ? <div data-i18n-skip className="mt-1 break-all text-xs text-slate-500">{taskContext(task).join(' · ')}</div> : null}
+                  <details className="mt-2 text-xs text-slate-400">
+                    <summary className="cursor-pointer select-none text-slate-500"><I18nText>技术信息</I18nText></summary>
+                    <div data-i18n-skip className="mt-2 break-all font-mono leading-5">
+                      task: {task.id}<br />library: {task.libraryId}
+                      {task.resourceId ? <><br />resource: {task.resourceId}</> : null}
+                      {task.sourceNodeId ? <><br />source: {task.sourceNodeId}</> : null}
+                    </div>
+                  </details>
                   {task.errorSummary ? <div className="mt-3 flex gap-2 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle size={16} className="mt-0.5 shrink-0" /><span>{task.errorSummary}</span></div> : null}
                 </div>
               </div>
@@ -281,7 +336,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
                 ) : null}
               </div>
             </div>
-            {task.state === 'SUCCEEDED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>导入完成</I18nText></div> : null}
+            {task.state === 'SUCCEEDED' ? <div className="mt-4 flex items-center gap-2 text-sm text-emerald-600"><CheckCircle2 size={16} /><I18nText>{completionLabel(task.kind)}</I18nText></div> : null}
           </div>
         ))}
       </div>

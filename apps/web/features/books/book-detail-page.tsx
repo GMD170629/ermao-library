@@ -200,8 +200,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const requestedResourcePage = resourcePageFromQuery(searchParams.get('resourcePage'));
   const returnHref = bookDetailReturnHref(searchParams.get('returnTo'));
 
-  const refresh = useCallback(async () => {
-    const next = await fetchBook(bookId, undefined, requestedResourceId);
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const next = await fetchBook(bookId, signal, requestedResourceId);
     setBook(next);
   }, [bookId, requestedResourceId]);
 
@@ -214,6 +214,31 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [bookId, requestedResourceId, t]);
+
+  useEffect(() => {
+    if (!book || book.resourceImportSummary.pending === 0) return;
+    let controller: AbortController | null = null;
+    const refreshPendingResources = () => {
+      if (document.visibilityState !== 'visible') return;
+      controller?.abort();
+      controller = new AbortController();
+      void refresh(controller.signal)
+        .then(() => setContentsRevision((current) => current + 1))
+        .catch(() => undefined);
+    };
+    const intervalId = window.setInterval(refreshPendingResources, 2_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshPendingResources();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshPendingResources);
+    return () => {
+      controller?.abort();
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshPendingResources);
+    };
+  }, [book, refresh]);
 
   useEffect(() => {
     const controller = new AbortController();

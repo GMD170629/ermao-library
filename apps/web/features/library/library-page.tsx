@@ -104,6 +104,7 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [pollKey, setPollKey] = useState(0);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [canManageSystem, setCanManageSystem] = useState(false);
   const [authorizationLoaded, setAuthorizationLoaded] = useState(false);
@@ -114,6 +115,7 @@ export function LibraryPage() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const requestedScopeRef = useRef('');
   const requestedReloadKeyRef = useRef(reloadKey);
+  const requestedPollKeyRef = useRef(pollKey);
   const rememberedSortPreferenceRef = useRef(initialSortPreference);
   const toast = useToast();
   const applicableRules = useMemo(
@@ -127,6 +129,10 @@ export function LibraryPage() {
   }), [search, smartFilterQuery]);
   const [settledQuery, setSettledQuery] = useState<LibraryQueryDraft>(queryDraft);
   const queryDraftSettled = libraryQueryDraftIsSettled(queryDraft, settledQuery);
+  const pendingResourceCount = books.reduce(
+    (count, book) => count + book.resourceImportSummary.pending,
+    0
+  );
   const selectedLibraryCondition = smartFilterRules.conditions.find((condition) => (
     condition.field === 'library'
     && condition.operator === 'equals'
@@ -263,13 +269,15 @@ export function LibraryPage() {
     let active = true;
     const scopeChanged = requestedScopeRef.current !== requestScope;
     const reloadChanged = requestedReloadKeyRef.current !== reloadKey;
+    const pollChanged = requestedPollKeyRef.current !== pollKey;
     const requestedPage = scopeChanged || reloadChanged ? 1 : page;
     requestedScopeRef.current = requestScope;
     requestedReloadKeyRef.current = reloadKey;
+    requestedPollKeyRef.current = pollKey;
     if (requestedPage !== page) setPage(requestedPage);
 
     const controller = new AbortController();
-    setLoading(true);
+    if (!pollChanged) setLoading(true);
     fetchLibraryBooksPage(
       queryBase,
       requestedPage,
@@ -301,12 +309,32 @@ export function LibraryPage() {
         if (!active) return;
         setError(reason instanceof Error ? reason.message : '读取书库失败');
       })
-      .finally(() => active && setLoading(false));
+      .finally(() => {
+        if (active && !pollChanged) setLoading(false);
+      });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [page, queryBase, queryDraftSettled, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
+  }, [page, pollKey, queryBase, queryDraftSettled, reloadKey, requestPageSize, requestScope, sortPreferenceLoaded, view]);
+
+  useEffect(() => {
+    if (pendingResourceCount === 0) return;
+    const refreshPendingBooks = () => {
+      if (document.visibilityState === 'visible') setPollKey((current) => current + 1);
+    };
+    const intervalId = window.setInterval(refreshPendingBooks, 2_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshPendingBooks();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    window.addEventListener('focus', refreshPendingBooks);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+      window.removeEventListener('focus', refreshPendingBooks);
+    };
+  }, [pendingResourceCount]);
 
   useEffect(() => {
     const sentinel = loadMoreRef.current;

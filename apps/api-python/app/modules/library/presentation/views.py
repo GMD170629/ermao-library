@@ -366,6 +366,7 @@ def bookshelf_book_list_view(item: dict[str, object]) -> dict[str, object]:
         "availableMediaKinds": (
             list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
         ),
+        "resourceImportSummary": item.get("resourceImportSummary"),
         "progress": (
             float(progress) if isinstance(progress, (int, float, str)) else 0.0
         ),
@@ -390,6 +391,7 @@ def management_book_list_view(item: dict[str, object]) -> dict[str, object]:
         "availableMediaKinds": (
             list(media_kinds) if isinstance(media_kinds, (list, tuple)) else []
         ),
+        "resourceImportSummary": item.get("resourceImportSummary"),
         "statusValue": str(item.get("statusValue") or "UNREAD"),
         "lastReadAt": item.get("lastReadAt"),
         "importedAt": item.get("importedAt"),

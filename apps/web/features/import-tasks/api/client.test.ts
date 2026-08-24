@@ -26,6 +26,8 @@ test('parses the canonical LibraryImportTask identity and terminal state', () =>
 test('parses import task pagination and summary', () => {
   const page = parseImportTasksPage({
     tasks: [task],
+    queued: 2,
+    running: 3,
     completed: 4,
     failed: 1,
     page: 2,
@@ -34,7 +36,7 @@ test('parses import task pagination and summary', () => {
     totalPages: 2
   });
   assert.equal(page.tasks[0]?.id, 'task-1');
-  assert.deepEqual(page.summary, { completed: 4, failed: 1 });
+  assert.deepEqual(page.summary, { queued: 2, running: 3, completed: 4, failed: 1 });
   assert.equal(page.totalPages, 2);
 });
 
