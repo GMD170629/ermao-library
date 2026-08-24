@@ -22,6 +22,12 @@ class _UnavailablePublication:
         raise PublicationUnsupportedError("MOBI runtime unavailable")
 
 
+class _ComicPageIndex:
+    def canonical_href(self, resource_id: str, page_index: int) -> str | None:
+        del resource_id, page_index
+        return None
+
+
 class _ReaderRepository:
     def __init__(self) -> None:
         resource = ReaderResourceDto(
@@ -46,6 +52,7 @@ class _ReaderRepository:
         self.assets = [
             ReaderAssetDto(
                 id="asset-1",
+                title="Legacy MOBI",
                 resource_id=resource.id,
                 source_node_id="source-1",
                 role="PRIMARY",
@@ -75,6 +82,7 @@ def test_reflowable_validation_fails_when_publication_is_unavailable() -> None:
     index = NormalizedPublicationLocatorIndex(
         _UnavailablePublication(),  # type: ignore[arg-type]
         repository,  # type: ignore[arg-type]
+        _ComicPageIndex(),
     )
 
     valid = index.validate(

@@ -134,6 +134,7 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 break
 
         decision = decide_directory_probe(
+            directory_relative_path=directory_relative_path,
             sample_relative_paths=tuple(samples),
             entries_visited=entries_visited,
             max_depth_reached=max_depth_reached,

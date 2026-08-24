@@ -79,9 +79,14 @@ from app.modules.library.application.source_tree_ports import (
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
+    ResourceAssetMetadataInput,
     ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
+)
+from app.modules.library.domain.asset_titles import (
+    AssetTitleCandidate,
+    resolve_asset_display_titles,
 )
 from app.modules.library.domain.book_placement import (
     BookAnchorDecision,
@@ -97,10 +102,12 @@ from app.modules.library.domain.organization_modes import (
 from app.modules.library.domain.readable_resource_anchors import (
     ReadableResourceAnchorViolationCode,
     ReadableResourceTopologyError,
+    audiobook_resource_owns_path,
     is_asset_path_within_resource_scope,
     is_resource_anchor_within_book_scope,
     is_same_or_descendant_path,
     is_strict_descendant_path,
+    is_transparent_audiobook_directory_name,
 )
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
@@ -136,6 +143,7 @@ __all__ = [
     "AdapterIdentity",
     "AssetImportState",
     "AssetRole",
+    "AssetTitleCandidate",
     "BookAnchorDecision",
     "BookCoverCandidate",
     "BookCoverQueryPort",
@@ -192,6 +200,7 @@ __all__ = [
     "ReadableResourceRecord",
     "ReadableResourceTopologyError",
     "ResolveBookCoverCandidates",
+    "ResourceAssetMetadataInput",
     "ResourceEnablementState",
     "ResourceImportState",
     "ResourceNavigationUnitInput",
@@ -206,6 +215,7 @@ __all__ = [
     "SourceNodeViolation",
     "SourceNodeViolationCode",
     "TargetLibraryOrganizationMode",
+    "audiobook_resource_owns_path",
     "book_view",
     "bookshelf_item_view",
     "bookshelf_item_views",
@@ -216,12 +226,14 @@ __all__ = [
     "is_resource_anchor_within_book_scope",
     "is_same_or_descendant_path",
     "is_strict_descendant_path",
+    "is_transparent_audiobook_directory_name",
     "meets_minimum_ready_assets",
     "parse_filter_expression",
     "parse_source_node_relative_path",
     "parse_target_organization_mode",
     "preferred_book_cover_path",
     "prepare_book_facet",
+    "resolve_asset_display_titles",
     "resource_is_openable",
     "resource_root_folder_creates_empty_book_on_discovery",
 ]

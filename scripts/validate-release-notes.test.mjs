@@ -110,13 +110,20 @@ test('application version sources and release tags must exactly match', () => {
   const versions = {
     root: '1.2.3',
     web: '1.2.3',
+    readerCore: '1.2.3',
+    readerContracts: '1.2.3',
+    readiumWebPoc: '1.2.3',
     python: '1.2.3',
     runtime: '1.2.3',
     serviceWorker: '1.2.3',
-    uvLock: '1.2.3'
+    uvLock: '1.2.3',
+    android: '1.2.3',
+    ios: '1.2.3'
   };
   assert.doesNotThrow(() => validateApplicationVersions(versions, 'v1.2.3'));
   assert.throws(() => validateApplicationVersions({ ...versions, runtime: '1.2.2' }), /version mismatch/u);
   assert.throws(() => validateApplicationVersions({ ...versions, serviceWorker: '1.2.2' }), /version mismatch/u);
+  assert.throws(() => validateApplicationVersions({ ...versions, android: '1.2.2' }), /version mismatch/u);
+  assert.throws(() => validateApplicationVersions({ ...versions, ios: null }), /version mismatch/u);
   assert.throws(() => validateApplicationVersions(versions, 'v1.2.4'), /does not match/u);
 });

@@ -37,6 +37,10 @@ from app.modules.library.application.resource_details import (
     ResourceDetailItem,
     ResourceDetailResource,
 )
+from app.modules.library.domain.asset_titles import (
+    AssetTitleCandidate,
+    resolve_asset_display_titles,
+)
 
 
 def _progress_position(
@@ -251,11 +255,19 @@ class SqlAlchemyResourceDetailQueries:
                 LibraryResourceAsset.id.asc(),
             )
         ).all()
+        titles = resolve_asset_display_titles(
+            AssetTitleCandidate(
+                asset_id=asset.id,
+                metadata_title=metadata.title if metadata is not None else None,
+                source_filename=source.name,
+            )
+            for asset, metadata, source in rows
+        )
         return tuple(
             ResourceAssetDetail(
                 id=asset.id,
                 role=asset.role,
-                title=source.name,
+                title=titles[asset.id],
                 media_type=metadata.mime_type if metadata is not None else None,
                 sort_key=source.relative_path,
                 sort_order=asset.sequence_index or 0,

@@ -6,7 +6,7 @@ Ermao Books is a self-hosted digital library for individuals and families. It or
 
 The database, accounts, reading progress, and system settings remain on your own device. Original books stay in the directories you specify, with no dependency on third-party cloud hosting.
 
-- Current version: `0.5.5`
+- Current version: `1.0.0`
 - Languages: Simplified Chinese and English
 - License: [MIT](LICENSE)
 - Community and feedback: QQ group `154560969`

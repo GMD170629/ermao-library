@@ -96,7 +96,7 @@ class MeViewModelTest {
         sideEffects = sideEffects,
         serverName = "Home Library",
         serverBaseUrl = "https://books.example.com",
-        appVersion = "0.1.0",
+        appVersion = "1.0.0",
         initialAccount = ACCOUNT.toViewState(),
         initialLocale = PersonalSettingsLocale.EnUs,
     )

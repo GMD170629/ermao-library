@@ -327,15 +327,17 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 2
-    assert script.get_heads() == ["0002_library_scan_queue_uniqueness"]
-    assert head_revision() == "0002_library_scan_queue_uniqueness"
+    assert len(revisions) == 3
+    assert script.get_heads() == ["0003_audio_asset_title"]
+    assert head_revision() == "0003_audio_asset_title"
     assert [revision.revision for revision in revisions] == [
+        "0003_audio_asset_title",
         "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0001_library_topology_baseline"
-    assert revisions[1].down_revision is None
+    assert revisions[0].down_revision == "0002_library_scan_queue_uniqueness"
+    assert revisions[1].down_revision == "0001_library_topology_baseline"
+    assert revisions[2].down_revision is None
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -344,7 +346,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0002_library_scan_queue_uniqueness"
+        assert _current_revision(engine) == "0003_audio_asset_title"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -356,6 +358,11 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
             for column in inspect(engine).get_columns("MetadataWritebackPreparation")
         }
         assert preparation_columns["sourceNodeId"]["nullable"] is False
+        asset_metadata_columns = {
+            column["name"]: column
+            for column in inspect(engine).get_columns("LibraryResourceAssetMetadata")
+        }
+        assert asset_metadata_columns["title"]["nullable"] is True
     finally:
         engine.dispose()
 

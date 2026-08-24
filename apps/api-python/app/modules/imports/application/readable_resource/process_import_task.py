@@ -25,7 +25,11 @@ from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterSpec,
 )
-from app.modules.library.domain.readable_resource_states import AssetImportState, AssetRole
+from app.modules.library.domain.readable_resource_states import (
+    AssetImportState,
+    AssetRole,
+)
+from app.modules.library.public import ResourceAssetMetadataInput
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +86,12 @@ class ProcessReadableResourceImportTask:
                 return ProcessTaskResult(task_id=task_id, outcome="invalid_task")
             resource = self._books_resources.get_resource(task.resource_id)
             node = self._source_nodes.get(task.source_node_id)
-            if resource is None or node is None:
+            resource_node = (
+                self._source_nodes.get(resource.source_node_id)
+                if resource is not None
+                else None
+            )
+            if resource is None or node is None or resource_node is None:
                 self._queue.mark_failed(
                     task_id,
                     error_summary="MISSING_TARGETS",
@@ -99,6 +108,7 @@ class ProcessReadableResourceImportTask:
                 return ProcessTaskResult(task_id=task_id, outcome="unknown_adapter")
             config = self._libraries.get_library(resource.library_id)
             relative_path = node.relative_path
+            resource_relative_path = resource_node.relative_path
             root_path = config.root_path
             role = task.role
             resource_id = resource.id
@@ -112,8 +122,12 @@ class ProcessReadableResourceImportTask:
 
         self._uow.release_before_io()
         absolute = self._filesystem.resolve_under_root(root_path, relative_path)
+        resource_absolute = self._filesystem.resolve_under_root(
+            root_path, resource_relative_path
+        )
         parsed = self._adapters.parse_file(
             absolute_path=absolute,
+            resource_absolute_path=resource_absolute,
             adapter=adapter,
             role=role,
             local_metadata_priority=local_metadata_priority,
@@ -239,8 +253,19 @@ class ProcessReadableResourceImportTask:
                 sequence_index=parsed.asset.sequence_index,
                 sort_key=sort_key,
                 failure_reason=None,
+                metadata=ResourceAssetMetadataInput(
+                    title=parsed.asset.title,
+                    mime_type=parsed.asset.mime_type,
+                    duration_ms=parsed.asset.duration_ms,
+                    codec=parsed.asset.technical.codec,
+                    bitrate=parsed.asset.technical.bitrate,
+                    sample_rate=parsed.asset.technical.sample_rate,
+                    channels=parsed.asset.technical.channels,
+                    disc_number=parsed.asset.technical.disc_number,
+                    track_number=parsed.asset.technical.track_number,
+                ),
             )
-            title = parsed.resource_title or parsed.asset.title
+            title = parsed.resource_title
             if parsed.local_metadata is not None:
                 self._books_resources.apply_local_metadata(
                     resource_id=resource_id,
@@ -267,6 +292,8 @@ class ProcessReadableResourceImportTask:
                         resource_id,
                         parsed.asset.technical.page_count,
                     )
+                if parsed.asset.role is AssetRole.TRACK:
+                    self._books_resources.refresh_audio_resource_aggregates(resource_id)
             return (True, "ok")
 
         summary = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
@@ -280,7 +307,10 @@ class ProcessReadableResourceImportTask:
             sort_key=None,
             failure_reason=summary,
         )
-        if self._books_resources.count_ready_assets(resource_id) < 1:
+        ready_assets = self._books_resources.count_ready_assets(resource_id)
+        if role is AssetRole.TRACK and ready_assets >= 1:
+            self._books_resources.refresh_audio_resource_aggregates(resource_id)
+        if ready_assets < 1:
             self._books_resources.mark_resource_failed(resource_id)
         self._queue.mark_failed(
             task_id,

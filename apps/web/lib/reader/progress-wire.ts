@@ -50,7 +50,7 @@ export function v4LocationToDomain(
     return { kind: 'pdf', pageIndex: locator.pageIndex, pageProgression: locator.pageProgression };
   }
   if (locator.kind === 'comic') {
-    return { kind: 'comic', resourceId, pageIndex: locator.pageIndex + 1, resourceHref: locator.resourceHref };
+    return { kind: 'comic', resourceId, pageIndex: locator.pageIndex, resourceHref: locator.resourceHref };
   }
   if (locator.kind !== 'reflowable' || !format) return null;
   const envelope = locator.engineLocator;
@@ -104,7 +104,7 @@ export function publicationLocationFromDomain(
   if (location.kind === 'comic' && location.resourceHref) {
     return parsePublicationLocation({
       kind: 'comic',
-      pageIndex: location.pageIndex - 1,
+      pageIndex: location.pageIndex,
       resourceHref: location.resourceHref
     });
   }

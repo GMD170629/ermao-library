@@ -32,6 +32,7 @@ export type ReflowableLocation = {
 export type ComicLocation = {
   kind: 'comic';
   resourceId: string;
+  /** Zero-based canonical comic page. */
   pageIndex: number;
   resourceHref?: string;
 };

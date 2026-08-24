@@ -30,6 +30,9 @@ from app.modules.imports.application.readable_resource.request_library_scan impo
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
+from app.modules.imports.infrastructure.audio_metadata_inspector import (
+    MutagenFfprobeAudioMetadataInspector,
+)
 from app.modules.imports.infrastructure.local_cover_publication import (
     FilesystemLocalCoverPublication,
 )
@@ -111,7 +114,7 @@ def build_readable_resource_pipeline(
     source_nodes = SqlAlchemySourceNodeRepository(session)
     books_resources = SqlAlchemyBookResourceRepository(session)
     queue = SqlAlchemyLibraryImportTaskQueue(session)
-    adapters = RegistryResourceAdapterExecutor()
+    adapters = RegistryResourceAdapterExecutor(MutagenFfprobeAudioMetadataInspector())
     uow = SqlAlchemyUnitOfWork(session)
     clock = UtcClock()
     log = StructuredPipelineLog()

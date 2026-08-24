@@ -187,6 +187,7 @@ def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:
     asset = library_schemas.ResourceAssetView.model_validate(
         {
             "id": "asset-1",
+            "title": "001.jpg",
             "resourceId": "resource-1",
             "sourceNodeId": "source-1",
             "role": "PAGE",
@@ -202,6 +203,7 @@ def test_library_resource_asset_schema_accepts_comic_page_fields() -> None:
 
     assert asset.model_dump(by_alias=True, exclude_none=True) == {
         "id": "asset-1",
+        "title": "001.jpg",
         "resourceId": "resource-1",
         "sourceNodeId": "source-1",
         "role": "PAGE",

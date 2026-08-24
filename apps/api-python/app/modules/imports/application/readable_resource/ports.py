@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from app.contracts.local_metadata import LocalMetadataSource
+from app.modules.imports.application.audio_types import AudioFileMetadata
 from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -38,6 +39,7 @@ __all__ = [
     "WORKER_INTERRUPTED",
     "AdapterIdentity",
     "AssetTechnicalMetadata",
+    "AudioMetadataInspectorPort",
     "BookResourceRepositoryPort",
     "ClockPort",
     "DirectoryEntry",
@@ -247,10 +249,15 @@ class ResourceAdapterExecutorPort(Protocol):
         self,
         *,
         absolute_path: Path,
+        resource_absolute_path: Path | None = None,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
         local_metadata_priority: tuple[LocalMetadataSource, ...],
     ) -> FileParseResult: ...
+
+
+class AudioMetadataInspectorPort(Protocol):
+    def inspect(self, path: Path) -> AudioFileMetadata: ...
 
 
 class LocalMetadataPriorityPort(Protocol):

@@ -17,7 +17,7 @@ const payload = {
       { id: 'resource-2', bookId: 'book-1', title: '第二资源', sortOrder: 1, chapterCount: 0, durationMs: 0, resourceCompleted: true }
     ],
     assets: [
-      { id: 'asset-1', mimeType: 'audio/mpeg', codec: 'mp3', durationMs: 10_000, sortOrder: 0, url: '/api/assets/asset-1' },
+      { id: 'asset-1', title: '精绝古城 01', mimeType: 'audio/mpeg', codec: 'mp3', durationMs: 10_000, sortOrder: 0, url: '/api/assets/asset-1' },
       { id: 'asset-2', mimeType: 'audio/mpeg', durationMs: 20_000, sortOrder: 1, url: '/api/assets/asset-2' }
     ],
     units: [{ id: 'chapter-1', title: '第一章', assetId: 'asset-1', startMs: 0, endMs: 10_000, index: 0 }],
@@ -42,7 +42,10 @@ test('normalizes the resource-first Reader v4 audio bootstrap', () => {
   assert.deepEqual(bootstrap.availableResources.map((resource) => resource.id), ['resource-1', 'resource-2']);
   assert.equal(bootstrap.resumeLocation?.resourceId, 'resource-1');
   assert.equal(bootstrap.tracks[0]?.codec, 'mp3');
+  assert.equal(bootstrap.tracks[0]?.title, '精绝古城 01');
+  assert.equal(bootstrap.tracks[1]?.title, '音轨 2');
   assert.equal(bootstrap.tracks[1]?.codec, null);
+  assert.equal(bootstrap.totalDurationMs, 30_000);
 });
 
 test('maps between track and absolute time', () => {

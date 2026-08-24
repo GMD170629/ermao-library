@@ -383,6 +383,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
     assert [path.name for path in revision_files] == [
         "0001_library_topology_baseline.py",
         "0002_library_scan_queue_uniqueness.py",
+        "0003_audio_asset_title.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")

@@ -722,6 +722,7 @@ class LibraryResourceAssetMetadata(Base):
         ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
         primary_key=True,
     )
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     mime_type: Mapped[str | None] = mapped_column(
         "mimeType", String(191), nullable=True
     )

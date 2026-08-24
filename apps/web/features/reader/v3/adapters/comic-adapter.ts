@@ -18,14 +18,12 @@ import { ComicContinuousController } from './comic-continuous';
 import { effectiveReaderPageWidth } from '../page-width';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import {
-  comicCacheWindow,
   comicAdjacentSpreadPage,
   comicLastSpreadPage,
   comicNormalizePage,
   comicOrderedPages,
   comicPageForProgress,
   comicPagePercent,
-  comicPreloadWindow,
   comicSpreadPages,
   comicVisualPages,
   type ComicPairingPolicy,
@@ -33,9 +31,7 @@ import {
 } from './comic-model';
 
 export type ComicPageView = ComicPageMeta & {
-  url?: string;
-  loading: boolean;
-  error?: string;
+  url: string;
 };
 
 export type ComicViewModel = {
@@ -50,20 +46,9 @@ export type ComicViewModel = {
   error?: string;
 };
 
-type CachedComicPage = {
-  url?: string;
-  objectUrl?: string;
-  controller?: AbortController;
-  promise?: Promise<string>;
-  variant?: ReaderPreferences['comic']['imageVariant'];
-  error?: string;
-};
-
 export type ComicAdapterOptions = {
   container: HTMLElement;
   onInputIntent?: ReaderAdapterInputHandler;
-  fetch?: typeof globalThis.fetch;
-  decodeImage?: (url: string, signal: AbortSignal) => Promise<void>;
   pageUrl?: (context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) => string;
   initialPages?: ComicPageMeta[];
   onViewModel?: (model: ComicViewModel) => void;
@@ -81,52 +66,8 @@ function defaultPageUrl(context: ReaderAdapterOpenContext, pageIndex: number, pr
   return `${context.source.comicPageUrlTemplate.replace('{pageIndex}', encodeURIComponent(String(pageIndex)))}?${parameters}`;
 }
 
-function waitForSignal<T>(request: Promise<T>, signal: AbortSignal) {
-  if (signal.aborted) return Promise.reject(new DOMException('The operation was aborted', 'AbortError'));
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(new DOMException('The operation was aborted', 'AbortError'));
-    signal.addEventListener('abort', abort, { once: true });
-    request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-  });
-}
-
-async function decodeComicImage(document: Document, url: string, signal: AbortSignal) {
-  const ImageConstructor = document.defaultView?.Image ?? globalThis.Image;
-  if (typeof ImageConstructor !== 'function') return;
-  const image = new ImageConstructor();
-  image.decoding = 'async';
-  let resolveLoad!: () => void;
-  let rejectLoad!: (reason: unknown) => void;
-  const loaded = new Promise<void>((resolve, reject) => {
-    resolveLoad = resolve;
-    rejectLoad = reject;
-  });
-  const handleLoad = () => resolveLoad();
-  const handleError = () => rejectLoad(new Error('comic-image-decode-failed'));
-  image.addEventListener('load', handleLoad, { once: true });
-  image.addEventListener('error', handleError, { once: true });
-  image.src = url;
-  try {
-    if (typeof image.decode === 'function') {
-      try {
-        await waitForSignal(image.decode(), signal);
-      } catch (reason) {
-        if (isAbortError(reason)) throw reason;
-        await waitForSignal(loaded, signal);
-      }
-    } else {
-      await waitForSignal(loaded, signal);
-    }
-  } finally {
-    image.removeEventListener('load', handleLoad);
-    image.removeEventListener('error', handleError);
-  }
-}
-
 export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapter, ReaderInteractiveAdapter {
   private readonly container: HTMLElement;
-  private readonly fetcher: typeof globalThis.fetch;
-  private readonly decodeImage: NonNullable<ComicAdapterOptions['decodeImage']>;
   private readonly pageUrl: NonNullable<ComicAdapterOptions['pageUrl']>;
   private readonly initialPages?: ComicPageMeta[];
   private readonly onEndOfResource?: ComicAdapterOptions['onEndOfResource'];
@@ -141,11 +82,9 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private pageMeta = new Map<number, ComicPageMeta>();
   private pages: number[] = [];
   private currentPage = 0;
-  private cache = new Map<number, CachedComicPage>();
   private retryCounts = new Map<number, number>();
   private status: ComicViewModel['status'] = 'idle';
   private error: string | undefined;
-  private prepareError: string | undefined;
   private zoom = 1;
   private suppressClickUntil = 0;
   private resizeObserver: ResizeObserver | null = null;
@@ -209,8 +148,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   constructor(options: ComicAdapterOptions) {
     super();
     this.container = options.container;
-    this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.decodeImage = options.decodeImage ?? ((url, signal) => decodeComicImage(this.container.ownerDocument, url, signal));
     this.pageUrl = options.pageUrl ?? defaultPageUrl;
     this.initialPages = options.initialPages;
     this.onEndOfResource = options.onEndOfResource;
@@ -218,7 +155,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.track = new ComicSpreadTrackDriver(this.container, {
       getView: () => this.trackView(),
       prepare: (step, signal) => this.prepareTrackSpread(step, signal),
-      promote: (step, signal) => this.promoteTrackSpread(step, signal)
+      promote: (step, signal) => this.promoteTrackSpread(step, signal),
+      retry: (page) => this.retryPage(page)
     });
     this.trackController = new PagedTrackController(this.track, {
       requestCommit: (request) => this.requestTrackCommit(request),
@@ -237,10 +175,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         this.renderContinuous();
         return;
       }
-      this.releasePage(page);
-      void this.loadPage(page, this.currentGeneration(), signal, false)
-        .then(() => this.emitView())
-        .catch(() => this.emitView());
+      this.track.render();
     });
     const viewport = this.track.getViewportElement();
     viewport.addEventListener('pointerdown', this.handlePointerDown);
@@ -326,7 +261,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       this.pages = comicOrderedPages(pageCount);
       const initialPage = context.initialLocation?.kind === 'comic' ? context.initialLocation.pageIndex : 0;
       this.currentPage = comicNormalizePage(this.pages, clampPage(initialPage, pageCount), this.comicMode(context.preferences), this.pairingPolicy(context.preferences));
-      await this.refreshVisiblePages(generation, signal);
       this.assertActive(generation, signal);
       this.status = 'ready';
       this.track.recenter();
@@ -378,7 +312,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (command.type === 'go-to-href' || command.type === 'set-fit') return this.failOperation(context, 'unsupported-command');
     if (command.type === 'cancel') {
       this.trackController.interrupt();
-      this.cache.forEach((entry) => entry.controller?.abort());
       return this.ack(context.operation, true, { location: this.location() });
     }
     if (command.type === 'set-zoom') {
@@ -413,7 +346,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     } else if (command.type === 'retry') {
       comicSpreadPages(this.pages, this.currentPage, this.comicMode(), this.pairingPolicy()).forEach((page) => {
         this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
-        this.releasePage(page);
       });
     }
 
@@ -423,27 +355,12 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
 
     this.currentPage = nextPage;
     this.emit({ type: 'activity' }, context.operation);
-    this.status = 'loading';
+    this.status = 'ready';
     this.emitView();
-    try {
-      await this.refreshVisiblePages(this.currentGeneration(), context.signal);
-      if (this.preferences.comic.flow === 'scrolled') this.continuous.scrollToPage(this.currentPage);
-      else this.track.recenter(true);
-      this.status = 'ready';
-      this.emitLocation(context.operation);
-      this.emitView();
-      return this.ack(context.operation, true, { location: this.location() });
-    } catch (reason) {
-      if (isAbortError(reason) || reason instanceof StaleReaderOperationError) return this.failOperation(context, 'operation-cancelled');
-      this.status = 'error';
-      this.error = errorMessage(reason, '漫画页面加载失败');
-      this.emitView();
-      this.emit({
-        type: 'error',
-        error: { code: 'COMIC_PAGE_LOAD_FAILED', message: this.error, recoverable: true }
-      }, context.operation);
-      return this.failOperation(context, this.error);
-    }
+    if (this.preferences.comic.flow === 'scrolled') this.continuous.scrollToPage(this.currentPage);
+    else this.track.recenter(true);
+    this.emitLocation(context.operation);
+    return this.ack(context.operation, true, { location: this.location() });
   }
 
   async applyPreferences(preferences: ReaderPreferences, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
@@ -454,7 +371,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     }
     this.trackController.interrupt({ suspended: preferences.comic.zoom > 1 });
     const previousFlow = this.preferences?.comic.flow;
-    const variantChanged = preferences.comic.imageVariant !== this.preferences?.comic.imageVariant;
     const modeChanged = preferences.comic.spreadMode !== this.preferences?.comic.spreadMode
       || preferences.comic.flow !== this.preferences?.comic.flow
       || preferences.comic.coverSingle !== this.preferences?.comic.coverSingle;
@@ -463,9 +379,9 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (modeChanged) this.currentPage = comicNormalizePage(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
     this.zoom = preferences.comic.zoom;
     this.container.style.background = readerThemeSurfaces[preferences.appearance.theme].background;
-    if (variantChanged) this.releaseAllPages();
     if (this.openContext && this.pages.length) {
-      await this.refreshVisiblePages(this.currentGeneration(), context.signal);
+      this.assertActive(this.currentGeneration(), context.signal);
+      this.emitView();
       if (preferences.comic.flow === 'scrolled') {
         if (previousFlow !== 'scrolled') this.continuous.scrollToPage(this.currentPage);
       } else {
@@ -518,7 +434,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
 
     this.emit({ type: 'activity' }, context.operation);
     this.status = 'loading';
-    this.prepareError = undefined;
     this.emitView();
     try {
       const pending = this.trackController.snapshot();
@@ -541,19 +456,12 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         this.status = 'ready';
         this.emitView();
         if (context.signal.aborted) return this.failOperation(context, 'operation-cancelled');
-        if (this.prepareError) {
-          this.emit({
-            type: 'error',
-            error: { code: 'COMIC_PAGE_LOAD_FAILED', message: this.prepareError, recoverable: true }
-          }, context.operation);
-        }
-        return this.failOperation(context, this.prepareError ?? 'page-not-ready');
+        return this.failOperation(context, 'page-not-ready');
       }
 
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
-      this.preloadTrackWindow();
       return this.ack(context.operation, true, { location: this.location() });
     } catch (reason) {
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError) {
@@ -562,13 +470,9 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         return this.failOperation(context, 'operation-cancelled');
       }
       this.status = 'ready';
-      this.prepareError = errorMessage(reason, '漫画页面加载失败');
+      const message = errorMessage(reason, '漫画加载失败');
       this.emitView();
-      this.emit({
-        type: 'error',
-        error: { code: 'COMIC_PAGE_LOAD_FAILED', message: this.prepareError, recoverable: true }
-      }, context.operation);
-      return this.failOperation(context, this.prepareError);
+      return this.failOperation(context, message);
     }
   }
 
@@ -581,130 +485,12 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       return this.failOperation(context, step === 1 ? 'end-of-resource' : 'start-of-resource');
     }
     this.emit({ type: 'activity' }, context.operation);
-    this.status = 'loading';
     this.currentPage = target;
+    this.status = 'ready';
     this.emitView();
-    try {
-      await this.refreshVisiblePages(this.currentGeneration(), context.signal);
-      this.continuous.scrollToPage(target);
-      this.status = 'ready';
-      this.emitLocation(context.operation);
-      this.emitView();
-      return this.ack(context.operation, true, { location: this.location() });
-    } catch (reason) {
-      if (isAbortError(reason) || reason instanceof StaleReaderOperationError) {
-        return this.failOperation(context, 'operation-cancelled');
-      }
-      this.status = 'error';
-      this.error = errorMessage(reason, '漫画页面加载失败');
-      this.emitView();
-      return this.failOperation(context, this.error);
-    }
-  }
-
-  private async refreshVisiblePages(generation: number, signal: AbortSignal) {
-    this.assertActive(generation, signal);
-    const preferences = this.preferences;
-    if (!preferences) return;
-    const vertical = preferences.comic.flow === 'scrolled';
-    if (vertical) {
-      this.emitView();
-      return;
-    }
-    const visible = comicSpreadPages(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
-    const retained = new Set(comicCacheWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences)));
-    this.cache.forEach((_entry, page) => {
-      if (!retained.has(page)) this.releasePage(page);
-    });
-    await Promise.all(visible.map((page) => this.loadPage(page, generation, signal, true)));
-    this.emitView();
-    const preload = comicPreloadWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences));
-    for (const page of preload) {
-      if (visible.includes(page)) continue;
-      void this.loadPage(page, generation, signal, false).then(() => {
-        if (this.isActive(generation, signal)) this.emitView();
-      }).catch(() => undefined);
-    }
-  }
-
-  private async loadPage(page: number, generation: number, parentSignal: AbortSignal, visible: boolean) {
-    const context = this.openContext;
-    const preferences = this.preferences;
-    const lifecycleSignal = this.lifecycleController?.signal;
-    if (!context || !preferences || !lifecycleSignal) throw new StaleReaderOperationError();
-    const variant = preferences.comic.imageVariant;
-    const cached = this.cache.get(page);
-    if (cached?.url && cached.variant === variant) return cached.url;
-    if (cached?.promise && cached.variant === variant) {
-      try {
-        const url = await this.waitForPageRequest(cached.promise, parentSignal);
-        this.assertActive(generation, parentSignal);
-        return url;
-      } catch (reason) {
-        if (visible && !isAbortError(reason) && !(reason instanceof StaleReaderOperationError)) {
-          throw new Error(errorMessage(reason, `第 ${page} 页加载失败`));
-        }
-        throw reason;
-      }
-    }
-    if (cached) this.releasePage(page);
-    const controller = new AbortController();
-    const combinedSignal = this.combineSignals(lifecycleSignal, controller.signal);
-    const { signal } = combinedSignal;
-    const ownedEntry: CachedComicPage = { controller, variant };
-    this.cache.set(page, ownedEntry);
-    this.emitView();
-    const request = (async () => {
-      try {
-        const response = await this.fetcher(this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0), { signal });
-        if (!response.ok) throw new Error(`第 ${page} 页加载失败 (${response.status})`);
-        const blob = await response.blob();
-        this.assertActive(generation, signal);
-        const url = URL.createObjectURL(blob);
-        if (!this.isActive(generation, signal) || this.cache.get(page) !== ownedEntry) {
-          URL.revokeObjectURL(url);
-          throw new StaleReaderOperationError();
-        }
-        ownedEntry.objectUrl = url;
-        await this.decodeImage(url, signal);
-        this.assertActive(generation, signal);
-        if (this.cache.get(page) !== ownedEntry) throw new StaleReaderOperationError();
-        ownedEntry.objectUrl = undefined;
-        this.cache.set(page, { url, variant });
-        return url;
-      } catch (reason) {
-        this.revokeEntryObjectUrl(ownedEntry);
-        if (isAbortError(reason) || reason instanceof StaleReaderOperationError) {
-          if (this.cache.get(page) === ownedEntry) this.cache.delete(page);
-          throw reason;
-        }
-        const message = errorMessage(reason, `第 ${page} 页加载失败`);
-        if (this.cache.get(page) === ownedEntry) this.cache.set(page, { error: message, variant });
-        throw new Error(message);
-      } finally {
-        combinedSignal.cleanup();
-      }
-    })();
-    ownedEntry.promise = request;
-    try {
-      const url = await this.waitForPageRequest(request, parentSignal);
-      this.assertActive(generation, parentSignal);
-      return url;
-    } catch (reason) {
-      if (visible && !isAbortError(reason) && !(reason instanceof StaleReaderOperationError)) {
-        throw new Error(errorMessage(reason, `第 ${page} 页加载失败`));
-      }
-      throw reason;
-    }
-  }
-
-  private waitForPageRequest(request: Promise<string>, signal: AbortSignal) {
-    if (signal.aborted) return Promise.reject(new DOMException('The operation was aborted', 'AbortError'));
-    return new Promise<string>((resolve, reject) => {
-      const abort = () => reject(new DOMException('The operation was aborted', 'AbortError'));
-      signal.addEventListener('abort', abort, { once: true });
-      request.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-    });
+    this.continuous.scrollToPage(target);
+    this.emitLocation(context.operation);
+    return this.ack(context.operation, true, { location: this.location() });
   }
 
   private emitLocation(operation = this.currentOperation()) {
@@ -733,13 +519,10 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     const preferences = this.preferences;
     const visiblePages = preferences
       ? comicVisualPages(this.pages, this.currentPage, this.comicMode(preferences), preferences.comic.direction, this.pairingPolicy(preferences)).map((page) => {
-          const cached = this.cache.get(page);
           return {
             pageIndex: page,
             ...this.pageMeta.get(page),
-            url: cached?.url,
-            loading: Boolean(cached?.controller),
-            error: cached?.error
+            url: this.pageSource(page)
           };
         })
       : [];
@@ -799,13 +582,10 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     return {
       anchor,
       pages: comicVisualPages(this.pages, anchor, mode, direction, this.pairingPolicy(preferences)).map((page) => {
-        const cached = this.cache.get(page);
         return {
           pageIndex: page,
           ...this.pageMeta.get(page),
-          url: cached?.url,
-          loading: Boolean(cached?.controller),
-          error: cached?.error
+          url: this.pageSource(page)
         };
       })
     };
@@ -837,31 +617,18 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         return {
           pageIndex: page,
           ...this.pageMeta.get(page),
-          url: this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0),
-          loading: false
+          url: this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0)
         };
       })
     });
   }
 
   private async prepareTrackSpread(step: -1 | 1, signal: AbortSignal) {
+    this.assertActive(this.currentGeneration(), signal);
     const preferences = this.preferences;
     if (!preferences || !this.pages.length) return false;
     const target = comicAdjacentSpreadPage(this.pages, this.currentPage, this.comicMode(preferences), step, this.pairingPolicy(preferences));
-    if (target === this.currentPage) return false;
-    try {
-      await Promise.all(
-        comicSpreadPages(this.pages, target, this.comicMode(preferences), this.pairingPolicy(preferences))
-          .map((page) => this.loadPage(page, this.currentGeneration(), signal, false))
-      );
-      this.track.render();
-      return true;
-    } catch (reason) {
-      if (isAbortError(reason) || reason instanceof StaleReaderOperationError) throw reason;
-      this.prepareError = errorMessage(reason, '漫画页面加载失败');
-      this.track.render();
-      return false;
-    }
+    return target !== this.currentPage;
   }
 
   private promoteTrackSpread(step: -1 | 1, signal: AbortSignal) {
@@ -873,24 +640,19 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.currentPage = target;
     this.status = 'ready';
     this.error = undefined;
-    const retained = new Set(comicCacheWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences)));
-    this.cache.forEach((_entry, page) => {
-      if (!retained.has(page)) this.releasePage(page);
-    });
   }
 
-  private preloadTrackWindow() {
+  private pageSource(page: number) {
+    const context = this.openContext;
     const preferences = this.preferences;
-    const signal = this.lifecycleController?.signal;
-    if (!preferences || !signal) return;
-    const generation = this.currentGeneration();
-    for (const page of comicPreloadWindow(this.pages, this.currentPage, this.comicMode(preferences), this.pairingPolicy(preferences))) {
-      void this.loadPage(page, generation, signal, false)
-        .then(() => {
-          if (this.isActive(generation, signal)) this.emitView();
-        })
-        .catch(() => undefined);
-    }
+    if (!context || !preferences) throw new StaleReaderOperationError();
+    return this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0);
+  }
+
+  private retryPage(page: number) {
+    this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
+    if (this.preferences?.comic.flow === 'scrolled') this.renderContinuous();
+    else this.track.render();
   }
 
   private requestTrackCommit(request: PagedTrackCommitRequest) {
@@ -918,27 +680,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     } catch {
       // The browser may release capture before the async settle completes.
     }
-  }
-
-  private releasePage(page: number) {
-    const cached = this.cache.get(page);
-    cached?.controller?.abort();
-    if (cached?.url) {
-      URL.revokeObjectURL(cached.url);
-      cached.url = undefined;
-    }
-    if (cached) this.revokeEntryObjectUrl(cached);
-    this.cache.delete(page);
-  }
-
-  private revokeEntryObjectUrl(entry: CachedComicPage) {
-    if (!entry.objectUrl) return;
-    URL.revokeObjectURL(entry.objectUrl);
-    entry.objectUrl = undefined;
-  }
-
-  private releaseAllPages() {
-    Array.from(this.cache.keys()).forEach((page) => this.releasePage(page));
   }
 
   private combineSignals(first: AbortSignal, second: AbortSignal) {
@@ -971,7 +712,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.trackController.interrupt();
     this.lifecycleController?.abort();
     this.lifecycleController = null;
-    this.releaseAllPages();
     this.openContext = null;
     this.preferences = null;
     this.pages = [];
@@ -980,7 +720,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.currentPage = 0;
     this.status = 'idle';
     this.error = undefined;
-    this.prepareError = undefined;
     this.track.reset();
     delete this.container.dataset.readerEngine;
   }

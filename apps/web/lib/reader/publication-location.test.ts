@@ -45,14 +45,14 @@ test('enforces zero-based exact page anchors and safe comic resources', () => {
   assert.equal(quantizePageProgression(0.12345), 0.1235);
 });
 
-test('keeps PDF locations zero-based across domain and wire data', () => {
+test('keeps PDF and comic locations zero-based across domain and wire data', () => {
   const pdf = parsePublicationLocation(pdfRequest.locator);
   const comic = parsePublicationLocation(comicRequest.locator);
   assert.ok(pdf?.kind === 'pdf' && comic?.kind === 'comic');
   const pdfDomain = v4LocationToDomain(pdf, 'resource-pdf', null);
   const comicDomain = v4LocationToDomain(comic, 'resource-comic', null);
   assert.equal(pdfDomain?.kind === 'pdf' ? pdfDomain.pageIndex : null, pdf.pageIndex);
-  assert.equal(comicDomain?.kind === 'comic' ? comicDomain.pageIndex : null, comic.pageIndex + 1);
+  assert.equal(comicDomain?.kind === 'comic' ? comicDomain.pageIndex : null, comic.pageIndex);
   assert.deepEqual(pdfDomain ? publicationLocationFromDomain(pdfDomain) : null, pdf);
   assert.deepEqual(comicDomain ? publicationLocationFromDomain(comicDomain) : null, comic);
 });

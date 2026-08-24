@@ -18,7 +18,10 @@ class FakeElement {
   textContent = '';
   src = '';
   alt = '';
+  complete = false;
+  naturalWidth = 0;
   draggable = true;
+  readonly listeners = new Map<string, Set<() => void>>();
 
   constructor(ownerDocument: FakeDocument) {
     this.ownerDocument = ownerDocument;
@@ -53,16 +56,32 @@ class FakeElement {
   setAttribute(name: string, value: string) {
     this.attributes.set(name, value);
   }
+
+  addEventListener(type: string, listener: () => void) {
+    const listeners = this.listeners.get(type) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  removeEventListener(type: string, listener: () => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatch(type: string) {
+    this.listeners.get(type)?.forEach((listener) => listener());
+  }
 }
 
 class FakeDocument {
+  readonly documentElement = { lang: 'zh-CN' };
+
   createElement() {
     return new FakeElement(this);
   }
 }
 
 function page(pageIndex: number, url = `blob:${pageIndex}`) {
-  return { pageIndex, url, loading: false };
+  return { pageIndex, url };
 }
 
 function view(overrides: Partial<ComicTrackView> = {}): ComicTrackView {
@@ -84,6 +103,7 @@ function createHarness(initial = view()) {
   const ownerDocument = new FakeDocument();
   const container = new FakeElement(ownerDocument);
   let currentView = initial;
+  const retriedPages: number[] = [];
   const driver = new ComicSpreadTrackDriver(container as unknown as HTMLElement, {
     getView: () => currentView,
     prepare: async (step) => Boolean(step === -1 ? currentView.previous : currentView.next),
@@ -96,11 +116,12 @@ function createHarness(initial = view()) {
           next: { anchor: 3, pages: [page(3)] }
         };
       }
-    }
+    },
+    retry: (pageIndex) => retriedPages.push(pageIndex)
   });
   driver.render();
   driver.recenter();
-  return { container, driver, getView: () => currentView, setView: (next: ComicTrackView) => { currentView = next; } };
+  return { container, driver, retriedPages, getView: () => currentView, setView: (next: ComicTrackView) => { currentView = next; } };
 }
 
 test('comic track keeps the viewport and rotates persistent slots after promotion', async () => {
@@ -191,21 +212,29 @@ test('an unmatched final double-page spread is centered as one logical page', ()
   assert.equal(harness.driver.snapshot().hasNext, false);
 });
 
-test('adjacent load errors stay in the candidate slot without replacing the track root', () => {
+test('native image events replace the loading placeholder and expose retry on failure', () => {
   const harness = createHarness();
   const root = harness.container.children[0];
   const next = harness.driver.getSlotElement('next');
-  harness.setView(view({
-    next: {
-      anchor: 2,
-      pages: [{ pageIndex: 2, loading: false, error: '第 2 页加载失败' }]
-    }
-  }));
-
-  harness.driver.render();
+  const pageSlot = next.children[0].children[0] as unknown as FakeElement;
+  const image = pageSlot.children[0];
+  const placeholder = pageSlot.children[1];
 
   assert.equal(harness.container.children[0], root);
-  assert.equal(next.children[0].children[0].children[0].textContent, '第 2 页加载失败');
+  assert.equal(placeholder.textContent, '加载中');
+  assert.equal(image.style.visibility, 'hidden');
+
+  image.dispatch('error');
+  const failure = placeholder.children[0];
+  assert.equal(failure.children[0].textContent, '漫画页面加载失败');
+  failure.children[1].dispatch('click');
+  assert.deepEqual(harness.retriedPages, [2]);
+
+  const currentPageSlot = harness.driver.getSlotElement('current').children[0].children[0] as unknown as FakeElement;
+  const currentImage = currentPageSlot.children[0];
+  currentImage.dispatch('load');
+  assert.equal(currentImage.style.visibility, 'visible');
+  assert.equal(currentPageSlot.children.length, 1);
 });
 
 test('a stalled animation frame still finishes at the exact comic snap point', async () => {

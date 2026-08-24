@@ -6,7 +6,8 @@ import base64
 from dataclasses import replace
 from pathlib import Path
 
-from sqlalchemy import select
+import pytest
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.bootstrap.readable_resource_pipeline import (
@@ -17,7 +18,8 @@ from app.bootstrap.readable_resource_pipeline import (
 from app.core.config import Settings
 from app.db.bootstrap import bootstrap_database
 from app.db.sqlite import create_sqlite_engine
-from app.models.library import Library
+from app.models.library import Library, ReadableResourceNavigationUnit
+from app.modules.imports.application.audio_types import AudioFileMetadata
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
     ContinueSourceImport,
@@ -58,6 +60,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
 )
@@ -72,10 +75,16 @@ class StubAlwaysOkAdapter(ResourceAdapterExecutorPort):
         role: AssetRole,
         **_kwargs: object,
     ) -> FileParseResult:
+        resource_path = _kwargs.get("resource_absolute_path")
+        resource_title = (
+            resource_path.name
+            if isinstance(resource_path, Path) and resource_path.is_dir()
+            else absolute_path.stem
+        )
         return FileParseResult(
             ok=True,
             adapter=adapter,
-            resource_title=absolute_path.stem,
+            resource_title=resource_title,
             asset=ParsedAssetPayload(
                 title=absolute_path.stem,
                 role=role,
@@ -157,6 +166,19 @@ def _add_library(db: Session, root: Path, library_id: str = "lib-1") -> None:
             name="Lib",
             root_path=str(root),
             organization_mode="FLAT",
+            min_file_size_bytes=0,
+        )
+    )
+
+
+def _add_volumes_library(db: Session, root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    db.add(
+        Library(
+            id="lib-1",
+            name="Lib",
+            root_path=str(root),
+            organization_mode="VOLUMES",
             min_file_size_bytes=0,
         )
     )
@@ -391,8 +413,118 @@ def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None
         engine.dispose()
 
 
+def test_volumes_audiobook_creates_one_book_and_eight_bounded_resources(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    counts = (50, 42, 45, 42, 57, 58, 56, 78)
+    names = (
+        "鬼吹灯I-1-精绝古城",
+        "鬼吹灯I-2-龙岭迷窟",
+        "鬼吹灯I-3-云南虫谷",
+        "鬼吹灯I-4-昆仑神宫",
+        "鬼吹灯II-1-黄皮子坟",
+        "鬼吹灯II-2-南海归墟",
+        "鬼吹灯II-3-怒晴湘西",
+        "鬼吹灯II-4-巫峡棺山",
+    )
+    try:
+        with Session(engine) as db:
+            _add_volumes_library(db, root)
+            work = root / "鬼吹灯-全八册"
+            for name, count in zip(names, counts, strict=True):
+                volume = work / name
+                volume.mkdir(parents=True)
+                for index in range(1, count + 1):
+                    (volume / f"{index:02d}.mp3").write_bytes(b"audio")
+            db.commit()
+            pipeline, _ = _pipeline(db)
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline, limit=1_000)
+
+            assert db.query(LibraryBook).count() == 1
+            resources = db.execute(
+                select(LibraryReadableResource, LibrarySourceNode)
+                .join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+                )
+                .order_by(LibrarySourceNode.relative_path)
+            ).all()
+            assert len(resources) == 8
+            actual_counts = {
+                source.name: db.scalar(
+                    select(func.count(LibraryResourceAsset.id)).where(
+                        LibraryResourceAsset.resource_id == resource.id
+                    )
+                )
+                for resource, source in resources
+            }
+            assert actual_counts == dict(zip(names, counts, strict=True))
+            assert all(
+                source.relative_path.startswith("鬼吹灯-全八册/")
+                for _resource, source in resources
+            )
+    finally:
+        engine.dispose()
+
+
+def test_audiobook_direct_tracks_and_volume_children_form_separate_resources(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_volumes_library(db, root)
+            work = root / "作品"
+            (work / "CD1").mkdir(parents=True)
+            (work / "CD1" / "01.mp3").write_bytes(b"audio")
+            volume = work / "分卷一"
+            volume.mkdir()
+            (volume / "01.mp3").write_bytes(b"audio")
+            db.commit()
+            pipeline, _ = _pipeline(db)
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            resources = db.execute(
+                select(LibraryReadableResource, LibrarySourceNode).join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id == LibraryReadableResource.source_node_id,
+                )
+            ).all()
+            assert {source.relative_path for _resource, source in resources} == {
+                "作品",
+                "作品/分卷一",
+            }
+            by_path = {source.relative_path: resource for resource, source in resources}
+            direct_assets = db.scalars(
+                select(LibrarySourceNode)
+                .join(
+                    LibraryResourceAsset,
+                    LibraryResourceAsset.source_node_id == LibrarySourceNode.id,
+                )
+                .where(LibraryResourceAsset.resource_id == by_path["作品"].id)
+            ).all()
+            assert [asset.relative_path for asset in direct_assets] == [
+                "作品/CD1/01.mp3"
+            ]
+            direct_metadata = db.get(
+                LibraryReadableResourceMetadata, by_path["作品"].id
+            )
+            assert direct_metadata is not None
+            assert direct_metadata.title == "作品"
+    finally:
+        engine.dispose()
+
+
 def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
@@ -417,6 +549,23 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
                 <manifest><item id="cover-image" href="01.cover.png" media-type="image/png" /></manifest>
                 </package>""",
                 encoding="utf-8",
+            )
+            monkeypatch.setattr(
+                "app.modules.imports.infrastructure.audio_metadata_inspector.parse_audio_metadata",
+                lambda path: AudioFileMetadata(
+                    path=path,
+                    title="第一集",
+                    album=None,
+                    author=None,
+                    narrator=None,
+                    duration_ms=60_000,
+                    codec="mp3",
+                    bitrate=128_000,
+                    sample_rate=44_100,
+                    channels=2,
+                    disc_number=None,
+                    track_number=1,
+                ),
             )
 
             pipeline = build_readable_resource_pipeline(
@@ -443,6 +592,30 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
             assert metadata is not None
             assert metadata.title == "Sidecar audiobook"
             assert metadata.cover_path is not None
+            assert metadata.track_count == 1
+            assert metadata.duration_ms == 60_000
+            assert metadata.chapter_count == 1
+            asset_metadata = db.get(LibraryResourceAssetMetadata, assets[0].id)
+            assert asset_metadata is not None
+            assert asset_metadata.title == "第一集"
+            assert asset_metadata.mime_type == "audio/mpeg"
+            assert asset_metadata.duration_ms == 60_000
+            assert asset_metadata.codec == "mp3"
+            assert asset_metadata.bitrate == 128_000
+            assert asset_metadata.sample_rate == 44_100
+            assert asset_metadata.channels == 2
+            assert asset_metadata.track_number == 1
+            unit = db.scalar(
+                select(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.resource_id == resource.id
+                )
+            )
+            assert unit is not None
+            assert (unit.start_ms, unit.end_ms, unit.duration_ms) == (
+                0,
+                60_000,
+                60_000,
+            )
     finally:
         engine.dispose()
 

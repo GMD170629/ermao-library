@@ -6,9 +6,15 @@ from dataclasses import dataclass
 from enum import Enum
 
 from app.modules.imports.domain.resource_adapters import (
+    ResourceAdapterId,
     ResourceAdapterSpec,
     match_directory_adapters_for_samples,
     unique_adapter_or_none,
+)
+from app.modules.library.public import (
+    SourceNodePhysicalKind,
+    SourceNodeRelativePath,
+    audiobook_resource_owns_path,
 )
 
 
@@ -45,6 +51,7 @@ class DirectoryProbeDecision:
 
 def decide_directory_probe(
     *,
+    directory_relative_path: str,
     sample_relative_paths: tuple[str, ...],
     entries_visited: int,
     max_depth_reached: int,
@@ -67,6 +74,34 @@ def decide_directory_probe(
     sample_names = tuple(path.rsplit("/", 1)[-1] for path in sample_relative_paths)
     matches = match_directory_adapters_for_samples(sample_names)
     adapter = unique_adapter_or_none(matches)
+    if (
+        adapter is not None
+        and adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+    ):
+        anchor = SourceNodeRelativePath(directory_relative_path)
+        owned_samples = tuple(
+            sample
+            for sample in sample_relative_paths
+            if audiobook_resource_owns_path(
+                resource_anchor=anchor,
+                candidate_path=SourceNodeRelativePath(sample),
+                candidate_kind=SourceNodePhysicalKind.REGULAR_FILE,
+            )
+        )
+        if not owned_samples:
+            return DirectoryProbeDecision(
+                result=ProbeInterpretationResult.NODE_ONLY,
+                adapter=None,
+                reason_code="AUDIOBOOK_CHILD_RESOURCE_BOUNDARY",
+                evidence=evidence,
+            )
+        evidence = DirectoryProbeEvidence(
+            sample_relative_paths=owned_samples,
+            sample_count=len(owned_samples),
+            entries_visited=entries_visited,
+            max_depth_reached=max_depth_reached,
+            termination_reason=termination_reason,
+        )
     if adapter is None:
         return DirectoryProbeDecision(
             result=ProbeInterpretationResult.NODE_ONLY,

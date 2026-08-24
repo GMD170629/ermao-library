@@ -117,3 +117,7 @@ class ReaderPublicationLocatorIndex(Protocol):
         access_scope: ReaderAccessScope,
         location: ReaderExactLocationDto,
     ) -> bool: ...
+
+
+class ReaderComicPageIndex(Protocol):
+    def canonical_href(self, resource_id: str, page_index: int) -> str | None: ...

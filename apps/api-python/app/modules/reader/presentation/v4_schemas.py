@@ -412,6 +412,7 @@ class ReaderNavigationUnitSummary(ReaderWireModel):
 
 class ReaderAssetSummary(ReaderWireModel):
     id: str
+    title: str
     resource_id: str = Field(alias="resourceId")
     source_node_id: str = Field(alias="sourceNodeId")
     role: str

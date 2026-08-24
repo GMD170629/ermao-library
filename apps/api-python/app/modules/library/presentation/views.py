@@ -25,6 +25,10 @@ from app.models import (
     ReaderResourceProgress,
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
+from app.modules.library.domain.asset_titles import (
+    AssetTitleCandidate,
+    resolve_asset_display_titles,
+)
 
 
 def _dt(value: object) -> datetime | None:
@@ -118,6 +122,10 @@ def _asset_rows(
     return sorted(
         rows,
         key=lambda row: (
+            row[1].disc_number if row[1] and row[1].disc_number else 1,
+            row[1].track_number
+            if row[1] and row[1].track_number is not None
+            else 10**9,
             natural_sort_key(row[2].relative_path),
             row[0].id,
         ),
@@ -136,20 +144,32 @@ def _resource_view(
     format_value = str(resource.format)
     reader_type = reader_type_for_format(format_value)
     assets = _asset_rows(db, resource.id) if include_assets else []
+    asset_titles = resolve_asset_display_titles(
+        AssetTitleCandidate(
+            asset_id=asset.id,
+            metadata_title=asset_metadata.title if asset_metadata else None,
+            source_filename=source.name,
+        )
+        for asset, asset_metadata, source in assets
+    )
     asset_views: list[dict[str, Any]] = [
         {
             "id": asset.id,
             "resourceId": asset.resource_id,
             "sourceNodeId": asset.source_node_id,
             "role": asset.role,
+            "title": asset_titles[asset.id],
             "mimeType": asset_metadata.mime_type
-            if asset_metadata
+            if asset_metadata and asset_metadata.mime_type
             else "application/octet-stream",
             "sizeBytes": int(source.observed_size_bytes or 0),
             "size": _format_bytes(source.observed_size_bytes),
             "mtimeMs": int(source.observed_mtime_ns // 1_000_000),
             "durationMs": asset_metadata.duration_ms if asset_metadata else None,
             "codec": asset_metadata.codec if asset_metadata else None,
+            "bitrate": asset_metadata.bitrate if asset_metadata else None,
+            "sampleRate": asset_metadata.sample_rate if asset_metadata else None,
+            "channels": asset_metadata.channels if asset_metadata else None,
             "discNumber": asset_metadata.disc_number if asset_metadata else None,
             "trackNumber": asset_metadata.track_number if asset_metadata else None,
             "sortOrder": asset_index,

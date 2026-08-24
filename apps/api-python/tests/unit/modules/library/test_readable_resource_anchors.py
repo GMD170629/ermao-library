@@ -115,6 +115,28 @@ def test_directory_resource_assets_must_be_descendants() -> None:
         resource_anchor_kind=SourceNodePhysicalKind.DIRECTORY,
         asset_path=track,
     )
+
+
+def test_audiobook_resource_owns_direct_and_transparent_disc_tracks_only() -> None:
+    resource = _path("鬼吹灯")
+    assert is_asset_path_within_resource_scope(
+        resource_anchor=resource,
+        resource_anchor_kind=SourceNodePhysicalKind.DIRECTORY,
+        asset_path=_path("鬼吹灯/01.mp3"),
+        adapter_id="audiobook-directory",
+    )
+    assert is_asset_path_within_resource_scope(
+        resource_anchor=resource,
+        resource_anchor_kind=SourceNodePhysicalKind.DIRECTORY,
+        asset_path=_path("鬼吹灯/Disc 1/CD2/02.mp3"),
+        adapter_id="audiobook-directory",
+    )
+    assert not is_asset_path_within_resource_scope(
+        resource_anchor=resource,
+        resource_anchor_kind=SourceNodePhysicalKind.DIRECTORY,
+        asset_path=_path("鬼吹灯/精绝古城/01.mp3"),
+        adapter_id="audiobook-directory",
+    )
     assert not is_asset_path_within_resource_scope(
         resource_anchor=resource,
         resource_anchor_kind=SourceNodePhysicalKind.DIRECTORY,

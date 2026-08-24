@@ -16,7 +16,10 @@ from app.modules.reader.application.dto import (
     ReaderPdfExactLocationDto,
     ReaderReflowableExactLocationDto,
 )
-from app.modules.reader.application.ports import ReaderResourceRepository
+from app.modules.reader.application.ports import (
+    ReaderComicPageIndex,
+    ReaderResourceRepository,
+)
 
 
 class NormalizedPublicationLocatorIndex:
@@ -24,9 +27,11 @@ class NormalizedPublicationLocatorIndex:
         self,
         publications: OpenPublication,
         reader_repository: ReaderResourceRepository,
+        comic_page_index: ReaderComicPageIndex,
     ) -> None:
         self._publications = publications
         self._reader_repository = reader_repository
+        self._comic_page_index = comic_page_index
 
     def validate(
         self,
@@ -64,15 +69,10 @@ class NormalizedPublicationLocatorIndex:
         if isinstance(location, ReaderComicExactLocationDto):
             if context.resource.format.lower() not in _COMIC_FORMATS:
                 return False
-            page_units = [
-                unit
-                for unit in self._reader_repository.list_navigation_units(resource_id)
-                if unit.unit_type == "page"
-            ]
-            return (
-                location.page_index < len(page_units)
-                and page_units[location.page_index].href == location.resource_href
+            canonical_href = self._comic_page_index.canonical_href(
+                resource_id, location.page_index
             )
+            return canonical_href is not None and location.resource_href == canonical_href
         if isinstance(location, ReaderAudioExactLocationDto):
             if context.resource.format.lower() not in _AUDIO_FORMATS:
                 return False

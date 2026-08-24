@@ -245,7 +245,7 @@ jobs:
             done
             adb shell pidof com.ermao.library | grep -q '[0-9]'
             adb shell dumpsys package com.ermao.library | grep -q 'versionCode=1'
-            adb shell dumpsys package com.ermao.library | grep -q 'versionName=0.1.0'
+            adb shell dumpsys package com.ermao.library | grep -q 'versionName=1.0.0'
             app_ready=false
             for attempt in $(seq 1 20); do
               adb shell uiautomator dump /sdcard/mobile-stage-1.xml >/dev/null

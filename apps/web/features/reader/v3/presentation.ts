@@ -117,13 +117,14 @@ export function locationProgress(location: ReaderLocation | null, percent: numbe
     return { page: 1, total: totalHint ?? null, percent: safePercent, position: '', label: '正在定位' };
   }
   if (location.kind === 'comic') {
-    const total = Math.max(1, totalHint ?? location.pageIndex);
+    const pageNumber = location.pageIndex + 1;
+    const total = Math.max(1, totalHint ?? pageNumber);
     return {
-      page: location.pageIndex,
+      page: pageNumber,
       total,
       percent: safePercent,
-      position: String(location.pageIndex),
-      label: `第 ${location.pageIndex} / ${total} 页`
+      position: String(pageNumber),
+      label: `第 ${pageNumber} / ${total} 页`
     };
   }
   if (location.kind === 'pdf') {

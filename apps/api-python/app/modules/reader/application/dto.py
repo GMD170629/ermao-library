@@ -45,6 +45,7 @@ class ReaderResourceDto:
 @dataclass(frozen=True, slots=True)
 class ReaderAssetDto:
     id: str
+    title: str
     resource_id: str
     source_node_id: str
     role: str

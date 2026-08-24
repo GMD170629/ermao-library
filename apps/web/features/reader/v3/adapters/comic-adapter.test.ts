@@ -93,6 +93,7 @@ class FakeElement {
 }
 
 class FakeDocument {
+  readonly documentElement = { lang: 'zh-CN' };
   defaultView: {
     HTMLImageElement?: typeof HTMLImageElement;
     IntersectionObserver?: typeof IntersectionObserver;
@@ -214,13 +215,6 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000) {
 }
 
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
 test('comic adapter commits programmatic and pointer navigation once while reusing the track slots', async () => {
   const ownerDocument = new FakeDocument();
   const container = new FakeElement(ownerDocument);
@@ -230,7 +224,6 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
     initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
-    fetch: async () => new Response(new Blob(['page']), { status: 200 }),
     onInputIntent: (intent) => {
       if (intent.type !== 'command') return;
       return adapter.execute(intent.command as ReaderCommand, {
@@ -307,20 +300,13 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   adapter.dispose();
 });
 
-test('comic navigation waits for the candidate image to decode before promoting it', async () => {
+test('comic navigation promotes immediately while the native image is still loading', async () => {
   const ownerDocument = new FakeDocument();
   const container = new FakeElement(ownerDocument);
-  const candidateDecode = deferred();
-  let decodeCalls = 0;
   let sequence = 1;
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
-    fetch: async () => new Response(new Blob(['page']), { status: 200 }),
-    decodeImage: async () => {
-      decodeCalls += 1;
-      if (decodeCalls > 1) await candidateDecode.promise;
-    }
+    initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
 
   await adapter.open({
@@ -340,20 +326,30 @@ test('comic navigation waits for the candidate image to decode before promoting 
     initialLocation: null,
     preferences: DEFAULT_READER_PREFERENCES
   });
-  await waitFor(() => decodeCalls >= 2);
-
-  const navigation = adapter.execute({ type: 'next' }, {
+  const locationPages: number[] = [];
+  adapter.subscribe((event) => {
+    if (event.type === 'location-changed' && event.location.kind === 'comic') {
+      locationPages.push(event.location.pageIndex);
+    }
+  });
+  locationPages.splice(0);
+  const acknowledged = await adapter.execute({ type: 'next' }, {
     operation: operation(++sequence),
     signal: new AbortController().signal
   });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(adapter.getViewModel().currentPage, 0);
-  assert.equal(container.children[0].children[0].children[1].dataset.comicSpreadAnchor, '0');
-
-  candidateDecode.resolve();
-  const acknowledged = await navigation;
   assert.equal(acknowledged.accepted, true);
   assert.equal(adapter.getViewModel().currentPage, 1);
+  const currentSlot = container.children[0].children[0].children[1];
+  const pageSlot = currentSlot.children[0].children[0];
+  const image = pageSlot.children[0];
+  assert.equal(pageSlot.children[1].textContent, '加载中');
+  assert.equal(image.style.visibility, 'hidden');
+  assert.deepEqual(locationPages, [1]);
+
+  image.dispatch('load', {});
+  assert.equal(image.style.visibility, 'visible');
+  assert.equal(pageSlot.children.length, 1);
+  assert.deepEqual(locationPages, [1]);
   adapter.dispose();
 });
 
@@ -456,8 +452,6 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
     initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
-    fetch: async () => new Response(new Blob(['page']), { status: 200 }),
-    decodeImage: async () => undefined,
     onInputIntent: () => false
   });
 
@@ -497,16 +491,14 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
 });
 
 
-test('comic signal fallback removes source listeners after abort and every completed page request', async () => {
+test('comic signal fallback removes source listeners after abort and session bootstrap', async () => {
   const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
   Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined });
   const ownerDocument = new FakeDocument();
   const container = new FakeElement(ownerDocument);
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
-    initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
-    fetch: async () => new Response(new Blob(['page']), { status: 200 }),
-    decodeImage: async () => undefined
+    initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
   type SignalCombiner = (first: AbortSignal, second: AbortSignal) => {
     signal: AbortSignal;
@@ -564,8 +556,8 @@ test('comic signal fallback removes source listeners after abort and every compl
       initialLocation: null,
       preferences: DEFAULT_READER_PREFERENCES
     });
-    await waitFor(() => combineCount >= 3 && cleanupCount === combineCount);
-    assert.equal(cleanupCount, combineCount);
+    assert.equal(combineCount, 1);
+    assert.equal(cleanupCount, 1);
   } finally {
     adapter.dispose();
     if (anyDescriptor) Object.defineProperty(AbortSignal, 'any', anyDescriptor);

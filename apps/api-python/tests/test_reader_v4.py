@@ -205,6 +205,7 @@ def _add_resource(
     )
     asset_metadata = LibraryResourceAssetMetadata(
         asset_id=asset_id,
+        title=f"{title} asset",
         mime_type=mime_type,
         duration_ms=duration_ms,
     )
@@ -385,6 +386,7 @@ def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
     assert bootstrap["resource"]["id"] == resource.id
     assert bootstrap["resource"]["bookId"] == "book-reader-v4"
     assert bootstrap["resource"]["resourceCompleted"] is False
+    assert bootstrap["assets"][0]["title"] == "电子书 asset"
     assert bootstrap["availableResources"][0]["id"] == resource.id
     assert "mediaVersion" not in bootstrap
     assert "mediaCompleted" not in bootstrap
@@ -549,7 +551,7 @@ def test_reader_v4_validates_pdf_progress_against_canonical_page_index(
     assert out_of_range.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
-def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
+def test_reader_v4_validates_comic_progress_against_canonical_page_index(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -559,7 +561,7 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     resource.media_kind = "COMIC"
     metadata = db_session.get(LibraryReadableResourceMetadata, resource.id)
     assert metadata is not None
-    metadata.page_count = 2
+    metadata.page_count = 15
     asset_metadata = db_session.get(LibraryResourceAssetMetadata, asset.id)
     assert asset_metadata is not None
     asset_metadata.mime_type = "application/vnd.comicbook+zip"
@@ -576,7 +578,7 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
                 sort_order=page_number,
                 metadata_json="{}",
             )
-            for page_number in (0, 1)
+            for page_number in range(15)
         ]
     )
     db_session.commit()
@@ -594,21 +596,24 @@ def test_reader_v4_validates_comic_progress_against_indexed_page_media_type(
     accepted = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            locator=_exact_comic_locator(page_index=1, resource_href="images/0002.jpg")
+            locator=_exact_comic_locator(page_index=14, resource_href="pages/14")
         ),
     )
-    wrong_media_type = client.put(
+    wrong_href = client.put(
         f"/api/reader/v4/resources/{resource.id}/progress",
         json=_progress_payload(
-            locator=_exact_comic_locator(
-                page_index=1, resource_href="images/not-page-2.png"
-            )
+            locator=_exact_comic_locator(page_index=14, resource_href="pages/13")
         ),
     )
 
     assert accepted.status_code == 200
-    assert wrong_media_type.status_code == 422
-    assert wrong_media_type.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
+    assert accepted.json()["data"]["locator"] == {
+        "kind": "comic",
+        "pageIndex": 14,
+        "resourceHref": "pages/14",
+    }
+    assert wrong_href.status_code == 422
+    assert wrong_href.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
 
 
 def test_reader_v4_validates_audio_asset_chapter_and_position(

@@ -593,6 +593,7 @@ def reader_bootstrap_v4(
             assets=[
                 ReaderAssetSummary(
                     id=asset.id,
+                    title=asset.title,
                     resourceId=asset.resource_id,
                     sourceNodeId=asset.source_node_id,
                     role=asset.role,

@@ -17,6 +17,12 @@ from app.infrastructure.comic_archives import (
     ComicArchiveError,
     inspect_comic_archive,
 )
+from app.modules.imports.application.audio_types import (
+    AudioFileMetadata,
+    audio_episode_number,
+    audio_mime_type,
+)
+from app.modules.imports.application.errors import AudioInspectionError
 from app.modules.imports.application.local_metadata import (
     LocalCoverPayload,
     LocalMetadataCandidate,
@@ -24,6 +30,7 @@ from app.modules.imports.application.local_metadata import (
 )
 from app.modules.imports.application.readable_resource.ports import (
     AssetTechnicalMetadata,
+    AudioMetadataInspectorPort,
     FileParseResult,
     ParsedAssetPayload,
     ResourceAdapterExecutorPort,
@@ -35,6 +42,7 @@ from app.modules.imports.domain.resource_adapters import (
 )
 from app.modules.imports.infrastructure.sidecar_opf import discover_sidecar_opf
 from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.library.public import is_transparent_audiobook_directory_name
 from app.modules.metadata.public import parse_opf_metadata
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -43,10 +51,22 @@ _MAX_COVER_BYTES = 20 * 1024 * 1024
 class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
     """Wraps existing inspection helpers behind the target adapter port."""
 
+    def __init__(
+        self, audio_metadata: AudioMetadataInspectorPort | None = None
+    ) -> None:
+        if audio_metadata is None:
+            from app.modules.imports.infrastructure.audio_metadata_inspector import (
+                MutagenFfprobeAudioMetadataInspector,
+            )
+
+            audio_metadata = MutagenFfprobeAudioMetadataInspector()
+        self._audio_metadata = audio_metadata
+
     def parse_file(
         self,
         *,
         absolute_path: Path,
+        resource_absolute_path: Path | None = None,
         adapter: ResourceAdapterSpec,
         role: AssetRole,
         local_metadata_priority: tuple[
@@ -63,14 +83,77 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 error_summary="source file is not a regular file",
             )
         pdf_page_count: int | None = None
+        audio_metadata: AudioFileMetadata | None = None
         if adapter.adapter_id is ResourceAdapterId.PDF:
             pdf_inspection = self._inspect_pdf(absolute_path)
             embedded = pdf_inspection[0] if pdf_inspection is not None else None
             pdf_page_count = pdf_inspection[1] if pdf_inspection is not None else None
+        elif adapter.adapter_id in {
+            ResourceAdapterId.AUDIO_FILE,
+            ResourceAdapterId.AUDIOBOOK_DIRECTORY,
+        }:
+            try:
+                audio_metadata = self._audio_metadata.inspect(absolute_path)
+            except AudioInspectionError as exc:
+                return FileParseResult(
+                    ok=False,
+                    adapter=adapter,
+                    resource_title=None,
+                    asset=None,
+                    error_code=exc.code,
+                    error_summary=str(exc),
+                )
+            except (OSError, ValueError) as exc:
+                return FileParseResult(
+                    ok=False,
+                    adapter=adapter,
+                    resource_title=None,
+                    asset=None,
+                    error_code="AUDIO_METADATA_INVALID",
+                    error_summary=str(exc),
+                )
+            embedded = LocalMetadataCandidate(
+                source="EMBEDDED",
+                metadata=PublicationMetadata(
+                    title=(
+                        audio_metadata.album
+                        if adapter.adapter_id is ResourceAdapterId.AUDIO_FILE
+                        else None
+                    ),
+                    authors=(audio_metadata.author,) if audio_metadata.author else (),
+                    narrators=(audio_metadata.narrator,)
+                    if audio_metadata.narrator
+                    else (),
+                    series_name=audio_metadata.series_name,
+                    volume_index=audio_metadata.volume_index,
+                ),
+                cover=(
+                    LocalCoverPayload(audio_metadata.cover_data)
+                    if audio_metadata.cover_data is not None
+                    else None
+                ),
+            )
         else:
             embedded = self._inspect_embedded(absolute_path, adapter)
-        sidecar = discover_sidecar_opf(absolute_path)
-        path_titles = titles_from_local_source(absolute_path.stem)
+        effective_resource_path = resource_absolute_path or (
+            absolute_path.parent
+            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+            else absolute_path
+        )
+        metadata_source = (
+            effective_resource_path
+            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+            else absolute_path
+        )
+        sidecar = discover_sidecar_opf(metadata_source)
+        if (
+            sidecar is None
+            and adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+        ):
+            sidecar = discover_sidecar_opf(absolute_path)
+        path_titles = titles_from_local_source(
+            metadata_source.name if metadata_source.is_dir() else metadata_source.stem
+        )
         candidates = [
             LocalMetadataCandidate(
                 source="PATH",
@@ -102,6 +185,10 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             or absolute_path.stem
         )
         navigation_units: tuple[ResourceNavigationUnitInput, ...] = ()
+        asset_title: str | None = title
+        mime_type: str | None = None
+        disc_number: int | None = None
+        track_number: int | None = None
         if adapter.adapter_id is ResourceAdapterId.COMIC_ARCHIVE:
             try:
                 inspection = inspect_comic_archive(
@@ -130,21 +217,44 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 )
                 for page in inspection["pages"]
             )
-        elif adapter.adapter_id in {
-            ResourceAdapterId.AUDIO_FILE,
-            ResourceAdapterId.AUDIOBOOK_DIRECTORY,
-        }:
-            title = self._inspect_audio_title(absolute_path) or title
+        elif audio_metadata is not None:
+            asset_title = _clean_track_title(audio_metadata.title)
+            mime_type = audio_mime_type(absolute_path)
+            disc_number = audio_metadata.disc_number or _disc_number_from_path(
+                absolute_path, effective_resource_path
+            )
+            track_number = audio_metadata.track_number or audio_episode_number(
+                absolute_path
+            )
+            navigation_units = _audio_navigation_units(
+                audio_metadata,
+                title=asset_title or absolute_path.name,
+                mime_type=mime_type,
+            )
         # IMAGE_DIRECTORY pages: filename stem is enough; no archive unpack.
         asset = ParsedAssetPayload(
-            title=title,
+            title=asset_title if audio_metadata is not None else title,
             role=role,
             sequence_index=None,
             sort_key=absolute_path.name,
-            mime_type=None,
-            duration_ms=None,
+            mime_type=mime_type if audio_metadata is not None else None,
+            duration_ms=(
+                audio_metadata.duration_ms if audio_metadata is not None else None
+            ),
             failure_reason=None,
-            technical=AssetTechnicalMetadata(page_count=pdf_page_count),
+            technical=AssetTechnicalMetadata(
+                codec=audio_metadata.codec if audio_metadata is not None else None,
+                bitrate=audio_metadata.bitrate if audio_metadata is not None else None,
+                sample_rate=(
+                    audio_metadata.sample_rate if audio_metadata is not None else None
+                ),
+                channels=audio_metadata.channels
+                if audio_metadata is not None
+                else None,
+                disc_number=disc_number,
+                track_number=track_number,
+                page_count=pdf_page_count,
+            ),
             navigation_units=navigation_units,
         )
         return FileParseResult(
@@ -272,13 +382,57 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         ) or (prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP")
         return content if valid else None
 
-    def _inspect_audio_title(self, path: Path) -> str | None:
-        from app.services.audio_metadata import parse_audio_metadata
 
-        try:
-            metadata = parse_audio_metadata(path)
-        except (OSError, ValueError):
-            return None
-        if metadata is None:
-            return path.stem
-        return getattr(metadata, "title", None) or path.stem
+def _clean_track_title(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"\s+", " ", value).strip()
+    return normalized or None
+
+
+def _disc_number_from_path(path: Path, resource_root: Path) -> int | None:
+    try:
+        parents = path.relative_to(resource_root).parts[:-1]
+    except ValueError:
+        return None
+    for name in reversed(parents):
+        if not is_transparent_audiobook_directory_name(name):
+            continue
+        match = re.search(r"\d{1,6}", name)
+        return int(match.group()) if match else 1
+    return None
+
+
+def _audio_navigation_units(
+    metadata: AudioFileMetadata,
+    *,
+    title: str,
+    mime_type: str,
+) -> tuple[ResourceNavigationUnitInput, ...]:
+    chapters = metadata.chapters
+    if not chapters:
+        return (
+            ResourceNavigationUnitInput(
+                unit_type="audio_chapter",
+                title=title,
+                href=f"#t=0,{metadata.duration_ms / 1000:g}",
+                media_type=mime_type,
+                sort_order=0,
+                start_ms=0,
+                end_ms=metadata.duration_ms,
+                duration_ms=metadata.duration_ms,
+            ),
+        )
+    return tuple(
+        ResourceNavigationUnitInput(
+            unit_type="audio_chapter",
+            title=_clean_track_title(chapter.title) or title,
+            href=f"#t={chapter.start_ms / 1000:g},{chapter.end_ms / 1000:g}",
+            media_type=mime_type,
+            sort_order=index,
+            start_ms=chapter.start_ms,
+            end_ms=chapter.end_ms,
+            duration_ms=chapter.end_ms - chapter.start_ms,
+        )
+        for index, chapter in enumerate(chapters)
+    )

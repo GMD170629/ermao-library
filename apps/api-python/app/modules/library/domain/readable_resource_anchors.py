@@ -8,6 +8,7 @@ never case folding, Unicode normalization, or unsafe string prefixes.
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from app.modules.library.domain.source_nodes import (
@@ -39,6 +40,40 @@ class ReadableResourceTopologyError(Exception):
         self.code = code
         self.detail = detail
         super().__init__(code.value if detail is None else f"{code.value}:{detail}")
+
+
+_TRANSPARENT_AUDIO_DIRECTORY = re.compile(
+    r"^(?:cd|disc|disk|\u789f|\u76d8)(?:\s*[-_.]?\s*\d+)?$",
+    re.IGNORECASE,
+)
+
+
+def is_transparent_audiobook_directory_name(name: str) -> bool:
+    """Return whether a directory is only physical audiobook disc grouping."""
+
+    return bool(_TRANSPARENT_AUDIO_DIRECTORY.fullmatch(name.strip()))
+
+
+def audiobook_resource_owns_path(
+    *,
+    resource_anchor: SourceNodeRelativePath,
+    candidate_path: SourceNodeRelativePath,
+    candidate_kind: SourceNodePhysicalKind,
+) -> bool:
+    """Limit an audiobook directory Resource to direct/transparent descendants."""
+
+    prefix = resource_anchor.value + "/"
+    if not candidate_path.value.startswith(prefix):
+        return False
+    relative_parts = candidate_path.value[len(prefix) :].split("/")
+    directory_parts = (
+        relative_parts[:-1]
+        if candidate_kind is SourceNodePhysicalKind.REGULAR_FILE
+        else relative_parts
+    )
+    return all(
+        is_transparent_audiobook_directory_name(part) for part in directory_parts
+    )
 
 
 def resource_owns_book_metadata(
@@ -93,12 +128,19 @@ def is_asset_path_within_resource_scope(
     resource_anchor: SourceNodeRelativePath,
     resource_anchor_kind: SourceNodePhysicalKind,
     asset_path: SourceNodeRelativePath,
+    adapter_id: str | None = None,
 ) -> bool:
     """File Resource may only own itself; directory Resource owns descendants."""
 
     if resource_anchor_kind is SourceNodePhysicalKind.REGULAR_FILE:
         return asset_path.value == resource_anchor.value
     if resource_anchor_kind is SourceNodePhysicalKind.DIRECTORY:
+        if adapter_id == "audiobook-directory":
+            return audiobook_resource_owns_path(
+                resource_anchor=resource_anchor,
+                candidate_path=asset_path,
+                candidate_kind=SourceNodePhysicalKind.REGULAR_FILE,
+            )
         return is_strict_descendant_path(ancestor=resource_anchor, candidate=asset_path)
     return False
 

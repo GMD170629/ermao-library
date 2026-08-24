@@ -25,6 +25,10 @@ from app.models import (
 )
 from app.models.auth import ReaderBookmark
 from app.models.common import cuid
+from app.modules.library.public import (
+    AssetTitleCandidate,
+    resolve_asset_display_titles,
+)
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAssetDto,
@@ -319,13 +323,28 @@ class SqlAlchemyReaderResourceRepository:
         ordered_rows = sorted(
             rows,
             key=lambda row: (
+                row[2].disc_number if row[2] and row[2].disc_number else 1,
+                row[2].track_number
+                if row[2] and row[2].track_number is not None
+                else 10**9,
                 natural_sort_key(row[1].relative_path),
                 row[0].id,
             ),
         )
+        titles = resolve_asset_display_titles(
+            AssetTitleCandidate(
+                asset_id=asset.id,
+                metadata_title=(
+                    asset_metadata.title if asset_metadata is not None else None
+                ),
+                source_filename=source_node.name,
+            )
+            for asset, source_node, asset_metadata in ordered_rows
+        )
         return [
             ReaderAssetDto(
                 id=asset.id,
+                title=titles[asset.id],
                 resource_id=asset.resource_id,
                 source_node_id=asset.source_node_id,
                 role=asset.role,

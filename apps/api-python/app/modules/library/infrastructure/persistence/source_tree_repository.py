@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.contracts.publication_metadata import PublicationMetadata
+from app.core.natural_sort import natural_sort_key
 from app.models.common import cuid
 from app.models.library import Library, ReadableResourceNavigationUnit
 from app.modules.library.application.source_tree_ports import (
@@ -20,6 +21,7 @@ from app.modules.library.application.source_tree_ports import (
     LibrarySourceTreeConfig,
     ObservedSourceEntry,
     ReadableResourceRecord,
+    ResourceAssetMetadataInput,
     ResourceNavigationUnitInput,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
@@ -31,6 +33,7 @@ from app.modules.library.domain.organization_modes import (
 from app.modules.library.domain.readable_resource_anchors import (
     ReadableResourceAnchorViolationCode,
     ReadableResourceTopologyError,
+    audiobook_resource_owns_path,
     is_asset_path_within_resource_scope,
     is_resource_anchor_within_book_scope,
     resource_owns_book_metadata,
@@ -57,6 +60,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
+    LibraryResourceAssetMetadata,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
 )
@@ -612,6 +616,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         sequence_index: int | None,
         sort_key: str | None,
         failure_reason: str | None,
+        metadata: ResourceAssetMetadataInput | None = None,
     ) -> str:
         # Keep the existing port field for compatibility, but persist the canonical
         # SourceNode path computed below instead of adapter-provided ordering hints.
@@ -650,6 +655,7 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             resource_anchor=SourceNodeRelativePath(resource_anchor.relative_path),
             resource_anchor_kind=SourceNodePhysicalKind(resource_anchor.physical_kind),
             asset_path=SourceNodeRelativePath(asset_node.relative_path),
+            adapter_id=resource.adapter_id,
         ):
             raise ReadableResourceTopologyError(
                 ReadableResourceAnchorViolationCode.ASSET_OUT_OF_RESOURCE_SCOPE,
@@ -680,6 +686,21 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         )
         row.failure_reason = failure_reason
         self._session.flush()
+        if metadata is not None:
+            metadata_row = self._session.get(LibraryResourceAssetMetadata, row.id)
+            if metadata_row is None:
+                metadata_row = LibraryResourceAssetMetadata(asset_id=row.id)
+                self._session.add(metadata_row)
+            metadata_row.title = metadata.title
+            metadata_row.mime_type = metadata.mime_type
+            metadata_row.duration_ms = metadata.duration_ms
+            metadata_row.codec = metadata.codec
+            metadata_row.bitrate = metadata.bitrate
+            metadata_row.sample_rate = metadata.sample_rate
+            metadata_row.channels = metadata.channels
+            metadata_row.disc_number = metadata.disc_number
+            metadata_row.track_number = metadata.track_number
+            self._session.flush()
         return row.id
 
     def count_ready_assets(self, resource_id: str) -> int:
@@ -695,6 +716,82 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             or 0
         )
 
+    def refresh_audio_resource_aggregates(self, resource_id: str) -> None:
+        rows = self._session.execute(
+            select(
+                LibraryResourceAsset,
+                LibraryResourceAssetMetadata,
+                LibrarySourceNode,
+            )
+            .join(
+                LibrarySourceNode,
+                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+            )
+            .outerjoin(
+                LibraryResourceAssetMetadata,
+                LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
+            )
+            .where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.import_state == AssetImportState.READY.value,
+                LibraryResourceAsset.role == AssetRole.TRACK.value,
+            )
+        ).all()
+        ordered_rows = sorted(
+            rows,
+            key=lambda item: (
+                item[1].disc_number if item[1] and item[1].disc_number else 1,
+                item[1].track_number
+                if item[1] and item[1].track_number is not None
+                else 10**9,
+                natural_sort_key(item[2].relative_path),
+                item[0].id,
+            ),
+        )
+        asset_order: dict[str, int] = {}
+        for index, (asset, _asset_metadata, _source) in enumerate(ordered_rows):
+            asset.sequence_index = index
+            asset_order[asset.id] = index
+
+        asset_ids = tuple(asset_order)
+        units = (
+            self._session.scalars(
+                select(ReadableResourceNavigationUnit).where(
+                    ReadableResourceNavigationUnit.resource_id == resource_id,
+                    ReadableResourceNavigationUnit.asset_id.in_(asset_ids),
+                )
+            ).all()
+            if asset_ids
+            else []
+        )
+        ordered_units = sorted(
+            units,
+            key=lambda unit: (
+                asset_order.get(unit.asset_id or "", 10**9),
+                unit.start_ms if unit.start_ms is not None else unit.sort_order,
+                unit.id,
+            ),
+        )
+        for index, unit in enumerate(ordered_units):
+            unit.sort_order = len(ordered_units) + index
+        self._session.flush()
+        for index, unit in enumerate(ordered_units):
+            unit.sort_order = index
+
+        resource_metadata = self._session.get(
+            LibraryReadableResourceMetadata, resource_id
+        )
+        if resource_metadata is None:
+            raise LookupError(resource_id)
+        resource_metadata.track_count = len(ordered_rows)
+        resource_metadata.duration_ms = sum(
+            asset_metadata.duration_ms or 0
+            for _asset, asset_metadata, _source in ordered_rows
+            if asset_metadata is not None
+        )
+        resource_metadata.chapter_count = len(ordered_units)
+        self._session.flush()
+
     def replace_navigation_units(
         self,
         *,
@@ -705,9 +802,15 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self._session.execute(
             delete(ReadableResourceNavigationUnit).where(
                 ReadableResourceNavigationUnit.resource_id == resource_id,
-                ReadableResourceNavigationUnit.unit_type == "page",
+                ReadableResourceNavigationUnit.asset_id == asset_id,
             )
         )
+        current_max = self._session.scalar(
+            select(func.max(ReadableResourceNavigationUnit.sort_order)).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id
+            )
+        )
+        base_sort_order = 0 if current_max is None else int(current_max) + 1
         self._session.add_all(
             [
                 ReadableResourceNavigationUnit(
@@ -718,10 +821,13 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
                     title=unit.title,
                     href=unit.href,
                     media_type=unit.media_type,
-                    sort_order=unit.sort_order,
+                    sort_order=base_sort_order + unit.sort_order,
                     width=unit.width,
                     height=unit.height,
                     size=unit.size,
+                    start_ms=unit.start_ms,
+                    end_ms=unit.end_ms,
+                    duration_ms=unit.duration_ms,
                     metadata_json="{}",
                 )
                 for unit in units
@@ -733,7 +839,8 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         )
         if metadata is None:
             raise LookupError(resource_id)
-        metadata.page_count = len(units)
+        if units and all(unit.unit_type == "page" for unit in units):
+            metadata.page_count = len(units)
         self._session.flush()
 
     def find_outermost_directory_resource(
@@ -756,11 +863,30 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             )
         ).all()
         by_path = {node.relative_path: node for node in nodes}
+        candidate_node = self._session.scalar(
+            select(LibrarySourceNode).where(
+                LibrarySourceNode.library_id == library_id,
+                LibrarySourceNode.path_key
+                == SourceNodeRelativePath(relative_path).path_key,
+            )
+        )
         for path in candidates:
             node = by_path.get(path)
             if node is None:
                 continue
             resource = self.get_resource_by_source_node(node.id)
+            if resource is None:
+                continue
+            if (
+                resource.adapter_id == "audiobook-directory"
+                and candidate_node is not None
+                and not audiobook_resource_owns_path(
+                    resource_anchor=SourceNodeRelativePath(node.relative_path),
+                    candidate_path=SourceNodeRelativePath(relative_path),
+                    candidate_kind=SourceNodePhysicalKind(candidate_node.physical_kind),
+                )
+            ):
+                continue
             if resource is not None:
                 return resource
         return None

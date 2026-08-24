@@ -83,6 +83,7 @@ export type PdfLocation = {
 
 export type ReaderAssetSummary = {
   id: string;
+  title: string;
   resourceId: string;
   sourceNodeId: string;
   role: string;

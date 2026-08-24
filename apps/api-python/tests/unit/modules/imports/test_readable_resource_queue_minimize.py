@@ -282,6 +282,7 @@ class FakeResource:
     def __init__(self) -> None:
         self.id = "res-1"
         self.library_id = "lib-1"
+        self.source_node_id = "node-1"
         self.adapter_id = "epub"
 
 

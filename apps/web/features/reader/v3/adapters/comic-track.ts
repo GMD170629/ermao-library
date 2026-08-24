@@ -1,9 +1,10 @@
 import type { PagedTrackDriver, PagedTrackDriverSnapshot, PageStep } from '../paged-track/paged-track-types';
 import { comicImageSizing, comicPageSlotSizing, type ComicImageFit, type ComicPageMeta } from './comic-model';
+import { normalizeLocale } from '../../../../i18n/config';
+import { translateMessage } from '../../../../i18n/messages';
 
 export type ComicTrackPage = ComicPageMeta & {
-  url?: string;
-  loading: boolean;
+  url: string;
   error?: string;
 };
 
@@ -30,6 +31,7 @@ export type ComicTrackSource = {
   getView: () => ComicTrackView;
   prepare: (step: PageStep, signal: AbortSignal) => Promise<boolean>;
   promote: (step: PageStep, signal: AbortSignal) => Promise<void> | void;
+  retry: (page: number) => void;
 };
 
 type ComicTrackSlot = 'previous' | 'current' | 'next';
@@ -66,7 +68,7 @@ function spreadKey(spread: ComicTrackSpread | null, view: ComicTrackView, role: 
     anchor: spread.anchor,
     fit: view.imageFit,
     mode: view.mode,
-    pages: spread.pages.map((page) => [page.pageIndex, page.url, page.loading, page.error]),
+    pages: spread.pages.map((page) => [page.pageIndex, page.url]),
     zoom: view.zoom,
     pageWidth: view.pageWidth,
     pageGap: view.pageGap ?? 0
@@ -74,7 +76,7 @@ function spreadKey(spread: ComicTrackSpread | null, view: ComicTrackView, role: 
 }
 
 /**
- * Persistent three-slot comic track. The source owns page/cache state; this
+ * Persistent three-slot comic track. The source owns page identity; this
  * class only owns presentation, physical direction and deterministic motion.
  */
 export class ComicSpreadTrackDriver implements PagedTrackDriver {
@@ -365,24 +367,57 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
           maxWidth: sizing.maxWidth,
           minWidth: '0',
           overflow: 'hidden',
+          position: 'relative',
           width: sizing.width
         });
-        if (page.url) {
-          const image = this.document.createElement('img');
-          image.src = page.url;
-          image.alt = `第 ${page.pageIndex} 页`;
-          image.decoding = 'async';
-          image.draggable = false;
-          Object.assign(image.style, comicImageSizing(view.imageFit, layoutMode));
-          pageSlot.append(image);
-        } else {
-          const placeholder = this.document.createElement('div');
-          placeholder.dataset.comicPagePlaceholder = String(page.pageIndex);
-          placeholder.textContent = page.error ?? `正在加载第 ${page.pageIndex} 页`;
-          placeholder.style.opacity = '0.7';
-          placeholder.style.padding = '24px';
-          pageSlot.append(placeholder);
-        }
+        const locale = normalizeLocale(this.document.documentElement.lang);
+        const image = this.document.createElement('img');
+        const placeholder = this.document.createElement('div');
+        placeholder.dataset.comicPagePlaceholder = String(page.pageIndex);
+        placeholder.setAttribute('role', 'status');
+        placeholder.textContent = translateMessage(locale, '加载中');
+        Object.assign(placeholder.style, {
+          alignItems: 'center',
+          display: 'flex',
+          height: '100%',
+          justifyContent: 'center',
+          opacity: '0.7',
+          padding: '24px',
+          position: 'absolute',
+          inset: '0'
+        });
+        image.alt = translateMessage(locale, '第 {value0} 页', { value0: page.pageIndex + 1 });
+        image.decoding = 'async';
+        image.draggable = false;
+        image.style.visibility = 'hidden';
+        Object.assign(image.style, comicImageSizing(view.imageFit, layoutMode));
+        const cleanup = () => {
+          image.removeEventListener('load', handleLoad);
+          image.removeEventListener('error', handleError);
+        };
+        const handleLoad = () => {
+          cleanup();
+          image.style.visibility = 'visible';
+          placeholder.remove();
+        };
+        const handleError = () => {
+          cleanup();
+          const failure = this.document.createElement('div');
+          failure.setAttribute('role', 'alert');
+          const message = this.document.createElement('p');
+          message.textContent = translateMessage(locale, '漫画页面加载失败');
+          const retry = this.document.createElement('button');
+          retry.type = 'button';
+          retry.textContent = translateMessage(locale, '重试');
+          retry.addEventListener('click', () => this.source.retry(page.pageIndex), { once: true });
+          failure.append(message, retry);
+          placeholder.replaceChildren(failure);
+        };
+        image.addEventListener('load', handleLoad, { once: true });
+        image.addEventListener('error', handleError, { once: true });
+        pageSlot.append(image, placeholder);
+        image.src = page.url;
+        if (image.complete && image.naturalWidth > 0) handleLoad();
         frame.append(pageSlot);
       });
     }

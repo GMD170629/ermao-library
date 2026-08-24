@@ -121,20 +121,35 @@ function packageVersionFromUvLock(contents) {
   return null;
 }
 
+function singleCapturedVersion(contents, expression) {
+  const versions = [...contents.matchAll(expression)].map((match) => match[1]);
+  return versions.length > 0 && new Set(versions).size === 1 ? versions[0] : null;
+}
+
 export async function readApplicationVersions(repositoryRoot) {
   const rootPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'));
   const webPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/web/package.json'), 'utf8'));
+  const readerCorePackage = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/reader-core/package.json'), 'utf8'));
+  const readerContractsPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/reader-contracts/package.json'), 'utf8'));
+  const readiumWebPocPackage = JSON.parse(await readFile(path.join(repositoryRoot, 'apps/readium-web-poc/package.json'), 'utf8'));
   const pyproject = await readFile(path.join(repositoryRoot, 'apps/api-python/pyproject.toml'), 'utf8');
   const runtimeConfig = await readFile(path.join(repositoryRoot, 'apps/api-python/app/core/config.py'), 'utf8');
   const serviceWorker = await readFile(path.join(repositoryRoot, 'apps/web/public/sw.js'), 'utf8');
   const uvLock = await readFile(path.join(repositoryRoot, 'apps/api-python/uv.lock'), 'utf8');
+  const androidBuild = await readFile(path.join(repositoryRoot, 'apps/mobile/androidApp/build.gradle.kts'), 'utf8');
+  const iosProject = await readFile(path.join(repositoryRoot, 'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'), 'utf8');
   return {
     root: rootPackage.version,
     web: webPackage.version,
+    readerCore: readerCorePackage.version,
+    readerContracts: readerContractsPackage.version,
+    readiumWebPoc: readiumWebPocPackage.version,
     python: /^version = "([^"]+)"$/mu.exec(pyproject)?.[1] ?? null,
     runtime: /^\s*app_version: str = "([^"]+)"$/mu.exec(runtimeConfig)?.[1] ?? null,
     serviceWorker: /^const FRONTEND_RESOURCE_VERSION = '([^']+)';\r?$/mu.exec(serviceWorker)?.[1] ?? null,
-    uvLock: packageVersionFromUvLock(uvLock)
+    uvLock: packageVersionFromUvLock(uvLock),
+    android: singleCapturedVersion(androidBuild, /^\s*versionName = "([^"]+)"\s*$/gmu),
+    ios: singleCapturedVersion(iosProject, /^\s*MARKETING_VERSION = ([^;]+);\s*$/gmu)
   };
 }
 
@@ -192,7 +207,12 @@ export async function validateReleaseNotesRepository({
         'apps/web/public/sw.js',
         'apps/api-python/pyproject.toml',
         'apps/api-python/app/core/config.py',
-        'apps/api-python/uv.lock'
+        'apps/api-python/uv.lock',
+        'packages/reader-core/package.json',
+        'packages/reader-contracts/package.json',
+        'apps/readium-web-poc/package.json',
+        'apps/mobile/androidApp/build.gradle.kts',
+        'apps/mobile/iosApp/ErmaoLibrary.xcodeproj/project.pbxproj'
       ];
       const missing = required.filter((file) => !changes.has(file));
       if (missing.length > 0) throw new Error(`Version bump must update: ${missing.join(', ')}`);

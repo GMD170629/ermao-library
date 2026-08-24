@@ -44,6 +44,24 @@ class ResourceNavigationUnitInput:
     size: int | None = None
     width: int | None = None
     height: int | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    duration_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceAssetMetadataInput:
+    """Validated metadata persisted beside one imported source asset."""
+
+    title: str | None = None
+    mime_type: str | None = None
+    duration_ms: int | None = None
+    codec: str | None = None
+    bitrate: int | None = None
+    sample_rate: int | None = None
+    channels: int | None = None
+    disc_number: int | None = None
+    track_number: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,9 +249,12 @@ class BookResourceRepositoryPort(Protocol):
         sequence_index: int | None,
         sort_key: str | None,
         failure_reason: str | None,
+        metadata: ResourceAssetMetadataInput | None = None,
     ) -> str: ...
 
     def count_ready_assets(self, resource_id: str) -> int: ...
+
+    def refresh_audio_resource_aggregates(self, resource_id: str) -> None: ...
 
     def replace_navigation_units(
         self,
