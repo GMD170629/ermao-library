@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +34,7 @@ from app.modules.library.domain.readable_resource_anchors import (
     is_asset_path_within_resource_scope,
     is_resource_anchor_within_book_scope,
     resource_owns_book_metadata,
+    resource_relative_asset_sort_key,
 )
 from app.modules.library.domain.readable_resource_states import (
     AssetImportState,
@@ -62,8 +63,14 @@ from app.modules.library.infrastructure.readable_resource_schema import (
 
 
 class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        global_ignore_patterns_loader: Callable[[], str] | None = None,
+    ) -> None:
         self._session = session
+        self._global_ignore_patterns_loader = global_ignore_patterns_loader
 
     def get_library(self, library_id: str) -> LibrarySourceTreeConfig:
         library = self._session.get(Library, library_id)
@@ -80,7 +87,11 @@ class SqlAlchemyLibraryConfigAdapter(LibraryConfigPort):
             organization_mode=mode,
             ignore_hidden=bool(library.ignore_hidden),
             ignore_patterns=library.ignore_patterns,
-            global_ignore_patterns="",
+            global_ignore_patterns=(
+                self._global_ignore_patterns_loader()
+                if self._global_ignore_patterns_loader is not None
+                else ""
+            ),
             probe_sample_limit=100,
             probe_max_entries=5000,
             probe_max_depth=32,
@@ -602,6 +613,9 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         sort_key: str | None,
         failure_reason: str | None,
     ) -> str:
+        # Keep the existing port field for compatibility, but persist the canonical
+        # SourceNode path computed below instead of adapter-provided ordering hints.
+        del sort_key
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None:
             raise ReadableResourceTopologyError(
@@ -660,7 +674,10 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         row.role = role.value
         row.import_state = import_state.value
         row.sequence_index = sequence_index
-        row.sort_key = sort_key
+        row.sort_key = resource_relative_asset_sort_key(
+            resource_anchor=SourceNodeRelativePath(resource_anchor.relative_path),
+            asset_path=SourceNodeRelativePath(asset_node.relative_path),
+        )
         row.failure_reason = failure_reason
         self._session.flush()
         return row.id

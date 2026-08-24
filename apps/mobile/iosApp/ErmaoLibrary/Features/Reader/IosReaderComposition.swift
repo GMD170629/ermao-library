@@ -352,7 +352,7 @@ final class IosReaderComposition: ObservableObject {
             bookId: target.bookId,
             resourceId: target.resourceId
         )
-        let progressStore: any ErmaoShared.ReaderProgressSyncingStore
+        var progressStore: any ErmaoShared.ReaderProgressSyncingStore
         let progressCoordination: IosReaderProgressSessionCoordination?
         var sessionRemoteSnapshot = remoteSnapshot
         do {
@@ -559,6 +559,7 @@ final class IosReaderComposition: ObservableObject {
             displayTitle: existing.displayTitle,
             format: existing.sourceFormat.readerFormat,
             bookId: existing.bookID,
+            assetId: existing.assetID,
             sourceFormat: existing.sourceFormat
         )
     }

@@ -23,7 +23,8 @@ dependencies = [
   "pypdfium2>=4.30.0",
   "pypdf>=5.7.0",
   "rarfile>=4.4",
-  "python-multipart>=0.0.20"
+  "python-multipart>=0.0.20",
+  "watchdog>=4.0.0"
 ]
 
 [project.optional-dependencies]

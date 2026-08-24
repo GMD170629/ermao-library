@@ -14,9 +14,9 @@ actor SharedShelfClient: ShelfClient {
             bookId: bookID
         )
         if let content = result as? ErmaoShared.ShelfResultContent<NSArray> {
-            return (content.value ?? []).compactMap { value in
+            return (content.value ?? []).compactMap { value -> ShelfOption? in
                 guard let shelf = value as? ErmaoShared.ShelfSummary else { return nil }
-                return ShelfOption(id: shelf.id, name: shelf.name, containsWork: shelf.containsWork)
+                return ShelfOption(id: shelf.id, name: shelf.name, containsWork: shelf.containsBook)
             }
         }
         throw mapFailure(result)

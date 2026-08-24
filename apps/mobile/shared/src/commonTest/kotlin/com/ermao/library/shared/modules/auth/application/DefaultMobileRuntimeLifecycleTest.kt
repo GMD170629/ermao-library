@@ -62,14 +62,15 @@ class DefaultMobileRuntimeLifecycleTest {
     }
 
     @Test
-    fun serverIdentityMismatchClearsSavedSessionAndCookie() = runBlocking {
+    fun serverIdentityChangeRefreshesTheProfileWithoutBlockingTheSession() = runBlocking {
         val activeProfile = profile("profile-a", "server-a", true)
         val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
         val verifiedSessions = InMemoryVerifiedSessionRepository().also {
+            val previouslyVerifiedProfile = activeProfile.copy(serverIdentity = "previous-session-server")
             it.save(
                 VerifiedSessionRecord.from(
                     activeProfile.id,
-                    identity(activeProfile),
+                    identity(previouslyVerifiedProfile),
                     authorization(),
                     validatedAtEpochMillis = 500,
                 ),
@@ -83,11 +84,12 @@ class DefaultMobileRuntimeLifecycleTest {
             probe = ServerProbe { ServerProbeResult.Compatible("different-server") },
         )
 
-        assertIs<RuntimeOperationResult.Failure>(runtime.start())
+        assertIs<RuntimeOperationResult.Success>(runtime.start())
 
-        assertIs<AppSession.IncompatibleServer>(runtime.currentSession)
-        assertEquals(null, verifiedSessions.load(activeProfile.id))
-        assertEquals(true, cookies.cleared)
+        val authenticated = assertIs<AppSession.Authenticated>(runtime.currentSession)
+        assertEquals("different-server", authenticated.profile.serverIdentity)
+        assertEquals("different-server", profiles.activeProfile()?.serverIdentity)
+        assertEquals(false, cookies.cleared)
     }
 
     @Test

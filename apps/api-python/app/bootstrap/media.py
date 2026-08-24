@@ -19,7 +19,10 @@ from app.modules.media.infrastructure.page_index import (
     list_page_units_for_resource,
     load_read_only_page_index_projection,
 )
-from app.modules.media.infrastructure.resource_preview import FilesystemResourcePreview
+from app.modules.media.infrastructure.resource_preview import (
+    FilesystemResourcePreview,
+    ResourcePreviewRenderCoordinator,
+)
 from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
@@ -47,6 +50,9 @@ class MediaPageIndex:
 
 
 media_page_index = MediaPageIndex()
+resource_preview_render_coordinator = ResourcePreviewRenderCoordinator(
+    max_concurrent_pdf_renders=1
+)
 
 
 def media_resource_query(db: Session) -> MediaResourceQuery:
@@ -54,7 +60,9 @@ def media_resource_query(db: Session) -> MediaResourceQuery:
 
 
 def resource_preview(db: Session, settings: Settings) -> GetResourcePreview:
-    return GetResourcePreview(FilesystemResourcePreview(db, settings))
+    return GetResourcePreview(
+        FilesystemResourcePreview(db, settings, resource_preview_render_coordinator)
+    )
 
 
 def effective_book_cover_query(db: Session) -> ResolveBookCoverCandidates:

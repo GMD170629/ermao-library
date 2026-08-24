@@ -157,6 +157,8 @@ class UnitOfWorkPort(Protocol):
 
     def rollback(self) -> None: ...
 
+    def recover_after_failure(self) -> None: ...
+
 
 class SourceTreeFilesystemPort(Protocol):
     def resolve_under_root(self, root: Path, relative_path: str) -> Path: ...
@@ -184,6 +186,11 @@ class SourceTreeFilesystemPort(Protocol):
 
 
 class LibraryImportTaskQueuePort(Protocol):
+    def request_library_scan(
+        self, library_id: str
+    ) -> tuple[LibraryImportTaskRecord, bool]:
+        """Return the one queued scan, creating it when absent."""
+
     def enqueue(
         self,
         *,

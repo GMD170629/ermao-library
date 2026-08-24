@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -451,6 +452,42 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     assert "release" in uow.events
     assert uow.txn_count >= 40
     assert uow.events.count("commit") == uow.txn_count
+
+
+def test_scan_skips_builtin_library_and_global_ignore_rules(tmp_path: Path) -> None:
+    root = tmp_path / "books"
+    root.mkdir()
+    entries: list[DirectoryEntry] = [
+        ("01.cover.jpg", SourceNodePhysicalKind.REGULAR_FILE, 1, 1),
+        ("01.OPF", SourceNodePhysicalKind.REGULAR_FILE, 1, 2),
+        ("download.tmp", SourceNodePhysicalKind.REGULAR_FILE, 1, 3),
+        ("cache-note.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 4),
+        ("keep.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 5),
+    ]
+    uow = RecordingUoW()
+    filesystem = RecordingFilesystem(uow, {})
+    filesystem._entries[str(root)] = entries
+    filesystem._entries[str(root.resolve())] = entries
+    source_nodes = FakeSourceNodes()
+    config = replace(
+        _config(root),
+        ignore_patterns="cache*",
+        global_ignore_patterns="*.tmp",
+    )
+
+    result = ScanLibrarySourceTree(
+        libraries=FakeLibraries(config),
+        filesystem=filesystem,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+    ).execute_library("lib-1")
+
+    assert result.nodes_inserted == 1
+    assert {node.name for node in source_nodes._by_id.values()} == {"keep.md"}
 
 
 def test_scan_releases_before_directory_probe(tmp_path: Path) -> None:

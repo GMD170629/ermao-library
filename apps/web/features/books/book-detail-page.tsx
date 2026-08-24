@@ -439,8 +439,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   return <div className="w-full">
     <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-950"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
     <section className="rounded-[22px] border border-[#f1ddd3] bg-[#fffaf7] p-5 sm:p-6">
-      <div className="grid gap-6 lg:grid-cols-[190px_minmax(0,1fr)_230px]">
-        <Cover book={{ id: nestedNode?.sourceNodeId ?? book.id, title: displayedTitle, author: book.author, coverUrl: coverRevision > 0 && displayedCoverUrl ? `${displayedCoverUrl}${displayedCoverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : displayedCoverUrl, gradient: book.gradient, coverStatus: activeResource ? '' : book.coverStatus }} className="mx-auto aspect-[2/3] w-36 rounded-xl shadow-md sm:w-[190px] lg:mx-0" size="large" priority />
+      <div className="grid gap-6 lg:grid-cols-[150px_minmax(0,1fr)_230px]">
+        <Cover book={{ id: nestedNode?.sourceNodeId ?? book.id, title: displayedTitle, author: book.author, coverUrl: coverRevision > 0 && displayedCoverUrl ? `${displayedCoverUrl}${displayedCoverUrl.includes('?') ? '&' : '?'}v=${coverRevision}` : displayedCoverUrl, gradient: book.gradient, coverStatus: activeResource ? '' : book.coverStatus }} className="mx-auto aspect-[2/3] w-24 max-w-[150px] rounded-xl shadow-md sm:w-[150px] lg:mx-0" size="small" priority />
         <div className="flex min-w-0 flex-col py-1">
           {displayedCompleted ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]">{displayedTitle}</h1>

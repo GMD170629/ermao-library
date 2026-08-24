@@ -8,6 +8,9 @@ import signal
 import threading
 from pathlib import Path
 
+from app.bootstrap.library_scan_runtime import (
+    LibraryScanCoordinator,
+)
 from app.bootstrap.metadata import build_automatic_metadata_request_gate
 from app.bootstrap.prestart import verify_current_schema
 from app.bootstrap.readable_resource_pipeline import (
@@ -39,6 +42,14 @@ def main() -> None:
     pipeline = build_readable_resource_pipeline(import_session)
     readable_worker = build_readable_resource_worker(pipeline)
     readable_worker.startup()
+    if pipeline.request_library_scan is None:
+        raise RuntimeError("library scan requester is not configured")
+    scan_coordinator = LibraryScanCoordinator(
+        session=import_session,
+        settings=settings,
+        request_scan=pipeline.request_library_scan,
+        uow=pipeline.uow,
+    )
 
     metadata_worker = MetadataLookupWorker(
         MetadataMaintenanceSessionLocal,
@@ -70,6 +81,7 @@ def main() -> None:
     try:
         while not stop_event.is_set():
             try:
+                scan_coordinator.tick()
                 outcome = readable_worker.process_once()
             except Exception:
                 # This is the process-level containment boundary.  Task-level
@@ -83,6 +95,7 @@ def main() -> None:
         READY_FILE.unlink(missing_ok=True)
         metadata_worker.shutdown()
         organizer_scheduler.shutdown()
+        scan_coordinator.shutdown()
         import_session.close()
 
 

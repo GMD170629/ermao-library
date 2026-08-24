@@ -19,8 +19,7 @@ data class VerifiedSessionRecord(
     val avatarUrl: String? = null,
     val locale: String? = null,
 ) {
-    fun matches(profileId: String, serverIdentity: String): Boolean =
-        this.profileId == profileId && this.serverIdentity == serverIdentity
+    fun belongsToProfile(profileId: String): Boolean = this.profileId == profileId
 
     fun toIdentity(): SessionIdentity = SessionIdentity(
         userId = userId,

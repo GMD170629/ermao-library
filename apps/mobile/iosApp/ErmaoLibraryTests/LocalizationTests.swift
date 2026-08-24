@@ -3,6 +3,30 @@ import XCTest
 @testable import ErmaoLibrary
 
 final class LocalizationTests: XCTestCase {
+    func testCompatibilityCopyReflectsTheActualFailure() {
+        XCTAssertEqual(
+            ServerCompatibilityCopy.resolve(reasonCode: "CLIENT_UPDATE_REQUIRED"),
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.appUpdate.title",
+                messageKey: "server.compatibility.appUpdate.message"
+            )
+        )
+        XCTAssertEqual(
+            ServerCompatibilityCopy.resolve(reasonCode: "UNSUPPORTED_READER_SCHEMA"),
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.serverUpdate.title",
+                messageKey: "server.compatibility.serverUpdate.message"
+            )
+        )
+        XCTAssertEqual(
+            ServerCompatibilityCopy.resolve(reasonCode: "UNEXPECTED_SERVICE"),
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.invalidResponse.title",
+                messageKey: "server.compatibility.invalidResponse.message"
+            )
+        )
+    }
+
     func testRequiredStringsExistInEnglishAndSimplifiedChinese() throws {
         let keys = [
             "server.empty.title",
@@ -10,6 +34,12 @@ final class LocalizationTests: XCTestCase {
             "server.tls.risk.title",
             "server.tls.ignore.action",
             "server.incompatible.title",
+            "server.compatibility.appUpdate.title",
+            "server.compatibility.appUpdate.message",
+            "server.compatibility.serverUpdate.title",
+            "server.compatibility.serverUpdate.message",
+            "server.compatibility.invalidResponse.title",
+            "server.compatibility.invalidResponse.message",
             "setup.required.title",
             "setup.submit.action",
             "setup.confirmPassword.mismatch",

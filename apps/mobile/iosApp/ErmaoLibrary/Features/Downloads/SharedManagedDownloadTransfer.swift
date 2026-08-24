@@ -23,7 +23,15 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
 
     func download(_ request: ManagedDownloadRequest, progress: @escaping @Sendable (ManagedDownloadProgress) async -> Void) async throws -> ManagedDownloadReceipt {
         let key = descriptorKey(request.context, request.record.resourceID)
-        let descriptor = descriptors.value(for: key) ?? (try await loadDescriptor(context: request.context, resourceID: request.record.resourceID))
+        let descriptor: ErmaoShared.DownloadDescriptor
+        if let cached = descriptors.value(for: key) {
+            descriptor = cached
+        } else {
+            descriptor = try await loadDescriptor(
+                context: request.context,
+                resourceID: request.record.resourceID
+            )
+        }
         guard let expectedBytes = request.record.expectedBytes else {
             throw ManagedDownloadTransferError.invalidResponse
         }
@@ -42,8 +50,8 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
             sink: sink,
             progressObserver: observer
         )
-        guard let success = result as? DownloadTransferSuccess else {
-            if let failure = result as? DownloadTransferFailure { throw map(failure.error) }
+        guard let success = result as? ErmaoShared.DownloadTransferResultSuccess else {
+            if let failure = result as? ErmaoShared.DownloadTransferResultFailure { throw map(failure.error) }
             throw ManagedDownloadTransferError.invalidResponse
         }
         return ManagedDownloadReceipt(receivedBytes: success.transfer.verifiedBytes, expectedBytes: descriptor.source.totalBytes)
@@ -58,8 +66,11 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
 
     private func loadDescriptor(context: ContentRequestContext, resourceID: String) async throws -> ErmaoShared.DownloadDescriptor {
         let result = try await makeGateway(context).load(context: sharedContext(context), resourceId: resourceID)
-        if let success = result as? DownloadBootstrapSuccess, success.bootstrap.descriptor.identity.resourceId == resourceID { return success.bootstrap.descriptor }
-        if let failure = result as? DownloadBootstrapFailure { throw map(failure.error) }
+        if let success = result as? ErmaoShared.DownloadBootstrapResultSuccess,
+           success.bootstrap.descriptor.identity.resourceId == resourceID {
+            return success.bootstrap.descriptor
+        }
+        if let failure = result as? ErmaoShared.DownloadBootstrapResultFailure { throw map(failure.error) }
         throw ManagedDownloadTransferError.invalidResponse
     }
 

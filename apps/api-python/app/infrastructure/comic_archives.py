@@ -10,12 +10,13 @@ import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Literal, Self, TypeAlias, cast
+from typing import BinaryIO, Literal, Self, TypeAlias, cast
 from xml.etree import ElementTree
 
 # rarfile has no published typing metadata; ComicArchive is the typed adapter boundary.
 import rarfile  # type: ignore[import-untyped]
 
+from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.comic_types import (
     ComicArchiveInspection,
     ComicInfoMetadata,
@@ -71,13 +72,6 @@ def _ignored_entry(name: str) -> bool:
         or last.startswith("._")
         or any(part.startswith(".") for part in parts)
     )
-
-
-def _natural_key(value: str) -> list[Any]:
-    return [
-        int(part) if part.isdigit() else part.lower()
-        for part in re.split(r"(\d+)", value)
-    ]
 
 
 def _split_tags(value: str | None) -> list[str]:
@@ -290,7 +284,7 @@ def inspect_comic_archive(
         ]
         if not images:
             raise ValueError("漫画压缩包内没有可导入的图片")
-        images.sort(key=lambda item: _natural_key(item.filename))
+        images.sort(key=lambda item: natural_sort_key(item.filename))
         comic_info_entry = next(
             (
                 info

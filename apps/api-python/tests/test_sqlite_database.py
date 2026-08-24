@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    func,
     inspect,
     select,
 )
@@ -326,13 +327,15 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 1
-    assert script.get_heads() == ["0001_library_topology_baseline"]
-    assert head_revision() == "0001_library_topology_baseline"
+    assert len(revisions) == 2
+    assert script.get_heads() == ["0002_library_scan_queue_uniqueness"]
+    assert head_revision() == "0002_library_scan_queue_uniqueness"
     assert [revision.revision for revision in revisions] == [
+        "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision is None
+    assert revisions[0].down_revision == "0001_library_topology_baseline"
+    assert revisions[1].down_revision is None
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -341,7 +344,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0001_library_topology_baseline"
+        assert _current_revision(engine) == "0002_library_scan_queue_uniqueness"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -353,6 +356,69 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
             for column in inspect(engine).get_columns("MetadataWritebackPreparation")
         }
         assert preparation_columns["sourceNodeId"]["nullable"] is False
+    finally:
+        engine.dispose()
+
+
+def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
+    from alembic import command
+
+    from app.db.runner import alembic_config_for_engine
+
+    engine = create_sqlite_engine(tmp_path / "upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0001_library_topology_baseline")
+        with Session(engine) as session:
+            session.add(
+                Library(
+                    id="scan-library",
+                    name="Scan Library",
+                    root_path=str(tmp_path / "books"),
+                    organization_mode="FLAT",
+                )
+            )
+            session.add_all(
+                [
+                    LibraryImportTask(
+                        id="queued-1",
+                        kind="SCAN_LIBRARY",
+                        library_id="scan-library",
+                        state="QUEUED",
+                    ),
+                    LibraryImportTask(
+                        id="queued-2",
+                        kind="SCAN_LIBRARY",
+                        library_id="scan-library",
+                        state="QUEUED",
+                    ),
+                ]
+            )
+            session.commit()
+
+        runner_module.apply_schema(engine)
+        runner_module.apply_schema(engine)
+
+        with Session(engine) as session:
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(LibraryImportTask)
+                    .where(
+                        LibraryImportTask.library_id == "scan-library",
+                        LibraryImportTask.kind == "SCAN_LIBRARY",
+                        LibraryImportTask.state == "QUEUED",
+                    )
+                )
+                == 1
+            )
+        index_names = {
+            index["name"] for index in inspect(engine).get_indexes("LibraryImportTask")
+        }
+        assert "LibraryImportTask_scan_queued_key" in index_names
+        assert "LibraryImportTask_scan_running_key" in index_names
     finally:
         engine.dispose()
 

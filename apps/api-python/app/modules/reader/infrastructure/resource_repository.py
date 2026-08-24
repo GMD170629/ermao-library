@@ -9,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.natural_sort import natural_sort_key
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
     LibraryBook,
@@ -314,13 +315,14 @@ class SqlAlchemyReaderResourceRepository:
                 LibraryResourceAsset.import_state == "READY",
                 LibrarySourceNode.physical_kind == "REGULAR_FILE",
             )
-            .order_by(
-                LibraryResourceAsset.sequence_index,
-                LibraryResourceAsset.sort_key,
-                LibraryResourceAsset.created_at,
-                LibraryResourceAsset.id,
-            )
         ).all()
+        ordered_rows = sorted(
+            rows,
+            key=lambda row: (
+                natural_sort_key(row[1].relative_path),
+                row[0].id,
+            ),
+        )
         return [
             ReaderAssetDto(
                 id=asset.id,
@@ -343,11 +345,13 @@ class SqlAlchemyReaderResourceRepository:
                 track_number=(
                     asset_metadata.track_number if asset_metadata is not None else None
                 ),
-                sort_order=asset.sequence_index or 0,
+                sort_order=sort_order,
                 mtime_ms=source_node.observed_mtime_ns // 1_000_000,
                 codec=asset_metadata.codec if asset_metadata is not None else None,
             )
-            for asset, source_node, asset_metadata in rows
+            for sort_order, (asset, source_node, asset_metadata) in enumerate(
+                ordered_rows
+            )
         ]
 
     def list_navigation_units(self, resource_id: str) -> list[ReaderNavigationUnitDto]:

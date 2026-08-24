@@ -198,7 +198,7 @@ def continue_download_import_command(
         task_id,
         updated_at=db_timestamp(),
     )
-    result = continue_library_import(db, library_id)
+    result = continue_library_import(db, library_id, trigger="UPLOAD")
     with DownloadWriteTransaction(db):
         db.execute(mark_importing_statement)
     return result

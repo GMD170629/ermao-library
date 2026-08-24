@@ -31,9 +31,15 @@ final class IosPublicationDownloadSink: ErmaoShared.PublicationDownloadSink, @un
     init(
         store: IosManagedPublicationStore,
         staging: URL,
-        download: ErmaoShared.ReaderPublicationDownload
+        download: ErmaoShared.ReaderPublicationDownload,
+        namespace: String
     ) {
-        worker = IosPublicationDownloadWorker(store: store, staging: staging, download: download)
+        worker = IosPublicationDownloadWorker(
+            store: store,
+            staging: staging,
+            download: download,
+            namespace: namespace
+        )
     }
 
     func write(bytes: KotlinByteArray, count: Int32) async throws {
@@ -101,6 +107,7 @@ private actor IosPublicationDownloadWorker {
                 normalizationVersion: "reader-v4",
                 sourceFormat: download.sourceFormat,
                 bookID: download.bookId,
+                assetID: download.assetId,
                 namespace: namespace,
                 validateWithReaderParser: true
             )
@@ -109,6 +116,7 @@ private actor IosPublicationDownloadWorker {
                 displayTitle: managed.displayTitle,
                 format: managed.sourceFormat.readerFormat,
                 bookId: managed.bookID,
+                assetId: managed.assetID,
                 sourceFormat: managed.sourceFormat
             )
         } catch {

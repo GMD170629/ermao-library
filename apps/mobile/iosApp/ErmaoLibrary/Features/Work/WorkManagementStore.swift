@@ -19,7 +19,7 @@ final class WorkManagementStore: ObservableObject {
     @Published private(set) var kindleSettings: ErmaoShared.KindleSettings?
 
     private let repository: any ErmaoShared.WorkManagementRepository
-    private let context: ErmaoShared.WorkManagementContext
+    private let context: ErmaoShared.BookManagementContext
     private let bookID: String
 
     init(
@@ -116,11 +116,16 @@ final class WorkManagementStore: ObservableObject {
                 bookId: bookID,
                 resourceId: resource.id,
                 draft: ErmaoShared.ResourceMetadataDraft(
+                    title: nil,
+                    description: nil,
                     publisher: publisher,
+                    publishedAt: nil,
                     language: language,
                     isbn: isbn,
                     identifier: identifier,
-                    narrator: narrator
+                    narrator: narrator,
+                    abridged: nil,
+                    resourceIndex: nil
                 )
             )
         }
@@ -221,7 +226,7 @@ final class WorkManagementStore: ObservableObject {
     ) {
         runValue {
             let result = try await operation()
-            let _: KotlinUnit = try Self.value(result)
+            try Self.requireSuccess(result)
             self.completedAction = action
         }
     }
@@ -257,6 +262,15 @@ final class WorkManagementStore: ObservableObject {
         guard let content = result as? ErmaoShared.WorkManagementResultContent<AnyObject>,
               let value = content.value as? Value else { throw WorkManagementClientError(code: "MANAGEMENT_INVALID_RESPONSE") }
         return value
+    }
+
+    private static func requireSuccess(_ result: any ErmaoShared.WorkManagementResult) throws {
+        if let failure = result as? ErmaoShared.WorkManagementResultFailure {
+            throw WorkManagementClientError(code: failure.error.code)
+        }
+        guard result is ErmaoShared.WorkManagementResultContent<AnyObject> else {
+            throw WorkManagementClientError(code: "MANAGEMENT_INVALID_RESPONSE")
+        }
     }
 }
 

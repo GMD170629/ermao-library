@@ -25,6 +25,10 @@ from app.modules.imports.application.library_commands import (
     PreparedLibraryUpdate,
     UpdateLibrary,
 )
+from app.modules.imports.application.library_scan_settings import (
+    GetLibraryScanSettings,
+    UpdateLibraryScanSettings,
+)
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImportResult,
 )
@@ -33,6 +37,7 @@ from app.modules.imports.application.save_uploaded_files import (
     SaveUploadedFiles,
     SaveUploadedFilesCommand,
 )
+from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
 from app.modules.imports.infrastructure.library_queries import (
     get_import_task,
     get_library,
@@ -44,8 +49,14 @@ from app.modules.imports.infrastructure.library_queries import (
     list_library_access_user_ids,
     source_node_library_id,
 )
+from app.modules.imports.infrastructure.library_scan_settings import (
+    SqlAlchemyLibraryScanSettingsRepository,
+)
 from app.modules.imports.infrastructure.library_write import (
     SqlAlchemyLibraryWriteStore,
+)
+from app.modules.imports.infrastructure.readable_resource.support import (
+    SqlAlchemyUnitOfWork,
 )
 from app.modules.imports.infrastructure.readable_resource.worker import (
     ReadableResourceWorkerProcessor,
@@ -86,6 +97,32 @@ def save_uploaded_files(
     return SaveUploadedFiles(AtomicUploadedFilePublisher()).execute(command)
 
 
+def get_library_scan_settings(
+    session: Session, *, legacy_interval_ms: int | None = None
+) -> LibraryScanSettings:
+    return GetLibraryScanSettings(
+        SqlAlchemyLibraryScanSettingsRepository(
+            session,
+            legacy_interval_ms=legacy_interval_ms,
+        )
+    ).execute()
+
+
+def update_library_scan_settings(
+    session: Session,
+    settings: LibraryScanSettings,
+    *,
+    legacy_interval_ms: int | None = None,
+) -> LibraryScanSettings:
+    repository = SqlAlchemyLibraryScanSettingsRepository(
+        session,
+        legacy_interval_ms=legacy_interval_ms,
+    )
+    return UpdateLibraryScanSettings(repository, SqlAlchemyUnitOfWork(session)).execute(
+        settings
+    )
+
+
 __all__ = [
     "ContinueImportResult",
     "ReadableResourcePipeline",
@@ -97,6 +134,7 @@ __all__ = [
     "get_import_task",
     "get_library",
     "get_library_by_root_path",
+    "get_library_scan_settings",
     "library_has_topology",
     "list_enabled_library_rows",
     "list_import_tasks_page",
@@ -107,4 +145,5 @@ __all__ = [
     "persist_import_library_update",
     "save_uploaded_files",
     "source_node_library_id",
+    "update_library_scan_settings",
 ]

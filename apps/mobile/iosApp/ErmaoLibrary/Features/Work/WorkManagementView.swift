@@ -289,7 +289,7 @@ struct WorkManagementView: View {
 
     private var kindle: some View {
         Section {
-            if let settings = store.kindleSettings, settings.ready {
+            if let settings = store.kindleSettings, kindleReady(settings) {
                 Label("management.kindleReady", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(theme.actionAccent)
                 LabeledContent("management.kindleSender", value: settings.senderEmail)
@@ -313,14 +313,14 @@ struct WorkManagementView: View {
                             if selectedKindleAssetID == asset.id { Image(systemName: "checkmark.circle.fill") }
                         }
                     }
-                    .disabled(store.kindleSettings?.ready != true)
+                    .disabled(!kindleReady(store.kindleSettings))
                 }
             }
             Button("management.addToKindleQueue") {
                 guard let selectedKindleAssetID else { return }
                 store.sendToKindle(assetID: selectedKindleAssetID)
             }
-            .disabled(store.kindleSettings?.ready != true || selectedKindleAssetID == nil)
+            .disabled(!kindleReady(store.kindleSettings) || selectedKindleAssetID == nil)
         }
     }
 
@@ -334,7 +334,7 @@ struct WorkManagementView: View {
         author = detail.book.author ?? ""
         description = detail.description ?? ""
         series = detail.seriesFacet?.name ?? ""
-        seriesIndex = detail.seriesIndex.map(String.init) ?? ""
+        seriesIndex = detail.seriesIndex.map { String($0) } ?? ""
         tags = detail.tags.joined(separator: ", ")
         publisher = activeResource?.publisher ?? ""
         language = activeResource?.language ?? ""
@@ -354,16 +354,23 @@ struct WorkManagementView: View {
         return path.hasSuffix(".epub") || path.hasSuffix(".pdf")
     }
 
+    private func kindleReady(_ settings: ErmaoShared.KindleSettings?) -> Bool {
+        guard let settings else { return false }
+        return settings.smtpConfigured
+            && !settings.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !settings.recipientEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func availableFields(_ candidate: ErmaoShared.MetadataCandidate) -> Set<ErmaoShared.MetadataField> {
         var fields: Set<ErmaoShared.MetadataField> = []
         if candidate.coverUrl != nil { fields.insert(.cover) }
         if candidate.title != nil { fields.insert(.title) }
         if candidate.author != nil { fields.insert(.author) }
-        if candidate.description_ != nil { fields.insert(.description) }
+        if candidate.description_ != nil { fields.insert(.description_) }
         if !candidate.tags.isEmpty { fields.insert(.tags) }
-        if candidate.seriesName != nil { fields.insert(.seriesName) }
+        if candidate.seriesName != nil { fields.insert(.seriesname) }
         if candidate.publisher != nil { fields.insert(.publisher) }
-        if candidate.publishedAt != nil { fields.insert(.publishedAt) }
+        if candidate.publishedAt != nil { fields.insert(.publishedat) }
         if candidate.language != nil { fields.insert(.language) }
         if candidate.isbn != nil { fields.insert(.isbn) }
         return fields
@@ -374,11 +381,11 @@ struct WorkManagementView: View {
         case .cover: "management.cover"
         case .title: "management.title"
         case .author: "management.author"
-        case .description: "management.description"
+        case .description_: "management.description"
         case .tags: "management.tagsLabel"
-        case .seriesName: "management.series"
+        case .seriesname: "management.series"
         case .publisher: "management.publisher"
-        case .publishedAt: "management.publishedAt"
+        case .publishedat: "management.publishedAt"
         case .language: "management.language"
         case .isbn: "management.isbn"
         default: "management.metadata"

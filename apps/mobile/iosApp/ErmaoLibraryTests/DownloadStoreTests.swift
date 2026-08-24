@@ -48,7 +48,7 @@ final class DownloadStoreTests: XCTestCase {
             authorizationVersion: context.authorizationVersion
         )
         let gatewayResult = try await gateway.load(context: sharedContext, resourceId: resource.id)
-        if let failure = gatewayResult as? DownloadBootstrapFailure {
+        if let failure = gatewayResult as? ErmaoShared.DownloadBootstrapResultFailure {
             XCTFail("bootstrap \(failure.error.code): \(failure.error.diagnosticMessage ?? "no diagnostic")")
             return
         }

@@ -7,6 +7,7 @@ import time
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -51,8 +52,12 @@ from app.modules.imports.infrastructure.readable_resource.support import (
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
+from app.modules.library.application.source_tree_ports import ObservedSourceEntry
 from app.modules.library.domain.readable_resource_states import AssetRole
-from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
+from app.modules.library.domain.source_nodes import (
+    SourceNodePhysicalKind,
+    SourceNodeRelativePath,
+)
 from app.modules.library.infrastructure.persistence.source_tree_repository import (
     SqlAlchemyBookResourceRepository,
     SqlAlchemyLibraryConfigAdapter,
@@ -468,6 +473,28 @@ def test_exact_path_spellings_create_distinct_source_nodes(tmp_path: Path) -> No
             (root / "case.epub").write_bytes(b"b")
             slash_name = "slash\\name.epub"
             (root / slash_name).write_bytes(b"c")
+
+            if os.path.samefile(root / "Case.epub", root / "case.epub"):
+                repository = SqlAlchemySourceNodeRepository(db)
+                for name in ("Case.epub", "case.epub", slash_name):
+                    repository.insert_if_absent(
+                        library_id="lib-1",
+                        parent_id=None,
+                        entry=ObservedSourceEntry(
+                            relative_path=SourceNodeRelativePath(name),
+                            physical_kind=SourceNodePhysicalKind.REGULAR_FILE,
+                            observed_size_bytes=1,
+                            observed_mtime_ns=1,
+                            observed_at=datetime.now(UTC),
+                        ),
+                    )
+                db.commit()
+                paths = {
+                    row.relative_path
+                    for row in db.scalars(select(LibrarySourceNode)).all()
+                }
+                assert paths == {"Case.epub", "case.epub", slash_name}
+                return
 
             pipeline = _pipeline(db)
             _continue_and_drain(pipeline)

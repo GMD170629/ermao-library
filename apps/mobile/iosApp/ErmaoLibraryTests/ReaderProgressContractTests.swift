@@ -22,7 +22,7 @@ final class ReaderProgressContractTests: XCTestCase {
         XCTAssertTrue(encoded.contains(#""engine":"readium""#))
         XCTAssertTrue(encoded.contains(#""payload":{"href""#))
         XCTAssertFalse(encoded.contains(#""payload":"{"#))
-        XCTAssertEqual(decoded.sourceID, "volume-epub-42")
+        XCTAssertEqual(decoded.resourceID, "volume-epub-42")
         XCTAssertEqual(decoded.resourceKey, "OPS/chapter-03.xhtml")
         XCTAssertEqual(decoded.quoteExact, "A portable reading position")
         XCTAssertTrue(decoded.engineLocatorCanonicalJSON?.contains("\"cssSelector\":\"#paragraph-17\"") == true)
@@ -96,11 +96,11 @@ final class ReaderProgressContractTests: XCTestCase {
 
     private func makeSource(sourceID: String = "volume-epub-42") -> ErmaoShared.ReaderSource {
         ErmaoShared.LocalReaderSource(
-            sourceId: sourceID,
+            resourceId: sourceID,
             displayTitle: "Fixture",
             format: .epub,
             bookId: "work-42",
-            resourceId: sourceID,
+            assetId: nil,
             sourceFormat: .epub
         )
     }

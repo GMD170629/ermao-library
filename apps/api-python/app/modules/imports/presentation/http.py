@@ -285,7 +285,7 @@ def create_library(
     except IntegrityError:
         return fail("书库路径已存在", status_code=409, details={"rootPath": root_path})
     if payload.enabled:
-        continue_library_import(db, library_id)
+        continue_library_import(db, library_id, trigger="ENABLE")
     return ok({"library": get_library(db, library_id) or library}, status_code=201)
 
 
@@ -369,7 +369,7 @@ def update_library(
             return fail("书库路径已存在", status_code=409)
     updated = get_library(db, library_id) or existing
     if bool(updated.get("enabled")) and not was_enabled:
-        continue_library_import(db, library_id)
+        continue_library_import(db, library_id, trigger="ENABLE")
     return ok({"library": updated})
 
 

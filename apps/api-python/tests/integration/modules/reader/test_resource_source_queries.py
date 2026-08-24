@@ -256,7 +256,7 @@ def test_reader_resolves_book_and_source_through_resource_graph(
     assert source.source_format == fmt.lower()
 
 
-def test_audiobook_lists_every_track_in_sort_order(
+def test_audiobook_lists_every_track_in_natural_path_order(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
@@ -286,7 +286,7 @@ def test_audiobook_lists_every_track_in_sort_order(
 
     assert context is not None
     assert context.book.id == "book-audio"
-    assert [asset.id for asset in assets] == ["asset-audio-1", "asset-audio-2"]
+    assert [asset.id for asset in assets] == ["asset-audio-2", "asset-audio-1"]
     assert [asset.sort_order for asset in assets] == [0, 1]
     assert source is not None
     assert source.asset_id == "asset-audio-1"

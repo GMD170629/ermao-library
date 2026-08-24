@@ -559,7 +559,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             let openedPublication = try await runtime.open(managed)
             let publication = openedPublication.publication
             self.openedPublication = openedPublication
-            let saved = try? await progressStore.load(resourceId: resourceID)
+            let saved = try? await progressStore.load(sourceId: resourceID)
             let initial = await restore(
                 local: saved,
                 remote: remoteSnapshot,
@@ -588,7 +588,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 self?.showRemoteProgress(snapshot)
             }
-            tableOfContents = mergedNavigation(publication: publication)
+            tableOfContents = await mergedNavigation(publication: publication)
             phase = .reading
             startBookmarkSynchronization()
             if let initial { reflectLocation(initial) }
@@ -635,9 +635,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     private func executeTOCNavigation(_ entry: IosReaderTocEntry) async -> Bool {
         guard let canonicalHref = entry.href,
-              let href = RelativeURL(string: canonicalHref)
+              RelativeURL(string: canonicalHref) != nil
         else { return false }
-        let link = Link(href: href, title: entry.title)
+        let link = Link(href: canonicalHref, title: entry.title)
         if navigationHrefMatches(navigator?.currentLocation?.href.normalized.string, canonicalHref) {
             return true
         }
@@ -841,10 +841,15 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         try? await persistCurrentLocation()
     }
 
-    private func mergedNavigation(publication: Publication) -> [IosReaderTocEntry] {
-        let publicationEntries = publication.tableOfContents.enumerated().map { index, link in
+    private func mergedNavigation(publication: Publication) async -> [IosReaderTocEntry] {
+        let publicationLinks: [Link]
+        switch await publication.tableOfContents() {
+        case let .success(links): publicationLinks = links
+        case .failure: publicationLinks = []
+        }
+        let publicationEntries = publicationLinks.enumerated().map { index, link in
             let title = link.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-            IosReaderTocEntry(
+            return IosReaderTocEntry(
                 id: "publication:\(index)",
                 title: title?.isEmpty == false ? title ?? String(index + 1) : String(index + 1),
                 href: String(describing: link.href),
@@ -867,7 +872,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             displayTitle: managed.displayTitle,
             format: managed.sourceFormat.readerFormat,
             bookId: managed.bookID,
-            resourceId: managed.resourceID,
+            assetId: managed.assetID,
             sourceFormat: managed.sourceFormat
         )
         let decision = ErmaoShared.PublicKt.decideReaderResume(

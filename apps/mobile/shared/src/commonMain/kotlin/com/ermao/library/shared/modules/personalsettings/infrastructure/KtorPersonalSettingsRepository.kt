@@ -242,13 +242,7 @@ internal class KtorPersonalSettingsRepository(
                     ),
                 )
             },
-        ) { wire ->
-            if (wire.serverIdentity != context.serverIdentity) {
-                protocolFailure("SERVER_IDENTITY_CHANGED")
-            } else {
-                PersonalSettingsResult.Content(wire.toDomain())
-            }
-        }
+        ) { wire -> PersonalSettingsResult.Content(wire.toDomain()) }
 
     private suspend fun <T> request(
         context: PersonalSettingsContext,

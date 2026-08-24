@@ -26,20 +26,19 @@ materializes Book/ReadableResource/ResourceAsset identity, and only then enqueue
 original-file parsing.
 See [Library Root Layout](library-root-layout.md).
 
-## Fresh schema baseline
+## Schema revisions
 
-Alembic has one current revision:
-`0001_library_topology_baseline` (library topology, source-node covers, and ADR 0018
-readable-resource overlay tables). Startup behavior is intentionally narrow:
+Alembic uses a linear revision chain. The current head is
+`0002_library_scan_queue_uniqueness`; it follows `0001_library_topology_baseline` and adds
+the active library-scan uniqueness constraints. Startup behavior is intentionally narrow:
 
 - an empty database is created at the current head;
 - a database already stamped at the current head is accepted;
-- any populated unversioned database or other revision is rejected.
+- a database stamped at a known ancestor is upgraded to the current head;
+- any populated unversioned database or unknown revision is rejected.
 
-There is no historical schema upgrade, data backfill, backup compatibility bridge, or
-implicit repair. Deploy this refactor with a new SQLite database and rescan the original
-library roots. `app/db/seed.py` inserts only current baseline settings and built-in metadata
-providers.
+There is no implicit repair for unversioned or unknown schemas. `app/db/seed.py` inserts only
+current baseline settings and built-in metadata providers.
 
 The API and worker both pass `verify_current_schema` before serving work. Run the same
 prestart path manually with:

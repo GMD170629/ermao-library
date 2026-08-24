@@ -227,7 +227,7 @@ fun ErmaoLibraryRoot(
         is AppSession.IncompatibleServer -> LoginEntry(
             state, actions,
             LoginEntryAlert.IncompatibleServer.takeIf {
-                shouldShowIncompatibleServerAlert(state.operationErrorCode, session.reasonCode)
+                shouldShowIncompatibleServerAlert(state.operationErrorCode)
             },
             modifier,
         )
@@ -235,12 +235,9 @@ fun ErmaoLibraryRoot(
 }
 
 private const val INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
-private const val SERVER_IDENTITY_CHANGED = "SERVER_IDENTITY_CHANGED"
-
 internal fun shouldShowIncompatibleServerAlert(
     operationErrorCode: String?,
-    reasonCode: String,
-): Boolean = operationErrorCode != null && reasonCode != SERVER_IDENTITY_CHANGED
+): Boolean = operationErrorCode != null
 
 data class MainActions(
     val onOpenServerCenter: () -> Unit,

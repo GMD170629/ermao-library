@@ -129,13 +129,13 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                     depth: 0
                 )
             }
-            let local = try? await progressStore.load(resourceId: resourceID)
+            let local = try? await progressStore.load(sourceId: resourceID)
             let openedSource = ErmaoShared.LocalReaderSource(
                 resourceId: managed.resourceID,
                 displayTitle: managed.displayTitle,
                 format: managed.sourceFormat.readerFormat,
                 bookId: managed.bookID,
-                resourceId: managed.resourceID,
+                assetId: managed.assetID,
                 sourceFormat: managed.sourceFormat
             )
             let initialPage = restorePage(local: local, remote: remoteSnapshot, source: openedSource)
@@ -472,7 +472,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 depth: 0
             )
         }
-        let local = try? await progressStore.load(resourceId: resourceID)
+        let local = try? await progressStore.load(sourceId: resourceID)
         let initialPage = restorePage(local: local, remote: remoteSnapshot, source: source) ?? 0
         let navigator = IosPdfiumNavigatorViewController(
             document: document,

@@ -257,7 +257,7 @@ class SqlAlchemyResourceDetailQueries:
                 role=asset.role,
                 title=source.name,
                 media_type=metadata.mime_type if metadata is not None else None,
-                sort_key=asset.sort_key or source.name,
+                sort_key=source.relative_path,
                 sort_order=asset.sequence_index or 0,
                 duration_ms=metadata.duration_ms if metadata is not None else None,
                 disc_number=metadata.disc_number if metadata is not None else None,

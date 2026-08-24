@@ -98,6 +98,24 @@ class DefaultMobileRuntimeTest {
     }
 
     @Test
+    fun startupAcceptsTheCurrentIdentityForASavedCompatibleAddress() = runBlocking {
+        val harness = RuntimeHarness(
+            Response(200, HEALTHY),
+            Response(200, COMPATIBLE),
+            Response(200, SETUP_COMPLETE),
+            Response(200, SESSION),
+        )
+        harness.profiles.upsert(profile().copy(serverIdentity = "previous-server-identity"))
+        val runtime = harness.runtime()
+
+        assertIs<RuntimeOperationResult.Success>(runtime.start())
+
+        assertEquals("server-fixture", requireNotNull(harness.profiles.activeProfile()).serverIdentity)
+        assertIs<AppSession.Authenticated>(runtime.currentSession)
+        Unit
+    }
+
+    @Test
     fun invalidCredentialsDoNotSaveANewServerProfile() = runBlocking {
         val harness = RuntimeHarness(
             Response(200, HEALTHY),

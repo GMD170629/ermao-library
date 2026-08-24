@@ -15,6 +15,7 @@ from app.contracts.media_capabilities import (
     kindle_send_available_for_format,
     reader_type_for_format,
 )
+from app.core.natural_sort import natural_sort_key
 from app.models import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
@@ -91,7 +92,7 @@ def _asset_rows(
         LibrarySourceNode,
     ]
 ]:
-    return [
+    rows = [
         (row[0], row[1], row[2])
         for row in db.execute(
             select(
@@ -112,9 +113,15 @@ def _asset_rows(
                 LibraryResourceAsset.import_state == "READY",
                 LibrarySourceNode.physical_kind == "REGULAR_FILE",
             )
-            .order_by(LibraryResourceAsset.sequence_index, LibraryResourceAsset.id)
         ).all()
     ]
+    return sorted(
+        rows,
+        key=lambda row: (
+            natural_sort_key(row[2].relative_path),
+            row[0].id,
+        ),
+    )
 
 
 def _resource_view(
@@ -145,11 +152,11 @@ def _resource_view(
             "codec": asset_metadata.codec if asset_metadata else None,
             "discNumber": asset_metadata.disc_number if asset_metadata else None,
             "trackNumber": asset_metadata.track_number if asset_metadata else None,
-            "sortOrder": int(asset.sequence_index or 0),
+            "sortOrder": asset_index,
             "url": f"/api/assets/{quote(asset.id, safe='')}",
             "downloadUrl": f"/api/assets/{quote(asset.id, safe='')}?download=true",
         }
-        for asset, asset_metadata, source in assets
+        for asset_index, (asset, asset_metadata, source) in enumerate(assets)
     ]
     total_size = sum(
         int(item["sizeBytes"])

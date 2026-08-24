@@ -1,19 +1,7 @@
-"""Deterministic natural ordering for library layout names."""
+"""Compatibility export for the canonical natural filename ordering."""
 
 from __future__ import annotations
 
-import re
-import unicodedata
+from app.core.natural_sort import natural_sort_key
 
-_DIGIT_GROUPS = re.compile(r"(\d+)")
-
-
-def natural_sort_key(value: str) -> tuple[tuple[int, int | str], ...]:
-    """Return a locale-independent key that orders embedded integers numerically."""
-
-    normalized = unicodedata.normalize("NFC", value)
-    return tuple(
-        (0, int(part)) if part.isdigit() else (1, part)
-        for part in _DIGIT_GROUPS.split(normalized)
-        if part
-    )
+__all__ = ["natural_sort_key"]

@@ -11,9 +11,13 @@ import { Select } from '../../components/ui/select';
 import { withBasePath } from '../../lib/base-path';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import {
+  ORGANIZATION_MODES,
+  organizationModeDescription,
+  organizationModeLabel,
+  type OrganizationMode
+} from './model/organization-mode';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
-
-type OrganizationMode = 'FLAT' | 'VOLUMES';
 
 type Library = {
   id: string;
@@ -32,23 +36,6 @@ type LibrariesPayload = {
   lastUploadTargetPath?: string | null;
   lastDownloadTargetPath?: string | null;
 };
-
-const ORGANIZATION_MODE_OPTIONS: Array<{
-  value: OrganizationMode;
-  label: string;
-  description: string;
-}> = [
-  { value: 'FLAT', label: '平铺', description: '平铺：根目录文件各自作为独立图书' },
-  { value: 'VOLUMES', label: '按目录归组', description: '按目录归组：图书 / 可读资源 / 资产' }
-];
-
-function organizationModeLabel(mode: OrganizationMode): string {
-  return ORGANIZATION_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
-}
-
-function organizationModeDescription(mode: OrganizationMode): string {
-  return ORGANIZATION_MODE_OPTIONS.find((option) => option.value === mode)?.description ?? '';
-}
 
 type BackupItem = {
   id: string;
@@ -341,7 +328,7 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
                 </div>
                 <label className="md:col-span-4">
                   <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
-                  <Select value={organizationMode} onChange={(value) => setOrganizationMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))} />
+                  <Select value={organizationMode} onChange={(value) => setOrganizationMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODES.map((option) => ({ value: option.value, label: option.label }))} />
                 </label>
                 <div className="self-end text-xs leading-5 text-slate-500 md:col-span-8">{i18nAttribute(organizationModeDescription(organizationMode))}</div>
                 <div className="text-xs leading-5 text-slate-500 md:col-span-12"><I18nText>图书会进入书库；每位用户可按来源文件夹创建自己的智能书架。</I18nText></div>
@@ -515,7 +502,7 @@ function LibraryEditor({
         </label>
         <label className="md:col-span-4">
           <span className="text-sm font-medium text-slate-700"><I18nText>组织方式</I18nText></span>
-          <Select value={mode} onChange={(value) => setMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))} />
+          <Select value={mode} onChange={(value) => setMode(value as OrganizationMode)} ariaLabel="组织方式" className="mt-1.5 w-full" size="sm" options={ORGANIZATION_MODES.map((option) => ({ value: option.value, label: option.label }))} />
         </label>
       </div>
       <div className="mt-2 text-xs leading-5 text-slate-500">{i18nAttribute(organizationModeDescription(mode))}</div>
@@ -529,7 +516,7 @@ function LibraryEditor({
           className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-[#F19B84] focus:ring-2 focus:ring-[#FCE5DE]"
         />
       </label>
-      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>默认已忽略封面、缩略图、临时文件、说明文件和普通图片；这里填写额外规则，每行一条。</I18nText></div>
+      <div className="mt-2 text-xs leading-5 text-slate-500"><I18nText>默认忽略 *.cover.jpg/jpeg/png/webp、cover.jpg/jpeg/png/webp 和 .opf 文件；这里填写额外规则，每行一条。</I18nText></div>
       <div className="mt-3 flex justify-end">
         <Button
           type="button"

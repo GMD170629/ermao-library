@@ -6,6 +6,9 @@ import hashlib
 import io
 import os
 import tempfile
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
@@ -66,10 +69,33 @@ class _PdfiumModule(Protocol):
     def PdfDocument(self, path: str) -> _PdfDocument: ...
 
 
+class ResourcePreviewRenderCoordinator:
+    """Bound expensive PDFium work so concurrent thumbnail requests stay reliable."""
+
+    def __init__(self, *, max_concurrent_pdf_renders: int = 1) -> None:
+        if max_concurrent_pdf_renders < 1:
+            raise ValueError("max_concurrent_pdf_renders must be positive")
+        self._pdf_slots = threading.BoundedSemaphore(max_concurrent_pdf_renders)
+
+    @contextmanager
+    def pdf_render_slot(self) -> Iterator[None]:
+        self._pdf_slots.acquire()
+        try:
+            yield
+        finally:
+            self._pdf_slots.release()
+
+
 class FilesystemResourcePreview:
-    def __init__(self, db: Session, settings: Settings) -> None:
+    def __init__(
+        self,
+        db: Session,
+        settings: Settings,
+        render_coordinator: ResourcePreviewRenderCoordinator,
+    ) -> None:
         self._db = db
         self._settings = settings
+        self._render_coordinator = render_coordinator
 
     def load(
         self,
@@ -185,7 +211,7 @@ class FilesystemResourcePreview:
         ordered = sorted(
             rows,
             key=lambda row: (
-                natural_sort_key(str(row.sort_key or row.name)),
+                natural_sort_key(str(row.relative_path)),
                 str(row.id),
             ),
         )
@@ -209,22 +235,22 @@ class FilesystemResourcePreview:
             return None
         return resolved
 
-    @staticmethod
-    def _render(source: _PreviewSource, page_index: int) -> bytes:
+    def _render(self, source: _PreviewSource, page_index: int) -> bytes:
         try:
             if source.resource_format == "PDF":
-                pdfium = cast(_PdfiumModule, import_module("pypdfium2"))
-                document = pdfium.PdfDocument(str(source.path))
-                try:
-                    if page_index >= len(document):
-                        raise ResourcePreviewNotFoundError
-                    page = document[page_index]
+                with self._render_coordinator.pdf_render_slot():
+                    pdfium = cast(_PdfiumModule, import_module("pypdfium2"))
+                    document = pdfium.PdfDocument(str(source.path))
                     try:
-                        image = page.render(scale=1).to_pil()
+                        if page_index >= len(document):
+                            raise ResourcePreviewNotFoundError
+                        page = document[page_index]
+                        try:
+                            image = page.render(scale=1).to_pil()
+                        finally:
+                            page.close()
                     finally:
-                        page.close()
-                finally:
-                    document.close()
+                        document.close()
             elif source.page_entry is not None:
                 with open_comic_archive(source.path) as archive:
                     content = archive.read(source.page_entry)
@@ -285,4 +311,4 @@ class FilesystemResourcePreview:
                 temporary.unlink(missing_ok=True)
 
 
-__all__ = ["FilesystemResourcePreview"]
+__all__ = ["FilesystemResourcePreview", "ResourcePreviewRenderCoordinator"]

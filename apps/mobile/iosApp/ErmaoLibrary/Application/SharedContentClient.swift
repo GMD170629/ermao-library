@@ -48,7 +48,7 @@ actor SharedContentClient: ContentClient {
         let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.BookSummary>> = try contentFetch(result)
         return ContentFetch(
             value: BookPage(
-                books: payload.value.items.map(mapBook),
+                books: try mapBooks(payload.value.items),
                 page: Int(payload.value.page),
                 pageSize: Int(payload.value.pageSize),
                 total: Int(payload.value.total),
@@ -68,8 +68,11 @@ actor SharedContentClient: ContentClient {
         let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary>> = try contentFetch(result)
         return ContentFetch(
             value: GroupingPage(
-                groups: payload.value.items.map { group in
-                    LibraryGrouping(
+                groups: try payload.value.items.map { rawValue in
+                    guard let group = rawValue as? ErmaoShared.GroupingSummary else {
+                        throw ContentClientError.invalidResponse
+                    }
+                    return LibraryGrouping(
                         id: group.id,
                         kind: query.kind,
                         name: group.name,
@@ -97,7 +100,7 @@ actor SharedContentClient: ContentClient {
         return ContentFetch(
             value: FacetPage(
                 facet: mapFacet(payload.value.facet),
-                books: payload.value.books.items.map(mapBook),
+                books: try mapBooks(payload.value.books.items),
                 page: Int(payload.value.books.page),
                 pageSize: Int(payload.value.books.pageSize),
                 total: Int(payload.value.books.total),
@@ -212,6 +215,15 @@ actor SharedContentClient: ContentClient {
 
     private func mapBook(_ value: ErmaoShared.BookSummary) -> BookCard {
         BookCard(id: value.id, title: value.title, author: value.author, cover: cover(value.coverUrl), progress: value.progress > 0 ? value.progress : nil, availableMediaKinds: value.availableMediaKinds.compactMap(mapMediaKind))
+    }
+
+    private func mapBooks(_ values: [Any]) throws -> [BookCard] {
+        try values.map { value in
+            guard let book = value as? ErmaoShared.BookSummary else {
+                throw ContentClientError.invalidResponse
+            }
+            return mapBook(book)
+        }
     }
 
     private func mapResource(_ value: ErmaoShared.Resource, selectedResourceID: String?) -> BookResource {

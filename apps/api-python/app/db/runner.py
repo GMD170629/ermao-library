@@ -1,4 +1,4 @@
-"""Alembic-backed schema bootstrap for fresh installations."""
+"""Alembic-backed schema bootstrap and supported linear upgrades."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.script.revision import ResolutionError
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
@@ -103,6 +104,10 @@ def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> Non
         _upgrade_head(engine)
     elif current_revision == head:
         pass
+    elif current_revision is not None and _is_ancestor_revision(
+        engine, current_revision, head
+    ):
+        _upgrade_head(engine)
     else:
         raise _unsupported_database_error(current_revision, head)
 
@@ -110,6 +115,22 @@ def _apply_schema_once(engine: Engine, _settings: Settings | None = None) -> Non
         stamped = MigrationContext.configure(connection).get_current_revision()
         if stamped is None:
             raise RuntimeError("database migration did not record an alembic_version")
+
+
+def _is_ancestor_revision(engine: Engine, current_revision: str, head: str) -> bool:
+    script = ScriptDirectory.from_config(alembic_config_for_engine(engine))
+    try:
+        return any(
+            revision.revision == current_revision
+            for revision in script.iterate_revisions(head, "base")
+        )
+    except ResolutionError:
+        LOGGER.warning(
+            "database revision lookup failed",
+            extra={"current_revision": current_revision, "head": head},
+            exc_info=True,
+        )
+        return False
 
 
 def apply_schema(engine: Engine, settings: Settings | None = None) -> None:

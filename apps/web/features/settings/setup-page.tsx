@@ -13,11 +13,12 @@ import { organizationModeLabel, type OrganizationMode } from './model/organizati
 import { DirectoryPathPicker } from './ui/directory-path-picker';
 import { OrganizationModePicker } from './ui/organization-mode-picker';
 
-type SetupStage = 'checking' | 'account' | 'creating-account' | 'library' | 'checking-library' | 'saving-library' | 'activating' | 'complete' | 'unavailable';
+type SetupStage = 'checking' | 'account' | 'creating-account' | 'library' | 'checking-library' | 'saving-library' | 'activating' | 'unavailable';
 type SetupPayload = { ok: boolean; data?: { initialized?: boolean; user?: { email?: string } }; error?: { message?: string }; detail?: Array<{ loc?: Array<string | number> }> };
 type SetupLibrary = { id: string; name: string; rootPath: string; organizationMode: OrganizationMode };
 type LibraryPayload = { ok: boolean; data?: { library?: SetupLibrary }; error?: { message?: string } };
-type SetupProgress = { stage: 'library' | 'summary' | 'complete'; email: string; libraries: SetupLibrary[] };
+type SetupProgress = { stage: 'library'; email: string; libraries: SetupLibrary[] };
+type StoredSetupProgress = SetupProgress | { stage: 'summary' | 'complete'; email: string; libraries: SetupLibrary[] };
 const setupProgressKey = 'shuku.setup.progress';
 
 async function readSetupPayload(response: Response): Promise<SetupPayload> {
@@ -60,9 +61,12 @@ export function SetupPage() {
       const session = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin', signal });
       if (session.ok) {
         try {
-          const saved = JSON.parse(window.localStorage.getItem(setupProgressKey) ?? 'null') as SetupProgress | null;
-          if (saved && ['library', 'summary', 'complete'].includes(saved.stage)) {
-            setEmail(saved.email); setLibraries(saved.libraries ?? []); setStage(saved.stage === 'summary' ? 'library' : saved.stage); return;
+          const saved = JSON.parse(window.localStorage.getItem(setupProgressKey) ?? 'null') as StoredSetupProgress | null;
+          if (saved?.stage === 'complete') {
+            window.localStorage.removeItem(setupProgressKey); router.replace('/library'); return;
+          }
+          if (saved && ['library', 'summary'].includes(saved.stage)) {
+            setEmail(saved.email); setLibraries(saved.libraries ?? []); setStage('library'); return;
           }
         } catch { window.localStorage.removeItem(setupProgressKey); }
       }
@@ -131,11 +135,11 @@ export function SetupPage() {
         const payload = await response.json() as LibraryPayload;
         if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? '启用书库失败');
       }));
-      setStage('complete'); saveProgress({ stage: 'complete', email, libraries });
+      window.localStorage.removeItem(setupProgressKey); router.replace('/library'); router.refresh();
     } catch (reason) { setError(reason instanceof Error ? reason.message : '启用书库失败'); setStage('library'); }
   }
 
-  function enterLibrary() { window.localStorage.removeItem(setupProgressKey); router.replace('/library'); router.refresh(); }
+  function skipLibrarySetup() { window.localStorage.removeItem(setupProgressKey); router.replace('/library'); router.refresh(); }
   const statusChecked = stage !== 'checking' && stage !== 'unavailable';
   const accountCreated = !['checking', 'account', 'creating-account', 'unavailable'].includes(stage);
   const configuring = ['library', 'checking-library', 'saving-library', 'activating'].includes(stage);
@@ -146,10 +150,9 @@ export function SetupPage() {
         {stage === 'checking' ? <CenteredStatus icon={<Loader2 className="animate-spin" size={30} />} title={t('正在检查系统状态')} description={t('确认是否需要创建第一个管理账户')} /> : null}
         {stage === 'unavailable' ? <Unavailable error={error} onRetry={() => void checkStatus()} /> : null}
         {stage === 'account' || stage === 'creating-account' ? <AccountForm stage={stage} name={name} email={email} password={password} confirmPassword={confirmPassword} error={error} setName={setName} setEmail={setEmail} setPassword={setPassword} setConfirmPassword={setConfirmPassword} clearError={() => setError('')} onSubmit={createAccount} /> : null}
-        {['library', 'checking-library', 'saving-library', 'activating'].includes(stage) ? <LibraryWorkspace stage={stage} name={libraryName} path={libraryPath} mode={organizationMode} libraries={libraries} error={error} dialogOpen={libraryDialogOpen} setName={setLibraryName} setPath={setLibraryPath} setMode={setOrganizationMode} clearError={() => setError('')} onOpenDialog={() => { setError(''); setLibraryDialogOpen(true); }} onCloseDialog={() => { if (stage === 'library') { setError(''); setLibraryDialogOpen(false); } }} onSubmit={addLibrary} onRemove={removeLibrary} onActivate={() => void activateLibraries()} onSkip={() => { setStage('complete'); saveProgress({ stage: 'complete', email, libraries: [] }); }} /> : null}
-        {stage === 'complete' ? <Complete email={email} count={libraries.length} onEnter={enterLibrary} /> : null}
+        {['library', 'checking-library', 'saving-library', 'activating'].includes(stage) ? <LibraryWorkspace stage={stage} name={libraryName} path={libraryPath} mode={organizationMode} libraries={libraries} error={error} dialogOpen={libraryDialogOpen} setName={setLibraryName} setPath={setLibraryPath} setMode={setOrganizationMode} clearError={() => setError('')} onOpenDialog={() => { setError(''); setLibraryDialogOpen(true); }} onCloseDialog={() => { if (stage === 'library') { setError(''); setLibraryDialogOpen(false); } }} onSubmit={addLibrary} onRemove={removeLibrary} onActivate={() => void activateLibraries()} onSkip={skipLibrarySetup} /> : null}
       </div>
-      <SetupAside statusChecked={statusChecked} accountCreated={accountCreated} configuring={configuring} complete={stage === 'complete'} count={libraries.length} />
+      <SetupAside statusChecked={statusChecked} accountCreated={accountCreated} configuring={configuring} count={libraries.length} />
     </section>
   </main>;
 }
@@ -172,7 +175,7 @@ function LibraryWorkspace(p: LibraryWorkspaceProps) {
   return <>
     <div className="mt-9">
       <div className="text-sm font-semibold text-[#C66B3D]"><I18nText>第 2 步，共 2 步</I18nText></div>
-      <h1 className="mt-2 text-3xl font-semibold sm:text-4xl"><I18nText>添加多个书库</I18nText></h1>
+      <h1 className="mt-2 text-3xl font-semibold sm:text-4xl"><I18nText>添加书库</I18nText></h1>
       <p className="mt-3 text-sm leading-7 text-[#606C38]/80"><I18nText>每个书库可以独立选择路径和文件组织方式，添加后仍可继续新增。</I18nText></p>
     </div>
     <section aria-label={t('书库清单')} className={`mt-8 grid gap-4 ${p.libraries.length === 0 ? 'min-h-[330px] place-items-center' : 'sm:grid-cols-2 xl:grid-cols-3'}`}>
@@ -190,7 +193,7 @@ function LibraryWorkspace(p: LibraryWorkspaceProps) {
     </section>
     {p.error && !p.dialogOpen ? <div className="mt-5"><SetupError message={p.error} /></div> : null}
     <div className="mt-7 flex justify-center">
-      {p.libraries.length > 0 ? <button type="button" disabled={busy} onClick={p.onActivate} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] disabled:opacity-70">{p.stage === 'activating' ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}{p.stage === 'activating' ? t('正在启用书库') : t('启用并进入书库')}</button> : <button type="button" onClick={() => setSkipConfirmationOpen(true)} className="px-3 py-2 text-sm font-semibold text-[#606C38]/70 underline decoration-1 underline-offset-4 transition hover:text-[#C43D2F] focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#C66B3D]/25"><I18nText>跳过</I18nText></button>}
+      {p.libraries.length > 0 ? <button type="button" disabled={busy} onClick={p.onActivate} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] disabled:opacity-70">{p.stage === 'activating' ? <Loader2 size={17} className="animate-spin" /> : <ArrowRight size={17} />}{p.stage === 'activating' ? t('正在启用书库') : t('确认')}</button> : <button type="button" onClick={() => setSkipConfirmationOpen(true)} className="px-3 py-2 text-sm font-semibold text-[#606C38]/70 underline decoration-1 underline-offset-4 transition hover:text-[#C43D2F] focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#C66B3D]/25"><I18nText>跳过</I18nText></button>}
     </div>
     {p.dialogOpen ? <LibraryDialog {...p} busy={busy} /> : null}
     {skipConfirmationOpen ? <SkipLibraryConfirmation onCancel={() => setSkipConfirmationOpen(false)} onConfirm={() => { setSkipConfirmationOpen(false); p.onSkip(); }} /> : null}
@@ -236,11 +239,10 @@ function SkipLibraryConfirmation({ onCancel, onConfirm }: { onCancel: () => void
   </div>;
 }
 
-function Complete({ email, count, onEnter }: { email: string; count: number; onEnter: () => void }) { const { t } = useI18n(); return <div className="flex min-h-[500px] flex-col items-start justify-center"><span className="flex h-14 w-14 items-center justify-center rounded-[20px] bg-[#8B9D83] text-[#E8DCC7]"><Check size={28} /></span><h1 className="mt-7 text-3xl font-semibold sm:text-4xl"><I18nText>你的私人书库已准备好</I18nText></h1><p className="mt-4 max-w-xl text-sm leading-7">{t('管理账户 {value0} 已创建并登录。', { value0: email })}{count ? t('已启用 {value0} 个书库，后台识别正在进行；现在即可进入书库。', { value0: count }) : t('你可以稍后在设置中新增书库。')}</p><button type="button" onClick={onEnter} className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7]"><I18nText>进入书库</I18nText><ArrowRight size={17} /></button></div>; }
 function PrimaryButton({ busy, busyLabel, label }: { busy: boolean; busyLabel: string; label: string }) { return <button type="submit" disabled={busy} className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-[#C66B3D] px-6 text-sm font-semibold text-[#E8DCC7] disabled:opacity-70">{busy ? <Loader2 size={17} className="animate-spin" /> : null}{busy ? busyLabel : label}{busy ? null : <ArrowRight size={17} />}</button>; }
 function SetupError({ message }: { message: string }) { return <div role="alert" className="flex items-start gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertCircle size={17} className="mt-0.5" /><span>{message}</span></div>; }
 
-function SetupAside({ statusChecked, accountCreated, configuring, complete, count }: { statusChecked: boolean; accountCreated: boolean; configuring: boolean; complete: boolean; count: number }) {
-  const { t } = useI18n(); return <aside className="bg-[#606C38] p-7 text-[#E8DCC7] sm:p-10"><div className="flex h-full flex-col"><ShieldCheck size={28} /><h2 className="mt-6 text-xl font-semibold"><I18nText>初始化清单</I18nText></h2><ol className="mt-8 space-y-6"><SetupStep icon={Database} title={t('检查系统状态')} description={t('确认数据库和存储目录可用')} complete={statusChecked} active={!statusChecked} /><SetupStep icon={UserRoundPlus} title={t('创建管理账户')} description={t('设置用户名、邮箱和登录密码')} complete={accountCreated} active={statusChecked && !accountCreated} /><SetupStep icon={LibraryBig} title={t('添加多个书库')} description={count ? t('已添加 {value0} 个书库', { value0: count }) : t('路径与组织方式一起设置')} complete={complete} active={configuring} /></ol><p className="mt-auto pt-8 text-xs leading-6 text-[#E8DCC7]/70"><I18nText>账号信息仅保存在你的服务器中。以后可以在设置页面继续管理书库。</I18nText></p></div></aside>;
+function SetupAside({ statusChecked, accountCreated, configuring, count }: { statusChecked: boolean; accountCreated: boolean; configuring: boolean; count: number }) {
+  const { t } = useI18n(); return <aside className="bg-[#606C38] p-7 text-[#E8DCC7] sm:p-10"><div className="flex h-full flex-col"><ShieldCheck size={28} /><h2 className="mt-6 text-xl font-semibold"><I18nText>初始化清单</I18nText></h2><ol className="mt-8 space-y-6"><SetupStep icon={Database} title={t('检查系统状态')} description={t('确认数据库和存储目录可用')} complete={statusChecked} active={!statusChecked} /><SetupStep icon={UserRoundPlus} title={t('创建管理账户')} description={t('设置用户名、邮箱和登录密码')} complete={accountCreated} active={statusChecked && !accountCreated} /><SetupStep icon={LibraryBig} title={t('添加书库')} description={count ? t('已添加 {value0} 个书库', { value0: count }) : t('路径与组织方式一起设置')} complete={false} active={configuring} /></ol><p className="mt-auto pt-8 text-xs leading-6 text-[#E8DCC7]/70"><I18nText>账号信息仅保存在你的服务器中。以后可以在设置页面继续管理书库。</I18nText></p></div></aside>;
 }
 function SetupStep({ icon: Icon, title, description, complete, active }: { icon: typeof FolderPlus; title: string; description: string; complete: boolean; active: boolean }) { return <li className="flex gap-4"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${complete ? 'bg-[#8B9D83]' : active ? 'bg-[#C66B3D]' : 'bg-[#8B9D83]/25'}`}>{complete ? <Check size={18} /> : <Icon size={18} />}</span><span><span className="block text-sm font-semibold">{title}</span><span className="mt-1 block text-xs leading-5 text-[#E8DCC7]/65">{description}</span></span></li>; }

@@ -367,7 +367,6 @@ def _worker(
 
 def test_continue_import_constructs_without_clock() -> None:
     ContinueImport(
-        libraries=FakeLibraries(),
         source_nodes=FakeSourceNodes(),
         queue=FakeQueue(_import_task()),
         uow=RecordingUoW(),

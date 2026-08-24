@@ -2,6 +2,13 @@
   "schemaVersion": 1,
   "status": "candidate",
   "pdfiumCommit": "875172eae557a308d0c5b2be43822814c8a885bb",
+  "iosRelease": {
+    "provider": "bblanchon/pdfium-binaries",
+    "version": "153.0.8009.0",
+    "asset": "pdfium-ios-device-arm64.tgz",
+    "sha256": "671ae30cc2ed65d0adf4a32d176bfcc9fe800da6237659d2b5a8e18832bf7cac",
+    "minimumOsVersion": "17.0"
+  },
   "wrapperAbiVersion": 1,
   "commonGnArgs": {
     "is_debug": false,
@@ -29,7 +36,7 @@
   "freezeRequires": [
     "Android AAR contains all three declared ABIs",
     "iOS XCFramework contains iphoneos arm64 only",
-    "both wrappers report the exact pdfiumCommit",
+    "the Android wrapper reports pdfiumCommit and the iOS wrapper reports iosRelease.version",
     "shared PDF corpus and Range acceptance pass on Android and a physical iOS device",
     "artifact SHA-256 values and license paths are populated"
   ]

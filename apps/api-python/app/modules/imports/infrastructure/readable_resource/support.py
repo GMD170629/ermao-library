@@ -70,6 +70,9 @@ class SqlAlchemyUnitOfWork(UnitOfWorkPort):
     def rollback(self) -> None:
         self._session.rollback()
 
+    def recover_after_failure(self) -> None:
+        self._session.rollback()
+
 
 class InMemorySidecarWriteback(SidecarWritebackPort):
     """Test-only sidecar scheduler that records resource ids in memory."""

@@ -29,6 +29,27 @@ from app.modules.imports.application.audio_types import (
 from app.services.audio_metadata import parse_audio_metadata
 
 
+def test_audio_bundle_uses_canonical_natural_relative_path_order(tmp_path) -> None:
+    root = tmp_path / "book"
+    for volume_name in ("volume 10", "volume 2"):
+        volume = root / volume_name
+        volume.mkdir(parents=True)
+        for track_name in ("10.mp3", "2.mp3", "1.mp3"):
+            (volume / track_name).write_bytes(b"audio")
+
+    structure = audio_metadata_module.inspect_audio_bundle(root)
+
+    assert structure is not None
+    assert [volume.path.name for volume in structure.volumes] == [
+        "volume 2",
+        "volume 10",
+    ]
+    assert [[track.name for track in volume.files] for volume in structure.volumes] == [
+        ["1.mp3", "2.mp3", "10.mp3"],
+        ["1.mp3", "2.mp3", "10.mp3"],
+    ]
+
+
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
     return LibrarySourceNode(
         id=node_id,

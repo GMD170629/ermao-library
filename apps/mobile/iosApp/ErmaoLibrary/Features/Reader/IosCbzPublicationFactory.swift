@@ -147,6 +147,12 @@ struct IosCbzArchiveIndex: Sendable {
         }
     }
 
+    func requireCanonicalPages(_ candidate: [IosCbzPage]) throws {
+        guard candidate == pages,
+              candidate.enumerated().allSatisfy({ offset, page in page.pageIndex == offset })
+        else { throw IosCbzError.invalidArchive }
+    }
+
     private static func isSafePath(_ value: String) -> Bool {
         guard !value.isEmpty, !value.hasPrefix("/"), !value.contains("\\"), !value.contains("\0"),
               value.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
@@ -222,7 +228,7 @@ struct IosCbzPublicationFactory {
                 title: pageTitleHints.indices.contains(index) ? pageTitleHints[index].title : nil
             )
         }
-        let asset: Asset
+        let asset: ReadiumShared.Asset
         switch await assetRetriever.retrieve(url: fileURL, mediaType: .cbz) {
         case let .success(value): asset = value
         case .failure: throw IosReaderFailure(code: .corruptFile)
@@ -335,7 +341,7 @@ private final class IosRemoteComicContainer: Container, @unchecked Sendable {
         })
     }
 
-    subscript(url: any URLConvertible) -> (any Resource)? {
+    subscript(url: any URLConvertible) -> (any ReadiumShared.Resource)? {
         let href = url.anyURL.string
         guard let pageIndex = pageByHref[href] else { return nil }
         return DataResource { [source, server, imageVariant] in
@@ -381,7 +387,7 @@ struct IosRemoteComicPublicationFactory {
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
-                    identifier: "urn:shuku:comic:\(source.resourceId):\(source.protocolFingerprint)",
+                    identifier: "urn:shuku:comic:\(source.resourceId):\(source.assetId)",
                     conformsTo: [.divina],
                     title: source.displayTitle,
                     layout: .fixed,

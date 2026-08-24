@@ -18,6 +18,17 @@ export type CoverBook = {
   availableMediaKinds?: MediaKind[];
 };
 
+function coverUrlWithSize(url: string, size: 'small' | 'medium' | 'large') {
+  const hashIndex = url.indexOf('#');
+  const urlWithoutFragment = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const fragment = hashIndex >= 0 ? url.slice(hashIndex) : '';
+  if (/[?&]size=[^&#]*/.test(urlWithoutFragment)) {
+    return `${urlWithoutFragment.replace(/([?&])size=[^&#]*/, `$1size=${size}`)}${fragment}`;
+  }
+  const separator = urlWithoutFragment.includes('?') ? '&' : '?';
+  return `${urlWithoutFragment}${separator}size=${size}${fragment}`;
+}
+
 export function Cover({
   book,
   className = '',
@@ -39,7 +50,7 @@ export function Cover({
   const requestedSize = size ?? (small ? 'small' : 'medium');
   const responsiveSize = requestedSize === 'small' ? '48px' : requestedSize === 'large' ? '280px' : '180px';
   const coverUrl = useMemo(() => {
-    if (book.coverUrl) return withBasePath(book.coverUrl.replace(/size=(small|medium|large)/, `size=${requestedSize}`));
+    if (book.coverUrl) return withBasePath(coverUrlWithSize(book.coverUrl, requestedSize));
     return book.id ? withBasePath(`/api/books/${book.id}/cover?size=${requestedSize}`) : '';
   }, [book.coverUrl, book.id, requestedSize]);
   const fallbackCoverUrl = withBasePath('/images/fallback-book-cover-v1.png');

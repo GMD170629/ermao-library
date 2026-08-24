@@ -7,6 +7,7 @@ from typing import cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
     LibraryBook,
@@ -52,7 +53,7 @@ class SqlAlchemyMediaResourceRepository:
         return self._asset_resource(row)
 
     def first_resource_asset(self, resource_id: str) -> MediaAssetResource | None:
-        row = self._session.execute(
+        rows = self._session.execute(
             select(
                 LibraryResourceAsset,
                 LibrarySourceNode,
@@ -73,14 +74,15 @@ class SqlAlchemyMediaResourceRepository:
                 LibraryResourceAsset.import_state == "READY",
                 LibrarySourceNode.physical_kind == "REGULAR_FILE",
             )
-            .order_by(
-                LibraryResourceAsset.sequence_index,
-                LibraryResourceAsset.sort_key,
-                LibraryResourceAsset.created_at,
-                LibraryResourceAsset.id,
-            )
-            .limit(1)
-        ).first()
+        ).all()
+        row = min(
+            rows,
+            key=lambda value: (
+                natural_sort_key(value[1].relative_path),
+                value[0].id,
+            ),
+            default=None,
+        )
         return self._asset_resource(row)
 
     def resource_cover_path(self, resource_id: str) -> str | None:

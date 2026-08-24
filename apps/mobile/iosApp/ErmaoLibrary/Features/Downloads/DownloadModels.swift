@@ -190,7 +190,7 @@ struct ReaderHandoff: Hashable, Sendable {
 enum ManagedReaderAccessPolicy {
     static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
         let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        switch readerType {
+        return switch readerType {
         case .reflowable: ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"].contains(normalized)
         case .comic: ["CBZ", "ZIP"].contains(normalized)
         case .pdf: normalized == "PDF"

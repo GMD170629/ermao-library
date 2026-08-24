@@ -148,7 +148,7 @@ class ProcessReadableResourceImportTask:
                     role=parsed.asset.role,
                     import_state=AssetImportState.READY,
                     sequence_index=parsed.asset.sequence_index,
-                    sort_key=parsed.asset.sort_key,
+                    sort_key=node.relative_path,
                     failure_reason=None,
                 )
                 title = parsed.resource_title or parsed.asset.title

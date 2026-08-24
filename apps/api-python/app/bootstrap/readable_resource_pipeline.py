@@ -16,11 +16,16 @@ from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPrio
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
     ContinueImportResult,
-    ContinueLibraryImport,
     ContinueSourceImport,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
+)
+from app.modules.imports.application.readable_resource.request_library_scan import (
+    LibraryScanTrigger,
+    RequestLibraryScan,
+    RequestLibraryScanCommand,
+    RequestLibraryScanResult,
 )
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
@@ -33,6 +38,9 @@ from app.modules.imports.infrastructure.readable_resource.adapter_registry impor
 )
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
+)
+from app.modules.imports.infrastructure.readable_resource.global_ignore_patterns import (
+    load_global_ignore_patterns,
 )
 from app.modules.imports.infrastructure.readable_resource.support import (
     BestEffortSidecarWriteback,
@@ -66,6 +74,7 @@ __all__ = [
     "build_readable_resource_worker",
     "continue_library_import",
     "continue_source_import",
+    "request_library_scan",
 ]
 
 
@@ -86,6 +95,7 @@ class ReadableResourcePipeline:
     adapters: RegistryResourceAdapterExecutor
     uow: SqlAlchemyUnitOfWork
     clock: UtcClock
+    request_library_scan: RequestLibraryScan | None = None
 
 
 def build_readable_resource_pipeline(
@@ -93,7 +103,10 @@ def build_readable_resource_pipeline(
     settings: Settings | None = None,
 ) -> ReadableResourcePipeline:
     runtime_settings = settings or get_settings()
-    libraries = SqlAlchemyLibraryConfigAdapter(session)
+    libraries = SqlAlchemyLibraryConfigAdapter(
+        session,
+        global_ignore_patterns_loader=lambda: load_global_ignore_patterns(session),
+    )
     filesystem = OsSourceTreeFilesystem()
     source_nodes = SqlAlchemySourceNodeRepository(session)
     books_resources = SqlAlchemyBookResourceRepository(session)
@@ -129,16 +142,23 @@ def build_readable_resource_pipeline(
         metadata_priority=SqlAlchemyLocalMetadataPriority(session),
         covers=FilesystemLocalCoverPublication(runtime_settings.resolved_storage_root),
     )
-    continue_import = ContinueImport(
+    request_scan = RequestLibraryScan(
         libraries=libraries,
-        source_nodes=source_nodes,
         queue=queue,
         uow=uow,
         log=log,
     )
+    continue_import = ContinueImport(
+        source_nodes=source_nodes,
+        queue=queue,
+        uow=uow,
+        log=log,
+        request_library_scan=request_scan,
+    )
 
     return ReadableResourcePipeline(
         continue_import=continue_import,
+        request_library_scan=request_scan,
         scan_library_source_tree=scan,
         process_import_task=process_import,
         delete_source_node=DeleteSourceNode(
@@ -179,11 +199,43 @@ def build_readable_resource_pipeline(
     )
 
 
-def continue_library_import(session: Session, library_id: str) -> ContinueImportResult:
+def continue_library_import(
+    session: Session,
+    library_id: str,
+    *,
+    trigger: LibraryScanTrigger = "MANUAL",
+) -> ContinueImportResult:
     """Enqueue one library ContinueImport command in the caller session."""
 
     pipeline = build_readable_resource_pipeline(session)
-    return pipeline.continue_import.execute(ContinueLibraryImport(library_id))
+    requester = pipeline.request_library_scan
+    if requester is None:
+        raise RuntimeError("library scan requester is not configured")
+    result = requester.execute(
+        RequestLibraryScanCommand(library_id=library_id, trigger=trigger)
+    )
+    return ContinueImportResult(
+        library_id=result.library_id,
+        source_node_id=None,
+        requeued_failed=result.requeued_failed,
+        enqueued_scan=result.enqueued,
+        task_id=result.task_id,
+    )
+
+
+def request_library_scan(
+    session: Session,
+    library_id: str,
+    *,
+    trigger: LibraryScanTrigger,
+) -> RequestLibraryScanResult:
+    pipeline = build_readable_resource_pipeline(session)
+    requester = pipeline.request_library_scan
+    if requester is None:
+        raise RuntimeError("library scan requester is not configured")
+    return requester.execute(
+        RequestLibraryScanCommand(library_id=library_id, trigger=trigger)
+    )
 
 
 def continue_source_import(

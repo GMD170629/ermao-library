@@ -3,14 +3,14 @@
 import { AlertTriangle, ArrowLeft, BarChart3, CheckCircle2, Circle, FileImage, Headphones, LoaderCircle } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../../components/ui/button';
 import { cn } from '../../../components/ui/cn';
 import { useI18n } from '../../../i18n/provider';
 import type { ReadableResourceView } from '../../../types/book';
 import { formatDuration } from '../book-detail';
 import { resolveChapterReadingStates } from '../chapter-reading-state';
-import { resourceDetailItemHref, type ResourceDetailPage, type ResourcePageDetailUnit } from '../model/resource-detail';
+import { resourceDetailItemHref, resourcePreviewRetryUrl, type ResourceDetailPage, type ResourcePageDetailUnit } from '../model/resource-detail';
 
 type Props = Readonly<{
   resource: ReadableResourceView;
@@ -26,13 +26,43 @@ function PreviewTile({ resource, unit }: { resource: ReadableResourceView; unit:
   const router = useRouter();
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const href = resourceDetailItemHref(resource, unit);
   const title = unit.title || t('第 {value0} 页', { value0: unit.pageNumber });
+  const previewUrl = unit.previewUrl ? resourcePreviewRetryUrl(unit.previewUrl, attempt) : null;
 
-  return <button type="button" disabled={!href} onClick={() => href && router.push(href)} className="group min-w-0 text-left disabled:cursor-not-allowed">
-    <span className="relative flex aspect-[3/4] overflow-hidden rounded-xl border border-stone-200 bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[#ff4f2a]">
-      {unit.previewUrl && !failed
-        ? <Image src={unit.previewUrl} alt={t('第 {value0} 页预览', { value0: unit.pageNumber })} fill unoptimized loading="lazy" sizes="(min-width: 1280px) 16vw, (min-width: 768px) 24vw, 45vw" className="object-contain" onError={() => setFailed(true)} />
+  useEffect(() => {
+    setFailed(false);
+    setRetrying(false);
+    setAttempt(0);
+    if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    return () => {
+      if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    };
+  }, [unit.previewUrl]);
+
+  const handlePreviewError = () => {
+    if (attempt >= 2) {
+      setFailed(true);
+      setRetrying(false);
+      return;
+    }
+    setRetrying(true);
+    retryTimer.current = setTimeout(() => {
+      setAttempt((current) => current + 1);
+      setRetrying(false);
+      retryTimer.current = null;
+    }, 600 * (attempt + 1));
+  };
+
+  return <button type="button" disabled={!href} onClick={() => href && router.push(href)} className="group min-w-0 w-full text-left disabled:cursor-not-allowed sm:w-[150px]">
+    <span className="relative flex aspect-[2/3] overflow-hidden rounded-xl border border-stone-200 bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[#ff4f2a]">
+      {previewUrl && !failed && !retrying
+        ? <Image key={previewUrl} src={previewUrl} alt={t('第 {value0} 页预览', { value0: unit.pageNumber })} fill unoptimized loading="lazy" sizes="(min-width: 1280px) 20vw, (min-width: 768px) 25vw, 45vw" className="object-contain" onLoad={() => { setFailed(false); setRetrying(false); }} onError={handlePreviewError} />
+        : retrying
+          ? <span className="m-auto" role="status" aria-label={t('正在加载资源详情…')}><LoaderCircle size={24} className="animate-spin text-stone-400 motion-reduce:animate-none" /></span>
         : <span className="m-auto flex flex-col items-center gap-2 px-3 text-center text-xs text-stone-500"><FileImage size={28} /><span>{t('预览暂不可用')}</span></span>}
       <span className="absolute bottom-2 right-2 rounded-full bg-stone-950/70 px-2 py-0.5 text-xs tabular-nums text-white">{unit.pageNumber}</span>
     </span>
@@ -88,7 +118,7 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
       })}
     </div> : null}
 
-    {pages.length > 0 ? <div className={cn('mt-6 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6', loading && 'opacity-60')}>{pages.map((unit) => <PreviewTile key={unit.id} resource={resource} unit={unit} />)}</div> : null}
+    {pages.length > 0 ? <div className={cn('mt-6 grid grid-cols-2 items-start gap-x-5 gap-y-7 sm:grid-cols-[repeat(auto-fill,150px)]', loading && 'opacity-60')}>{pages.map((unit) => <PreviewTile key={unit.id} resource={resource} unit={unit} />)}</div> : null}
 
     {tracks.length > 0 ? <div className={cn('mt-6 divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white', loading && 'opacity-60')}>
       {tracks.map((unit, index) => {

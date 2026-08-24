@@ -56,7 +56,7 @@ struct IosPdfRangeCacheIdentity: Sendable {
 
     init(source: ErmaoShared.RemoteByteRangeReaderSource) {
         namespaceKey = Self.digest(
-            "\(source.namespace.serverIdentity)|\(source.namespace.userId)|\(source.namespace.authorizationVersion)"
+            "\(source.namespace_.serverIdentity)|\(source.namespace_.userId)|\(source.namespace_.authorizationVersion)"
         )
         documentKey = Self.digest(source.resourceId)
     }

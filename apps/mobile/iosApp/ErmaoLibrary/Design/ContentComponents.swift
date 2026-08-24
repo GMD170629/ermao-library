@@ -271,3 +271,23 @@ struct PaginationStatusView: View {
         .padding(.vertical, .space2)
     }
 }
+
+struct ContentOfflineNotice: View {
+    let retry: () -> Void
+
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: .space1) {
+            Image(systemName: "wifi.slash")
+                .accessibilityHidden(true)
+            Text("content.cached.notice")
+                .appTextStyle(.caption)
+            Spacer()
+            Button("common.retry", action: retry)
+                .appTextStyle(.label)
+        }
+        .foregroundStyle(theme.textSecondary)
+        .frame(minHeight: .iosMinimumTouchTarget)
+    }
+}

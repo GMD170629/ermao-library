@@ -91,6 +91,8 @@
 		B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19000000000000000000190 /* IosPdfiumNavigator.swift */; };
 		B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19200000000000000000192 /* IosReaderPrivateContentCache.swift */; };
 		B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19100000000000000000191 /* ShukuPdfium.xcframework */; };
+		B19300000000000000000193 /* Pdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19300000000000000000193 /* Pdfium.xcframework */; };
+		B19400000000000000000194 /* Pdfium.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F19300000000000000000193 /* Pdfium.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		B08700000000000000000087 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F08700000000000000000087 /* libsqlite3.tbd */; };
 		B02000000000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F02000000000000000000020 /* Assets.xcassets */; };
 		B02100000000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = F02100000000000000000021 /* Localizable.xcstrings */; };
@@ -294,6 +296,7 @@
 		F80200000000000000000802 /* ErmaoLibraryUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ErmaoLibraryUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F90000000000000000000900 /* ErmaoShared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = ErmaoShared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		F19100000000000000000191 /* ShukuPdfium.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = ShukuPdfium.xcframework; path = ../native/pdfium/artifacts/ios/ShukuPdfium.xcframework; sourceTree = SOURCE_ROOT; };
+		F19300000000000000000193 /* Pdfium.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = Pdfium.xcframework; path = ../native/pdfium/artifacts/ios/Pdfium.xcframework; sourceTree = SOURCE_ROOT; };
 		E17400000000000000000174 /* DownloadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadModels.swift; sourceTree = "<group>"; };
 		E17500000000000000000175 /* DownloadCenterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterStore.swift; sourceTree = "<group>"; };
 		E17600000000000000000176 /* DownloadCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenterView.swift; sourceTree = "<group>"; };
@@ -302,6 +305,20 @@
 		E13800000000000000000138 /* DownloadStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		S01100000000000000000011 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				B19400000000000000000194 /* Pdfium.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFrameworksBuildPhase section */
 		S00300000000000000000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -309,6 +326,7 @@
 			files = (
 				B90000000000000000000900 /* ErmaoShared.framework in Frameworks */,
 				B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */,
+				B19300000000000000000193 /* Pdfium.xcframework in Frameworks */,
 				BR0100000000000000000001 /* ReadiumShared in Frameworks */,
 				BR0200000000000000000002 /* ReadiumStreamer in Frameworks */,
 				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
@@ -622,6 +640,7 @@
 			children = (
 				F90000000000000000000900 /* ErmaoShared.framework */,
 				F19100000000000000000191 /* ShukuPdfium.xcframework */,
+				F19300000000000000000193 /* Pdfium.xcframework */,
 				F08700000000000000000087 /* libsqlite3.tbd */,
 			);
 			name = Frameworks;
@@ -647,6 +666,7 @@
 				S00100000000000000000001 /* Build KMP Framework and Design Tokens */,
 				S00200000000000000000002 /* Sources */,
 				S00300000000000000000003 /* Frameworks */,
+				S01100000000000000000011 /* Embed Frameworks */,
 				S00400000000000000000004 /* Resources */,
 			);
 			buildRules = (
@@ -1026,7 +1046,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1059,7 +1079,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ErmaoLibrary/Resources/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -1084,7 +1104,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = W5G54L42KQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -1102,7 +1122,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = W5G54L42KQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -1119,7 +1139,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = W5G54L42KQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -1136,7 +1156,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = W5G54L42KQ;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ermao.library.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = iphoneos;

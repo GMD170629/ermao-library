@@ -31,15 +31,15 @@ type Props = Readonly<{
 
 function SourceNodeCard({ book, entry, resource, position, canManage, onOpen, onManage }: { book: BookView; entry: BookContentEntry; resource: ReadableResourceView | undefined; position: number; canManage: boolean; onOpen: () => void; onManage: (anchor: HTMLButtonElement) => void }) {
   const { t } = useI18n();
-  return <article className="group relative min-w-0 rounded-2xl border border-stone-200 bg-white p-2 shadow-sm transition hover:border-orange-100 hover:shadow-md">
+  return <article className="group relative min-w-0 w-full sm:w-[150px]">
     <button type="button" onClick={onOpen} className="block w-full text-left focus-visible:outline-none" aria-label={t('打开来源目录 {value0}', { value0: entry.title })}>
       <div className="relative overflow-hidden rounded-xl bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-within:outline group-focus-within:outline-2 group-focus-within:outline-offset-2 group-focus-within:outline-[#ff4f2a]">
         <Cover book={{ id: entry.sourceNodeId, title: entry.title, author: book.author, coverUrl: entry.coverUrl || resource?.coverUrl || book.coverUrl, gradient: book.gradient, coverStatus: entry.coverUrl || resource ? '' : book.coverStatus }} className="aspect-[2/3] w-full rounded-none" size="small" />
         <span className="absolute left-2 top-2 rounded-full bg-stone-950/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-white shadow-sm backdrop-blur-sm">{String(position + 1).padStart(2, '0')}</span>
       </div>
     </button>
-    {canManage ? <button type="button" onClick={(event) => { event.stopPropagation(); onManage(event.currentTarget); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onManage(event.currentTarget); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); event.stopPropagation(); onManage(event.currentTarget); } }} className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-stone-950/55 text-white shadow-sm backdrop-blur-sm transition hover:bg-stone-950/75" aria-label={t('管理 {value0}', { value0: entry.title })} aria-haspopup="menu"><MoreVertical size={17} /></button> : null}
-    <button type="button" onClick={onOpen} className="mt-2 flex w-full items-start gap-2 rounded-lg px-1 pb-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200">
+    {canManage ? <button type="button" onClick={(event) => { event.stopPropagation(); onManage(event.currentTarget); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onManage(event.currentTarget); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); event.stopPropagation(); onManage(event.currentTarget); } }} className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-stone-950/55 text-white shadow-sm backdrop-blur-sm transition hover:bg-stone-950/75" aria-label={t('管理 {value0}', { value0: entry.title })} aria-haspopup="menu"><MoreVertical size={17} /></button> : null}
+    <button type="button" onClick={onOpen} className="mt-2 flex w-full items-start gap-2 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200">
       <span data-i18n-skip className="min-w-0 flex-1 line-clamp-2 text-sm font-semibold leading-5 text-stone-900">{entry.title}</span>
       <ChevronRight size={16} className="mt-0.5 shrink-0 text-stone-400" aria-hidden="true" />
     </button>
@@ -50,7 +50,7 @@ function ResourceCard({ book, resource, position, canManage, onOpen, onManage }:
   const { t } = useI18n();
   const progress = coverReadingProgressState(resource.progress);
   const number = position + 1;
-  return <article className="group relative min-w-0" data-resource-card="true">
+  return <article className="group relative min-w-0 w-full sm:w-[150px]" data-resource-card="true">
     <button type="button" onClick={onOpen} disabled={!resource.readable} aria-label={progress.visible ? t(resource.readerType === 'audio' ? '可读资源 {value0}，收听进度 {value1}%' : '可读资源 {value0}，阅读进度 {value1}%', { value0: number, value1: progress.roundedValue }) : t('可读资源 {value0}', { value0: number })} className={cn('block w-full text-left', !resource.readable && 'cursor-not-allowed opacity-50')}>
       <div className="relative overflow-hidden rounded-xl bg-stone-100 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-[#ff4f2a]">
         <Cover book={{ id: resource.id, title: resource.title, author: book.author, coverUrl: resource.coverUrl, gradient: book.gradient, coverStatus: '' }} className="aspect-[2/3] w-full rounded-none" size="small" />
@@ -102,7 +102,7 @@ export function BookContentBrowser({ book, contents, resources, loading, error, 
     {loading ? <div className="flex min-h-48 items-center justify-center"><span className="text-sm text-stone-500"><I18nText>正在加载图书内容</I18nText></span></div> : null}
     {!loading && itemCount === 0 && importSummary.pending === 0 && importSummary.failed === 0 ? <div className="mt-5 rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500"><I18nText>没有可读资源</I18nText></div> : null}
 
-    {!loading && itemCount > 0 && layout === 'grid' ? <div className="mt-6 grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+    {!loading && itemCount > 0 && layout === 'grid' ? <div className="mt-6 grid grid-cols-2 items-start gap-x-5 gap-y-7 sm:grid-cols-[repeat(auto-fill,150px)]">
       {sourceNodes.map((entry, index) => <SourceNodeCard key={entry.sourceNodeId} book={book} entry={entry} resource={entry.representativeResourceId ? resourcesById.get(entry.representativeResourceId) : undefined} position={index} canManage={canManage} onOpen={() => onNavigate(entry.sourceNodeId, entry)} onManage={(anchor) => onManageSourceNode(entry, anchor)} />)}
       {visibleResources.map((resource, index) => <ResourceCard key={resource.id} book={book} resource={resource} position={index} canManage={canManage} onOpen={() => onOpenResource(resource)} onManage={(anchor) => onManageResource(resource, anchor)} />)}
     </div> : null}

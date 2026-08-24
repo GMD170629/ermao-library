@@ -73,6 +73,50 @@ find_host_compiler() {
   exit 1
 }
 
+find_built_mobi_core_library() {
+  host_system="$(uname -s 2>/dev/null || true)"
+
+  case "$host_system" in
+    Darwin)
+      set -- \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.dylib" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.dylib"
+      ;;
+    Linux)
+      set -- \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.so" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.so"
+      ;;
+    CYGWIN* | MINGW* | MSYS*)
+      set -- \
+        "$MOBI_CORE_BUILD_DIR/ermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/Release/ermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.dll"
+      ;;
+    *)
+      set -- \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.so" \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.dylib" \
+        "$MOBI_CORE_BUILD_DIR/ermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/libermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.so" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.dylib" \
+        "$MOBI_CORE_BUILD_DIR/Release/ermao_mobi_core.dll" \
+        "$MOBI_CORE_BUILD_DIR/Release/libermao_mobi_core.dll"
+      ;;
+  esac
+
+  for library_path in "$@"; do
+    if [ -f "$library_path" ]; then
+      printf '%s\n' "$library_path"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 case "$STORAGE_ROOT" in
   /*) ;;
   *) STORAGE_ROOT="$ROOT_DIR/$STORAGE_ROOT" ;;
@@ -101,7 +145,10 @@ if [ -z "${ERMAO_MOBI_CORE_LIBRARY:-}" ]; then
     --build "$MOBI_CORE_BUILD_DIR" \
     --config Release \
     --target ermao_mobi_core_shared
-  ERMAO_MOBI_CORE_LIBRARY="$MOBI_CORE_BUILD_DIR/libermao_mobi_core.so"
+  if ! ERMAO_MOBI_CORE_LIBRARY="$(find_built_mobi_core_library)"; then
+    echo "Pinned libmobi runtime is unavailable under: $MOBI_CORE_BUILD_DIR" >&2
+    exit 1
+  fi
 fi
 
 if [ ! -f "$ERMAO_MOBI_CORE_LIBRARY" ]; then

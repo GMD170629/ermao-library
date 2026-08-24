@@ -113,10 +113,11 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                     displayTitle: managed.displayTitle,
                     format: managed.sourceFormat.readerFormat,
                     bookId: managed.bookID,
+                    assetId: managed.assetID,
                     sourceFormat: managed.sourceFormat
                 )
             }
-            let local = try? await progressStore.load(resourceId: resourceID)
+            let local = try? await progressStore.load(sourceId: resourceID)
             let initialPage = restorePage(
                 local: local,
                 remote: remoteSnapshot,

@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.modules.imports.application.readable_resource.ports import (
-    LibraryConfigPort,
     LibraryImportTaskQueuePort,
     PipelineLogPort,
     SourceNodeRepositoryPort,
     UnitOfWorkPort,
+)
+from app.modules.imports.application.readable_resource.request_library_scan import (
+    RequestLibraryScan,
+    RequestLibraryScanCommand,
 )
 
 
@@ -38,17 +41,17 @@ class ContinueImport:
     def __init__(
         self,
         *,
-        libraries: LibraryConfigPort,
         source_nodes: SourceNodeRepositoryPort,
         queue: LibraryImportTaskQueuePort,
         uow: UnitOfWorkPort,
         log: PipelineLogPort,
+        request_library_scan: RequestLibraryScan | None = None,
     ) -> None:
-        self._libraries = libraries
         self._source_nodes = source_nodes
         self._queue = queue
         self._uow = uow
         self._log = log
+        self._request_library_scan = request_library_scan
 
     def execute(
         self,
@@ -59,29 +62,17 @@ class ContinueImport:
         return self._continue_source(target.source_node_id)
 
     def _continue_library(self, library_id: str) -> ContinueImportResult:
-        with self._uow.transaction():
-            self._libraries.get_library(library_id)
-            requeued = self._queue.requeue_failed_for_library(library_id)
-            enqueued = False
-            task_id: str | None = None
-            if not self._queue.has_active_kind(
-                kind="SCAN_LIBRARY", library_id=library_id
-            ):
-                task = self._queue.enqueue(kind="SCAN_LIBRARY", library_id=library_id)
-                enqueued = True
-                task_id = task.id
-        self._log.emit(
-            "continue_import.library",
-            library_id=library_id,
-            stage="continue",
-            outcome="enqueued" if enqueued else "already_active",
+        if self._request_library_scan is None:
+            raise RuntimeError("library scan requester is not configured")
+        result = self._request_library_scan.execute(
+            RequestLibraryScanCommand(library_id=library_id, trigger="MANUAL")
         )
         return ContinueImportResult(
-            library_id=library_id,
+            library_id=result.library_id,
             source_node_id=None,
-            requeued_failed=requeued,
-            enqueued_scan=enqueued,
-            task_id=task_id,
+            requeued_failed=result.requeued_failed,
+            enqueued_scan=result.enqueued,
+            task_id=result.task_id,
         )
 
     def _continue_source(self, source_node_id: str) -> ContinueImportResult:

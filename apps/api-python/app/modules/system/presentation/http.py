@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_system_manager, require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.imports import (
+    get_library_scan_settings,
+    update_library_scan_settings,
+)
 from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     clear_system_events_with_audit,
@@ -30,6 +34,9 @@ from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.modules.backup.application.restore import BackupRecordValidationError
+from app.modules.imports.public import (
+    LibraryScanSettings,
+)
 from app.modules.opds.public import (
     OPDS_ENABLED_SETTING_KEY,
     OPDS_PUBLIC_BASE_URL_SETTING_KEY,
@@ -63,6 +70,8 @@ from app.modules.system.presentation.schemas import (
     ClearedEventsResponse,
     DashboardSystemStatusPayload,
     DashboardSystemStatusResponse,
+    LibraryScanSystemSettingsPayload,
+    LibraryScanSystemSettingsResponse,
     ManagementEventsPayload,
     ManagementEventsResponse,
     ManagementOverviewPayload,
@@ -70,6 +79,7 @@ from app.modules.system.presentation.schemas import (
     OpdsSystemSettingsPayload,
     OpdsSystemSettingsResponse,
     SystemSettingsResponse,
+    UpdateLibraryScanSystemSettingsRequest,
     UpdateOpdsSystemSettingsRequest,
     UpdateSystemSettingsRequest,
 )
@@ -149,6 +159,63 @@ def _opds_settings_payload(db: Session) -> OpdsSystemSettingsPayload:
         configured=snapshot.configured,
         publicBaseUrl=snapshot.public_base_url,
         catalogUrl=snapshot.catalog_url,
+    )
+
+
+def _library_scan_settings_payload(
+    db: Session, settings: Settings
+) -> LibraryScanSystemSettingsPayload:
+    snapshot = get_library_scan_settings(
+        db,
+        legacy_interval_ms=settings.library_scan_interval_ms,
+    )
+    return LibraryScanSystemSettingsPayload(
+        watchEnabled=snapshot.watch_enabled,
+        intervalMinutes=snapshot.interval_minutes,
+    )
+
+
+@router.get(
+    "/system-settings/library-scan",
+    response_model=LibraryScanSystemSettingsResponse,
+)
+def get_library_scan_system_settings(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LibraryScanSystemSettingsResponse | Response:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    return ok(_library_scan_settings_payload(db, settings))
+
+
+@router.put(
+    "/system-settings/library-scan",
+    response_model=LibraryScanSystemSettingsResponse,
+)
+def update_library_scan_system_settings(
+    payload: UpdateLibraryScanSystemSettingsRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LibraryScanSystemSettingsResponse | Response:
+    _user, auth_error = _system_manager(db, request, settings)
+    if auth_error:
+        return auth_error
+    updated = update_library_scan_settings(
+        db,
+        LibraryScanSettings(
+            watch_enabled=payload.watch_enabled,
+            interval_minutes=payload.interval_minutes,
+        ),
+        legacy_interval_ms=settings.library_scan_interval_ms,
+    )
+    return ok(
+        LibraryScanSystemSettingsPayload(
+            watchEnabled=updated.watch_enabled,
+            intervalMinutes=updated.interval_minutes,
+        )
     )
 
 

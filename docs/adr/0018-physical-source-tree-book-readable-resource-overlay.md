@@ -434,9 +434,9 @@ Library 冲突后，只更新 `rootPath`；所有相对路径和 Book/Resource/A
 目标实现最初在独立 composition root 中构造，并由 ADR 0019 完成生产切换。每个阶段从
 fresh database 验收并保持全仓可构建、适用测试为绿色。
 
-Alembic 已压平为唯一 fresh-install baseline
-（`0001_library_topology_baseline`，含 version covers 与 ADR 0018 overlay 表）。
-不支持从已删除的开发期 revision（原 `0002` / `0003`）升级；baseline 发布后不可重写。
+Alembic 以 `0001_library_topology_baseline` 作为不可重写的 fresh-install baseline
+（含 version covers 与 ADR 0018 overlay 表），后续能力通过线性、不可变 revision 演进。
+不支持从已删除的开发期 revision（原 `0002` / `0003`）升级。
 
 ## 12. 验收矩阵
 
@@ -507,7 +507,7 @@ Alembic 已压平为唯一 fresh-install baseline
   控制入口已从生产路径删除；
 - Library、Reader、Publication、Media、Metadata、Organize、Kindle、Backup、OPDS、System、
   Web 与 reader-core 已由 ADR 0019 切换到 Book/ReadableResource/ResourceAsset 身份；
-- fresh baseline 仅保留 `0001_library_topology_baseline`，不提供旧数据升级或兼容接口；
+- fresh baseline 为 `0001_library_topology_baseline`；后续仅支持仓库中明确保留的线性 revision；
 - Mobile 未纳入本次实现和验收。
 
 ### 最终后端验证（2026-08-22，于 `apps/api-python`）

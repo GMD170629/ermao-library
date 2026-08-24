@@ -306,7 +306,6 @@ Tests follow the same capability layout as production code.
 - Migration tests cover fresh creation and every supported upgrade path.
 - Worker tests cover idempotency, retry, lease expiry, shutdown, abandoned work, and recovery.
 - Web model tests cover pure rules and reducers; component tests cover interaction and accessibility; E2E covers only critical cross-layer journeys.
-- Every defect fix starts with a failing regression test and audits adjacent behavior variants under the functional triage rule below.
 - Tests assert observable behavior, not private implementation details. Mock only owned ports, not every internal function.
 - Time, randomness, filesystem roots, and external services must be controllable in tests.
 

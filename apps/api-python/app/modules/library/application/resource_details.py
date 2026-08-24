@@ -303,23 +303,10 @@ class ListResourceDetails:
             for asset in self._queries.list_assets(resource_id=resource_id)
             if asset.role.strip().upper() in roles
         )
-        if roles == {"PAGE"}:
-            return tuple(
-                sorted(
-                    assets,
-                    key=lambda asset: (
-                        natural_sort_key(asset.sort_key or asset.title),
-                        asset.id,
-                    ),
-                )
-            )
         return tuple(
             sorted(
                 assets,
                 key=lambda asset: (
-                    asset.sort_order,
-                    asset.disc_number or 0,
-                    asset.track_number or 0,
                     natural_sort_key(asset.sort_key or asset.title),
                     asset.id,
                 ),

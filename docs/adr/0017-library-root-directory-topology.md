@@ -36,8 +36,10 @@ identity.
 All Reader and download paths use the original publication format. The system does not
 create a derived EPUB, ZIP, or unpacked publication as a persisted fallback.
 
-Periodic and manual requests submit one deduplicated scan job for an entire enabled library
-root; `LIBRARY_SCAN_INTERVAL_MS` controls the periodic interval. The bounded scanner handles
+Watcher, periodic, and manual requests submit one deduplicated scan job for an entire enabled library
+root. Persisted system settings control watching and the periodic interval;
+`LIBRARY_SCAN_INTERVAL_MS` is only a compatibility fallback when no interval has been saved.
+The bounded scanner handles
 currently discovered candidates. Reconciliation for vanished,
 unreadable, or user-renamed files and directories is outside this refactor. A future
 capability must define those state transitions explicitly rather than adding them to import
@@ -51,7 +53,7 @@ heuristics.
   order.
 - An upload must land inside an enabled library root at a path valid for its organization
   mode; scanning, not upload metadata, binds it to topology.
-- Database initialization uses the single current baseline. Old database files must not be
-  opened as an implicit migration path.
+- Database initialization uses the current linear Alembic head. Explicit supported revisions
+  are upgraded; unversioned or unknown database layouts remain rejected.
 - Internal names retained by stable external contracts do not grant the old grouping model
   any authority over library structure.

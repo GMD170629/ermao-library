@@ -173,8 +173,8 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
     assert [unit.page_number for unit in image_result.units] == [1, 2, 3]
 
     audio_assets = (
-        asset("track-10", "Track 10.mp3", role="TRACK", track=10),
-        asset("track-2", "Track 2.mp3", role="TRACK", track=2),
+        asset("track-10", "Track 10.mp3", role="TRACK", track=1),
+        asset("track-2", "Track 2.mp3", role="TRACK", track=99),
     )
     audio_result = ListResourceDetails(
         FakeQueries(resource("AUDIOBOOK_DIR"), assets=audio_assets), FakeNavigation()
@@ -182,4 +182,4 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
     )
     assert [unit.asset_id for unit in audio_result.units] == ["track-2", "track-10"]
-    assert [unit.track_number for unit in audio_result.units] == [2, 10]
+    assert [unit.track_number for unit in audio_result.units] == [99, 1]

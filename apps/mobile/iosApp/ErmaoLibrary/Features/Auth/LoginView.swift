@@ -258,9 +258,10 @@ struct LoginView: View {
                 secondaryButton: .cancel()
             )
         case .incompatible:
+            let copy = ServerCompatibilityCopy.resolve(reasonCode: store.snapshot.reasonCode)
             return Alert(
-                title: Text("server.incompatible.title"),
-                message: Text("server.incompatible.message"),
+                title: Text(LocalizedStringKey(copy.titleKey)),
+                message: Text(LocalizedStringKey(copy.messageKey)),
                 dismissButton: .cancel()
             )
         case .insecureTLS:

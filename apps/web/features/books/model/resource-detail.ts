@@ -55,6 +55,15 @@ export function resourceDetailPageSize(resource: ReadableResourceView): number {
     : RESOURCE_DETAIL_LIST_PAGE_SIZE;
 }
 
+export function resourcePreviewRetryUrl(previewUrl: string, attempt: number): string {
+  if (attempt <= 0) return previewUrl;
+  const hashIndex = previewUrl.indexOf('#');
+  const urlWithoutFragment = hashIndex >= 0 ? previewUrl.slice(0, hashIndex) : previewUrl;
+  const fragment = hashIndex >= 0 ? previewUrl.slice(hashIndex) : '';
+  const separator = urlWithoutFragment.includes('?') ? '&' : '?';
+  return `${urlWithoutFragment}${separator}previewRetry=${attempt}${fragment}`;
+}
+
 export function resourceDetailItemHref(
   resource: ReadableResourceView,
   unit: ResourceDetailUnit

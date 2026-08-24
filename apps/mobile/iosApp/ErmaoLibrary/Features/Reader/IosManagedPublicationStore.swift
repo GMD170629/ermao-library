@@ -8,6 +8,7 @@ struct IosManagedPublication: Sendable, Equatable {
     let fileURL: URL
     let byteCount: Int64
     let bookID: String?
+    let assetID: String?
     let namespace: String?
     let sourceFormat: ErmaoShared.ReaderSourceFormat
 }
@@ -65,6 +66,7 @@ actor IosManagedPublicationStore {
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
         bookID: String? = nil,
+        assetID: String? = nil,
         namespace: String? = nil,
         parserVersion: String,
         normalizationVersion: String
@@ -126,6 +128,7 @@ actor IosManagedPublicationStore {
             displayTitle: displayTitle,
             byteCount: byteCount,
             bookID: bookID,
+            assetID: assetID,
             namespace: namespace,
             sourceFormat: sourceFormat.wireValue
         )
@@ -141,6 +144,7 @@ actor IosManagedPublicationStore {
             fileURL: destination,
             byteCount: byteCount,
             bookID: bookID,
+            assetID: assetID,
             namespace: namespace,
             sourceFormat: sourceFormat
         )
@@ -172,6 +176,7 @@ actor IosManagedPublicationStore {
         normalizationVersion: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat,
         bookID: String,
+        assetID: String,
         namespace: String? = nil,
         validateWithReaderParser: Bool = false
     ) async throws -> IosManagedPublication {
@@ -204,6 +209,7 @@ actor IosManagedPublicationStore {
             displayTitle: displayTitle,
             byteCount: byteCount,
             bookID: bookID,
+            assetID: assetID,
             namespace: namespace,
             sourceFormat: sourceFormat.wireValue
         )
@@ -219,6 +225,7 @@ actor IosManagedPublicationStore {
             fileURL: destination,
             byteCount: byteCount,
             bookID: bookID,
+            assetID: assetID,
             namespace: namespace,
             sourceFormat: sourceFormat
         )
@@ -270,6 +277,7 @@ actor IosManagedPublicationStore {
             fileURL: publicationURL,
             byteCount: byteCount,
             bookID: metadata.bookID,
+            assetID: metadata.assetID,
             namespace: metadata.namespace,
             sourceFormat: sourceFormat
         )
@@ -463,6 +471,7 @@ actor IosManagedPublicationStore {
             fileURL: url,
             byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
             bookID: nil,
+            assetID: nil,
             namespace: nil,
             sourceFormat: sourceFormat
         )
@@ -477,6 +486,7 @@ actor IosManagedPublicationStore {
         let displayTitle: String
         let byteCount: Int64
         let bookID: String?
+        let assetID: String?
         let namespace: String?
         let sourceFormat: String
     }

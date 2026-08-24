@@ -116,18 +116,16 @@ class DefaultMobileRuntime(
         return when (val probe = serverProbe.probe(candidate)) {
             is ServerProbeResult.Failure -> failure(probe.error)
             is ServerProbeResult.Compatible -> {
-                if (probe.serverIdentity != existing.serverIdentity) {
-                    return failure(AppError(AppErrorKind.Conflict, "SERVER_IDENTITY_CHANGED"))
-                }
+                val currentCandidate = candidate.copy(serverIdentity = probe.serverIdentity)
                 storageGuard {
                     try {
-                        profileRepository.upsert(candidate)
-                        if (candidate.baseUrl != existing.baseUrl) {
+                        profileRepository.upsert(currentCandidate)
+                        if (currentCandidate.baseUrl != existing.baseUrl) {
                             cookieVault.clear(profileId)
                             verifiedSessionRepository.removeSession(profileId)
                         }
                         reloadProfiles()
-                        if (candidate.isActive) restore(candidate)
+                        if (currentCandidate.isActive) restore(currentCandidate)
                         else success("SERVER_UPDATED")
                     } catch (cancelled: CancellationException) {
                         profileRepository.upsert(existing)
@@ -154,17 +152,14 @@ class DefaultMobileRuntime(
                 failure(probe.error)
             }
             is ServerProbeResult.Compatible -> {
-                if (probe.serverIdentity != target.serverIdentity) {
-                    transition(previousSession)
-                    return failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
-                }
-                when (val resolution = preflightGate(target)) {
+                val currentTarget = target.copy(serverIdentity = probe.serverIdentity)
+                when (val resolution = preflightGate(currentTarget)) {
                     is GateResolution.Failed -> {
                         transition(previousSession)
                         failure(resolution.error)
                     }
                     else -> commitServerSwitch(
-                        target = target,
+                        target = currentTarget,
                         resolution = resolution,
                         previousSession = previousSession,
                     )
@@ -341,7 +336,7 @@ class DefaultMobileRuntime(
 
     private suspend fun restoreSavedProfile(profile: ServerProfile): RuntimeOperationResult {
         val record = verifiedSessionRepository.load(profile.id)
-        if (record == null || !record.matches(profile.id, profile.serverIdentity)) {
+        if (record == null || !record.belongsToProfile(profile.id)) {
             if (record != null) {
                 verifiedSessionRepository.removeSession(profile.id)
                 cookieVault.clear(profile.id)
@@ -351,19 +346,14 @@ class DefaultMobileRuntime(
 
         val restoredIdentity = record.toIdentity()
         transition(AppSession.Authenticated(profile, restoredIdentity, record.toAuthorization()))
-        val draft = profile.toDraft()
         return when (val probe = serverProbe.probe(profile)) {
             is ServerProbeResult.Failure -> success(
                 "SESSION_RESTORED_VALIDATION_DEFERRED",
                 NavigationDirective.RestoreSelectedTab,
             )
-            is ServerProbeResult.Compatible -> if (probe.serverIdentity != profile.serverIdentity) {
-                verifiedSessionRepository.removeSession(profile.id)
-                cookieVault.clear(profile.id)
-                transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
-                failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
-            } else {
-                when (val resolution = preflightGate(profile)) {
+            is ServerProbeResult.Compatible -> {
+                val currentProfile = persistCurrentServerIdentity(profile, probe.serverIdentity)
+                when (val resolution = preflightGate(currentProfile)) {
                     is GateResolution.Failed -> success(
                         "SESSION_RESTORED_VALIDATION_DEFERRED",
                         NavigationDirective.RestoreSelectedTab,
@@ -373,7 +363,7 @@ class DefaultMobileRuntime(
                         NavigationDirective.RestoreSelectedTab,
                     )
                     else -> {
-                        applyGateResolution(profile, resolution)
+                        applyGateResolution(currentProfile, resolution)
                         when (resolution) {
                             is GateResolution.Authenticated -> success(
                                 "AUTHENTICATED",
@@ -398,14 +388,10 @@ class DefaultMobileRuntime(
         transition(AppSession.CheckingServer(draft))
         return when (val probe = serverProbe.probe(profile)) {
             is ServerProbeResult.Failure -> handleSavedProbeFailure(profile, draft, probe.error)
-            is ServerProbeResult.Compatible -> if (probe.serverIdentity != profile.serverIdentity) {
-                verifiedSessionRepository.removeSession(profile.id)
-                cookieVault.clear(profile.id)
-                transition(AppSession.IncompatibleServer(draft, "SERVER_IDENTITY_CHANGED"))
-                failure(AppError(AppErrorKind.ProtocolViolation, "SERVER_IDENTITY_CHANGED"))
-            } else {
-                resolveGate(profile, activateBeforeTransition = false)
-            }
+            is ServerProbeResult.Compatible -> resolveGate(
+                persistCurrentServerIdentity(profile, probe.serverIdentity),
+                activateBeforeTransition = false,
+            )
         }
     }
 
@@ -605,6 +591,7 @@ class DefaultMobileRuntime(
         val previousActiveId = cachedProfiles.singleOrNull(ServerProfile::isActive)?.id
         return storageGuard {
             try {
+                profileRepository.upsert(target)
                 profileRepository.activate(target.id)
                 reloadProfiles()
                 applyGateResolution(activeProfile(target.id), resolution)
@@ -617,6 +604,16 @@ class DefaultMobileRuntime(
                 throw error
             }
         }
+    }
+
+    private suspend fun persistCurrentServerIdentity(
+        profile: ServerProfile,
+        serverIdentity: String,
+    ): ServerProfile {
+        val currentProfile = profile.copy(serverIdentity = serverIdentity)
+        profileRepository.upsert(currentProfile)
+        reloadProfiles()
+        return findProfile(profile.id) ?: currentProfile
     }
 
     private suspend fun compensateNewProfile(

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.modules.imports.domain.directory_probe import ProbeTerminationReason
+from app.modules.imports.domain.resource_adapters import ResourceAdapterId
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
 )
@@ -105,6 +106,39 @@ def test_million_entry_generator_stops_at_sample_limit(tmp_path: Path) -> None:
     assert decision.evidence.sample_count == 100
     assert counter.count == 100
     assert counter.count < 1_000_000
+
+
+def test_probe_ignores_cover_and_opf_sidecars_before_adapter_matching(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "lib"
+    target = root / "audiobook"
+    target.mkdir(parents=True)
+    (target / "01.mp3").write_bytes(b"audio")
+    (target / "01.opf").write_text("<package />", encoding="utf-8")
+    (target / "01.cover.jpg").write_bytes(b"cover")
+    (target / "cover.webp").write_bytes(b"cover")
+    (target / "download.tmp").write_bytes(b"temporary")
+    cache = target / "cache"
+    cache.mkdir()
+    (cache / "bonus.mp3").write_bytes(b"ignored audio")
+
+    decision, termination = OsSourceTreeFilesystem().probe_directory(
+        root=root,
+        directory_relative_path="audiobook",
+        ignore_hidden=True,
+        ignore_patterns="**/cache/**",
+        global_ignore_patterns="*.tmp",
+        sample_limit=100,
+        max_entries=100,
+        max_depth=4,
+        time_budget_ms=60_000,
+    )
+
+    assert termination is ProbeTerminationReason.COMPLETE_SUBTREE
+    assert decision.adapter is not None
+    assert decision.adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+    assert decision.evidence.sample_relative_paths == ("audiobook/01.mp3",)
 
 
 def test_path_traversal_raises(tmp_path: Path) -> None:

@@ -76,6 +76,16 @@ class UpdateOpdsSystemSettingsRequest(HttpContractModel):
     )
 
 
+class LibraryScanSystemSettingsPayload(HttpContractModel):
+    watch_enabled: bool = Field(alias="watchEnabled")
+    interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
+
+
+class UpdateLibraryScanSystemSettingsRequest(HttpContractModel):
+    watch_enabled: bool = Field(alias="watchEnabled")
+    interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
+
+
 class Backup(HttpContractModel):
     id: str
     kind: str | None = None
@@ -216,6 +226,7 @@ class ManagementOverviewPayload(HttpContractModel):
 AppConfigResponse = SuccessEnvelope[AppConfigPayload]
 SystemSettingsResponse = SuccessEnvelope[SystemSettingsPayload]
 OpdsSystemSettingsResponse = SuccessEnvelope[OpdsSystemSettingsPayload]
+LibraryScanSystemSettingsResponse = SuccessEnvelope[LibraryScanSystemSettingsPayload]
 BackupsResponse = SuccessEnvelope[BackupsPayload]
 BackupResponse = SuccessEnvelope[BackupPayload]
 BackupRestoreResponse = SuccessEnvelope[BackupRestorePayload]

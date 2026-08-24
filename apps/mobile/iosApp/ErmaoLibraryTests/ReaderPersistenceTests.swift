@@ -134,7 +134,7 @@ final class ReaderPersistenceTests: XCTestCase {
         )
         let restored = try await v5.load(sourceId: "volume-a")
 
-        XCTAssertEqual(restored?.sourceId, "volume-a")
+        XCTAssertEqual(restored?.resourceId, "volume-a")
         XCTAssertEqual(restored?.updatedAtEpochMillis, 1_775_988_123_456)
     }
 
@@ -662,7 +662,7 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressServe
         if let failure { throw failure }
         return ErmaoShared.ReaderProgressPushResultAccepted(
             snapshot: ErmaoShared.ReaderProgressSnapshotV4(
-                sourceId: upload.target.resourceId,
+                resourceId: upload.target.resourceId,
                 clientId: upload.mutation.clientId,
                 revision: upload.mutation.baseRevision + 1,
                 locator: upload.mutation.locator,
@@ -706,7 +706,7 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServer
         }
         return ErmaoShared.ReaderProgressPushResultAccepted(
             snapshot: ErmaoShared.ReaderProgressSnapshotV4(
-                sourceId: upload.target.resourceId,
+                resourceId: upload.target.resourceId,
                 clientId: upload.mutation.clientId,
                 revision: upload.mutation.baseRevision + 1,
                 locator: upload.mutation.locator,

@@ -76,6 +76,22 @@ test('a single readable resource opens its paginated detail by default and survi
   await expect(page.getByRole('button', { name: '返回图书内容' })).toHaveCount(0);
 });
 
+test('detail volume cover requests the small variant and uses compact dimensions', async ({ page }) => {
+  const coverRequests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.includes('/cover')) coverRequests.push(request.url());
+  });
+
+  await page.goto('/books/book-1?resourceId=resource-epub&resourcePage=1');
+
+  const cover = page.locator('[data-book-cover="true"]').first();
+  await expect(cover).toHaveCSS('width', '128px');
+  await expect.poll(() => coverRequests.some((url) => url.includes('size=small'))).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(cover).toHaveCSS('width', '96px');
+});
+
 test('multiple readable resources still open from their cards and can return to book contents', async ({ page }) => {
   await page.unroute('**/api/**');
   await mockBookDetailApi(page, [epubResource, secondEpubResource]);

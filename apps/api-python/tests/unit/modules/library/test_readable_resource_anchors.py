@@ -10,6 +10,7 @@ from app.modules.library.domain.readable_resource_anchors import (
     is_same_or_descendant_path,
     is_strict_descendant_path,
     resource_owns_book_metadata,
+    resource_relative_asset_sort_key,
 )
 from app.modules.library.domain.source_nodes import (
     SourceNodePhysicalKind,
@@ -127,4 +128,24 @@ def test_symlink_or_other_resource_kind_rejects_assets() -> None:
         resource_anchor=resource,
         resource_anchor_kind=SourceNodePhysicalKind.SYMLINK,
         asset_path=_path("odd/a.epub"),
+    )
+
+
+def test_asset_sort_key_is_relative_to_directory_resource_anchor() -> None:
+    assert (
+        resource_relative_asset_sort_key(
+            resource_anchor=_path("series/album"),
+            asset_path=_path("series/album/disc 2/10.mp3"),
+        )
+        == "disc 2/10.mp3"
+    )
+
+
+def test_file_resource_asset_sort_key_is_its_filename() -> None:
+    assert (
+        resource_relative_asset_sort_key(
+            resource_anchor=_path("series/book.epub"),
+            asset_path=_path("series/book.epub"),
+        )
+        == "book.epub"
     )

@@ -12,8 +12,8 @@ export const ORGANIZATION_MODES: ReadonlyArray<{
   },
   {
     value: 'VOLUMES',
-    label: '按目录归组',
-    description: '首级目录为图书，第二级目录为可读资源，更深目录中的每个资产独立归组'
+    label: '分卷',
+    description: '下级目录作为图书，一个图书可能有多个分卷'
   }
 ];
 

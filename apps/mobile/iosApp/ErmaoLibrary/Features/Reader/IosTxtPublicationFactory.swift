@@ -90,14 +90,14 @@ private final class IosTxtContainer: Container, @unchecked Sendable {
         self.entries = entries
     }
 
-    subscript(url: any URLConvertible) -> Resource? {
+    subscript(url: any URLConvertible) -> (any ReadiumShared.Resource)? {
         resources[url.anyURL.removingQuery().removingFragment().string]
     }
 
     func close() {}
 }
 
-private final class IosTxtResource: Resource, @unchecked Sendable {
+private final class IosTxtResource: ReadiumShared.Resource, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
     private let data: Data
 

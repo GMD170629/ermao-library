@@ -101,3 +101,18 @@ def is_asset_path_within_resource_scope(
     if resource_anchor_kind is SourceNodePhysicalKind.DIRECTORY:
         return is_strict_descendant_path(ancestor=resource_anchor, candidate=asset_path)
     return False
+
+
+def resource_relative_asset_sort_key(
+    *,
+    resource_anchor: SourceNodeRelativePath,
+    asset_path: SourceNodeRelativePath,
+) -> str:
+    """Return the asset's exact path spelling relative to its Resource anchor."""
+
+    if resource_anchor.value == asset_path.value:
+        return asset_path.value.rsplit("/", 1)[-1]
+    prefix = resource_anchor.value + "/"
+    if asset_path.value.startswith(prefix):
+        return asset_path.value[len(prefix) :]
+    return asset_path.value

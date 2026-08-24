@@ -22,6 +22,12 @@ from app.modules.imports.application.readable_resource.continue_import import (
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
+from app.modules.imports.application.readable_resource.request_library_scan import (
+    LibraryScanTrigger,
+    RequestLibraryScan,
+    RequestLibraryScanCommand,
+    RequestLibraryScanResult,
+)
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
@@ -38,6 +44,7 @@ from app.modules.imports.application.save_uploaded_files import (
     UploadSource,
     safe_upload_filename,
 )
+from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
@@ -47,8 +54,13 @@ __all__ = [
     "ContinueLibraryImport",
     "ContinueSourceImport",
     "LibraryPathError",
+    "LibraryScanSettings",
+    "LibraryScanTrigger",
     "ParsedReleaseTitle",
     "ProcessReadableResourceImportTask",
+    "RequestLibraryScan",
+    "RequestLibraryScanCommand",
+    "RequestLibraryScanResult",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
     "SavedUploadFile",

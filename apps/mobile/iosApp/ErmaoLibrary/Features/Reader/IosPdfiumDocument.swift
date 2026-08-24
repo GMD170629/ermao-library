@@ -7,7 +7,7 @@ import ShukuPdfium
 #endif
 
 enum IosPdfiumFeatureFlags {
-    static let expectedRevision = "875172eae557a308d0c5b2be43822814c8a885bb"
+    static let expectedRevision = "153.0.8009.0"
     static let expectedWrapperABI: Int32 = 1
 
     /// Enabled for physical-device acceptance; the locked native artifact and ABI check remain mandatory.
@@ -169,7 +169,7 @@ final class IosPdfiumDocument: @unchecked Sendable {
               ) else {
             throw IosReaderFailure(code: .pdfRenderFailed)
         }
-        return UIImage(cgImage: image, scale: UIScreen.main.scale, orientation: .up)
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
         #else
         throw IosReaderFailure(code: .engineError)
         #endif

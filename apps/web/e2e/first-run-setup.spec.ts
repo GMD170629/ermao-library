@@ -1,12 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 test('an uninitialized installation opens the account setup wizard', async ({ page }) => {
+  let accountCreated = false;
   let createdLibraries = 0;
   const activatedLibraries: string[] = [];
   const removedLibraries: string[] = [];
   const consoleErrors: string[] = [];
   await page.route('**/api/auth/setup/status', async (route) => {
-    await route.fulfill({ json: { ok: true, data: { initialized: false } } });
+    await route.fulfill({ json: { ok: true, data: { initialized: accountCreated } } });
   });
   await page.route('**/api/auth/setup', async (route) => {
     expect(route.request().method()).toBe('POST');
@@ -16,8 +17,10 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
       password: 'initial-password-123',
       locale: 'zh-CN'
     });
+    accountCreated = true;
     await route.fulfill({
       status: 201,
+      headers: { 'Set-Cookie': 'shuku_session=e2e-session; Path=/; HttpOnly; SameSite=Lax' },
       json: {
         ok: true,
         data: {
@@ -26,6 +29,11 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
         }
       }
     });
+  });
+  await page.route('**/api/auth/me', async (route) => {
+    await route.fulfill(accountCreated
+      ? { json: { ok: true, data: { user: { name: '二毛', email: 'owner@example.com', role: 'admin' } } } }
+      : { status: 401, json: { ok: false, error: { message: 'UNAUTHORIZED' } } });
   });
   await page.route('**/api/libraries', async (route) => {
     if (route.request().method() === 'GET') {
@@ -96,7 +104,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByRole('button', { name: '创建账户' }).click();
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
 
-  await expect(page.getByRole('heading', { name: '添加多个书库' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '添加书库' })).toBeVisible();
   const emptyLibraryList = page.getByRole('region', { name: '书库清单' });
   const initialAddButton = emptyLibraryList.getByRole('button', { name: /添加书库/ });
   const emptyListBox = await emptyLibraryList.boundingBox();
@@ -136,8 +144,9 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await addDialog.getByRole('button', { name: '添加', exact: true }).click();
   await expect(addDialog.getByRole('alert')).toHaveText('请选择文件组织方式');
   const organizationModes = page.getByRole('radiogroup', { name: '组织方式' });
-  const modeBoxes = await Promise.all(['单本', '按目录归组'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
+  const modeBoxes = await Promise.all(['单本', '分卷'].map((name) => addDialog.getByRole('radio', { name }).boundingBox()));
   expect(modeBoxes[0]?.y).toBe(modeBoxes[1]?.y);
+  await expect(addDialog.getByText('下级目录作为图书，一个图书可能有多个分卷')).toBeVisible();
   await page.getByRole('button', { name: '展开文件夹路径树' }).click();
   await expect(selectedLibrary).toHaveAttribute('aria-selected', 'true');
   await expect(selectedLibrary).toBeInViewport();
@@ -152,7 +161,7 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByLabel('书库名称').fill('漫画合集');
   await page.getByRole('combobox', { name: '书库路径' }).fill('/comics');
   await page.getByRole('button', { name: '收起文件夹路径树' }).click();
-  await page.getByRole('radio', { name: '按目录归组' }).click();
+  await page.getByRole('radio', { name: '分卷' }).click();
   await page.getByRole('dialog', { name: '新增书库' }).getByRole('button', { name: '添加', exact: true }).click();
 
   await expect(page.getByText('漫画合集')).toBeVisible();
@@ -164,16 +173,14 @@ test('an uninitialized installation opens the account setup wizard', async ({ pa
   await page.getByLabel('书库名称').fill('漫画合集');
   await page.getByRole('combobox', { name: '书库路径' }).fill('/comics');
   await page.getByRole('button', { name: '收起文件夹路径树' }).click();
-  await page.getByRole('radio', { name: '按目录归组' }).click();
+  await page.getByRole('radio', { name: '分卷' }).click();
   await page.getByRole('dialog', { name: '新增书库' }).getByRole('button', { name: '添加', exact: true }).click();
-  await page.getByRole('button', { name: '启用并进入书库' }).click();
-
-  await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toBeVisible();
-  expect(activatedLibraries).toHaveLength(2);
-  await expect(page.getByText(/已启用 2 个书库/)).toBeVisible();
-  await expect(page.getByText(/owner@example.com/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '进入书库' })).toBeVisible();
   expect(consoleErrors).toEqual([]);
+  await page.getByRole('button', { name: '确认' }).click();
+
+  await expect(page).toHaveURL(/\/library$/);
+  expect(activatedLibraries).toHaveLength(2);
+  await expect(page.getByRole('heading', { name: '你的私人书库已准备好' })).toHaveCount(0);
 });
 
 test('an initialized installation cannot reopen the setup wizard', async ({ page }) => {
@@ -206,8 +213,9 @@ test('an authenticated owner can resume unfinished library onboarding after refr
   });
 
   await page.goto('/setup');
+  await page.context().addCookies([{ name: 'shuku_session', value: 'e2e-session', url: new URL(page.url()).origin }]);
 
-  await expect(page.getByRole('heading', { name: '添加多个书库' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '添加书库' })).toBeVisible();
   const skipButton = page.getByRole('button', { name: '跳过' });
   await expect(skipButton).toHaveCSS('text-decoration-line', 'underline');
   await skipButton.hover();
@@ -220,6 +228,10 @@ test('an authenticated owner can resume unfinished library onboarding after refr
   await page.getByRole('button', { name: /添加书库/ }).click();
   await expect(page.getByRole('dialog', { name: '新增书库' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: '书库路径' })).toHaveValue('');
+  await page.getByRole('dialog', { name: '新增书库' }).getByRole('button', { name: '关闭' }).click();
+  await page.getByRole('button', { name: '跳过' }).click();
+  await page.getByRole('alertdialog', { name: '确认跳过添加书库？' }).getByRole('button', { name: '确认跳过' }).click();
+  await expect(page).toHaveURL(/\/library$/);
 });
 
 test('login shows password errors in the system feedback style and in Chinese', async ({ page }) => {

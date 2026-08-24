@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import cast
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models.common import cuid
@@ -66,6 +67,42 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         self._session.add(row)
         self._session.flush()
         return self._to_record(row)
+
+    def request_library_scan(
+        self, library_id: str
+    ) -> tuple[LibraryImportTaskRecord, bool]:
+        """Atomically retain no more than one queued scan per library."""
+
+        task_id = cuid()
+        statement = (
+            sqlite_insert(LibraryImportTask)
+            .values(
+                id=task_id,
+                kind="SCAN_LIBRARY",
+                library_id=library_id,
+                state="QUEUED",
+            )
+            .on_conflict_do_nothing(
+                index_elements=[LibraryImportTask.library_id],
+                index_where=(
+                    (LibraryImportTask.kind == "SCAN_LIBRARY")
+                    & (LibraryImportTask.state == "QUEUED")
+                ),
+            )
+        )
+        result = self._session.execute(statement)
+        self._session.flush()
+        inserted = bool(getattr(result, "rowcount", 0))
+        row = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.kind == "SCAN_LIBRARY",
+                LibraryImportTask.state == "QUEUED",
+            )
+        )
+        if row is None:
+            raise RuntimeError("queued library scan disappeared after request")
+        return self._to_record(row), inserted
 
     def ensure_import_asset_task(
         self,
@@ -169,6 +206,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             .where(
                 LibraryImportTask.library_id == library_id,
                 LibraryImportTask.state == "FAILED",
+                LibraryImportTask.kind != "SCAN_LIBRARY",
             )
             .values(
                 state="QUEUED",

@@ -503,7 +503,8 @@ struct WorkDetailView: View {
                                     .appTextStyle(.caption)
                                     .foregroundStyle(theme.textSecondary)
                                     .multilineTextAlignment(.center)
-                                    .frame(width: 108, minHeight: .iosMinimumTouchTarget)
+                                    .frame(width: 108)
+                                    .frame(minHeight: .iosMinimumTouchTarget)
                             }
                             .buttonStyle(.plain)
                             .disabled(!store.hasResourcePaginationError)

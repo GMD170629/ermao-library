@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ReadableResourceView } from '../../../types/book';
-import { resourceDetailItemHref, resourceDetailPageSize } from './resource-detail';
+import { resourceDetailItemHref, resourceDetailPageSize, resourcePreviewRetryUrl } from './resource-detail';
 
 function resource(overrides: Partial<ReadableResourceView>): ReadableResourceView {
   return {
@@ -18,6 +18,12 @@ test('uses preview pagination for comic and PDF resources', () => {
   assert.equal(resourceDetailPageSize(resource({ format: 'PDF', readerType: 'pdf' })), 24);
   assert.equal(resourceDetailPageSize(resource({ format: 'IMAGE_DIR', readerType: 'comic' })), 24);
   assert.equal(resourceDetailPageSize(resource({ format: 'AUDIOBOOK_DIR', readerType: 'audio' })), 50);
+});
+
+test('adds a cache-busting retry marker without changing the original preview route', () => {
+  assert.equal(resourcePreviewRetryUrl('/api/resources/one/previews/6', 0), '/api/resources/one/previews/6');
+  assert.equal(resourcePreviewRetryUrl('/api/resources/one/previews/6', 1), '/api/resources/one/previews/6?previewRetry=1');
+  assert.equal(resourcePreviewRetryUrl('/api/resources/one/previews/6?size=small#page', 2), '/api/resources/one/previews/6?size=small&previewRetry=2#page');
 });
 
 test('builds exact chapter, page and stable audio track links', () => {

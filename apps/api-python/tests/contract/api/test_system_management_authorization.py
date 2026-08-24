@@ -59,6 +59,12 @@ SYSTEM_MANAGEMENT_REQUESTS = (
     ("GET", "/api/system-settings", None),
     ("PUT", "/api/system-settings", {"settings": {"readerTheme": "dark"}}),
     ("PATCH", "/api/system-settings", {"settings": {"readerTheme": "dark"}}),
+    ("GET", "/api/system-settings/library-scan", None),
+    (
+        "PUT",
+        "/api/system-settings/library-scan",
+        {"watchEnabled": True, "intervalMinutes": 30},
+    ),
     ("GET", "/api/management/events", None),
     ("DELETE", "/api/management/events", None),
     ("GET", "/api/backups", None),
@@ -130,6 +136,58 @@ def test_admin_and_delegated_system_manager_can_read_system_settings(
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert "settings" in response.json()["data"]
+
+
+def test_library_scan_settings_default_save_and_restore(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_user(
+        db_session,
+        email="scan-settings-admin@example.com",
+        role="admin",
+    )
+    _login(client, admin.email)
+
+    initial = client.get("/api/system-settings/library-scan")
+    assert initial.status_code == 200
+    assert initial.json()["data"] == {
+        "watchEnabled": True,
+        "intervalMinutes": 30,
+    }
+
+    saved = client.put(
+        "/api/system-settings/library-scan",
+        json={"watchEnabled": False, "intervalMinutes": 180},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["data"] == {
+        "watchEnabled": False,
+        "intervalMinutes": 180,
+    }
+    assert (
+        client.get("/api/system-settings/library-scan").json()["data"]
+        == saved.json()["data"]
+    )
+
+
+@pytest.mark.parametrize("minutes", [4, 1441, 30.5])
+def test_library_scan_settings_validate_interval(
+    client: TestClient,
+    db_session: Session,
+    minutes: float,
+) -> None:
+    admin = _create_user(
+        db_session,
+        email=f"scan-validation-{minutes}@example.com",
+        role="admin",
+    )
+    _login(client, admin.email)
+    response = client.put(
+        "/api/system-settings/library-scan",
+        json={"watchEnabled": True, "intervalMinutes": minutes},
+    )
+    assert response.status_code == 422
 
 
 def test_delegated_system_manager_keeps_system_management_success_contracts(

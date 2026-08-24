@@ -110,8 +110,6 @@ export function formatAudioTime(milliseconds: number, compact = false) {
 export function orderedTracks(tracks: AudioTrack[]) {
   return [...tracks].sort((left, right) => (
     left.sortOrder - right.sortOrder
-    || (left.discNumber ?? 0) - (right.discNumber ?? 0)
-    || (left.trackNumber ?? 0) - (right.trackNumber ?? 0)
     || left.assetId.localeCompare(right.assetId)
   ));
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 from pathlib import Path
 
@@ -386,6 +387,62 @@ def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None
             )
             assert resource is not None
             assert resource.adapter_id == "audiobook-directory"
+    finally:
+        engine.dispose()
+
+
+def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            album = root / "album"
+            album.mkdir()
+            (album / "01.mp3").write_bytes(b"audio")
+            (album / "01.cover.png").write_bytes(
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+            )
+            (album / "01.opf").write_text(
+                """<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+                <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                  <dc:title>Sidecar audiobook</dc:title>
+                  <meta name="cover" content="cover-image" />
+                </metadata>
+                <manifest><item id="cover-image" href="01.cover.png" media-type="image/png" /></manifest>
+                </package>""",
+                encoding="utf-8",
+            )
+
+            pipeline = build_readable_resource_pipeline(
+                db,
+                Settings(storage_root=str(tmp_path / "storage")),
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            resource = db.scalar(select(LibraryReadableResource))
+            assert resource is not None
+            assert resource.adapter_id == "audiobook-directory"
+            assets = db.scalars(
+                select(LibraryResourceAsset).where(
+                    LibraryResourceAsset.resource_id == resource.id
+                )
+            ).all()
+            assert len(assets) == 1
+            assert assets[0].sort_key == "01.mp3"
+            assert {
+                node.relative_path for node in db.scalars(select(LibrarySourceNode))
+            } == {"album", "album/01.mp3"}
+            metadata = db.get(LibraryReadableResourceMetadata, resource.id)
+            assert metadata is not None
+            assert metadata.title == "Sidecar audiobook"
+            assert metadata.cover_path is not None
     finally:
         engine.dispose()
 

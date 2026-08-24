@@ -94,6 +94,24 @@ class LibraryImportTask(Base):
         ),
         Index("LibraryImportTask_queued_createdAt_idx", "state", "createdAt"),
         Index("LibraryImportTask_libraryId_kind_idx", "libraryId", "kind", "state"),
+        Index(
+            "LibraryImportTask_scan_queued_key",
+            "libraryId",
+            unique=True,
+            sqlite_where=and_(
+                column("kind") == "SCAN_LIBRARY",
+                column("state") == "QUEUED",
+            ),
+        ),
+        Index(
+            "LibraryImportTask_scan_running_key",
+            "libraryId",
+            unique=True,
+            sqlite_where=and_(
+                column("kind") == "SCAN_LIBRARY",
+                column("state") == "RUNNING",
+            ),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

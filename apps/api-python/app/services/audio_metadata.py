@@ -11,6 +11,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.audio_types import (
     LEGACY_AUDIO_EXTS,
     MAX_AUDIO_BUNDLE_TRACKS,
@@ -84,7 +85,12 @@ def _directory_audio_files(
     path: Path,
     counter: _AudioTrackCounter,
 ) -> list[Path]:
-    return sorted(_direct_audio_files(path, counter), key=_natural_audio_key)
+    return sorted(
+        _direct_audio_files(path, counter),
+        key=lambda audio_path: natural_sort_key(
+            audio_path.relative_to(counter.root).as_posix()
+        ),
+    )
 
 
 def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
@@ -128,7 +134,11 @@ def inspect_audio_bundle(path: str | Path) -> AudioBundleStructure | None:
             "有声书书名目录不能同时包含直属音轨和卷目录，请整理为单卷或多卷结构后重试"
         )
     if child_volumes:
-        child_volumes.sort(key=lambda volume: _natural_audio_key(volume.path))
+        child_volumes.sort(
+            key=lambda volume: natural_sort_key(
+                volume.path.relative_to(root).as_posix()
+            )
+        )
         volumes = tuple(child_volumes)
     elif direct_files:
         volumes = (
@@ -907,13 +917,3 @@ def _clean_text(value: Any) -> str | None:
         value = value[0] if value else None
     cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
     return cleaned or None
-
-
-def _natural_audio_key(path: Path) -> tuple[Any, ...]:
-    parts: list[Any] = []
-    for segment in path.parts[-2:]:
-        parts.extend(
-            int(item) if item.isdigit() else item.casefold()
-            for item in re.split(r"(\d+)", segment)
-        )
-    return tuple(parts)

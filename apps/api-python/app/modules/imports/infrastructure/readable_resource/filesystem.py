@@ -16,6 +16,7 @@ from app.modules.imports.domain.directory_probe import (
     ProbeTerminationReason,
     decide_directory_probe,
 )
+from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
 from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 
 
@@ -111,7 +112,12 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                         continue
                     child_rel = f"{relative_dir}/{name}"
                     if self._matches_ignore(
-                        child_rel, name, ignore_patterns, global_ignore_patterns
+                        child_rel,
+                        name,
+                        kind,
+                        ignore_hidden,
+                        ignore_patterns,
+                        global_ignore_patterns,
                     ):
                         continue
                     if kind is SourceNodePhysicalKind.REGULAR_FILE:
@@ -158,14 +164,16 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         self,
         relative: str,
         name: str,
+        physical_kind: SourceNodePhysicalKind,
+        ignore_hidden: bool,
         ignore_patterns: str | None,
         global_ignore_patterns: str,
     ) -> bool:
-        for block in (global_ignore_patterns, ignore_patterns or ""):
-            for pattern in block.splitlines():
-                pattern = pattern.strip()
-                if not pattern:
-                    continue
-                if pattern == name or pattern == relative:
-                    return True
-        return False
+        return should_ignore_source_entry(
+            relative_path=relative,
+            name=name,
+            is_regular_file=physical_kind is SourceNodePhysicalKind.REGULAR_FILE,
+            ignore_hidden=ignore_hidden,
+            library_patterns=ignore_patterns,
+            global_patterns=global_ignore_patterns,
+        )

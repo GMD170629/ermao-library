@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeAudioBootstrap } from './api';
-import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
+import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, orderedTracks, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
 const payload = {
@@ -49,6 +49,16 @@ test('maps between track and absolute time', () => {
   const tracks = normalizeAudioBootstrap(payload, 'resource-1').tracks;
   assert.equal(absolutePositionForTrack(tracks, 1, 5_000), 15_000);
   assert.deepEqual(targetForAbsolutePosition(tracks, 15_000), { trackIndex: 1, positionMs: 5_000 });
+});
+
+test('orders tracks only by the canonical server sort order', () => {
+  const tracks = normalizeAudioBootstrap(payload, 'resource-1').tracks;
+  const conflicting = [
+    { ...tracks[0], sortOrder: 1, discNumber: 1, trackNumber: 1 },
+    { ...tracks[1], sortOrder: 0, discNumber: 99, trackNumber: 99 }
+  ];
+
+  assert.deepEqual(orderedTracks(conflicting).map((track) => track.assetId), ['asset-2', 'asset-1']);
 });
 
 test('checks known codecs with a codec-qualified MIME type', () => {

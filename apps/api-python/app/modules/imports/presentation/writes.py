@@ -226,7 +226,7 @@ def import_book_files(
             {"library.lastUploadTargetPath": str(upload_directory)}
         ),
     )
-    result = continue_library_import(db, library_id)
+    result = continue_library_import(db, library_id, trigger="UPLOAD")
     logger.info(
         "upload.files_saved",
         extra={

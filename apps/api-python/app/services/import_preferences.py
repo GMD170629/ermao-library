@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,9 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.models.settings import SystemSetting
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
+from app.modules.imports.domain.ignore_rules import (
+    IMPORT_IGNORE_PATTERNS_KEY,
+    matches_configured_ignore_patterns,
+    normalize_ignore_patterns,
+)
 
 IMPORT_ALLOWED_EXTENSIONS_KEY = "import.allowedExtensions"
-IMPORT_IGNORE_PATTERNS_KEY = "import.ignorePatterns"
 IMPORT_PREFERENCE_KEYS = {
     IMPORT_ALLOWED_EXTENSIONS_KEY,
     IMPORT_IGNORE_PATTERNS_KEY,
@@ -76,21 +79,11 @@ def normalize_allowed_extensions(value: Any) -> tuple[str, ...]:
     )
 
 
-def normalize_ignore_patterns(value: Any) -> str:
-    value = _json_value(value)
-    if not isinstance(value, str):
-        return ""
-    patterns = [
-        line.strip() for line in value.replace("\r\n", "\n").split("\n") if line.strip()
-    ]
-    return "\n".join(patterns[:200])
-
-
 def normalize_import_setting_value(key: str, value: Any) -> Any:
     if key == IMPORT_ALLOWED_EXTENSIONS_KEY:
         return list(normalize_allowed_extensions(value))
     if key == IMPORT_IGNORE_PATTERNS_KEY:
-        return normalize_ignore_patterns(value)
+        return normalize_ignore_patterns(_json_value(value))
     return value
 
 
@@ -126,24 +119,13 @@ def prepare_import_preferences(
             values.get(IMPORT_ALLOWED_EXTENSIONS_KEY)
         ),
         ignore_patterns=normalize_ignore_patterns(
-            values.get(IMPORT_IGNORE_PATTERNS_KEY)
+            _json_value(values.get(IMPORT_IGNORE_PATTERNS_KEY))
         ),
     )
 
 
-def parse_ignore_patterns(value: str | None) -> list[str]:
-    return [line.strip() for line in (value or "").splitlines() if line.strip()]
-
-
 def matches_ignore_patterns(path: str | Path, patterns: str | None) -> bool:
-    candidate = Path(path)
-    normalized_path = candidate.as_posix()
-    return any(
-        fnmatch.fnmatch(candidate.name, pattern)
-        or fnmatch.fnmatch(normalized_path, pattern)
-        or ("*" not in pattern and "?" not in pattern and pattern in candidate.name)
-        for pattern in parse_ignore_patterns(patterns)
-    )
+    return matches_configured_ignore_patterns(path, patterns)
 
 
 def extension_is_allowed(path: str | Path, preferences: ImportPreferences) -> bool:

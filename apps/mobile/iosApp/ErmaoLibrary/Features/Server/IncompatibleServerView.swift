@@ -1,9 +1,40 @@
 import SwiftUI
 
+struct ServerCompatibilityCopy: Equatable {
+    let titleKey: String
+    let messageKey: String
+
+    static func resolve(reasonCode: String?) -> ServerCompatibilityCopy {
+        switch reasonCode {
+        case "CLIENT_UPDATE_REQUIRED":
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.appUpdate.title",
+                messageKey: "server.compatibility.appUpdate.message"
+            )
+        case "UNSUPPORTED_PROTOCOL_VERSION", "UNSUPPORTED_READER_SCHEMA",
+             "UNSUPPORTED_LIBRARY_SCHEMA", "COOKIE_SESSION_REQUIRED", "READER_V4_REQUIRED",
+             "BOOK_RESOURCE_ASSET_REQUIRED", "MOBILE_DOWNLOADS_REQUIRED":
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.serverUpdate.title",
+                messageKey: "server.compatibility.serverUpdate.message"
+            )
+        default:
+            ServerCompatibilityCopy(
+                titleKey: "server.compatibility.invalidResponse.title",
+                messageKey: "server.compatibility.invalidResponse.message"
+            )
+        }
+    }
+}
+
 struct IncompatibleServerView: View {
     @ObservedObject var store: SessionStore
     let chooseAnotherServer: () -> Void
     @Environment(\.appTheme) private var theme
+
+    private var copy: ServerCompatibilityCopy {
+        .resolve(reasonCode: store.snapshot.reasonCode)
+    }
 
     var body: some View {
         ScrollView {
@@ -13,7 +44,7 @@ struct IncompatibleServerView: View {
                     .font(.system(.largeTitle, design: .default, weight: .semibold))
                     .foregroundStyle(.yellow)
                     .accessibilityHidden(true)
-                Text("server.incompatible.title")
+                Text(LocalizedStringKey(copy.titleKey))
                     .appTextStyle(.title)
                     .multilineTextAlignment(.center)
                 if let profile = store.snapshot.profile {
@@ -27,7 +58,7 @@ struct IncompatibleServerView: View {
                             .foregroundStyle(theme.textSecondary)
                     }
                 }
-                Text("server.incompatible.message")
+                Text(LocalizedStringKey(copy.messageKey))
                     .appTextStyle(.body)
                     .foregroundStyle(theme.textSecondary)
                     .multilineTextAlignment(.center)

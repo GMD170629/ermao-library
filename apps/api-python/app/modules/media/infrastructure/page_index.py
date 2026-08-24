@@ -209,7 +209,7 @@ def load_read_only_page_index_projection(
                 size_bytes=int(row.observed_size_bytes or 0),
                 sort_order=int(row.sequence_index or 0),
                 mtime_ms=int(row.observed_mtime_ns // 1_000_000),
-                sort_key=row.sort_key,
+                sort_key=row.relative_path,
             )
             for row in source_rows
         ),

@@ -2,6 +2,7 @@
   "sourceLanguage" : "en",
   "strings" : {
     "common.back" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Back" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "返回" } } } },
+    "content.cached.notice" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Showing saved results while offline." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前离线，正在显示已保存的结果。" } } } },
     "downloads.active.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloading" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在下载" } } } },
     "downloads.completed.detail.format" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%1$@ · %2$@" } } } },
     "downloads.completed.section" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded by Book" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按图书管理" } } } },
@@ -713,6 +714,102 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "非当前服务器不会播放、下载或后台同步。"
+          }
+        }
+      }
+    },
+    "server.compatibility.appUpdate.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server requires a newer version of this app. Update the app and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器要求使用更新版本的 App，请更新 App 后重试。"
+          }
+        }
+      }
+    },
+    "server.compatibility.appUpdate.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App Update Required"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要更新 App"
+          }
+        }
+      }
+    },
+    "server.compatibility.invalidResponse.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address did not return a valid Ermao Library compatibility response. Check the server address and service status."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该地址未返回有效的二毛图书兼容性信息，请检查服务器地址和服务状态。"
+          }
+        }
+      }
+    },
+    "server.compatibility.invalidResponse.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid Server Response"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器响应无效"
+          }
+        }
+      }
+    },
+    "server.compatibility.serverUpdate.message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server protocol, data schema, or required mobile capability is not supported. Update the server and try again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器协议、数据结构或移动端必需能力不受支持，请更新服务器后重试。"
+          }
+        }
+      }
+    },
+    "server.compatibility.serverUpdate.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server Update Required"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要更新服务器"
           }
         }
       }

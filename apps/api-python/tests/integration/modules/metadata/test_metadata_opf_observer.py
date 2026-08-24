@@ -321,7 +321,7 @@ def test_sidecar_is_scheduled_only_after_resource_asset_commit(tmp_path: Path) -
     assert queue.succeeded is True
     assert resources.asset_ready == 1
     assert resources.resource_ready is True
-    assert uow.commits == 2
+    assert uow.commits == 3
     assert sidecar.scheduled == ["sidecar-resource"]
 
 
@@ -345,5 +345,5 @@ def test_sidecar_failure_is_recorded_without_rolling_back_committed_asset(
     assert result.outcome == "ok"
     assert queue.succeeded is True
     assert resources.asset_ready == 1
-    assert uow.commits == 2
+    assert uow.commits == 3
     assert "readable_resource.sidecar.failed" in caplog.text

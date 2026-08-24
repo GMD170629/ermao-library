@@ -350,9 +350,11 @@ struct DownloadCenterView: View {
                 ForEach(store.completedGroups) { group in
                     VStack(alignment: .leading, spacing: .space1) {
                         Text(group.title).appTextStyle(.headline)
-                        Text(group.author)
-                            .appTextStyle(.caption)
-                            .foregroundStyle(theme.textSecondary)
+                        if let author = group.author, !author.isEmpty {
+                            Text(author)
+                                .appTextStyle(.caption)
+                                .foregroundStyle(theme.textSecondary)
+                        }
                         ForEach(group.resources) { resource in
                             Divider()
                             VStack(alignment: .leading, spacing: .spaceHalf) {

@@ -21,6 +21,7 @@ from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
     ProbeInterpretationResult,
 )
+from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     file_extension,
@@ -90,6 +91,20 @@ class ScanLibrarySourceTree:
                 raise LookupError(source_node_id)
             config = self._libraries.get_library(node.library_id)
             relative = SourceNodeRelativePath(node.relative_path)
+
+        if self._should_ignore(
+            config,
+            relative.parent_relative_path,
+            relative.name,
+            node.physical_kind,
+        ):
+            return ScanLibrarySourceTreeResult(
+                library_id=config.library_id,
+                nodes_inserted=0,
+                resources_created=0,
+                tasks_enqueued=0,
+                path_key_collisions=0,
+            )
 
         if node.physical_kind is SourceNodePhysicalKind.REGULAR_FILE:
             return self._continue_file(config, node.id, relative)
@@ -193,7 +208,7 @@ class ScanLibrarySourceTree:
                     )
                     break
 
-                if self._should_ignore(config, parent_rel, name):
+                if self._should_ignore(config, parent_rel, name, kind):
                     continue
                 relative_str = name if parent_rel is None else f"{parent_rel}/{name}"
                 parsed = parse_source_node_relative_path(relative_str)
@@ -405,22 +420,17 @@ class ScanLibrarySourceTree:
         config: LibrarySourceTreeConfig,
         parent_rel: str | None,
         name: str,
+        physical_kind: SourceNodePhysicalKind,
     ) -> bool:
-        if config.ignore_hidden and name.startswith(".") and name not in {".", ".."}:
-            return True
         relative = name if parent_rel is None else f"{parent_rel}/{name}"
-        for patterns in (config.global_ignore_patterns, config.ignore_patterns or ""):
-            for pattern in patterns.splitlines():
-                pattern = pattern.strip()
-                if not pattern:
-                    continue
-                if (
-                    pattern == name
-                    or pattern == relative
-                    or relative.endswith("/" + pattern)
-                ):
-                    return True
-        return False
+        return should_ignore_source_entry(
+            relative_path=relative,
+            name=name,
+            is_regular_file=physical_kind is SourceNodePhysicalKind.REGULAR_FILE,
+            ignore_hidden=config.ignore_hidden,
+            library_patterns=config.ignore_patterns,
+            global_patterns=config.global_ignore_patterns,
+        )
 
     def _persist_directory_decision(
         self,
