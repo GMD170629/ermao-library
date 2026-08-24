@@ -6,16 +6,7 @@ description: Guide maintainable architecture and bounded refactors for the Shuku
 # Python Backend Quality Refactor
 
 Improve the touched backend capability toward the repository's target architecture without turning a bounded change into a flag-day rewrite.
-
-## Authoritative Project Rules
-
-Before changing backend architecture or persistence, read:
-
-- the repository `AGENTS.md`;
-- `docs/business-code-layering-and-refactoring.md`;
-- the relevant rules in `.cursor/rules/`, especially `architecture.mdc`, `python-backend.mdc`, `python-orm-migrations.mdc`, and `refactoring.mdc`.
-
-Treat those files as authoritative when they are more specific than this skill. Preserve unrelated user changes in the worktree.
+Preserve unrelated user changes in the worktree.
 
 ## Organize by Business Capability
 

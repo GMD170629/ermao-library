@@ -155,7 +155,7 @@ Required persistence approach:
 - Use `with session.begin():` or an equivalent explicit unit-of-work boundary for writes.
 - Do not catch integrity errors and treat them as normal control flow unless they are translated into a named domain/application conflict with the original exception preserved.
 
-Legacy raw SQL is migration debt, not an accepted style. When touching a raw-SQL behavior, add characterization coverage and migrate the affected query to ORM within the same bounded capability. If that is unsafe within scope, do not add or modify raw SQL without explicit user direction.
+Legacy raw SQL is migration debt, not an accepted style. When touching a raw-SQL behavior, migrate the affected query to ORM within the same bounded capability. If that is unsafe within scope, do not add or modify raw SQL without explicit user direction.
 
 #### Schema migrations
 
@@ -344,7 +344,7 @@ Quality requirements:
 Refactor one named capability at a time:
 
 1. inventory entry points, callers, roles, contracts, state changes, and side effects;
-2. add characterization tests for current public behavior;
+2. identify the current public contracts and invariants;
 3. extract pure rules and explicit types;
 4. replace raw SQL in the touched capability with ORM models and typed queries;
 5. introduce capability-specific ports and adapters;
@@ -356,7 +356,7 @@ Refactor one named capability at a time:
 
 Do not combine architecture migration, product redesign, dependency upgrades, broad formatting, and unrelated cleanup in one change.
 
-Temporary compatibility code must have a named owner, protective tests, and an explicit removal condition. “Clean up later” is not an acceptable exit plan.
+Temporary compatibility code must have a named owner and an explicit removal condition. “Clean up later” is not an acceptable exit plan.
 
 ### Definition of Done
 

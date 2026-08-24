@@ -266,10 +266,12 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (!options.force && pendingLoad?.resourceId === normalizedResourceId) {
       const merged = mergeAudioLoadIntent(pendingLoad, {
         autoplay: options.autoplay,
-        chapterId: options.chapterId ?? undefined
+        chapterId: options.chapterId?.trim() || (options.assetId ? null : undefined),
+        assetId: options.assetId?.trim() || (options.chapterId ? null : undefined)
       });
       pendingLoad.autoplay = merged.autoplay;
       pendingLoad.chapterId = merged.chapterId;
+      pendingLoad.assetId = merged.assetId;
       if (options.summary) {
         pendingLoad.summary = options.summary;
         updateState({ pendingSummary: options.summary });
@@ -291,13 +293,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       const requestedChapter = options.chapterId
         ? bootstrapRef.current.chapters.find((chapter) => chapter.id === options.chapterId)
         : null;
-      if (requestedChapter) {
-        const trackIndex = bootstrapRef.current.tracks.findIndex((track) => track.assetId === requestedChapter.assetId);
-        if (trackIndex >= 0) {
-          void persistProgress(false, true);
-          configureTrack(trackIndex, requestedChapter.startMs, Boolean(options.autoplay) || audioRef.current?.paused === false);
-          return Promise.resolve();
-        }
+      const requestedTrackIndex = requestedChapter
+        ? bootstrapRef.current.tracks.findIndex((track) => track.assetId === requestedChapter.assetId)
+        : options.assetId
+          ? bootstrapRef.current.tracks.findIndex((track) => track.assetId === options.assetId)
+          : -1;
+      if (requestedTrackIndex >= 0) {
+        void persistProgress(false, true);
+        configureTrack(requestedTrackIndex, requestedChapter?.startMs ?? 0, Boolean(options.autoplay) || audioRef.current?.paused === false);
+        return Promise.resolve();
       }
       updateState({
         pendingResourceId: null,
@@ -318,6 +322,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       resourceId: normalizedResourceId,
       autoplay: Boolean(options.autoplay),
       chapterId: options.chapterId?.trim() || null,
+      assetId: options.assetId?.trim() || null,
       summary: options.summary ?? null,
       promise: Promise.resolve()
     };
@@ -376,9 +381,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           : null;
         const requestedTrackIndex = requestedChapter
           ? bootstrap.tracks.findIndex((track) => track.assetId === requestedChapter.assetId)
-          : -1;
-        const resume = requestedChapter && requestedTrackIndex >= 0
-          ? { trackIndex: requestedTrackIndex, positionMs: requestedChapter.startMs }
+          : request.assetId
+            ? bootstrap.tracks.findIndex((track) => track.assetId === request.assetId)
+            : -1;
+        const resume = requestedTrackIndex >= 0
+          ? { trackIndex: requestedTrackIndex, positionMs: requestedChapter?.startMs ?? 0 }
           : normalizeResumeTarget(bootstrap);
         updateState({
           bootstrap,
@@ -407,6 +414,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         failedLoadRef.current = {
           resourceId: request.resourceId,
           chapterId: request.chapterId,
+          assetId: request.assetId,
           summary: request.summary
         };
         updateState(failAudioResourceSwitch(previousState, normalizedResourceId, message, request.summary));
@@ -589,6 +597,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       force: true,
       autoplay: true,
       chapterId: failedLoad?.chapterId ?? undefined,
+      assetId: failedLoad?.assetId ?? undefined,
       summary: failedLoad?.summary ?? stateRef.current.pendingSummary ?? undefined
     });
   }, [loadResource]);

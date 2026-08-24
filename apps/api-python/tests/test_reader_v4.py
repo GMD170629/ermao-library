@@ -847,6 +847,44 @@ def test_reader_v4_rejects_bookmark_kind_that_does_not_match_resource(
     assert db_session.query(ReaderBookmark).count() == 0
 
 
+def test_book_detail_uses_natural_title_order_when_resource_indices_are_missing(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _login(client, db_session)
+    yunnan, _yunnan_asset = _add_resource(
+        db_session,
+        book_id="book-audio-natural-order",
+        resource_id="audio-a-yunnan",
+        asset_id="asset-a-yunnan",
+        source_path="/tmp/audio-yunnan.mp3",
+        title="鬼吹灯I-3-云南虫谷",
+        fmt="MP3",
+        mime_type="audio/mpeg",
+    )
+    jingjue, _jingjue_asset = _add_resource(
+        db_session,
+        book_id="book-audio-natural-order",
+        resource_id="audio-z-jingjue",
+        asset_id="asset-z-jingjue",
+        source_path="/tmp/audio-jingjue.mp3",
+        title="鬼吹灯I-1-精绝古城",
+        fmt="MP3",
+        mime_type="audio/mpeg",
+    )
+
+    response = client.get("/api/books/book-audio-natural-order")
+
+    assert response.status_code == 200
+    detail = response.json()["data"]["book"]
+    assert [resource["id"] for resource in detail["resources"]] == [
+        jingjue.id,
+        yunnan.id,
+    ]
+    assert detail["continueResourceId"] == jingjue.id
+    assert detail["continueResourceTitle"] == "鬼吹灯I-1-精绝古城"
+
+
 def test_resource_reading_status_updates_book_detail_and_isolated_progress(
     client: TestClient,
     db_session: Session,

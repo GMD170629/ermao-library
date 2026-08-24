@@ -11,6 +11,7 @@ import { Select } from '../../components/ui/select';
 import { useAppSession } from '../../components/layout/app-session-context';
 import type { ReaderType, ReadableResourceView, BookView } from '../../types/book';
 import { I18nText, useI18n } from '@/i18n/provider';
+import { useAudioPlayback } from '../audio/public';
 import {
   deleteResourceSource,
   continueSourceNode,
@@ -164,6 +165,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const feedback = useToast();
   const { t } = useI18n();
   const session = useAppSession();
+  const audioPlayback = useAudioPlayback();
   const canManage = session?.authorization?.canManageSystem === true;
   const [book, setBook] = useState<BookView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -294,6 +296,33 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const activeProgress = displayedProgress;
   const activeStatus = activeProgress >= 100 ? 'FINISHED' : activeProgress > 0 ? 'READING' : 'UNREAD';
   const activeResourceActions = activeResource ? readableResourceActionIds({ canManage, kindleSendAvailable: activeResource.kindleSendAvailable }) : [];
+
+  const playAudioResource = (resource: ReadableResourceView, assetId?: string, chapterTitle?: string) => {
+    if (!book) return;
+    void audioPlayback.loadResource(resource.id, {
+      autoplay: true,
+      assetId,
+      summary: {
+        resourceId: resource.id,
+        bookId: book.id,
+        title: book.title,
+        author: book.author || null,
+        coverUrl: resource.coverUrl || book.coverUrl || null,
+        resourceTitle: resource.title || null,
+        narrator: resource.narrator,
+        chapterTitle: chapterTitle || null
+      }
+    });
+  };
+
+  const consumeActiveResource = () => {
+    if (!activeResource?.readable) return;
+    if (activeResource.readerType === 'audio') {
+      playAudioResource(activeResource);
+      return;
+    }
+    router.push(readerHref(activeResource));
+  };
 
   useEffect(() => {
     if (!book || requestedResourceId || !singleReadableResource) return;
@@ -451,7 +480,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         </div>
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end lg:col-start-2 xl:col-start-3 xl:flex-col xl:justify-end">
-          {activeCopy ? <Button disabled={!activeReaderHref} icon={activeResource?.readerType === 'audio' ? Headphones : activeResource?.readerType === 'comic' ? Images : BookOpen} onClick={() => activeReaderHref && router.push(activeReaderHref)} className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420]">{t(activeProgress > 0 ? activeCopy.resume : activeCopy.start)}</Button> : null}
+          {activeCopy ? <Button disabled={!activeReaderHref} loading={activeResource?.readerType === 'audio' && audioPlayback.pendingResourceId === activeResource.id && !audioPlayback.loadError} loadingText="正在准备有声书…" icon={activeResource?.readerType === 'audio' ? Headphones : activeResource?.readerType === 'comic' ? Images : BookOpen} onClick={consumeActiveResource} className="!h-12 !min-h-12 w-full !rounded-xl !bg-[#ff4f26] !px-8 !text-base !text-white hover:!bg-[#e84420]">{t(activeProgress > 0 ? activeCopy.resume : activeCopy.start)}</Button> : null}
           <div className="flex w-full gap-2">
             {activeCopy && activeResource ? <Select value={activeStatus} options={[{ value: 'READING', label: '在读', disabled: activeStatus !== 'READING' }, { value: 'UNREAD', label: '未读' }, { value: 'FINISHED', label: '已读' }]} onChange={(status) => void changeReadingStatus(status)} ariaLabel={t(activeCopy.status)} disabled={readingStatusBusy} className="min-w-0 flex-1" /> : null}
             {activeResource && activeResourceActions.length ? <button type="button" onClick={(event) => openResourceMenu(activeResource, event.currentTarget)} onContextMenu={(event) => { event.preventDefault(); openResourceMenu(activeResource, event.currentTarget); }} className="ml-auto flex h-11 w-12 shrink-0 items-center justify-center rounded-xl border border-[#ead8cf] bg-white/80 text-stone-600 transition hover:bg-white hover:text-stone-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200" aria-label={t('管理当前可读资源 {value0}', { value0: activeResource.title })} aria-haspopup="menu"><Ellipsis size={20} /></button> : null}
@@ -470,6 +499,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       requestedPage={requestedResourcePage}
       onBack={singleReadableResource ? null : () => updateResourceLocation(null)}
       onPageChange={(page) => updateResourceLocation(requestedResource.id, page)}
+      onPlayAudio={(assetId, chapterTitle) => playAudioResource(requestedResource, assetId, chapterTitle)}
     /> : <BookContentBrowser
       book={book}
       contents={contents}

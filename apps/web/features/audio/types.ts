@@ -109,6 +109,7 @@ export type LoadAudioResourceOptions = {
   autoplay?: boolean;
   force?: boolean;
   chapterId?: string;
+  assetId?: string;
   summary?: AudioLaunchSummary;
 };
 

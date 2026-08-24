@@ -3,6 +3,7 @@ import type { AudioBootstrap, AudioChapter, AudioLaunchSummary, AudioLocation, A
 export type AudioLoadIntent = {
   autoplay: boolean;
   chapterId: string | null;
+  assetId: string | null;
 };
 
 const browserCodecIdentifiers: Readonly<Record<string, string>> = {
@@ -18,7 +19,8 @@ const browserCodecIdentifiers: Readonly<Record<string, string>> = {
 export function mergeAudioLoadIntent(current: AudioLoadIntent, next: Partial<AudioLoadIntent>): AudioLoadIntent {
   return {
     autoplay: current.autoplay || Boolean(next.autoplay),
-    chapterId: next.chapterId ?? current.chapterId
+    chapterId: next.chapterId === undefined ? current.chapterId : next.chapterId,
+    assetId: next.assetId === undefined ? current.assetId : next.assetId
   };
 }
 

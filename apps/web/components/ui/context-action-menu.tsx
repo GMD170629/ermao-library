@@ -124,21 +124,21 @@ export function ContextActionMenu<Action extends string>({
               aria-expanded={item.submenu ? submenuOpen : undefined}
               onClick={() => item.submenu ? setOpenSubmenuAction(item.action) : onSelect(item.action)}
               className={cn(
-                'group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition disabled:cursor-not-allowed disabled:opacity-40',
+                'group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition disabled:cursor-not-allowed disabled:opacity-40',
                 item.destructive ? 'hover:bg-red-50 focus-visible:bg-red-50' : 'hover:bg-[#FFF2ED] focus-visible:bg-[#FFF2ED]'
               )}
             >
               <span className={cn(
-                'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition group-hover:bg-white',
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition group-hover:bg-white',
                 item.destructive ? 'bg-red-50 text-red-600' : 'bg-black/[0.035] text-[#746D67] group-hover:text-[#EF4D2F]'
               )}>
                 <Icon size={16} />
               </span>
-              <span className="min-w-0">
-                <span className={cn('block text-sm font-medium', item.destructive ? 'text-red-700' : 'text-[#302C29]')}>{item.label}</span>
-                {item.description ? <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{item.description}</span> : null}
+              <span className="min-w-0 flex-1">
+                <span className={cn('block text-sm font-medium leading-5', item.destructive ? 'text-red-700' : 'text-[#302C29]')}>{item.label}</span>
+                {item.description ? <span className="block truncate text-[11px] leading-4 text-[#8B847D]">{item.description}</span> : null}
               </span>
-              {item.submenu ? <ChevronRight size={15} className="ml-auto mt-2 shrink-0 text-[#948D86]" /> : null}
+              {item.submenu ? <ChevronRight size={15} className="ml-auto shrink-0 text-[#948D86]" /> : null}
             </button>
             {submenuOpen ? <div
               role="menu"
@@ -156,10 +156,10 @@ export function ContextActionMenu<Action extends string>({
                   role="menuitem"
                   disabled={subitem.disabled}
                   onClick={() => onSelect(subitem.action)}
-                  className="group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition hover:bg-[#FFF2ED] focus-visible:bg-[#FFF2ED] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left outline-none transition hover:bg-[#FFF2ED] focus-visible:bg-[#FFF2ED] disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-black/[0.035] text-[#746D67] transition group-hover:bg-white group-hover:text-[#EF4D2F]"><SubIcon size={16} /></span>
-                  <span className="min-w-0"><span className="block text-sm font-medium text-[#302C29]">{subitem.label}</span>{subitem.description ? <span className="mt-0.5 block truncate text-[11px] text-[#8B847D]">{subitem.description}</span> : null}</span>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-black/[0.035] text-[#746D67] transition group-hover:bg-white group-hover:text-[#EF4D2F]"><SubIcon size={16} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm font-medium leading-5 text-[#302C29]">{subitem.label}</span>{subitem.description ? <span className="block truncate text-[11px] leading-4 text-[#8B847D]">{subitem.description}</span> : null}</span>
                 </button>;
               })}
             </div> : null}

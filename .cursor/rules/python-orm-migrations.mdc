@@ -25,7 +25,7 @@ alwaysApply: false
 - 分页必须有确定排序与文档化最大页大小
 - Repository 可 `flush()`，不得隐藏 `commit()`/`rollback()`；用例拥有事务
 - 写操作用 `with session.begin():` 或等价显式 UoW
-- 触及 raw SQL 行为时：先补表征测试，再在同一能力内迁到 ORM；不安全则不擅自增改 raw SQL
+- 触及 raw SQL 行为时：在同一能力内迁到 ORM；不安全则不擅自增改 raw SQL
 
 ## Schema 迁移
 

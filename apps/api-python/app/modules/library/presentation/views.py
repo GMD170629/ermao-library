@@ -65,7 +65,7 @@ def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
 def _resource_rows(
     db: Session, book_id: str
 ) -> list[tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None]]:
-    return [
+    rows = [
         (row[0], row[1])
         for row in db.execute(
             select(LibraryReadableResource, LibraryReadableResourceMetadata)
@@ -85,6 +85,21 @@ def _resource_rows(
             )
         ).all()
     ]
+    return sorted(rows, key=_resource_order_key)
+
+
+def _resource_order_key(
+    row: tuple[LibraryReadableResource, LibraryReadableResourceMetadata | None],
+) -> tuple[int, float, tuple[tuple[int, int | str], ...], str]:
+    resource, metadata = row
+    resource_index = metadata.resource_index if metadata else None
+    title = metadata.title.strip() if metadata and metadata.title else resource.id
+    return (
+        1 if resource_index is None else 0,
+        float(resource_index or 0),
+        natural_sort_key(title),
+        resource.id,
+    )
 
 
 def _asset_rows(
@@ -263,7 +278,9 @@ def book_view(
     candidates = unfinished or resources
     with_history = [item for item in candidates if item["lastReadAt"] is not None]
     selected = (
-        max(with_history, key=lambda item: (item["lastReadAt"], -int(item["sortOrder"])))
+        max(
+            with_history, key=lambda item: (item["lastReadAt"], -int(item["sortOrder"]))
+        )
         if with_history
         else min(candidates, key=lambda item: (int(item["sortOrder"]), str(item["id"])))
         if candidates

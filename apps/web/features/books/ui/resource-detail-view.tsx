@@ -20,6 +20,7 @@ type Props = Readonly<{
   requestedPage: number;
   onBack: (() => void) | null;
   onPageChange: (page: number) => void;
+  onPlayAudio: (assetId?: string, chapterTitle?: string) => void;
 }>;
 
 function PreviewTile({ resource, unit }: { resource: ReadableResourceView; unit: ResourcePageDetailUnit }) {
@@ -70,7 +71,7 @@ function PreviewTile({ resource, unit }: { resource: ReadableResourceView; unit:
   </button>;
 }
 
-export function ResourceDetailView({ resource, detail, loading, error, requestedPage, onBack, onPageChange }: Props) {
+export function ResourceDetailView({ resource, detail, loading, error, requestedPage, onBack, onPageChange, onPlayAudio }: Props) {
   const router = useRouter();
   const { t } = useI18n();
   const page = detail?.page.page ?? requestedPage;
@@ -89,6 +90,7 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
   const kind = resource.readerType === 'reflowable' ? 'chapter' : resource.readerType === 'audio' ? 'track' : 'page';
   const heading = kind === 'chapter' ? t('章节') : kind === 'track' ? t('音轨') : t('页面');
   const countLabel = kind === 'chapter' ? t('共 {value0} 章', { value0: detail?.page.total ?? 0 }) : kind === 'track' ? t('共 {value0} 条音轨', { value0: detail?.page.total ?? 0 }) : t('共 {value0} 页', { value0: detail?.page.total ?? 0 });
+  const openResource = () => resource.readerType === 'audio' ? onPlayAudio() : router.push(readerHref);
 
   return <section className="mt-6 border-t border-stone-200 pt-7" aria-busy={loading || undefined}>
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -97,12 +99,12 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
         <h2 className={cn('text-xl font-semibold text-stone-950', onBack && 'mt-3')}>{heading}</h2>
         <p className="mt-1 text-sm text-stone-500">{countLabel}</p>
       </div>
-      <Button variant="secondary" icon={resource.readerType === 'audio' ? Headphones : undefined} onClick={() => router.push(readerHref)}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button>
+      <Button variant="secondary" icon={resource.readerType === 'audio' ? Headphones : undefined} onClick={openResource}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button>
     </div>
 
     {loading && !detail ? <div className="mt-6 flex min-h-40 items-center justify-center text-sm text-stone-500" role="status"><LoaderCircle size={19} className="mr-2 animate-spin text-[#ff4f2a] motion-reduce:animate-none" />{t('正在加载资源详情…')}</div> : null}
-    {!loading && error ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700"><span className="inline-flex items-center gap-2"><AlertTriangle size={18} />{error}</span><Button variant="secondary" onClick={() => router.push(readerHref)}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button></div> : null}
-    {!loading && !error && detail?.units.length === 0 ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-dashed border-stone-300 px-5 py-8 text-sm text-stone-600"><span>{t(kind === 'chapter' ? '暂无可定位章节' : kind === 'track' ? '暂无可播放音轨' : '当前资源没有可预览页面')}</span><Button variant="secondary" onClick={() => router.push(readerHref)}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button></div> : null}
+    {!loading && error ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700"><span className="inline-flex items-center gap-2"><AlertTriangle size={18} />{error}</span><Button variant="secondary" onClick={openResource}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button></div> : null}
+    {!loading && !error && detail?.units.length === 0 ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-dashed border-stone-300 px-5 py-8 text-sm text-stone-600"><span>{t(kind === 'chapter' ? '暂无可定位章节' : kind === 'track' ? '暂无可播放音轨' : '当前资源没有可预览页面')}</span><Button variant="secondary" onClick={openResource}>{t(resource.readerType === 'audio' ? '打开播放器' : '打开阅读器')}</Button></div> : null}
 
     {chapters.length > 0 ? <div className={cn('mt-6 divide-y divide-stone-100 border-y border-stone-100', loading && 'opacity-60')}>
       {chapters.map((unit, index) => {
@@ -122,9 +124,9 @@ export function ResourceDetailView({ resource, detail, loading, error, requested
 
     {tracks.length > 0 ? <div className={cn('mt-6 divide-y divide-stone-100 overflow-hidden rounded-2xl border border-stone-200 bg-white', loading && 'opacity-60')}>
       {tracks.map((unit, index) => {
-        const href = resourceDetailItemHref(resource, unit);
+        const playable = resource.readable && Boolean(unit.assetId);
         const sequence = [unit.discNumber ? t('碟 {value0}', { value0: unit.discNumber }) : '', unit.trackNumber ? t('音轨 {value0}', { value0: unit.trackNumber }) : ''].filter(Boolean).join(' · ');
-        return <button key={unit.id} type="button" disabled={!href} onClick={() => href && router.push(href)} className="grid min-h-16 w-full grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 px-4 text-left transition hover:bg-[#fffaf7] disabled:cursor-not-allowed disabled:opacity-50">
+        return <button key={unit.id} type="button" disabled={!playable} onClick={() => unit.assetId && onPlayAudio(unit.assetId, unit.title)} className="grid min-h-16 w-full grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 px-4 text-left transition hover:bg-[#fffaf7] disabled:cursor-not-allowed disabled:opacity-50">
           <span className="tabular-nums text-stone-400">{(page - 1) * (detail?.page.pageSize ?? 50) + index + 1}</span>
           <span className="min-w-0"><span data-i18n-skip className="block truncate text-sm font-medium text-stone-900">{unit.title}</span>{sequence ? <span className="mt-1 block text-xs text-stone-500">{sequence}</span> : null}</span>
           <span className="text-sm tabular-nums text-stone-500">{formatDuration(unit.durationMs)}</span>

@@ -27,7 +27,7 @@ alwaysApply: true
 
 ## 测试
 
-域单测无框架；应用测用 fake ports；仓储集成用真 SQLite+ORM；API 契约测 path/status/envelope/code/角色；缺陷修复先写失败回归，并按功能面审计相邻交互变体。禁止新增 skip/flaky/静默削弱测试。
+域单测无框架；应用测用 fake ports；仓储集成用真 SQLite+ORM；API 契约测 path/status/envelope/code/角色；缺陷修复按功能面审计相邻交互变体。禁止新增 skip/flaky/静默削弱测试。
 
 ## 门禁（目标）
 

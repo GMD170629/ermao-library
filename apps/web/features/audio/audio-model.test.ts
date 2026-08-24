@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeAudioBootstrap } from './api';
-import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, orderedTracks, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
+import { absolutePositionForTrack, beginAudioResourceSwitch, failAudioResourceSwitch, mergeAudioLoadIntent, orderedTracks, targetForAbsolutePosition, unsupportedAudioMimeType } from './audio-model';
 import type { AudioPlaybackState } from './types';
 
 const payload = {
@@ -62,6 +62,16 @@ test('orders tracks only by the canonical server sort order', () => {
   ];
 
   assert.deepEqual(orderedTracks(conflicting).map((track) => track.assetId), ['asset-2', 'asset-1']);
+});
+
+test('a later track click replaces a pending chapter target and preserves autoplay', () => {
+  assert.deepEqual(
+    mergeAudioLoadIntent(
+      { autoplay: true, chapterId: 'chapter-1', assetId: null },
+      { chapterId: null, assetId: 'asset-2' }
+    ),
+    { autoplay: true, chapterId: null, assetId: 'asset-2' }
+  );
 });
 
 test('checks known codecs with a codec-qualified MIME type', () => {

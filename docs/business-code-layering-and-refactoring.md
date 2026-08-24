@@ -416,7 +416,7 @@ packages/
 每次只迁移一个可命名业务能力，按以下顺序执行：
 
 1. **定义能力面**：列出入口、调用者、授权角色、状态变化、文件/队列副作用和双语文案。
-2. **固定契约**：补充 happy path、validation、authorization、not-found、conflict、failure 和恢复测试。
+2. **固定契约**：记录既有 path、status、envelope、authorization、failure 和恢复语义。
 3. **提取纯规则**：先移动 normalization、mapping、policy、state transition，不改 I/O。
 4. **建立端口**：把 SQL、文件或第三方调用收敛到能力内 adapter。
 5. **建立用例**：让应用层拥有编排和事务；HTTP 与 Worker 共同调用用例。
@@ -564,7 +564,7 @@ pnpm smoke:python-sample
 
 - 被违反的规则；
 - 当前阻塞原因；
-- 风险与保护性测试；
+- 风险与约束措施；
 - 责任模块；
 - 清理条件，而不是模糊的“后续优化”。
 

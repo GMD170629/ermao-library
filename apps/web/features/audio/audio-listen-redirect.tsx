@@ -22,9 +22,10 @@ export function AudioListenRedirect({ resourceId }: { resourceId: string }) {
   useEffect(() => {
     void loadResource(resourceId, {
       autoplay: false,
-      chapterId: chapterId ?? undefined
+      chapterId: chapterId ?? undefined,
+      assetId: assetId ?? undefined
     });
-  }, [chapterId, loadResource, resourceId]);
+  }, [assetId, chapterId, loadResource, resourceId]);
 
   useEffect(() => {
     const bootstrap = playerBootstrap?.resource.id === resourceId ? playerBootstrap : null;
