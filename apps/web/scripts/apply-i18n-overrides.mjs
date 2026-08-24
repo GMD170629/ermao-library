@@ -218,6 +218,8 @@ const exactOverrides = {
   '取消下载任务：{value0}': 'Cancelled download task: {value0}',
   '重新排队导入任务：{value0}': 'Requeued import task: {value0}',
   '删除书库“{value0}”？不会删除原始读物文件。': 'Delete library “{value0}”? The original book files will not be deleted.',
+  '删除书库失败': 'Failed to delete library',
+  '书库已删除': 'Library deleted',
   '《{value0}》已由二毛图书发送至 Kindle。': '“{value0}” has been sent to Kindle by Ermao Books.',
   '{value0}{value1} · 第 {value2} 页': '{value0}{value1} · Page {value2}',
   '{value0} · 第 {value1} 部': '{value0} · Part {value1}',

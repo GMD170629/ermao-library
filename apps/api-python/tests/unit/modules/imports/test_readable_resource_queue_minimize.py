@@ -78,6 +78,7 @@ class FakeQueue:
         self._base = task
         self._state = task.state
         self._error_summary = task.error_summary
+        self.cancelled = False
         self.failed: list[tuple[str, str]] = []
 
     def _snapshot(self) -> LibraryImportTaskRecord:
@@ -96,9 +97,12 @@ class FakeQueue:
         return self._snapshot()
 
     def get_task(self, task_id: str) -> LibraryImportTaskRecord | None:
-        if task_id != self._base.id:
+        if task_id != self._base.id or self.cancelled:
             return None
         return self._snapshot()
+
+    def cancel(self) -> None:
+        self.cancelled = True
 
     def mark_running(self, task_id: str, *, started_at: datetime) -> None:
         del started_at
@@ -170,6 +174,28 @@ class ParseFailAdapters:
             error_code="PARSE_FAILED",
             error_summary="PARSE_FAILED",
         )
+
+
+class CancelDuringParseAdapters(ParseFailAdapters):
+    def __init__(self, queue: FakeQueue) -> None:
+        self._queue = queue
+
+    def parse_file(
+        self,
+        *,
+        absolute_path: Path,
+        adapter: ResourceAdapterSpec,
+        role: AssetRole,
+        **kwargs: object,
+    ) -> FileParseResult:
+        result = super().parse_file(
+            absolute_path=absolute_path,
+            adapter=adapter,
+            role=role,
+            **kwargs,
+        )
+        self._queue.cancel()
+        return result
 
 
 class FakeLibraries:
@@ -319,6 +345,22 @@ class UnusedScan:
         raise AssertionError(source_node_id)
 
 
+class CancelDuringScan:
+    def __init__(self, queue: FakeQueue) -> None:
+        self._queue = queue
+
+    def execute_library(self, library_id: str, *, task_id: str | None = None) -> None:
+        assert library_id == "lib-1"
+        assert task_id == "task-1"
+        self._queue.cancel()
+
+    def execute_source(
+        self, source_node_id: str, *, task_id: str | None = None
+    ) -> None:
+        del source_node_id, task_id
+        raise AssertionError("unexpected source scan")
+
+
 def _import_task() -> LibraryImportTaskRecord:
     return LibraryImportTaskRecord(
         id="task-1",
@@ -328,6 +370,19 @@ def _import_task() -> LibraryImportTaskRecord:
         resource_id="res-1",
         source_node_id="node-1",
         role=AssetRole.PRIMARY,
+        error_summary=None,
+    )
+
+
+def _scan_task() -> LibraryImportTaskRecord:
+    return LibraryImportTaskRecord(
+        id="task-1",
+        kind="SCAN_LIBRARY",
+        library_id="lib-1",
+        state="QUEUED",
+        resource_id=None,
+        source_node_id=None,
+        role=None,
         error_summary=None,
     )
 
@@ -416,3 +471,25 @@ def test_modeled_parse_failure_is_not_rewritten_as_worker_error() -> None:
     worker = _worker(adapters=ParseFailAdapters(), queue=queue)
     assert worker.process_once() == "failed"
     assert queue.failed == [("task-1", "PARSE_FAILED")]
+
+
+def test_import_task_cancelled_during_parse_does_not_commit_failure() -> None:
+    queue = FakeQueue(_import_task())
+    worker = _worker(adapters=CancelDuringParseAdapters(queue), queue=queue)
+
+    assert worker.process_once() == "cancelled"
+    assert queue.failed == []
+
+
+def test_scan_task_deleted_while_running_is_not_acknowledged() -> None:
+    queue = FakeQueue(_scan_task())
+    worker = ReadableResourceWorkerProcessor(
+        queue=queue,
+        scan=cast(ScanLibrarySourceTree, CancelDuringScan(queue)),
+        process_import=_process(adapters=ParseFailAdapters(), queue=queue),
+        uow=RecordingUoW(),
+        clock=FixedClock(),
+    )
+
+    assert worker.process_once() == "cancelled"
+    assert queue.failed == []

@@ -17,6 +17,7 @@ import {
   organizationModeLabel,
   type OrganizationMode
 } from './model/organization-mode';
+import { deleteLibrary } from './api/libraries-client';
 import { DirectoryPathPicker as SharedDirectoryPathPicker } from './ui/directory-path-picker';
 
 type Library = {
@@ -173,11 +174,18 @@ export function SettingsPage({ embedded = false, initialSection }: { embedded?: 
     });
     if (!confirmed) return;
     setPathBusy(`delete:${path.id}`);
-    await fetch(`/api/libraries/${path.id}`, { method: 'DELETE' });
-    await loadPaths();
-    notifyLibrarySourcesChanged();
-    toast.success('书库已删除');
-    setPathBusy('');
+    try {
+      await deleteLibrary(path.id);
+      await loadPaths();
+      notifyLibrarySourcesChanged();
+      toast.success('书库已删除');
+    } catch (reason: unknown) {
+      const message = reason instanceof Error ? reason.message : '删除书库失败';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setPathBusy('');
+    }
   }
 
   async function saveFolderSettings(path: Library, updates: Pick<Library, 'name' | 'rootPath' | 'ignorePatterns' | 'ignoreHidden' | 'minFileSizeBytes' | 'organizationMode'>) {

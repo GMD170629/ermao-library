@@ -12,6 +12,9 @@ from app.modules.imports.application.library_commands import (
     PreparedLibraryDelete,
     PreparedLibraryUpdate,
 )
+from app.modules.imports.infrastructure.readable_resource_import_schema import (
+    LibraryImportTask,
+)
 from app.services.system_events import write_prepared_system_events
 
 
@@ -30,6 +33,15 @@ class SqlAlchemyLibraryWriteStore:
             .values(**prepared.values)
         )
         write_prepared_system_events(self._db, (prepared.event,))
+
+    def cancel_import_tasks(self, library_id: str) -> int:
+        result = self._db.execute(
+            delete(LibraryImportTask).where(
+                LibraryImportTask.library_id == library_id
+            )
+        )
+        self._db.flush()
+        return int(getattr(result, "rowcount", 0) or 0)
 
     def delete(self, prepared: PreparedLibraryDelete) -> bool:
         result = self._db.execute(

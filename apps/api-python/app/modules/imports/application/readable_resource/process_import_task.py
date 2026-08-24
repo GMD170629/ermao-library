@@ -8,11 +8,13 @@ from app.contracts.local_metadata import DEFAULT_LOCAL_METADATA_PRIORITY
 from app.modules.imports.application.readable_resource.ports import (
     BookResourceRepositoryPort,
     ClockPort,
+    FileParseResult,
     LibraryConfigPort,
     LibraryImportTaskQueuePort,
     LocalCoverPublicationPort,
     LocalMetadataPriorityPort,
     PipelineLogPort,
+    PreparedLocalCover,
     ResourceAdapterExecutorPort,
     SidecarWritebackPort,
     SourceNodeRepositoryPort,
@@ -23,7 +25,7 @@ from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterSpec,
 )
-from app.modules.library.domain.readable_resource_states import AssetImportState
+from app.modules.library.domain.readable_resource_states import AssetImportState, AssetRole
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,67 +141,33 @@ class ProcessReadableResourceImportTask:
                 prepared_cover = None
 
         import_succeeded = False
+        outcome = "cancelled"
         with self._uow.transaction():
-            if parsed.ok and parsed.asset is not None:
-                asset_id = self._books_resources.upsert_asset(
-                    library_id=library_id,
-                    resource_id=resource_id,
-                    source_node_id=source_node_id,
-                    role=parsed.asset.role,
-                    import_state=AssetImportState.READY,
-                    sequence_index=parsed.asset.sequence_index,
-                    sort_key=node.relative_path,
-                    failure_reason=None,
-                )
-                title = parsed.resource_title or parsed.asset.title
-                if parsed.local_metadata is not None:
-                    self._books_resources.apply_local_metadata(
-                        resource_id=resource_id,
-                        metadata=parsed.local_metadata.metadata,
-                        cover_path=(
-                            prepared_cover.stored_path
-                            if prepared_cover is not None
-                            else None
-                        ),
-                    )
-                if parsed.asset.navigation_units:
-                    self._books_resources.replace_navigation_units(
-                        resource_id=resource_id,
-                        asset_id=asset_id,
-                        units=parsed.asset.navigation_units,
-                    )
-                if self._books_resources.count_ready_assets(resource_id) >= 1:
-                    self._books_resources.mark_resource_ready(
-                        resource_id=resource_id,
-                        title=title,
-                    )
-                    if parsed.asset.technical.page_count is not None:
-                        self._books_resources.set_resource_page_count(
-                            resource_id,
-                            parsed.asset.technical.page_count,
-                        )
-                import_succeeded = True
-                outcome = "ok"
-            else:
-                summary = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
-                self._books_resources.upsert_asset(
+            current_task = self._queue.get_task(task_id)
+            task_was_cancelled = current_task is None
+            if not task_was_cancelled:
+                import_succeeded, outcome = self._persist_parse_result(
+                    task_id=task_id,
+                    parsed=parsed,
+                    prepared_cover=prepared_cover,
                     library_id=library_id,
                     resource_id=resource_id,
                     source_node_id=source_node_id,
                     role=role,
-                    import_state=AssetImportState.FAILED,
-                    sequence_index=None,
-                    sort_key=None,
-                    failure_reason=summary,
+                    sort_key=node.relative_path,
                 )
-                if self._books_resources.count_ready_assets(resource_id) < 1:
-                    self._books_resources.mark_resource_failed(resource_id)
-                self._queue.mark_failed(
-                    task_id,
-                    error_summary=summary,
-                    finished_at=self._clock.now(),
-                )
-                outcome = "failed"
+        if task_was_cancelled:
+            if prepared_cover is not None and self._covers is not None:
+                self._covers.discard(prepared_cover)
+            self._log.emit(
+                "readable_resource.task.cancelled",
+                library_id=library_id,
+                resource_id=resource_id,
+                task_id=task_id,
+                stage="import",
+                outcome="cancelled",
+            )
+            return ProcessTaskResult(task_id=task_id, outcome="cancelled")
 
         if (
             not import_succeeded
@@ -248,6 +216,78 @@ class ProcessReadableResourceImportTask:
             outcome=outcome,
         )
         return ProcessTaskResult(task_id=task_id, outcome=outcome)
+
+    def _persist_parse_result(
+        self,
+        *,
+        task_id: str,
+        parsed: FileParseResult,
+        prepared_cover: PreparedLocalCover | None,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        role: AssetRole,
+        sort_key: str,
+    ) -> tuple[bool, str]:
+        if parsed.ok and parsed.asset is not None:
+            asset_id = self._books_resources.upsert_asset(
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                role=parsed.asset.role,
+                import_state=AssetImportState.READY,
+                sequence_index=parsed.asset.sequence_index,
+                sort_key=sort_key,
+                failure_reason=None,
+            )
+            title = parsed.resource_title or parsed.asset.title
+            if parsed.local_metadata is not None:
+                self._books_resources.apply_local_metadata(
+                    resource_id=resource_id,
+                    metadata=parsed.local_metadata.metadata,
+                    cover_path=(
+                        prepared_cover.stored_path
+                        if prepared_cover is not None
+                        else None
+                    ),
+                )
+            if parsed.asset.navigation_units:
+                self._books_resources.replace_navigation_units(
+                    resource_id=resource_id,
+                    asset_id=asset_id,
+                    units=parsed.asset.navigation_units,
+                )
+            if self._books_resources.count_ready_assets(resource_id) >= 1:
+                self._books_resources.mark_resource_ready(
+                    resource_id=resource_id,
+                    title=title,
+                )
+                if parsed.asset.technical.page_count is not None:
+                    self._books_resources.set_resource_page_count(
+                        resource_id,
+                        parsed.asset.technical.page_count,
+                    )
+            return (True, "ok")
+
+        summary = parsed.error_summary or parsed.error_code or "PARSE_FAILED"
+        self._books_resources.upsert_asset(
+            library_id=library_id,
+            resource_id=resource_id,
+            source_node_id=source_node_id,
+            role=role,
+            import_state=AssetImportState.FAILED,
+            sequence_index=None,
+            sort_key=None,
+            failure_reason=summary,
+        )
+        if self._books_resources.count_ready_assets(resource_id) < 1:
+            self._books_resources.mark_resource_failed(resource_id)
+        self._queue.mark_failed(
+            task_id,
+            error_summary=summary,
+            finished_at=self._clock.now(),
+        )
+        return (False, "failed")
 
     def _resolve_adapter(self, adapter_id: str) -> ResourceAdapterSpec | None:
         return next(

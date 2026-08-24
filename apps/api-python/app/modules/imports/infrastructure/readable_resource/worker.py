@@ -61,15 +61,19 @@ class ReadableResourceWorkerProcessor:
 
         try:
             if kind == "SCAN_LIBRARY":
-                self._scan.execute_library(library_id)
+                self._scan.execute_library(library_id, task_id=task_id)
                 with self._uow.transaction():
+                    if self._queue.get_task(task_id) is None:
+                        return "cancelled"
                     self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 return "scan"
             if kind == "CONTINUE_SOURCE":
                 if source_node_id is None:
                     raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
-                self._scan.execute_source(source_node_id)
+                self._scan.execute_source(source_node_id, task_id=task_id)
                 with self._uow.transaction():
+                    if self._queue.get_task(task_id) is None:
+                        return "cancelled"
                     self._queue.mark_succeeded(task_id, finished_at=self._clock.now())
                 return "continue_source"
             if kind == "IMPORT_ASSET":

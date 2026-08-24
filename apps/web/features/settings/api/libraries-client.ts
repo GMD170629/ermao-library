@@ -6,6 +6,13 @@ export type DirectoryNode = {
   children: Array<{ name: string; path: string; readable: boolean }>;
 };
 
+export class LibraryApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LibraryApiError';
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -47,4 +54,20 @@ export async function loadLibraryDirectory(
     throw new Error(message);
   }
   return node;
+}
+
+export async function deleteLibrary(libraryId: string): Promise<void> {
+  const response = await fetch(`/api/libraries/${encodeURIComponent(libraryId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin'
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  const deleted = isRecord(payload) && isRecord(payload.data)
+    ? payload.data.deleted : null;
+  if (!response.ok || !isRecord(payload) || payload.ok !== true || deleted !== true) {
+    const message = isRecord(payload) && isRecord(payload.error)
+      && typeof payload.error.message === 'string'
+      ? payload.error.message : '删除书库失败';
+    throw new LibraryApiError(message);
+  }
 }

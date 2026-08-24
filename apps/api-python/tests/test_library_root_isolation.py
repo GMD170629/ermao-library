@@ -293,6 +293,54 @@ def test_library_scan_request_always_schedules_the_library_root(
     assert stored.resource_id is None
 
 
+def test_delete_library_cancels_queued_and_running_import_tasks(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    _login_admin(client, db_session)
+    root = tmp_path / "delete-library"
+    root.mkdir()
+    source_file = root / "book.epub"
+    source_file.write_bytes(b"publication")
+    library = Library(
+        id="delete-library",
+        name="Delete library",
+        root_path=str(root),
+        organization_mode="FLAT",
+        enabled=True,
+    )
+    db_session.add(library)
+    db_session.flush()
+    db_session.add_all(
+        [
+            LibraryImportTask(
+                id="delete-library-queued",
+                kind="SCAN_LIBRARY",
+                library_id=library.id,
+                state="QUEUED",
+            ),
+            LibraryImportTask(
+                id="delete-library-running",
+                kind="SCAN_LIBRARY",
+                library_id=library.id,
+                state="RUNNING",
+                started_at=datetime.now(UTC),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.delete(f"/api/libraries/{library.id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {"deleted": True, "id": library.id}
+    assert db_session.get(Library, library.id) is None
+    assert db_session.get(LibraryImportTask, "delete-library-queued") is None
+    assert db_session.get(LibraryImportTask, "delete-library-running") is None
+    assert source_file.read_bytes() == b"publication"
+
+
 def test_download_outside_enabled_library_does_not_enqueue_import(
     db_session: Session,
     test_settings,

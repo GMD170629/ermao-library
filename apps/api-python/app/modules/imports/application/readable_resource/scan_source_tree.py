@@ -74,7 +74,9 @@ class ScanLibrarySourceTree:
         self._clock = clock
         self._log = log
 
-    def execute_library(self, library_id: str) -> ScanLibrarySourceTreeResult:
+    def execute_library(
+        self, library_id: str, *, task_id: str | None = None
+    ) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             config = self._libraries.get_library(library_id)
         return self._walk(
@@ -82,9 +84,12 @@ class ScanLibrarySourceTree:
             start_parent_id=None,
             start_parent_rel=None,
             reprobe_node_only=True,
+            task_id=task_id,
         )
 
-    def execute_source(self, source_node_id: str) -> ScanLibrarySourceTreeResult:
+    def execute_source(
+        self, source_node_id: str, *, task_id: str | None = None
+    ) -> ScanLibrarySourceTreeResult:
         with self._uow.transaction():
             node = self._source_nodes.get(source_node_id)
             if node is None:
@@ -110,12 +115,13 @@ class ScanLibrarySourceTree:
             return self._continue_file(config, node.id, relative)
         if node.physical_kind is SourceNodePhysicalKind.DIRECTORY:
             # Re-probe NODE_ONLY / missing interpretation at this directory first.
-            self._maybe_reprobe_directory(config, node.id, relative)
+            self._maybe_reprobe_directory(config, node.id, relative, task_id=task_id)
             return self._walk(
                 config=config,
                 start_parent_id=node.id,
                 start_parent_rel=relative.value,
                 reprobe_node_only=True,
+                task_id=task_id,
             )
         return ScanLibrarySourceTreeResult(
             library_id=config.library_id,
@@ -166,6 +172,7 @@ class ScanLibrarySourceTree:
         start_parent_id: str | None,
         start_parent_rel: str | None,
         reprobe_node_only: bool,
+        task_id: str | None,
     ) -> ScanLibrarySourceTreeResult:
         inserted = 0
         resources_created = 0
@@ -176,6 +183,8 @@ class ScanLibrarySourceTree:
         ]
 
         while stack:
+            if self._task_was_cancelled(task_id):
+                break
             parent_id, parent_rel = stack.pop()
             absolute = (
                 config.root_path
@@ -290,7 +299,7 @@ class ScanLibrarySourceTree:
                 if kind is SourceNodePhysicalKind.DIRECTORY:
                     if needs_probe:
                         created_r, enqueued = self._probe_and_persist_directory(
-                            config, node.id, parsed
+                            config, node.id, parsed, task_id=task_id
                         )
                         resources_created += created_r
                         tasks_enqueued += enqueued
@@ -367,6 +376,8 @@ class ScanLibrarySourceTree:
         config: LibrarySourceTreeConfig,
         node_id: str,
         relative: SourceNodeRelativePath,
+        *,
+        task_id: str | None,
     ) -> None:
         with self._uow.transaction():
             interpretation = self._source_nodes.get_interpretation(node_id)
@@ -375,13 +386,17 @@ class ScanLibrarySourceTree:
                 return
             if interpretation is not None and interpretation.result != "NODE_ONLY":
                 return
-        self._probe_and_persist_directory(config, node_id, relative)
+        self._probe_and_persist_directory(
+            config, node_id, relative, task_id=task_id
+        )
 
     def _probe_and_persist_directory(
         self,
         config: LibrarySourceTreeConfig,
         node_id: str,
         relative: SourceNodeRelativePath,
+        *,
+        task_id: str | None,
     ) -> tuple[int, int]:
         self._uow.release_before_io()
         decision, _termination = self._filesystem.probe_directory(
@@ -396,6 +411,8 @@ class ScanLibrarySourceTree:
             time_budget_ms=config.probe_time_budget_ms,
         )
         with self._uow.transaction():
+            if self._task_was_cancelled_in_transaction(task_id):
+                return (0, 0)
             # Do not overwrite an existing RESOURCE interpretation/adapter.
             existing_resource = self._books_resources.get_resource_by_source_node(
                 node_id
@@ -414,6 +431,18 @@ class ScanLibrarySourceTree:
                     self._enqueue_directory_samples(config, node_id, decision),
                 )
         return (0, 0)
+
+    def _task_was_cancelled(self, task_id: str | None) -> bool:
+        if task_id is None:
+            return False
+        with self._uow.transaction():
+            return self._task_was_cancelled_in_transaction(task_id)
+
+    def _task_was_cancelled_in_transaction(self, task_id: str | None) -> bool:
+        if task_id is None:
+            return False
+        task = self._queue.get_task(task_id)
+        return task is None
 
     def _should_ignore(
         self,
