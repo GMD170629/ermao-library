@@ -41,6 +41,23 @@ class ReaderAccessPolicyTest {
         )
     }
 
+    @Test
+    fun streamingOnlyImageDirectoriesRemainReadableOnlineButCannotBeOpenedOffline() {
+        val request = ReaderAccessRequest(
+            namespace = namespace,
+            resourceId = "resource",
+            readerType = DownloadReaderType.Comic,
+            isOnline = true,
+            isDownloadable = false,
+        )
+
+        assertEquals(ReaderAccessDecision.RemoteStream, policy.decide(request, emptyList()))
+        assertEquals(
+            ReaderAccessDecision.Unavailable("OFFLINE_ARTIFACT_MISSING"),
+            policy.decide(request.copy(isOnline = false), emptyList()),
+        )
+    }
+
     private fun request(type: DownloadReaderType, isOnline: Boolean) =
         ReaderAccessRequest(namespace, "resource", type, isOnline)
 

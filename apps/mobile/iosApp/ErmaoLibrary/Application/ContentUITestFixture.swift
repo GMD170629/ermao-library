@@ -24,7 +24,7 @@ enum ContentUITestFixture {
                 userLocale: "en-US",
                 authorization: RuntimeAuthorization(
                     isAdmin: false,
-                    canManageSystem: false,
+                    canManageSystem: true,
                     allLibraryScopes: true,
                     libraryIDs: [],
                     canViewManualImports: false,
@@ -78,10 +78,10 @@ private actor FixtureShelfClient: ShelfClient {
     private var selected = false
 
     func fetchShelves(context: ContentRequestContext, bookID: String) async throws -> [ShelfOption] {
-        [ShelfOption(id: "favorites", name: "Favorites", containsWork: selected)]
+        [ShelfOption(id: "favorites", name: "Favorites", containsWork: selected, isMembershipEditable: true)]
     }
 
-    func updateShelf(context: ContentRequestContext, bookID: String, shelfID: String, add: Bool) async throws {
+    func updateShelf(context: ContentRequestContext, bookID: String, shelf: ShelfOption, add: Bool) async throws {
         selected = add
     }
 }
@@ -93,29 +93,29 @@ private struct FixtureContentClient: ContentClient {
             title: "Pride and Prejudice",
             author: "Jane Austen",
             cover: nil,
-            progress: 32,
-            availableMediaKinds: [.ebook]
+            progress: 32
         ),
         BookCard(
             id: "the-left-hand-of-darkness",
             title: "The Left Hand of Darkness",
             author: "Ursula K. Le Guin",
             cover: nil,
-            progress: nil,
-            availableMediaKinds: [.ebook, .audiobook]
+            progress: nil
         ),
         BookCard(
             id: "a-wizard-of-earthsea",
             title: "A Wizard of Earthsea",
             author: "Ursula K. Le Guin",
             cover: nil,
-            progress: 68,
-            availableMediaKinds: [.ebook]
+            progress: 68
         )
     ]
 
     func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? {
-        ContinueReadingItem(book: books[0], resourceTitle: nil, positionLabel: "32%")
+        let book = ProcessInfo.processInfo.environment["ERMAO_UI_TEST_MULTI_DETAIL"] == "1"
+            ? books[1]
+            : books[0]
+        return ContinueReadingItem(book: book, resourceTitle: nil, positionLabel: book.progress.map { "\(Int($0))%" })
     }
 
     func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [BookCard] {
@@ -235,7 +235,113 @@ private struct FixtureContentClient: ContentClient {
         )
     }
 
+    func fetchBookContents(
+        context: ContentRequestContext,
+        bookID: String,
+        sourceNodeID: String?,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookContentsPage {
+        let root = fixtureContentEntry(
+            id: "fixture-root",
+            title: "The Left Hand of Darkness",
+            kind: "FOLDER",
+            hasChildren: true
+        )
+        let winter = fixtureContentEntry(
+            id: "winter-cycle",
+            parentID: "fixture-root",
+            title: "Winter Cycle",
+            kind: "FOLDER",
+            hasChildren: true
+        )
+        let volumeOne = fixtureContentEntry(
+            id: "resource-node-1",
+            parentID: "fixture-root",
+            title: "The Left Hand of Darkness I",
+            kind: "FILE",
+            hasChildren: false,
+            resourceID: "resource-1"
+        )
+        let volumeTwo = fixtureContentEntry(
+            id: "resource-node-2",
+            parentID: "winter-cycle",
+            title: "The Left Hand of Darkness II",
+            kind: "FILE",
+            hasChildren: false,
+            resourceID: "resource-2"
+        )
+        let volumeThree = fixtureContentEntry(
+            id: "resource-node-3",
+            parentID: "winter-cycle",
+            title: "The Left Hand of Darkness III",
+            kind: "FILE",
+            hasChildren: false,
+            resourceID: "resource-3"
+        )
+        let isNested = sourceNodeID == winter.sourceNodeID
+        let entries = isNested ? [volumeTwo, volumeThree] : [winter, volumeOne]
+        return BookContentsPage(
+            bookID: bookID,
+            currentSourceNodeID: isNested ? winter.sourceNodeID : nil,
+            currentResourceID: nil,
+            currentNode: isNested ? winter : root,
+            currentResourceIDs: entries.compactMap(\.resourceID),
+            parentSourceNodeID: isNested ? root.sourceNodeID : nil,
+            breadcrumbs: isNested ? [winter] : [],
+            entries: entries,
+            page: page,
+            pageSize: pageSize,
+            total: entries.count,
+            totalPages: 1
+        )
+    }
+
+    func fetchBookChapters(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookChapterPage {
+        BookChapterPage(
+            resourceID: resourceID,
+            chapters: [
+                BookChapter(id: "chapter-1", title: "Chapter 1", progress: 32, isCurrent: true, sortOrder: 1, state: .current),
+                BookChapter(id: "chapter-2", title: "Chapter 2", progress: nil, isCurrent: false, sortOrder: 2, state: .unread),
+            ],
+            page: page,
+            pageSize: pageSize,
+            total: 2,
+            totalPages: 1
+        )
+    }
+
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data {
         throw ContentClientError.invalidResponse
+    }
+
+    private func fixtureContentEntry(
+        id: String,
+        parentID: String? = nil,
+        title: String,
+        kind: String,
+        hasChildren: Bool,
+        resourceID: String? = nil
+    ) -> BookContentEntry {
+        BookContentEntry(
+            sourceNodeID: id,
+            parentSourceNodeID: parentID,
+            name: title,
+            title: title,
+            description: nil,
+            kind: kind,
+            physicalKind: kind == "FOLDER" ? "DIRECTORY" : "REGULAR_FILE",
+            sizeBytes: nil,
+            hasChildren: hasChildren,
+            resourceID: resourceID,
+            representativeResourceID: resourceID,
+            cover: nil
+        )
     }
 }

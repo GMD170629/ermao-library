@@ -156,8 +156,7 @@ struct ReaderDownloadTransitionView: View {
         phase = .creating
         accessTask = store.requestReaderAccess(
             book: request.book,
-            resource: request.resource,
-            mediaKind: request.mediaKind
+            resource: request.resource
         ) { outcome in
             accessTask = nil
             guard !cancelled else {

@@ -22,6 +22,24 @@ private struct WorkControlAction: Identifiable {
     let perform: () -> Void
 }
 
+private enum WorkDetailSheet: Identifiable {
+    case shelves
+    case management(WorkManagementTask)
+
+    var id: String {
+        switch self {
+        case .shelves: "shelves"
+        case .management(let task): "management-\(task.id)"
+        }
+    }
+}
+
+private struct WorkDetailFeedback: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+    let isError: Bool
+}
+
 struct WorkDetailView: View {
     let context: ContentRequestContext
     let client: any ContentClient
@@ -36,18 +54,20 @@ struct WorkDetailView: View {
     let canManageSystem: Bool
 
     @StateObject private var store: BookDetailStore
-    @State private var showsShelfPicker = false
+    @State private var activeSheet: WorkDetailSheet?
     @State private var shelves: [ShelfOption] = []
     @State private var selectedShelfIDs: Set<String> = []
+    @State private var shelfRequestGeneration = UUID()
     @State private var isLoadingShelves = false
     @State private var isSavingShelves = false
     @State private var shelfError = false
     @State private var isDescriptionExpanded = false
     @State private var unavailableFeature: UnavailableWorkFeature?
     @State private var readerAccessErrorCode: String?
-    @State private var managementStore: WorkManagementStore?
+    @StateObject private var managementHolder: WorkManagementStoreHolder
     @State private var managedResourceID: String?
-    @State private var managementTask: WorkManagementTask?
+    @State private var readingStatusOverride: LibraryReadingStatus?
+    @State private var feedback: WorkDetailFeedback?
     @State private var importsCover = false
     @State private var controlTarget: WorkControlTarget?
     @State private var controlAnchor = CGPoint(x: 260, y: 220)
@@ -55,11 +75,11 @@ struct WorkDetailView: View {
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
-
-    // The mobile compatibility contract currently advertises
-    // bookDetailManagement = false. Keep this explicit until that capability
-    // is negotiated; an admin authorization alone must not open CRUD UI.
-    private let bookDetailManagementEnabled = false
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmsCoverRegeneration = false
+    @State private var confirmsRescan = false
+    @State private var confirmsDeletion = false
+    @State private var deletionConfirmation = ""
 
     init(
         context: ContentRequestContext,
@@ -96,27 +116,46 @@ struct WorkDetailView: View {
                 onUnauthorized: onUnauthorized
             )
         )
-        _managementStore = State(
-            initialValue: managementRepository.flatMap { repository in
+        _managementHolder = StateObject(
+            wrappedValue: WorkManagementStoreHolder(
+                store: managementRepository.map { repository in
                 WorkManagementStore(repository: repository, context: context, bookID: bookID)
-            }
+                }
+            )
         )
     }
 
+    private var managementStore: WorkManagementStore? { managementHolder.store }
+
     var body: some View {
-        ScrollView {
-            content
-                .padding(.horizontal, .space2)
-                .padding(.bottom, .space4)
+        ZStack(alignment: .top) {
+            if case .ready(let detail, _) = store.state {
+                heroBackdrop(detail)
+                    .ignoresSafeArea(edges: .top)
+            }
+            ScrollView {
+                content
+                    .padding(.horizontal, .space2)
+                    .padding(.bottom, .space4)
+            }
+            .accessibilityIdentifier("work.detail.screen")
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: .space2)
         }
         .navigationTitle("work.detail.title")
-        .accessibilityIdentifier("work.detail.screen")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showsShelfPicker) { shelfPicker }
-        .sheet(item: $managementTask) { task in
-            NavigationStack { managementPage(task: task) }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .shelves:
+                shelfPicker
+                    .interactiveDismissDisabled(isLoadingShelves || isSavingShelves)
+            case .management(let task):
+                NavigationStack { managementPage(task: task) }
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+            }
         }
         .fileImporter(
             isPresented: $importsCover,
@@ -164,12 +203,49 @@ struct WorkDetailView: View {
         } message: {
             Text(readerAccessErrorMessage)
         }
+        .confirmationDialog("management.regenerateCoverConfirmTitle", isPresented: $confirmsCoverRegeneration) {
+            Button("management.regenerateCover") { regenerateBookCover() }
+            Button("common.cancel", role: .cancel) {}
+        } message: { Text("management.regenerateCoverConfirmMessage") }
+        .confirmationDialog("management.rescanConfirmTitle", isPresented: $confirmsRescan) {
+            Button("management.rescan") { rescanBook() }
+            Button("common.cancel", role: .cancel) {}
+        } message: { Text("management.rescanConfirmMessage") }
+        .alert("management.deleteConfirmTitle", isPresented: $confirmsDeletion) {
+            TextField("management.deleteConfirmPlaceholder", text: $deletionConfirmation)
+            Button("management.delete", role: .destructive) { deleteBook() }
+                .disabled(deletionConfirmation != currentDetail?.book.title)
+            Button("common.cancel", role: .cancel) { deletionConfirmation = "" }
+        } message: { Text("management.deleteConfirmMessage") }
         .overlay { controlMenuOverlay }
+        .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
         .task { store.load() }
         .onAppear { store.refreshIfLoaded() }
-        .onChange(of: managementStore?.completedAction) { action in
+        .onChange(of: managementStore?.completedAction) { _, action in
             handleManagementCompletion(action)
+        }
+        .onChange(of: managementStore?.errorCode) { _, code in
+            guard let code else { return }
+            readingStatusOverride = nil
+            showFeedback(
+                String(format: String(localized: "management.failed.format"), code),
+                isError: true
+            )
+        }
+        .onChange(of: downloads.storageErrorCode) { _, code in
+            guard let code else { return }
+            showFeedback(
+                String(format: String(localized: "work.download.failed.format"), code),
+                isError: true
+            )
+        }
+        .onChange(of: selectedDownloadErrorCode) { _, code in
+            guard let code else { return }
+            showFeedback(
+                String(format: String(localized: "work.download.failed.format"), code),
+                isError: true
+            )
         }
     }
 
@@ -200,25 +276,66 @@ struct WorkDetailView: View {
     private func readyContent(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             hero(detail)
-                .padding(.top, .spaceHalf)
-                .padding(.bottom, .space2)
+                .padding(.top, .space1)
+                .padding(.bottom, 18)
 
             readerAction(detail)
-                .padding(.bottom, .space2)
+                .padding(.bottom, .space3)
 
-            if hasDescription(detail) {
+            if normalizedDescription(detail) != nil {
                 aboutSection(detail)
-                    .padding(.bottom, .space2)
+                    .padding(.bottom, .space3)
             }
-            Divider().padding(.vertical, .space2)
+
+            Divider().overlay(theme.divider.opacity(0.72))
             mediaSection(detail)
+                .padding(.top, .space3)
         }
+    }
+
+    private func heroBackdrop(_ detail: BookDetailContent) -> some View {
+        ZStack {
+            BookCoverView(
+                reference: detail.book.cover,
+                title: detail.book.title,
+                context: context,
+                client: client,
+                cache: cache,
+                cornerRadius: 0
+            )
+            .frame(width: 300, height: 450)
+            .scaleEffect(1.7)
+            .saturation(0.9)
+            .blur(radius: 24, opaque: false)
+            .opacity(0.32)
+            .drawingGroup(opaque: false)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 460)
+        .clipped()
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black.opacity(0.82), location: 0.62),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
     private func hero(_ detail: BookDetailContent) -> some View {
         VStack(alignment: .center, spacing: .space1Half) {
-            cover(detail).frame(width: dynamicTypeSize.isAccessibilitySize ? 124 : 132)
+            cover(detail)
+                .frame(
+                    width: dynamicTypeSize.isAccessibilitySize ? 124 : 132,
+                    height: dynamicTypeSize.isAccessibilitySize ? 186 : 198
+                )
             identity(detail)
                 .frame(maxWidth: .infinity)
         }
@@ -328,40 +445,54 @@ struct WorkDetailView: View {
 
     private func readerAction(_ detail: BookDetailContent) -> some View {
         let selected = selectedResource(detail)
+        let readingStatus = readingStatusOverride ?? detail.readingStatus ?? .unread
         return VStack(spacing: .space1) {
             PrimaryActionButton(
                 detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
-                systemImage: "play.circle",
+                systemImage: "play.fill",
                 isDisabled: selected == nil || selected?.isReadable == false,
                 action: { requestReaderAccess(detail: detail) }
             )
+            .frame(height: 52)
             HStack(spacing: 0) {
-                quickAction("work.action.download", systemImage: "icloud.and.arrow.down") {
-                    enqueueSelectedResource()
+                quickAction(downloadActionTitle(selected), systemImage: selected.map { downloadSystemImage(resourceID: $0.id) } ?? "arrow.down") {
+                    handlePrimaryDownload(detail)
                 }
-                Menu {
-                    ForEach(LibraryReadingStatus.manualChoices, id: \.self) { status in
-                        Button(status.title) {
-                            if let managementStore,
-                               let sharedStatus = status.sharedValue,
-                               let resourceID = selected?.id {
-                                managementStore.setReadingStatus(resourceID: resourceID, status: sharedStatus)
-                            } else {
-                                unavailableFeature = .readingStatus
-                            }
-                        }
-                    }
-                } label: {
-                    quickActionLabel("work.action.readingStatus", systemImage: "chart.pie")
+                .accessibilityIdentifier("work.download.action")
+                quickAction(readingStatus.title, systemImage: readingStatus == .finished ? "checkmark.circle.fill" : "checkmark") {
+                    toggleBookReadingStatus(detail)
                 }
-                .frame(maxWidth: .infinity)
-                quickAction("work.action.add", systemImage: "books.vertical") { openShelfPicker() }
-                anchoredQuickAction("common.more", systemImage: "ellipsis") { anchor in
-                    controlAnchor = anchor
-                    controlTarget = .book
-                }
+                .disabled(managementStore?.isBusy == true)
+                .accessibilityIdentifier("work.readingStatus.action")
+                quickAction("work.action.add", systemImage: "bookmark") { openShelfPicker() }
+                    .accessibilityIdentifier("work.shelf.action")
+                bookControlMenu(detail)
             }
         }
+    }
+
+    private func bookControlMenu(_ detail: BookDetailContent) -> some View {
+        let actions = controlActions(target: .book, detail: detail)
+        return Menu {
+            ForEach(actions) { action in
+                Button(role: action.destructive ? .destructive : nil) {
+                    action.perform()
+                } label: {
+                    Label {
+                        Text(action.title)
+                    } icon: {
+                        Image(systemName: action.systemImage)
+                    }
+                }
+                .disabled(!action.enabled)
+            }
+        } label: {
+            quickActionLabel("common.more", systemImage: "ellipsis")
+        }
+        .menuOrder(.fixed)
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .accessibilityIdentifier("work.book.moreMenu")
     }
 
     private func quickAction(
@@ -376,70 +507,41 @@ struct WorkDetailView: View {
 
     private func quickActionLabel(_ title: LocalizedStringKey, systemImage: String) -> some View {
         VStack(spacing: .spaceHalf) {
-            Image(systemName: systemImage).font(.body)
-            Text(title).appTextStyle(.caption).lineLimit(1).minimumScaleFactor(0.8)
+            Image(systemName: systemImage)
+                .font(.system(size: 24, weight: .regular))
+                .frame(width: 28, height: 28)
+            Text(title)
+                .appTextStyle(.caption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .foregroundStyle(theme.textSecondary)
-        .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+        .frame(maxWidth: .infinity, minHeight: 56)
         .contentShape(Rectangle())
-    }
-
-    private func anchoredQuickAction(
-        _ title: LocalizedStringKey,
-        systemImage: String,
-        action: @escaping (CGPoint) -> Void
-    ) -> some View {
-        GeometryReader { proxy in
-            Button {
-                let frame = proxy.frame(in: .global)
-                action(CGPoint(x: frame.midX, y: frame.midY))
-            } label: {
-                quickActionLabel(title, systemImage: systemImage)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
     }
 
     @ViewBuilder
     private func aboutSection(_ detail: BookDetailContent) -> some View {
         if let description = normalizedDescription(detail) {
-            VStack(alignment: .leading, spacing: .space1Half) {
-                Text("work.description.title").appTextStyle(.sectionTitle)
+            VStack(alignment: .leading, spacing: .spaceHalf) {
                 Text(description)
                     .appTextStyle(.body)
                     .foregroundStyle(theme.textSecondary)
-                    .lineLimit(isDescriptionExpanded ? nil : 4)
+                    .lineLimit(isDescriptionExpanded ? nil : 3)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isDescriptionExpanded.toggle()
-                    }
+                    isDescriptionExpanded.toggle()
                 } label: {
-                    Image(systemName: isDescriptionExpanded ? "chevron.up" : "chevron.down")
-                        .font(.body.weight(.medium))
-                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                    Text(isDescriptionExpanded ? "work.description.collapse" : "work.description.expand")
+                        .appTextStyle(.caption)
+                        .frame(minHeight: .iosMinimumTouchTarget)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(theme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .center)
+                .foregroundStyle(theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .accessibilityLabel(Text(isDescriptionExpanded ? "work.description.collapse" : "work.description.expand"))
             }
-            .padding(.space2)
-            .background(
-                theme.surface,
-                in: RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: CGFloat(GeneratedDesignTokens.Radii.task), style: .continuous)
-                    .stroke(theme.divider.opacity(0.75), lineWidth: 0.5)
-            }
-            .shadow(color: theme.textPrimary.opacity(0.08), radius: 10, x: 0, y: 4)
         }
-    }
-
-    private func hasDescription(_ detail: BookDetailContent) -> Bool {
-        normalizedDescription(detail) != nil
     }
 
     private func normalizedDescription(_ detail: BookDetailContent) -> String? {
@@ -459,60 +561,399 @@ struct WorkDetailView: View {
         return value.isEmpty ? nil : value
     }
 
+    @ViewBuilder
     private func mediaSection(_ detail: BookDetailContent) -> some View {
-        VStack(alignment: .leading, spacing: .space2) {
-            mediaPicker(detail)
-            resourceSection(detail)
-            if let selected = selectedResource(detail) { selectedResourceMetadata(selected) }
+        let readableResources = detail.resources.filter { $0.isReadable != false }
+        if readableResources.count == 1 {
+            chapterSection(detail, resource: readableResources[0])
+        } else {
+            contentBrowserSection(detail)
+            if let selected = selectedResource(detail) {
+                selectedResourceMetadata(selected)
+                    .padding(.top, .space3)
+            }
         }
     }
 
     @ViewBuilder
-    private func mediaPicker(_ detail: BookDetailContent) -> some View {
-        // Resource selection is represented directly by the resource strip.
-        // The former Work/Version picker was removed with ADR0020.
-        EmptyView()
-    }
+    private func contentBrowserSection(_ detail: BookDetailContent) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("work.contents.title").appTextStyle(.sectionTitle)
+                Spacer()
+                if let page = store.contentsPage {
+                    Text(String(
+                        format: String(localized: "work.contents.count.format"),
+                        locale: locale,
+                        page.total
+                    ))
+                    .appTextStyle(.label)
+                    .foregroundStyle(theme.textSecondary)
+                }
+            }
+            .padding(.bottom, .space1)
 
-    @ViewBuilder
-    private func resourceSection(_ detail: BookDetailContent) -> some View {
-        if detail.resources.isEmpty {
-            ContentStatusView(
-                systemImage: "books.vertical",
-                title: "work.volumes.empty.title",
-                message: "work.volumes.empty.message"
-            )
-        } else {
-            VStack(alignment: .leading, spacing: .space2) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(alignment: .top, spacing: .space1Half) {
-                        ForEach(Array(detail.resources.enumerated()), id: \.element.id) { position, resource in
-                            resourceCoverItem(resource, position: position, detail: detail)
-                                .frame(width: dynamicTypeSize.isAccessibilitySize ? 160 : 108)
-                                .onAppear {
-                                    if position >= detail.resources.count - 3 { store.loadMoreResources() }
-                                }
-                        }
-                        if store.isLoadingMoreResources || store.hasResourcePaginationError {
-                            Button {
-                                store.loadMoreResources()
-                            } label: {
-                                Text(store.hasResourcePaginationError
-                                     ? "work.volumes.loadMore.failed"
-                                     : "work.volumes.loadMore.loading")
-                                    .appTextStyle(.caption)
-                                    .foregroundStyle(theme.textSecondary)
-                                    .multilineTextAlignment(.center)
-                                    .frame(width: 108)
-                                    .frame(minHeight: .iosMinimumTouchTarget)
+            if let page = store.contentsPage {
+                contentBreadcrumbs(detail: detail, page: page)
+                let entries = visibleContentEntries(page)
+                if entries.isEmpty {
+                    Text("work.contents.empty")
+                        .appTextStyle(.body)
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(entries) { entry in
+                            if entry.isSourceFolder {
+                                sourceFolderRow(entry)
+                            } else if let resourceID = entry.resourceID,
+                                      let resource = detail.resources.first(where: { $0.id == resourceID }) {
+                                resourceListRow(resource, entry: entry, detail: detail)
+                            } else if entry.isDirectResource {
+                                unresolvedResourceRow(entry)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!store.hasResourcePaginationError)
+                            Divider().overlay(theme.divider.opacity(0.72))
                         }
+                    }
+                }
+            } else if store.isLoadingContentBrowser {
+                HStack(spacing: .space1) {
+                    ProgressView()
+                    Text("common.loading")
+                        .appTextStyle(.body)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 112, alignment: .center)
+            } else if store.contentBrowserFailed {
+                contentBrowserRetry
+            } else if detail.resources.isEmpty {
+                Text("work.volumes.empty.message")
+                    .appTextStyle(.body)
+                    .foregroundStyle(theme.textTertiary)
+                    .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(detail.resources) { resource in
+                        resourceListRow(resource, entry: nil, detail: detail)
+                        Divider().overlay(theme.divider.opacity(0.72))
                     }
                 }
             }
         }
+    }
+
+    private func visibleContentEntries(_ page: BookContentsPage) -> [BookContentEntry] {
+        var entries = page.entries.filter { $0.isSourceFolder || $0.isDirectResource }
+        if page.currentNode.isDirectResource,
+           !entries.contains(where: { $0.id == page.currentNode.id }) {
+            entries.insert(page.currentNode, at: 0)
+        }
+        return entries
+    }
+
+    private func contentBreadcrumbs(detail: BookDetailContent, page: BookContentsPage) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: .spaceHalf) {
+                Button { store.openContents(nil) } label: {
+                    Text(detail.book.title)
+                }
+                .buttonStyle(.plain)
+                ForEach(page.breadcrumbs) { entry in
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(theme.textTertiary)
+                    Button { store.openContents(entry.sourceNodeID) } label: {
+                        Text(entry.title)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if page.currentSourceNodeID != nil,
+                   page.breadcrumbs.last?.sourceNodeID != page.currentNode.sourceNodeID {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(theme.textTertiary)
+                    Text(page.currentNode.title)
+                }
+            }
+            .appTextStyle(.caption)
+            .foregroundStyle(theme.textSecondary)
+            .frame(minHeight: .iosMinimumTouchTarget)
+        }
+        .accessibilityLabel(Text("work.contents.breadcrumbs"))
+    }
+
+    private func sourceFolderRow(_ entry: BookContentEntry) -> some View {
+        Button { store.openContents(entry.sourceNodeID) } label: {
+            HStack(spacing: .space2) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 30, weight: .regular))
+                    .foregroundStyle(Color.orange.opacity(0.88))
+                    .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: .spaceHalf) {
+                    Text(entry.title)
+                        .appTextStyle(.body)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                    Text(entry.hasChildren ? "work.contents.folder.hasChildren" : "work.contents.folder.empty")
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer(minLength: .space1)
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("work.contents.folder.\(entry.sourceNodeID)")
+    }
+
+    private func unresolvedResourceRow(_ entry: BookContentEntry) -> some View {
+        Button {
+            guard let resourceID = entry.resourceID else { return }
+            store.load(resourceID: resourceID, showBlockingLoading: false)
+        } label: {
+            HStack(spacing: .space2) {
+                BookCoverView(
+                    reference: entry.cover,
+                    title: entry.title,
+                    context: context,
+                    client: client,
+                    cache: cache
+                )
+                .frame(width: 40)
+                VStack(alignment: .leading, spacing: .spaceHalf) {
+                    Text(entry.title)
+                        .appTextStyle(.body)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(1)
+                    Text("work.contents.readableResource")
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer(minLength: .space1)
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .frame(minHeight: 76)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func resourceListRow(
+        _ resource: BookResource,
+        entry: BookContentEntry?,
+        detail: BookDetailContent
+    ) -> some View {
+        HStack(spacing: .space1) {
+            Text(resourceDisplayIndex(resource, detail: detail))
+                .appTextStyle(.caption)
+                .monospacedDigit()
+                .foregroundStyle(resource.isSelected ? theme.brandAccent : theme.textSecondary)
+                .frame(width: 28, alignment: .leading)
+
+            Button { store.load(resourceID: resource.id, showBlockingLoading: false) } label: {
+                HStack(spacing: .space2) {
+                    BookCoverView(
+                        reference: entry?.cover ?? resource.cover,
+                        title: resource.title,
+                        context: context,
+                        client: client,
+                        cache: cache
+                    )
+                    .frame(width: 40)
+                    .overlay(alignment: .bottom) {
+                        if let progress = resource.progress, progress > 0 {
+                            ResourceCoverProgressView(progress: progress)
+                                .padding(.horizontal, 2)
+                                .padding(.bottom, 2)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(resource.title)
+                            .appTextStyle(.body)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(theme.textPrimary)
+                            .lineLimit(1)
+                        HStack(spacing: .spaceHalf) {
+                            Text(resource.formatLabel)
+                            Text("·")
+                            Text("work.contents.readableResource")
+                        }
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                        .lineLimit(1)
+                        if let progress = resource.progress, progress > 0 {
+                            Text(progressLabel(progress))
+                                .appTextStyle(.caption)
+                                .foregroundStyle(theme.brandAccent)
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button { handleDownload(resource, detail: detail) } label: {
+                Image(systemName: downloadSystemImage(resourceID: resource.id))
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(downloadForeground(resourceID: resource.id))
+                    .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(downloadAccessibilityLabel(resourceID: resource.id)))
+
+            if entry?.hasChildren == true {
+                Button { store.openContents(entry?.sourceNodeID) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("work.contents.openChildren"))
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.textTertiary)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(minHeight: 76)
+        .padding(.horizontal, resource.isSelected ? .space1 : 0)
+        .background(
+            resource.isSelected ? theme.brandAccent.opacity(0.045) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            if resource.isSelected {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(theme.brandAccent.opacity(0.72), lineWidth: 1.5)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("work.resource.\(resource.id)")
+        .accessibilityValue(resourceAccessibilityValue(resource))
+        .accessibilityAddTraits(resource.isSelected ? .isSelected : [])
+    }
+
+    private func resourceDisplayIndex(_ resource: BookResource, detail: BookDetailContent) -> String {
+        resource.displayIndex(position: detail.resources.firstIndex(where: { $0.id == resource.id }) ?? 0)
+    }
+
+    @ViewBuilder
+    private func chapterSection(_ detail: BookDetailContent, resource: BookResource) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("work.chapters.title").appTextStyle(.sectionTitle)
+                Spacer()
+                if let page = store.chapterPage {
+                    Text(String(
+                        format: String(localized: "work.chapters.count.format"),
+                        locale: locale,
+                        page.total
+                    ))
+                    .appTextStyle(.label)
+                    .foregroundStyle(theme.textSecondary)
+                }
+            }
+            Text("\(resource.title) · \(resource.formatLabel)")
+                .appTextStyle(.caption)
+                .foregroundStyle(theme.textSecondary)
+                .padding(.top, .spaceHalf)
+                .padding(.bottom, .space1)
+
+            if let page = store.chapterPage {
+                if page.chapters.isEmpty {
+                    Text("work.chapters.empty")
+                        .appTextStyle(.body)
+                        .foregroundStyle(theme.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(page.chapters.enumerated()), id: \.element.id) { index, chapter in
+                            chapterRow(
+                                chapter,
+                                displayIndex: (page.page - 1) * page.pageSize + index + 1,
+                                detail: detail
+                            )
+                            Divider().overlay(theme.divider.opacity(0.72))
+                        }
+                    }
+                }
+            } else if store.isLoadingContentBrowser {
+                HStack(spacing: .space1) {
+                    ProgressView()
+                    Text("common.loading")
+                        .appTextStyle(.body)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 112, alignment: .center)
+            } else if store.contentBrowserFailed {
+                contentBrowserRetry
+            }
+        }
+    }
+
+    private func chapterRow(
+        _ chapter: BookChapter,
+        displayIndex: Int,
+        detail: BookDetailContent
+    ) -> some View {
+        Button { requestReaderAccess(detail: detail) } label: {
+            HStack(spacing: .space1) {
+                Text(String(format: "%02d", displayIndex))
+                    .appTextStyle(.body)
+                    .monospacedDigit()
+                    .foregroundStyle(chapter.isCurrent ? theme.brandAccent : theme.textSecondary)
+                    .frame(width: 36, alignment: .leading)
+                Text(chapter.title)
+                    .appTextStyle(.body)
+                    .fontWeight(chapter.isCurrent ? .semibold : .regular)
+                    .foregroundStyle(chapter.isCurrent ? theme.brandAccent : theme.textPrimary)
+                    .lineLimit(2)
+                Spacer(minLength: .space1)
+                Text(chapterStateTitle(chapter.state))
+                    .appTextStyle(.caption)
+                    .foregroundStyle(chapter.isCurrent ? theme.brandAccent : theme.textSecondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .frame(minHeight: 56)
+            .padding(.horizontal, chapter.isCurrent ? .space1 : 0)
+            .background(chapter.isCurrent ? theme.brandAccent.opacity(0.055) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func chapterStateTitle(_ state: ChapterReadingState) -> LocalizedStringKey {
+        switch state {
+        case .current: "work.chapter.current"
+        case .read: "work.chapter.read"
+        case .unread: "work.chapter.unread"
+        }
+    }
+
+    private var contentBrowserRetry: some View {
+        Button { store.retryContentBrowser() } label: {
+            Label("common.retry", systemImage: "arrow.clockwise")
+                .appTextStyle(.body)
+                .frame(maxWidth: .infinity, minHeight: 96)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.brandAccent)
     }
 
     private func resourceCoverItem(
@@ -619,19 +1060,22 @@ struct WorkDetailView: View {
             ("work.metadata.filePath", resource.assets.first?.path),
         ]
         return VStack(alignment: .leading, spacing: 0) {
-            Text("work.metadata.title").appTextStyle(.sectionTitle)
+            Text("work.metadata.title")
+                .appTextStyle(.label)
+                .fontWeight(.semibold)
+                .foregroundStyle(theme.textSecondary)
                 .padding(.bottom, .space1)
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(alignment: .firstTextBaseline, spacing: .space2) {
-                    Text(row.0).appTextStyle(.body).foregroundStyle(theme.textSecondary)
+                    Text(row.0).appTextStyle(.caption).foregroundStyle(theme.textSecondary)
                     Spacer(minLength: .space1)
                     Text(metadataValue(row.1))
-                        .appTextStyle(.body)
+                        .appTextStyle(.callout)
                         .multilineTextAlignment(.trailing)
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
-                Divider()
+                Divider().overlay(theme.divider.opacity(0.72))
             }
         }
         .accessibilityIdentifier("work.selectedResource.metadata")
@@ -693,6 +1137,55 @@ struct WorkDetailView: View {
     private var currentDetail: BookDetailContent? {
         guard case .ready(let detail, _) = store.state else { return nil }
         return detail
+    }
+
+    private var selectedDownloadErrorCode: String? {
+        guard let detail = currentDetail,
+              let resource = selectedResource(detail) else { return nil }
+        return downloads.record(for: resource.id)?.stableErrorCode
+    }
+
+    @ViewBuilder
+    private var feedbackBanner: some View {
+        if let feedback {
+            Label(
+                feedback.message,
+                systemImage: feedback.isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill"
+            )
+            .appTextStyle(.callout)
+            .foregroundStyle(feedback.isError ? Color.red : theme.textPrimary)
+            .padding(.horizontal, .space2)
+            .padding(.vertical, .space1Half)
+            .background(theme.surfaceRaised)
+            .clipShape(Capsule())
+            .shadow(color: Color.black.opacity(0.12), radius: 10, y: 4)
+            .padding(.horizontal, .space2)
+            .padding(.bottom, .space2)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityAddTraits(.isStaticText)
+        }
+    }
+
+    private func showFeedback(_ message: String, isError: Bool) {
+        let next = WorkDetailFeedback(message: message, isError: isError)
+        withAnimation(.easeOut(duration: 0.18)) { feedback = next }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(isError ? 5 : 3))
+            guard feedback?.id == next.id else { return }
+            withAnimation(.easeIn(duration: 0.16)) { feedback = nil }
+        }
+    }
+
+    private func managementFeedback(_ action: WorkManagementStore.Action?) -> String {
+        switch action {
+        case .readingStatusUpdated: String(localized: "work.readingStatus.updated")
+        case .coverUpdated: String(localized: "management.coverUpdated")
+        case .rescanQueued: String(localized: "management.rescanQueued")
+        case .metadataApplied: String(localized: "management.metadataApplied")
+        case .workUpdated, .resourceUpdated: String(localized: "management.updated")
+        case .kindleQueued: String(localized: "management.kindleQueued")
+        case .bookDeleted, .none: String(localized: "management.updated")
+        }
     }
 
     @ViewBuilder
@@ -856,38 +1349,21 @@ struct WorkDetailView: View {
         }
         var actions: [WorkControlAction] = []
         if target == .book {
-            if bookDetailManagementEnabled && canManageSystem {
-                actions.append(action("series", "work.control.addSeries", "square.stack.3d.up") {
-                    openManagement(.addSeries, resourceID: nil)
-                })
-            }
-            actions.append(action("shelf", "work.control.addShelf", "books.vertical") {
-                controlTarget = nil
-                openShelfPicker()
-            })
-            actions.append(action("unread", "work.control.markUnread", "bookmark", enabled: resource != nil) {
-                markUnread(resource)
-            })
-            actions.append(action("download", downloadTitle, downloadIcon, enabled: resource != nil) {
-                handleControlDownload(resource, detail: detail)
-            })
-            if bookDetailManagementEnabled && canManageSystem {
-                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editWork, resourceID: nil) })
-                actions.append(action("recognize", "work.control.recognize", "sparkles") { openManagement(.recognize, resourceID: nil) })
-                actions.append(action("uploadCover", "management.uploadCover", "photo.badge.plus") { openManagement(.cover, resourceID: nil) })
-                actions.append(action("regenerateCover", "management.regenerateCover", "wand.and.stars") { openManagement(.cover, resourceID: nil) })
-            }
-            if canManageSystem && kindleEligible {
-                actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, resourceID: resource?.id) })
+            if canManageSystem {
+                let managementAvailable = managementStore != nil
+                actions.append(action("edit", "work.control.edit", "pencil", enabled: managementAvailable) { openManagement(.editWork, resourceID: nil) })
+                actions.append(action("regenerateCover", "management.regenerateCover", "photo.badge.arrow.down", enabled: managementAvailable) { controlTarget = nil; confirmsCoverRegeneration = true })
+                actions.append(action("recognize", "work.control.recognize", "text.magnifyingglass", enabled: managementAvailable) { openManagement(.recognize, resourceID: nil) })
+                actions.append(action("rescan", "management.rescan", "arrow.clockwise", enabled: managementAvailable) { controlTarget = nil; confirmsRescan = true })
+                actions.append(action("delete", "management.delete", "trash", enabled: managementAvailable, destructive: true) { controlTarget = nil; confirmsDeletion = true })
             }
         } else if let resource {
             actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(resource) })
             actions.append(action("download", downloadTitle, downloadIcon) {
                 handleControlDownload(resource, detail: detail)
             })
-            if bookDetailManagementEnabled && canManageSystem {
+            if managementStore != nil && canManageSystem {
                 actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editResource, resourceID: resource.id) })
-                actions.append(action("mediaKind", "work.control.changeMediaType", "square.stack.3d.up", enabled: !activeDownload) { openManagement(.mediaKind, resourceID: resource.id) })
             }
             if canManageSystem && kindleEligible {
                 actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, resourceID: resource.id) })
@@ -904,10 +1380,13 @@ struct WorkDetailView: View {
     }
 
     private func openManagement(_ task: WorkManagementTask, resourceID: String?) {
-        guard task == .kindle || bookDetailManagementEnabled else { return }
+        guard task == .kindle || managementStore != nil else {
+            showFeedback(String(localized: "management.unavailable"), isError: true)
+            return
+        }
         controlTarget = nil
         managedResourceID = resourceID
-        managementTask = task
+        activeSheet = .management(task)
     }
 
     private func markUnread(_ resource: BookResource?) {
@@ -931,7 +1410,7 @@ struct WorkDetailView: View {
 
     @ViewBuilder
     private func managementPage(task: WorkManagementTask) -> some View {
-        if (task == .kindle || bookDetailManagementEnabled),
+        if (task == .kindle || managementStore != nil),
            let managementStore,
            let detail = currentDetail {
             let resource = managedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
@@ -948,23 +1427,65 @@ struct WorkDetailView: View {
     }
 
     private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
-        guard let action, let managementStore else { return }
-        managementTask = nil
+        guard action != nil, let managementStore else { return }
+        if action == .bookDeleted {
+            downloads.remove(bookID: store.bookIDValue)
+            managementStore.consumeCompletion()
+            dismiss()
+            return
+        }
+        activeSheet = nil
+        showFeedback(managementFeedback(action), isError: false)
         managementStore.consumeCompletion()
         store.load()
     }
 
+    private func toggleBookReadingStatus(_ detail: BookDetailContent) {
+        guard let managementStore else { unavailableFeature = .readingStatus; return }
+        let current = readingStatusOverride ?? detail.readingStatus ?? .unread
+        let next: LibraryReadingStatus = current == .finished ? .unread : .finished
+        readingStatusOverride = next
+        managementStore.setBookReadingStatus(next == .finished ? .finished : .unread)
+    }
+
+    private func regenerateBookCover() {
+        guard let resourceID = currentDetail.flatMap(selectedResource)?.id else {
+            showFeedback(String(localized: "management.missingSourceNode"), isError: true)
+            return
+        }
+        managementStore?.regenerateBookCover(anchoredResourceID: resourceID)
+    }
+
+    private func rescanBook() {
+        guard let sourceNodeID = currentDetail.flatMap(selectedResource)?.sourceNodeID,
+              !sourceNodeID.isEmpty else {
+            showFeedback(String(localized: "management.missingSourceNode"), isError: true)
+            return
+        }
+        managementStore?.rescanBook(sourceNodeID: sourceNodeID)
+    }
+
+    private func deleteBook() {
+        guard deletionConfirmation == currentDetail?.book.title else { return }
+        deletionConfirmation = ""
+        managementStore?.deleteBook()
+    }
+
     private func openShelfPicker() {
-        showsShelfPicker = true
+        let generation = UUID()
+        shelfRequestGeneration = generation
+        activeSheet = .shelves
         isLoadingShelves = true
         shelfError = false
         Task {
             do {
                 let loaded = try await shelfClient.fetchShelves(context: context, bookID: store.bookIDValue)
+                guard shelfRequestGeneration == generation, case .shelves? = activeSheet else { return }
                 shelves = loaded
                 selectedShelfIDs = Set(loaded.filter(\.containsWork).map(\.id))
                 isLoadingShelves = false
             } catch {
+                guard shelfRequestGeneration == generation, case .shelves? = activeSheet else { return }
                 isLoadingShelves = false
                 shelfError = true
             }
@@ -992,6 +1513,7 @@ struct WorkDetailView: View {
                 } else {
                     List(shelves) { shelf in
                         Button {
+                            guard shelf.isMembershipEditable else { return }
                             if !selectedShelfIDs.insert(shelf.id).inserted { selectedShelfIDs.remove(shelf.id) }
                         } label: {
                             HStack {
@@ -1005,7 +1527,7 @@ struct WorkDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .disabled(isSavingShelves)
+                        .disabled(isSavingShelves || !shelf.isMembershipEditable)
                     }
                 }
             }
@@ -1013,7 +1535,7 @@ struct WorkDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("common.cancel") { showsShelfPicker = false }
+                    Button("common.cancel") { activeSheet = nil }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("common.save") { saveShelves() }
@@ -1025,22 +1547,35 @@ struct WorkDetailView: View {
     }
 
     private func saveShelves() {
-        let original = Set(shelves.filter(\.containsWork).map(\.id))
+        let generation = UUID()
+        shelfRequestGeneration = generation
+        let editableShelves = shelves.filter(\.isMembershipEditable)
+        let original = Set(editableShelves.filter(\.containsWork).map(\.id))
         let additions = selectedShelfIDs.subtracting(original)
         let removals = original.subtracting(selectedShelfIDs)
         isSavingShelves = true
         Task {
             do {
                 for shelfID in additions {
-                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelfID: shelfID, add: true)
+                    guard let shelf = editableShelves.first(where: { $0.id == shelfID }) else { continue }
+                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelf: shelf, add: true)
                 }
                 for shelfID in removals {
-                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelfID: shelfID, add: false)
+                    guard let shelf = editableShelves.first(where: { $0.id == shelfID }) else { continue }
+                    try await shelfClient.updateShelf(context: context, bookID: store.bookIDValue, shelf: shelf, add: false)
                 }
-                shelves = shelves.map { ShelfOption(id: $0.id, name: $0.name, containsWork: selectedShelfIDs.contains($0.id)) }
+                let refreshed = try await shelfClient.fetchShelves(
+                    context: context,
+                    bookID: store.bookIDValue
+                )
+                guard shelfRequestGeneration == generation, case .shelves? = activeSheet else { return }
+                shelves = refreshed
+                selectedShelfIDs = Set(refreshed.filter(\.containsWork).map(\.id))
                 isSavingShelves = false
-                showsShelfPicker = false
+                activeSheet = nil
+                showFeedback(String(localized: "work.shelf.saved"), isError: false)
             } catch {
+                guard shelfRequestGeneration == generation, case .shelves? = activeSheet else { return }
                 isSavingShelves = false
                 shelfError = true
             }
@@ -1059,8 +1594,7 @@ struct WorkDetailView: View {
         prepareReader(ReaderPreparationRequest(
             context: context,
             book: detail.book,
-            resource: resource,
-            mediaKind: resource.libraryMediaKind
+            resource: resource
         ))
     }
 
@@ -1069,10 +1603,42 @@ struct WorkDetailView: View {
         requestReaderAccess(detail: detail)
     }
 
-    private func enqueueSelectedResource() {
-        guard case .ready(let detail, _) = store.state,
-              let resource = selectedResource(detail) else { return }
-        downloads.enqueue(book: detail.book, resource: resource, mediaKind: resource.libraryMediaKind)
+    private func handlePrimaryDownload(_ detail: BookDetailContent) {
+        guard let resource = selectedResource(detail) else {
+            showFeedback(String(localized: "work.download.unavailable"), isError: true)
+            return
+        }
+        if let record = downloads.record(for: resource.id) {
+            switch record.state {
+            case .queued, .downloading:
+                downloads.pause(record)
+                showFeedback(String(localized: "work.download.paused"), isError: false)
+            case .paused, .failedRetryable, .failedTerminal:
+                downloads.resume(record)
+                showFeedback(String(localized: "work.download.resumed"), isError: false)
+            case .completed:
+                if record.isVerifiedOfflineCopy {
+                    openDownloads()
+                } else {
+                    downloads.retry(record)
+                    showFeedback(String(localized: "work.download.resumed"), isError: false)
+                }
+            }
+            return
+        }
+        downloads.enqueue(book: detail.book, resource: resource)
+        showFeedback(String(localized: "work.download.queued"), isError: false)
+    }
+
+    private func downloadActionTitle(_ resource: BookResource?) -> LocalizedStringKey {
+        guard let resource, let record = downloads.record(for: resource.id) else {
+            return "work.action.download"
+        }
+        switch record.state {
+        case .queued, .downloading: return "work.download.pause"
+        case .paused, .failedRetryable, .failedTerminal: return "work.download.resume"
+        case .completed: return record.isVerifiedOfflineCopy ? "work.download.manage" : "work.download.retry"
+        }
     }
 
     private func handleDownload(_ resource: BookResource, detail: BookDetailContent) {
@@ -1083,7 +1649,7 @@ struct WorkDetailView: View {
             case .completed: break
             }
         } else {
-            downloads.enqueue(book: detail.book, resource: resource, mediaKind: resource.libraryMediaKind)
+            downloads.enqueue(book: detail.book, resource: resource)
         }
     }
 
@@ -1192,24 +1758,6 @@ private enum UnavailableWorkFeature: Identifiable {
         case .cover: "work.action.setCover.unavailable"
         case .download: "work.action.download.unavailable"
         case .readingStatus: "work.action.readingStatus.unavailable"
-        }
-    }
-}
-
-private extension LibraryMediaKind {
-    var title: LocalizedStringKey {
-        switch self {
-        case .ebook: "library.media.ebook"
-        case .comic: "library.media.comic"
-        case .audiobook: "library.media.audiobook"
-        }
-    }
-
-    var workDetailTitle: String {
-        switch self {
-        case .ebook: String(localized: "library.media.ebook")
-        case .comic: String(localized: "library.media.comic")
-        case .audiobook: String(localized: "library.media.audiobook")
         }
     }
 }

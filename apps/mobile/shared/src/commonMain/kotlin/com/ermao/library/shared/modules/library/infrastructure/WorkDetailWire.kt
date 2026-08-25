@@ -1,9 +1,7 @@
 package com.ermao.library.shared.modules.library.infrastructure
 
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.domain.Resource
-import com.ermao.library.shared.modules.library.domain.ResourceClassification
 import com.ermao.library.shared.modules.library.domain.Asset
 import kotlinx.serialization.Serializable
 
@@ -41,7 +39,7 @@ data class BookWire(
     val updatedAt: String? = null,
     val gradient: String = "",
     val resources: List<ResourceWire> = emptyList(),
-    val availableMediaKinds: List<String> = emptyList(),
+    val resourceImportSummary: ResourceImportSummaryWire = ResourceImportSummaryWire(),
     val completed: Boolean = false,
     val continueResourceId: String? = null,
     val continueResourceTitle: String? = null,
@@ -58,9 +56,7 @@ data class ResourceWire(
     val resourceIndex: Double? = null,
     val sortOrder: Int = 0,
     val format: String,
-    val mediaKind: String,
     val readerType: String,
-    val classification: ResourceClassificationWire = ResourceClassificationWire(),
     val kindleSendAvailable: Boolean = false,
     val publisher: String? = null,
     val publishedAt: String? = null,
@@ -88,15 +84,9 @@ data class ResourceWire(
 )
 
 @Serializable
-data class ResourceClassificationWire(
-    val source: String = "UNKNOWN",
-    val reason: String = "",
-    val suggestedMediaKind: String? = null,
-)
-
-@Serializable
 data class AssetWire(
     val id: String,
+    val title: String,
     val resourceId: String? = null,
     val sourceNodeId: String? = null,
     val role: String? = null,
@@ -138,7 +128,6 @@ fun BookWire.toBookDetailSummary(): BookDetailSummary {
         continueResourceId = continueResourceId,
         continueResourceProgress = continueResourceProgress,
         completed = completed,
-        availableMediaKinds = availableMediaKinds.map(::MediaKind),
         resources = resources.map(ResourceWire::toDomain),
     )
 }
@@ -159,13 +148,7 @@ fun ResourceWire.toDomain(): Resource {
         resourceIndex = resourceIndex,
         sortOrder = sortOrder,
         format = format,
-        mediaKind = MediaKind(mediaKind),
         readerType = readerType,
-        classification = ResourceClassification(
-            source = classification.source,
-            reason = classification.reason,
-            suggestedMediaKind = classification.suggestedMediaKind?.let(::MediaKind),
-        ),
         readable = readable,
         kindleSendAvailable = kindleSendAvailable,
         publisher = publisher,
@@ -197,6 +180,7 @@ fun AssetWire.toDomain(): Asset {
     require(id.isNotBlank() && sizeBytes >= 0) { "Asset identity or size is invalid" }
     return Asset(
         id = id,
+        title = title,
         resourceId = resourceId,
         sourceNodeId = sourceNodeId,
         role = role,

@@ -240,7 +240,9 @@ class WorkDetailViewModel(
     fun dismissShelfPicker() = mutableUiState.update { it.copy(isShelfPickerVisible = false, shelfErrorCode = null, shelfSaveCompleted = false) }
     fun consumeShelfSaveCompleted() = mutableUiState.update { it.copy(shelfSaveCompleted = false) }
     fun toggleShelf(shelfId: String) = mutableUiState.update { state ->
-        if (state.isSavingShelves) state else state.copy(selectedShelfIds = state.selectedShelfIds.toMutableSet().apply { if (!add(shelfId)) remove(shelfId) })
+        val shelf = state.shelves.firstOrNull { it.id == shelfId }
+        if (state.isSavingShelves || shelf?.kind != com.ermao.library.shared.modules.shelf.domain.ShelfKind.Static) state
+        else state.copy(selectedShelfIds = state.selectedShelfIds.toMutableSet().apply { if (!add(shelfId)) remove(shelfId) })
     }
 
     fun saveShelves() {
@@ -256,8 +258,9 @@ class WorkDetailViewModel(
         mutableUiState.update { it.copy(isSavingShelves = true, shelfErrorCode = null) }
         viewModelScope.launch {
             val shelfContext = ShelfRequestContext(context.profile, context.namespace)
-            val changes = additions.map { ShelfMembershipChange(bookId, it, ShelfMembership.Add) } +
-                removals.map { ShelfMembershipChange(bookId, it, ShelfMembership.Remove) }
+            val staticShelves = state.shelves.associateBy(ShelfSummary::id)
+            val changes = additions.mapNotNull { id -> staticShelves[id]?.let { ShelfMembershipChange(bookId, id, it.kind, ShelfMembership.Add) } } +
+                removals.mapNotNull { id -> staticShelves[id]?.let { ShelfMembershipChange(bookId, id, it.kind, ShelfMembership.Remove) } }
             var failure: ShelfResult.Failure? = null
             for (change in changes) {
                 when (val result = shelfRepository.updateMembership(shelfContext, change)) {

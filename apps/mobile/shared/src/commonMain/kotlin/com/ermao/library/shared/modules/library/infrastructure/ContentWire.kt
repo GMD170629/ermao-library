@@ -7,7 +7,6 @@ import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.domain.AppliedFacet
 import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -32,7 +31,6 @@ internal data class ContinueReadingWire(
     val title: String,
     val author: String? = null,
     val coverUrl: String,
-    val mediaKind: String,
     val resourceFormat: String,
     val readerType: String,
     val resumeResourceId: String? = null,
@@ -45,7 +43,6 @@ internal data class ContinueReadingWire(
 
 @Serializable
 internal data class GroupingPageWire(
-    val kind: String,
     val groups: List<GroupingWire>,
     val page: Int,
     val pageSize: Int,
@@ -77,8 +74,15 @@ data class BookSummaryWire(
     val title: String,
     val author: String? = null,
     val coverUrl: String,
-    val availableMediaKinds: List<String>,
+    val resourceImportSummary: ResourceImportSummaryWire = ResourceImportSummaryWire(),
     val progress: Double,
+)
+
+@Serializable
+data class ResourceImportSummaryWire(
+    val ready: Int = 0,
+    val pending: Int = 0,
+    val failed: Int = 0,
 )
 
 internal fun BookPageWire.toPage(): LibraryPage<BookSummary> =
@@ -111,7 +115,6 @@ private fun GroupingRepresentativeBookWire.toDomain() = BookSummary(
     title = title,
     author = author,
     coverUrl = coverUrl,
-    availableMediaKinds = emptyList(),
     progress = 0.0,
 )
 
@@ -120,7 +123,6 @@ internal fun ContinueReadingWire.toDomain(): ContinueReadingItem = ContinueReadi
     title = title,
     author = author,
     coverUrl = coverUrl,
-    mediaKind = MediaKind(mediaKind),
     resourceFormat = resourceFormat,
     readerType = readerType,
     resumeResourceId = resumeResourceId,
@@ -138,7 +140,6 @@ internal fun BookSummaryWire.toDomain(): BookSummary {
         title = title,
         author = author,
         coverUrl = coverUrl,
-        availableMediaKinds = availableMediaKinds.map(::MediaKind),
         progress = progress,
     )
 }

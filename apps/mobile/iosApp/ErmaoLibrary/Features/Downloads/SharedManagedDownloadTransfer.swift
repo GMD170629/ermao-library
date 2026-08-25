@@ -44,9 +44,18 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring, @uncheck
         let observer = SharedDownloadProgressSink { transferred, total in
             Task { await progress(ManagedDownloadProgress(receivedBytes: transferred, expectedBytes: total)) }
         }
+        let partialBytes = ((try? FileManager.default.attributesOfItem(atPath: request.destination.partialFileURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
+        let resumeBytes = partialBytes > 0 && partialBytes < expectedBytes ? partialBytes : 0
+        if resumeBytes == 0 && partialBytes > 0 { try? FileManager.default.removeItem(at: request.destination.partialFileURL) }
         let result = try await makeGateway(request.context).transfer(
             context: sharedContext(request.context),
-            request: DownloadTransferRequest(taskId: request.record.id, descriptor: descriptor, resumeFromBytes: 0),
+            request: DownloadTransferRequest(
+                taskId: request.record.id,
+                descriptor: descriptor,
+                resumeFromBytes: resumeBytes,
+                ifRangeValidator: nil,
+                preservePartialOnCancellation: true
+            ),
             sink: sink,
             progressObserver: observer
         )
@@ -112,9 +121,8 @@ private final class SharedPartialFileSink: NSObject, DownloadByteSink {
     init(record: ManagedDownloadRecord, destination: ManagedDownloadDestination) { self.record = record; self.destination = destination }
     func begin(request: DownloadSinkRequest) async throws -> DownloadByteSinkSession {
         guard request.taskId == record.id, request.resourceId == record.resourceID, request.assetId == record.assetID,
-              record.expectedBytes == Optional(request.expectedTotalBytes),
-              request.resumeFromBytes == 0 else { throw ManagedDownloadTransferError.invalidResponse }
-        return try SharedPartialFileSession(fileURL: destination.partialFileURL)
+              record.expectedBytes == Optional(request.expectedTotalBytes) else { throw ManagedDownloadTransferError.invalidResponse }
+        return try SharedPartialFileSession(fileURL: destination.partialFileURL, resumeFromBytes: request.resumeFromBytes)
     }
 }
 
@@ -122,12 +130,17 @@ private final class SharedPartialFileSession: NSObject, DownloadByteSinkSession,
     private let fileURL: URL
     private let queue = DispatchQueue(label: "com.ermao.library.download-file-sink")
     private var handle: FileHandle?
-    init(fileURL: URL) throws {
+    init(fileURL: URL, resumeFromBytes: Int64) throws {
         self.fileURL = fileURL
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil, attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        }
+        let size = (try FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+        guard size == resumeFromBytes else { throw ManagedDownloadTransferError.invalidResponse }
         handle = try FileHandle(forWritingTo: fileURL)
-        try handle?.truncate(atOffset: 0)
+        if resumeFromBytes == 0 { try handle?.truncate(atOffset: 0) }
+        else { try handle?.seekToEnd() }
     }
     func write(bytes: KotlinByteArray) async throws {
         let data = Data((0..<Int(bytes.size)).map { UInt8(bitPattern: bytes.get(index: Int32($0))) })
@@ -143,4 +156,5 @@ private final class SharedPartialFileSession: NSObject, DownloadByteSinkSession,
         }
     }
     func abort() async throws { try queue.sync { try handle?.close(); handle = nil; try? FileManager.default.removeItem(at: fileURL) } }
+    func pause() async throws { try queue.sync { try handle?.synchronize(); try handle?.close(); handle = nil } }
 }

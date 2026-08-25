@@ -1,6 +1,5 @@
 package com.ermao.library.features.content
 
-import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
@@ -32,11 +31,11 @@ class ContentModelsTest {
     @Test
     fun filterCountIncludesOnlySupportedPhaseSevenOptions() {
         val filters = WorksFilters(
-            media = setOf(MediaFilter.Ebook, MediaFilter.Audiobook),
-            reading = setOf(ReadingFilter.Reading),
+            reading = ReadingFilter.Reading,
+            downloadedOnly = true,
         )
 
-        assertEquals(3, filters.count)
+        assertEquals(2, filters.count)
     }
 
     @Test
@@ -52,7 +51,7 @@ class ContentModelsTest {
             selected = true,
         )
         val detail = BookDetailContent(
-            book = BookCard("book-1", "Title", "Author", "", listOf("EBOOK"), null),
+            book = BookCard("book-1", "Title", "Author", "", null),
             seriesId = null,
             seriesName = null,
             authorFacetId = null,
@@ -79,7 +78,7 @@ class ContentModelsTest {
             selected = true,
         )
         val content = BookDetailContent(
-            book = BookCard("book-1", "Title", "Author", "", listOf("EBOOK"), null),
+            book = BookCard("book-1", "Title", "Author", "", null),
             seriesId = null,
             seriesName = null,
             authorFacetId = null,

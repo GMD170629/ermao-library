@@ -44,15 +44,14 @@ class KtorShelfRepository(
             is ApiResult.Success -> {
                 val shelves = (result.value as? JsonObject)?.get("shelves") as? JsonArray
                     ?: return@coroutineScope protocolFailure("SHELVES_MISSING")
-                val staticShelves = shelves.mapNotNull { element ->
+                val listedShelves = shelves.mapNotNull { element ->
                     val value = element as? JsonObject ?: return@mapNotNull null
-                    val kind = value.string("kind") ?: return@mapNotNull null
-                    if (kind != "STATIC") return@mapNotNull null
+                    val kind = value.string("kind")?.toShelfKind() ?: return@mapNotNull null
                     val id = value.string("id") ?: return@mapNotNull null
                     val name = value.string("name") ?: return@mapNotNull null
-                    id to name
+                    Triple(id, name, kind)
                 }
-                val details = staticShelves.map { (id, name) ->
+                val details = listedShelves.map { (id, name, kind) ->
                     async {
                         when (val detail = request(context) { client ->
                             client.execute(
@@ -77,7 +76,7 @@ class KtorShelfRepository(
                                     ShelfSummary(
                                         id = id,
                                         name = name,
-                                        kind = ShelfKind.Static,
+                                        kind = kind,
                                         containsBook = ids.any { (it as? JsonPrimitive)?.contentOrNull == bookId },
                                     ),
                                 )
@@ -145,6 +144,13 @@ private data class BulkShelfMembershipWire(
 
 private fun JsonObject.string(name: String): String? =
     (this[name] as? JsonPrimitive)?.contentOrNull
+
+private fun String.toShelfKind(): ShelfKind? = when (this) {
+    "STATIC" -> ShelfKind.Static
+    "SMART" -> ShelfKind.Smart
+    "COLLECTION" -> ShelfKind.Collection
+    else -> null
+}
 
 private fun AppError.toShelfError(): ShelfError = ShelfError(
     kind = when (kind) {

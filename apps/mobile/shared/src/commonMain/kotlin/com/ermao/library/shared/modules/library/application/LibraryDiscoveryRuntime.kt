@@ -41,8 +41,7 @@ data class LibraryScopeSnapshot(
         query.trim(),
         if (scope == LibraryScope.Books) sort.name else "stable_name",
         if (scope == LibraryScope.Books) viewMode.name else "list",
-        if (scope == LibraryScope.Books) filters.mediaKinds.map { it.wireValue }.sorted().joinToString(",") else "",
-        if (scope == LibraryScope.Books) filters.readingStatuses.map { it.wireValue }.sorted().joinToString(",") else "",
+        if (scope == LibraryScope.Books) filters.readingStatus?.wireValue.orEmpty() else "",
         if (scope == LibraryScope.Books) filters.downloadedOnly.toString() else "false",
     ).joinToString("|")
 }

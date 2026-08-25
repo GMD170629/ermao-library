@@ -14,6 +14,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -46,12 +47,16 @@ fun WarmPageScaffold(
     actions: List<WarmPageTopBarAction> = emptyList(),
     actionContent: @Composable RowScope.() -> Unit = {},
     snackbarHost: @Composable () -> Unit = {},
+    containerColor: Color? = null,
+    topBarContainerColor: Color? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val theme = WarmPageThemeValues
+    val resolvedContainerColor = containerColor ?: theme.colors.canvas
+    val resolvedTopBarContainerColor = topBarContainerColor ?: theme.colors.canvas
     Scaffold(
         modifier = modifier,
-        containerColor = theme.colors.canvas,
+        containerColor = resolvedContainerColor,
         contentColor = theme.colors.textPrimary,
         topBar = {
             val titleContent: @Composable () -> Unit = {
@@ -84,7 +89,7 @@ fun WarmPageScaffold(
                 },
             )
             val topBarColors = TopAppBarDefaults.topAppBarColors(
-                containerColor = theme.colors.canvas,
+                containerColor = resolvedTopBarContainerColor,
                 scrolledContainerColor = theme.colors.surface,
                 navigationIconContentColor = theme.colors.textPrimary,
                 titleContentColor = theme.colors.textPrimary,

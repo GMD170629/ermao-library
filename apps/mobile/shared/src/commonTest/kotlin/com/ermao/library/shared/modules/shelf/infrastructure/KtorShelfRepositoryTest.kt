@@ -21,21 +21,24 @@ import kotlinx.serialization.json.Json
 
 class KtorShelfRepositoryTest {
     @Test
-    fun loadsOnlyStaticShelvesAndResolvesMembershipFromDetail() = runBlocking {
+    fun loadsAllShelfKindsAndResolvesMembershipFromDetail() = runBlocking {
         val harness = Harness(
             SHELVES,
             STATIC_DETAIL,
+            SMART_DETAIL,
+            COLLECTION_DETAIL,
         )
 
         val result = assertIs<ShelfResult.Content<*>>(
             harness.repository.loadShelves(context(), "book-1"),
         ).value as List<*>
-        val shelf = assertIs<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>(result.single())
+        val shelf = assertIs<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>(result.first())
 
         assertEquals("Favorites", shelf.name)
         assertEquals(true, shelf.containsBook)
+        assertEquals(listOf("Favorites", "Smart", "Collection"), result.filterIsInstance<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>().map { it.name })
         assertEquals(
-            listOf("/base/api/shelves", "/base/api/shelves/shelf-1"),
+            listOf("/base/api/shelves", "/base/api/shelves/shelf-1", "/base/api/shelves/smart-1", "/base/api/shelves/collection-1"),
             harness.requests.map(Request::path),
         )
     }
@@ -47,7 +50,7 @@ class KtorShelfRepositoryTest {
         assertIs<ShelfResult.Content<*>>(
             harness.repository.updateMembership(
                 context(),
-                ShelfMembershipChange("book-1", "shelf-1", ShelfMembership.Add),
+                ShelfMembershipChange("book-1", "shelf-1", com.ermao.library.shared.modules.shelf.domain.ShelfKind.Static, ShelfMembership.Add),
             ),
         )
 
@@ -96,7 +99,9 @@ class KtorShelfRepositoryTest {
     private data class Request(val method: HttpMethod, val path: String, val body: String)
 
     private companion object {
-        const val SHELVES = """{"ok":true,"data":{"shelves":[{"id":"shelf-1","name":"Favorites","kind":"STATIC"},{"id":"smart-1","name":"Smart","kind":"SMART"}]}}"""
+        const val SHELVES = """{"ok":true,"data":{"shelves":[{"id":"shelf-1","name":"Favorites","kind":"STATIC"},{"id":"smart-1","name":"Smart","kind":"SMART"},{"id":"collection-1","name":"Collection","kind":"COLLECTION"}]}}"""
         const val STATIC_DETAIL = """{"ok":true,"data":{"shelf":{"id":"shelf-1","name":"Favorites","kind":"STATIC","bookIds":["book-1"]}}}"""
+        const val SMART_DETAIL = """{"ok":true,"data":{"shelf":{"id":"smart-1","name":"Smart","kind":"SMART","bookIds":[]}}}"""
+        const val COLLECTION_DETAIL = """{"ok":true,"data":{"shelf":{"id":"collection-1","name":"Collection","kind":"COLLECTION","bookIds":["book-1"]}}}"""
     }
 }

@@ -31,6 +31,9 @@ import com.ermao.library.shared.modules.downloads.downloadStartEvent
 import com.ermao.library.shared.modules.downloads.downloadFailEvent
 import com.ermao.library.shared.modules.downloads.downloadCompleteEvent
 import com.ermao.library.shared.modules.downloads.downloadBytesTransferredEvent
+import com.ermao.library.shared.modules.downloads.downloadPauseEvent
+import com.ermao.library.shared.modules.downloads.downloadResumeEvent
+import com.ermao.library.shared.modules.downloads.DownloadTaskStatus
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -75,6 +78,7 @@ class DownloadActionsViewModel(
     val failureByResource: StateFlow<Map<String, String>> = mutableFailureByResource.asStateFlow()
     private val activeTransfers = mutableMapOf<String, Job>()
     private val activeReaderChecks = mutableMapOf<String, Job>()
+    private val pauseRequests = mutableSetOf<String>()
 
     init {
         viewModelScope.launch {
@@ -98,7 +102,15 @@ class DownloadActionsViewModel(
                     return@launch
                 }
             }
-            transfer(resourceId, descriptor)
+            if (!descriptor.isDownloadable) {
+                saveBootstrapFailure(resourceId, "DOWNLOAD_NOT_AVAILABLE_OFFLINE")
+                return@launch
+            }
+            val existing = sharedCatalog.listTasks(context.namespace)
+                .filter { it.descriptor.identity.resourceId == resourceId }
+                .maxByOrNull { it.transferredBytes }
+                ?.takeIf { it.status == DownloadTaskStatus.Paused }
+            transfer(resourceId, descriptor, existing)
         }
         activeTransfers[resourceId] = job
         job.invokeOnCompletion { activeTransfers.remove(resourceId, job) }
@@ -133,6 +145,7 @@ class DownloadActionsViewModel(
                     resourceId = descriptor.identity.resourceId,
                     readerType = descriptor.readerType,
                     isOnline = isOnline,
+                    isDownloadable = descriptor.isDownloadable,
                 ),
             )) {
                 is ReaderLocalArtifact -> onOutcome(decision.artifact.toReaderAccessOutcome())
@@ -158,21 +171,21 @@ class DownloadActionsViewModel(
         expectedBytes = verifiedBytes,
     )
 
-    private suspend fun transfer(resourceId: String, descriptor: DownloadDescriptor) {
+    private suspend fun transfer(resourceId: String, descriptor: DownloadDescriptor, existing: DownloadTask? = null) {
         var task: DownloadTask? = null
         var progressJob: Job? = null
         var progressUpdates: Channel<Long>? = null
         try {
-                task = DownloadTask(
+                task = existing ?: DownloadTask(
                     id = UUID.randomUUID().toString(),
                     descriptor = descriptor,
                 )
-                runtime.saveTask(task)
-                runtime.transitionTask(
-                    context.namespace,
-                    task.id,
-                    downloadStartEvent(),
-                )
+                if (existing == null) {
+                    runtime.saveTask(task)
+                    runtime.transitionTask(context.namespace, task.id, downloadStartEvent())
+                } else {
+                    runtime.transitionTask(context.namespace, task.id, downloadResumeEvent())
+                }
                 progressUpdates = Channel(Channel.CONFLATED)
                 progressJob = viewModelScope.launch {
                     var persistedBytes = 0L
@@ -188,7 +201,12 @@ class DownloadActionsViewModel(
                 }
                 when (val result = gateway.transfer(
                     context = context,
-                    request = DownloadTransferRequest(task.id, descriptor),
+                    request = DownloadTransferRequest(
+                        task.id,
+                        descriptor,
+                        resumeFromBytes = task.transferredBytes,
+                        preservePartialOnCancellation = true,
+                    ),
                     sink = sink,
                     progressObserver = DownloadProgressObserver { transferredBytes, _ ->
                         progressUpdates.trySend(transferredBytes)
@@ -223,7 +241,13 @@ class DownloadActionsViewModel(
                 progressUpdates?.close()
                 progressJob?.cancelAndJoin()
                 withContext(NonCancellable) {
-                    task?.let { sharedCatalog.deleteTask(context.namespace, it.id) }
+                    task?.let {
+                        if (pauseRequests.remove(resourceId)) {
+                            runCatching { runtime.transitionTask(context.namespace, it.id, downloadPauseEvent()) }
+                        } else {
+                            sharedCatalog.deleteTask(context.namespace, it.id)
+                        }
+                    }
                 }
                 throw cancelled
             } catch (_: Exception) {
@@ -247,6 +271,7 @@ class DownloadActionsViewModel(
     }
 
     fun cancelDownload(resourceId: String) {
+        pauseRequests += resourceId
         activeTransfers[resourceId]?.cancel()
     }
 
@@ -258,6 +283,20 @@ class DownloadActionsViewModel(
     fun removeDownload(record: AndroidDownloadRecord) {
         viewModelScope.launch {
             sharedCatalog.deleteTask(context.namespace, record.taskId)
+        }
+    }
+
+    fun removeBook(bookId: String) {
+        if (bookId.isBlank()) return
+        viewModelScope.launch {
+            val tasks = sharedCatalog.listTasks(context.namespace).filter { it.descriptor.identity.bookId == bookId }
+            tasks.forEach { task ->
+                activeTransfers[task.descriptor.identity.resourceId]?.cancelAndJoin()
+                sharedCatalog.deleteTask(context.namespace, task.id)
+            }
+            sharedCatalog.listArtifacts(context.namespace)
+                .filter { it.descriptor.identity.bookId == bookId }
+                .forEach { sharedCatalog.deleteArtifact(context.namespace, it.identity) }
         }
     }
 

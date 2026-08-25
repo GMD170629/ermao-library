@@ -21,13 +21,14 @@ protocol PrivateContentCacheClearing: Sendable {
 
 protocol ShelfClient: Sendable {
     func fetchShelves(context: ContentRequestContext, bookID: String) async throws -> [ShelfOption]
-    func updateShelf(context: ContentRequestContext, bookID: String, shelfID: String, add: Bool) async throws
+    func updateShelf(context: ContentRequestContext, bookID: String, shelf: ShelfOption, add: Bool) async throws
 }
 
 struct ShelfOption: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let containsWork: Bool
+    let isMembershipEditable: Bool
 }
 
 enum ContentClientError: Error, Equatable, Sendable {
@@ -76,12 +77,6 @@ enum OfflineFilterAvailability: Equatable, Sendable {
     case unavailable(reasonCode: String)
 }
 
-enum LibraryMediaKind: String, Codable, Hashable, Sendable {
-    case ebook = "EBOOK"
-    case comic = "COMIC"
-    case audiobook = "AUDIOBOOK"
-}
-
 enum LibraryReadingStatus: String, Codable, Hashable, Sendable {
     case unread = "UNREAD"
     case reading = "READING"
@@ -94,20 +89,25 @@ enum FacetKind: String, Codable, Hashable, Sendable {
 }
 
 struct LibraryFilters: Codable, Equatable, Hashable, Sendable {
-    var mediaKinds: Set<LibraryMediaKind> = []
-    var readingStatuses: Set<LibraryReadingStatus> = []
+    var readingStatus: LibraryReadingStatus?
     var downloadedOnly = false
 
-    var isEmpty: Bool { mediaKinds.isEmpty && readingStatuses.isEmpty && !downloadedOnly }
-    var count: Int { mediaKinds.count + readingStatuses.count + (downloadedOnly ? 1 : 0) }
+    var isEmpty: Bool { readingStatus == nil && !downloadedOnly }
+    var count: Int { (readingStatus == nil ? 0 : 1) + (downloadedOnly ? 1 : 0) }
 }
 
 struct BooksQuery: Equatable, Hashable, Sendable {
     let query: String
+    let libraryID: String?
     let sort: LibrarySort
     let filters: LibraryFilters
     let page: Int
     let pageSize: Int
+}
+
+struct LibrarySourceOption: Identifiable, Equatable, Hashable, Sendable {
+    let id: String
+    let name: String
 }
 
 struct GroupingsQuery: Equatable, Hashable, Sendable {
@@ -140,7 +140,6 @@ struct BookCard: Identifiable, Codable, Equatable, Hashable, Sendable {
     let author: String?
     let cover: CoverReference?
     let progress: Double?
-    let availableMediaKinds: [LibraryMediaKind]
 }
 
 struct ContinueReadingItem: Codable, Equatable, Sendable {
@@ -196,8 +195,6 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
     let description: String?
     let format: String
     let readerType: String
-    let mediaKind: LibraryMediaKind
-    let suggestedMediaKind: LibraryMediaKind?
     let resourceIndex: Double?
     let cover: CoverReference?
     let sizeLabel: String?
@@ -224,8 +221,6 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         description: String? = nil,
         format: String,
         readerType: String = "reflowable",
-        mediaKind: LibraryMediaKind = .ebook,
-        suggestedMediaKind: LibraryMediaKind? = nil,
         resourceIndex: Double? = nil,
         cover: CoverReference? = nil,
         sizeLabel: String?,
@@ -251,8 +246,6 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         self.description = description
         self.format = format
         self.readerType = readerType
-        self.mediaKind = mediaKind
-        self.suggestedMediaKind = suggestedMediaKind
         self.resourceIndex = resourceIndex
         self.cover = cover
         self.sizeLabel = sizeLabel
@@ -288,20 +281,6 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         return value.count >= 2 ? value : "0\(value)"
     }
 
-    var libraryMediaKind: LibraryMediaKind {
-        if let suggestedMediaKind { return suggestedMediaKind }
-        switch readerType.lowercased() {
-        case "audio": return .audiobook
-        case "comic": return .comic
-        default:
-            switch format.uppercased() {
-            case "CBZ", "CBR", "ZIP": return .comic
-            case "M4B", "MP3", "M4A", "AUDIO": return .audiobook
-            default: return .ebook
-            }
-        }
-    }
-
     var formatLabel: String { format }
     var primaryAssetID: String? {
         assets.sorted { ($0.sortOrder ?? Int.max) < ($1.sortOrder ?? Int.max) }.first?.id
@@ -324,6 +303,40 @@ struct ResourceAsset: Identifiable, Codable, Equatable, Sendable {
 struct BookResourcePage: Equatable, Sendable {
     let resources: [BookResource]
     let page: Int
+    let total: Int
+    let totalPages: Int
+}
+
+struct BookContentEntry: Identifiable, Equatable, Sendable {
+    let sourceNodeID: String
+    let parentSourceNodeID: String?
+    let name: String
+    let title: String
+    let description: String?
+    let kind: String
+    let physicalKind: String
+    let sizeBytes: Int64?
+    let hasChildren: Bool
+    let resourceID: String?
+    let representativeResourceID: String?
+    let cover: CoverReference?
+
+    var id: String { sourceNodeID }
+    var isDirectResource: Bool { resourceID?.isEmpty == false }
+    var isSourceFolder: Bool { kind == "FOLDER" && !isDirectResource }
+}
+
+struct BookContentsPage: Equatable, Sendable {
+    let bookID: String
+    let currentSourceNodeID: String?
+    let currentResourceID: String?
+    let currentNode: BookContentEntry
+    let currentResourceIDs: [String]
+    let parentSourceNodeID: String?
+    let breadcrumbs: [BookContentEntry]
+    let entries: [BookContentEntry]
+    let page: Int
+    let pageSize: Int
     let total: Int
     let totalPages: Int
 }
@@ -363,6 +376,15 @@ struct BookChapter: Identifiable, Codable, Equatable, Sendable {
         self.readingOrderPosition = readingOrderPosition
         self.state = state ?? (isCurrent ? .current : .unread)
     }
+}
+
+struct BookChapterPage: Equatable, Sendable {
+    let resourceID: String
+    let chapters: [BookChapter]
+    let page: Int
+    let pageSize: Int
+    let total: Int
+    let totalPages: Int
 }
 
 struct BookDetailContent: Codable, Equatable, Sendable {
@@ -408,6 +430,7 @@ protocol ContentClient: Sendable {
     func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard]
     func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage
     func fetchBooksResult(context: ContentRequestContext, query: BooksQuery) async throws -> ContentFetch<BookPage>
+    func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption]
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage
     func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage
@@ -419,16 +442,52 @@ protocol ContentClient: Sendable {
         page: Int,
         pageSize: Int
     ) async throws -> BookResourcePage
+    func fetchBookContents(
+        context: ContentRequestContext,
+        bookID: String,
+        sourceNodeID: String?,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookContentsPage
+    func fetchBookChapters(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookChapterPage
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data
 }
 
 extension ContentClient {
+    func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption] { [] }
+
     func fetchBookResources(
         context: ContentRequestContext,
         bookID: String,
         page: Int,
         pageSize: Int
     ) async throws -> BookResourcePage {
+        throw ContentClientError.invalidResponse
+    }
+
+    func fetchBookContents(
+        context: ContentRequestContext,
+        bookID: String,
+        sourceNodeID: String?,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookContentsPage {
+        throw ContentClientError.invalidResponse
+    }
+
+    func fetchBookChapters(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookChapterPage {
         throw ContentClientError.invalidResponse
     }
 

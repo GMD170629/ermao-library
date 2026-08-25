@@ -16,7 +16,6 @@ fun BookSummary.toCard(): BookCard = BookCard(
     title = title,
     author = author.orEmpty(),
     coverUrl = coverUrl,
-    mediaKinds = availableMediaKinds.map { it.wireValue },
     progressPercent = progress.toInt().takeIf { it > 0 },
 )
 
@@ -41,7 +40,6 @@ fun HomeSnapshot.toUiContent(): HomeContent {
                     title = it.title,
                     author = it.author.orEmpty(),
                     coverUrl = it.coverUrl,
-                    mediaKinds = listOf(it.mediaKind.wireValue),
                     progressPercent = it.progress.toInt().takeIf { percent -> percent > 0 },
                 ),
                 resourceTitle = it.resourceTitle,
@@ -77,7 +75,6 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
             title = title,
             author = author.orEmpty(),
             coverUrl = coverUrl,
-            mediaKinds = availableMediaKinds.map { it.wireValue },
             progressPercent = continueResourceProgress.toInt().takeIf { it > 0 },
         ),
         seriesId = seriesFacet?.id,
@@ -95,6 +92,7 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
 
 fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceContent(
     id = id,
+    sourceNodeId = sourceNodeId,
     title = title,
     format = format,
     readerType = readerType,
@@ -107,8 +105,7 @@ fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceC
     identifier = identifier,
     narrator = narrator,
     pageCount = pageCount,
-    metadataSource = classification.source,
-    suggestedMediaKind = classification.suggestedMediaKind?.wireValue ?: mediaKind.wireValue,
+    metadataSource = null,
     kindleSendAvailable = kindleSendAvailable,
     assets = assets.map { asset ->
         AssetContent(

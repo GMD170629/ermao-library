@@ -174,6 +174,8 @@ struct LibraryScopeState: Sendable {
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var selectedScope: LibraryScope = .books
+    @Published private(set) var libraryOptions: [LibrarySourceOption] = []
+    @Published private(set) var selectedLibraryID: String?
     @Published private(set) var cacheIssue: ContentCacheIssue?
     @Published private(set) var scopeStates: [LibraryScope: LibraryScopeState] = [
         .books: LibraryScopeState(),
@@ -221,6 +223,31 @@ final class LibraryStore: ObservableObject {
         selectedScope = scope
     }
 
+    func selectLibrary(_ libraryID: String?) {
+        guard selectedLibraryID != libraryID else { return }
+        selectedLibraryID = libraryID
+        reload()
+    }
+
+    func loadLibraryOptionsIfNeeded() {
+        guard libraryOptions.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let options = try await client.fetchLibraryOptions(context: context)
+                libraryOptions = options
+                if let selectedLibraryID, !options.contains(where: { $0.id == selectedLibraryID }) {
+                    self.selectedLibraryID = nil
+                    reload()
+                }
+            } catch ContentClientError.unauthorized {
+                onUnauthorized()
+            } catch {
+                // The unfiltered library remains usable if source labels cannot be loaded.
+            }
+        }
+    }
+
     func setQuery(_ query: String) {
         discoveryRuntime.updateQuery(scope: sharedScope(selectedScope), query: query)
         updateCurrent { $0.query = query }
@@ -265,15 +292,9 @@ final class LibraryStore: ObservableObject {
         reload()
     }
 
-    func removeMediaFilter(_ mediaKind: LibraryMediaKind) {
-        var filters = current.filters
-        filters.mediaKinds.remove(mediaKind)
-        applyFilters(filters)
-    }
-
     func removeReadingFilter(_ readingStatus: LibraryReadingStatus) {
         var filters = current.filters
-        filters.readingStatuses.remove(readingStatus)
+        if filters.readingStatus == readingStatus { filters.readingStatus = nil }
         applyFilters(filters)
     }
 
@@ -473,6 +494,7 @@ final class LibraryStore: ObservableObject {
                     context: context,
                     query: BooksQuery(
                         query: state.query,
+                        libraryID: selectedLibraryID,
                         sort: state.sort,
                         filters: state.filters,
                         page: page,
@@ -536,9 +558,8 @@ final class LibraryStore: ObservableObject {
     }
 
     private func cacheKey(scope: LibraryScope, state: LibraryScopeState, page: Int) -> String {
-        let media = state.filters.mediaKinds.map(\.rawValue).sorted().joined(separator: ",")
-        let reading = state.filters.readingStatuses.map(\.rawValue).sorted().joined(separator: ",")
-        return "library|\(scope.rawValue)|\(state.query)|\(state.sort.rawValue)|\(state.viewMode.rawValue)|\(media)|\(reading)|\(state.filters.downloadedOnly)|\(page)"
+        let reading = state.filters.readingStatus?.rawValue ?? ""
+        return "library|\(scope.rawValue)|\(selectedLibraryID ?? "all")|\(state.query)|\(state.sort.rawValue)|\(state.viewMode.rawValue)|\(reading)|\(state.filters.downloadedOnly)|\(page)"
     }
 
     private func paginationRequestKey(scope: LibraryScope, state: LibraryScopeState, page: Int) -> String {
@@ -574,14 +595,13 @@ final class LibraryStore: ObservableObject {
 
     private func sharedFilters(_ filters: LibraryFilters) -> ErmaoShared.LibraryFilters {
         ErmaoShared.PublicKt.createLibraryFilters(
-            mediaKindWireValues: filters.mediaKinds.map(\.rawValue),
-            readingStatuses: Set(filters.readingStatuses.map { status in
+            readingStatus: filters.readingStatus.map { status in
                 switch status {
                 case .unread: ErmaoShared.ReadingStatus.unread
                 case .reading: ErmaoShared.ReadingStatus.reading
                 case .finished: ErmaoShared.ReadingStatus.finished
                 }
-            })
+            }
         )
     }
 }
@@ -715,6 +735,10 @@ enum BookDetailLoadState: Sendable {
 final class BookDetailStore: ObservableObject {
     @Published private(set) var state: BookDetailLoadState = .loading
     @Published private(set) var cacheIssue: ContentCacheIssue?
+    @Published private(set) var contentsPage: BookContentsPage?
+    @Published private(set) var chapterPage: BookChapterPage?
+    @Published private(set) var isLoadingContentBrowser = false
+    @Published private(set) var contentBrowserFailed = false
     @Published private(set) var isLoadingMoreResources = false
     @Published private(set) var hasResourcePaginationError = false
     @Published private(set) var hasMoreResources = true
@@ -745,7 +769,11 @@ final class BookDetailStore: ObservableObject {
     func load(resourceID: String? = nil, showBlockingLoading: Bool = true) {
         activeResourceID = resourceID
         hasMoreResources = true
-        if showBlockingLoading || currentContent == nil { state = .loading }
+        if showBlockingLoading || currentContent == nil {
+            state = .loading
+            contentsPage = nil
+            chapterPage = nil
+        }
         let generation = UUID()
         requestGeneration = generation
         Task { [weak self] in
@@ -760,6 +788,7 @@ final class BookDetailStore: ObservableObject {
                     .flatMap { latestProgressUpdatesByResourceID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
                 state = .ready(presented, isCached: false)
+                await loadContentBrowser(for: presented, generation: generation)
             } catch {
                 guard requestGeneration == generation else { return }
                 if case ContentClientError.unauthorized = error { onUnauthorized(); return }
@@ -812,6 +841,96 @@ final class BookDetailStore: ObservableObject {
         }
     }
 
+    func openContents(_ sourceNodeID: String?) {
+        guard currentContent != nil else { return }
+        let generation = requestGeneration
+        isLoadingContentBrowser = true
+        contentBrowserFailed = false
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let page = try await client.fetchBookContents(
+                    context: context,
+                    bookID: bookID,
+                    sourceNodeID: sourceNodeID,
+                    page: 1,
+                    pageSize: 200
+                )
+                guard requestGeneration == generation else { return }
+                contentsPage = page
+                isLoadingContentBrowser = false
+            } catch {
+                guard requestGeneration == generation else { return }
+                isLoadingContentBrowser = false
+                contentBrowserFailed = true
+            }
+        }
+    }
+
+    func retryContentBrowser() {
+        guard let content = currentContent else { return }
+        if content.resources.filter({ $0.isReadable != false }).count == 1 {
+            let generation = requestGeneration
+            Task { [weak self] in
+                guard let self else { return }
+                await loadContentBrowser(for: content, generation: generation, force: true)
+            }
+        } else {
+            openContents(contentsPage?.currentSourceNodeID)
+        }
+    }
+
+    private func loadContentBrowser(
+        for content: BookDetailContent,
+        generation: UUID,
+        force: Bool = false
+    ) async {
+        let readableResources = content.resources.filter { $0.isReadable != false }
+        isLoadingContentBrowser = true
+        contentBrowserFailed = false
+        do {
+            if readableResources.count == 1, let resource = readableResources.first {
+                if !force, chapterPage?.resourceID == resource.id {
+                    isLoadingContentBrowser = false
+                    return
+                }
+                let page = try await client.fetchBookChapters(
+                    context: context,
+                    bookID: bookID,
+                    resourceID: resource.id,
+                    page: 1,
+                    pageSize: 500
+                )
+                guard requestGeneration == generation else { return }
+                chapterPage = page
+                contentsPage = nil
+                if case .ready(let current, let isCached) = state {
+                    state = .ready(current.replacingChapters(page.chapters), isCached: isCached)
+                }
+            } else {
+                if !force, contentsPage != nil {
+                    isLoadingContentBrowser = false
+                    return
+                }
+                let page = try await client.fetchBookContents(
+                    context: context,
+                    bookID: bookID,
+                    sourceNodeID: nil,
+                    page: 1,
+                    pageSize: 200
+                )
+                guard requestGeneration == generation else { return }
+                contentsPage = page
+                chapterPage = nil
+            }
+            isLoadingContentBrowser = false
+        } catch {
+            guard requestGeneration == generation else { return }
+            isLoadingContentBrowser = false
+            contentBrowserFailed = true
+        }
+    }
+
     private var currentContent: BookDetailContent? {
         guard case .ready(let content, _) = state else { return nil }
         return content
@@ -829,6 +948,21 @@ final class BookDetailStore: ObservableObject {
 }
 
 private extension BookDetailContent {
+    func replacingChapters(_ chapters: [BookChapter]) -> BookDetailContent {
+        BookDetailContent(
+            book: book,
+            description: description,
+            tags: tags,
+            seriesFacet: seriesFacet,
+            seriesIndex: seriesIndex,
+            authorFacets: authorFacets,
+            resources: resources,
+            selectedResourceID: selectedResourceID,
+            readingStatus: readingStatus,
+            chapters: chapters
+        )
+    }
+
     func appending(_ page: BookResourcePage) -> BookDetailContent {
         var seen = Set(resources.map(\.id))
         let merged = (resources + page.resources.filter { seen.insert($0.id).inserted })
@@ -859,8 +993,7 @@ private extension BookDetailContent {
             title: book.title,
             author: book.author,
             cover: book.cover,
-            progress: update.percent,
-            availableMediaKinds: book.availableMediaKinds
+            progress: update.percent
         )
         let updatedResources = resources.map { resource in
             guard resource.id == update.resourceId else { return resource }
@@ -872,8 +1005,6 @@ private extension BookDetailContent {
                 description: resource.description,
                 format: resource.format,
                 readerType: resource.readerType,
-                mediaKind: resource.mediaKind,
-                suggestedMediaKind: resource.suggestedMediaKind,
                 resourceIndex: resource.resourceIndex,
                 cover: resource.cover,
                 sizeLabel: resource.sizeLabel,
@@ -893,6 +1024,34 @@ private extension BookDetailContent {
                 assets: resource.assets
             )
         }
+        let currentChapterIndex = update.chapterTitle.flatMap { chapterTitle in
+            chapters.firstIndex { chapter in
+                chapter.title.compare(
+                    chapterTitle,
+                    options: [.caseInsensitive, .diacriticInsensitive]
+                ) == .orderedSame
+            }
+        }
+        let updatedChapters = chapters.enumerated().map { index, chapter in
+            guard let currentChapterIndex else { return chapter }
+            let state: ChapterReadingState = if index < currentChapterIndex {
+                .read
+            } else if index == currentChapterIndex {
+                .current
+            } else {
+                .unread
+            }
+            return BookChapter(
+                id: chapter.id,
+                title: chapter.title,
+                progress: state == .current ? update.percent : nil,
+                isCurrent: state == .current,
+                href: chapter.href,
+                sortOrder: chapter.sortOrder,
+                readingOrderPosition: chapter.readingOrderPosition,
+                state: state
+            )
+        }
         return BookDetailContent(
             book: updatedBook,
             description: description,
@@ -903,7 +1062,7 @@ private extension BookDetailContent {
             resources: updatedResources,
             selectedResourceID: selectedResourceID,
             readingStatus: update.percent >= 100 ? .finished : .reading,
-            chapters: chapters
+            chapters: updatedChapters
         )
     }
 }

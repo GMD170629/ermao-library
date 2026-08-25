@@ -36,6 +36,8 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,7 +69,6 @@ import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.GroupingCard
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
@@ -83,7 +84,6 @@ import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.ui.components.WarmPageActionMenu
-import com.ermao.library.ui.components.WarmPageChoice
 import com.ermao.library.ui.components.WarmPageEmptyState
 import com.ermao.library.ui.components.WarmPageErrorState
 import com.ermao.library.ui.components.WarmPageIconAction
@@ -97,7 +97,6 @@ import com.ermao.library.ui.components.WarmPagePermissionGate
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageSearchField
-import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageStaleStatus
 import com.ermao.library.ui.components.WarmPageTextAction
@@ -117,14 +116,13 @@ fun LibraryScreen(
     state: LibraryUiState,
     repository: ContentRepository,
     context: ContentRequestContext,
-    onSelectScope: (LibraryScope) -> Unit,
+    onSelectLibrary: (String?) -> Unit,
     onQueryChanged: (String) -> Unit,
     onClearQuery: () -> Unit,
     onSelectSort: (ContentSort) -> Unit,
     onSelectViewMode: (ContentViewMode) -> Unit,
     onOpenFilter: () -> Unit,
     onUpdateFilterDraft: (WorksFilters) -> Unit,
-    onRemoveMediaFilter: (MediaFilter) -> Unit,
     onRemoveReadingFilter: (ReadingFilter) -> Unit,
     onClearFilters: () -> Unit,
     onApplyFilter: () -> Unit,
@@ -193,22 +191,15 @@ fun LibraryScreen(
                     .padding(horizontal = theme.components.page.compactGutter)
                     .testTag("library-search"),
             )
-            WarmPageSegmentedControl(
-                options = LibraryScope.entries.map { scope ->
-                    WarmPageChoice(scope, stringResource(scope.labelResource))
-                },
-                selected = state.selectedScope,
-                onSelect = onSelectScope,
+            LibrarySourcePicker(
+                options = state.libraryOptions,
+                selectedLibraryId = state.selectedLibraryId,
+                onSelect = onSelectLibrary,
                 enabled = interactionsEnabled,
-                modifier = Modifier.padding(
-                    horizontal = theme.components.page.compactGutter,
-                    vertical = theme.spacing.one,
-                ),
             )
             LibraryContextRow(
                 state,
                 onOpenFilter,
-                onRemoveMediaFilter,
                 onRemoveReadingFilter,
                 filterFocusRequester,
                 interactionsEnabled,
@@ -250,15 +241,64 @@ fun LibraryScreen(
     }
 }
 
+@Composable
+private fun LibrarySourcePicker(
+    options: List<com.ermao.library.features.library.application.LibrarySourceOption>,
+    selectedLibraryId: String?,
+    onSelect: (String?) -> Unit,
+    enabled: Boolean,
+) {
+    val theme = WarmPageThemeValues
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("library-source-picker"),
+        contentPadding = PaddingValues(horizontal = theme.components.page.compactGutter),
+        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
+    ) {
+        item {
+            FilterChip(
+                selected = selectedLibraryId == null,
+                onClick = { onSelect(null) },
+                enabled = enabled,
+                label = { Text(stringResource(R.string.library_scope_works), style = theme.typography.label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = theme.colors.canvas,
+                    labelColor = theme.colors.textPrimary,
+                    selectedContainerColor = theme.colors.accentSoft,
+                    selectedLabelColor = theme.colors.actionAccent,
+                ),
+            )
+        }
+        items(options, key = { it.id }) { option ->
+            FilterChip(
+                selected = selectedLibraryId == option.id,
+                onClick = { onSelect(option.id) },
+                enabled = enabled,
+                label = {
+                    Text(
+                        option.name,
+                        style = theme.typography.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = theme.colors.canvas,
+                    labelColor = theme.colors.textPrimary,
+                    selectedContainerColor = theme.colors.accentSoft,
+                    selectedLabelColor = theme.colors.actionAccent,
+                ),
+            )
+        }
+    }
+}
+
 internal data class LibraryFilterSheetCopy(
     val title: String,
     val description: String,
     val cancelAction: String,
     val clearAction: String,
-    val mediaHeading: String,
-    val ebook: String,
-    val comic: String,
-    val audiobook: String,
     val readingHeading: String,
     val unread: String,
     val reading: String,
@@ -267,12 +307,6 @@ internal data class LibraryFilterSheetCopy(
     val downloaded: String,
     val applyAction: String,
 ) {
-    fun mediaLabel(value: MediaFilter): String = when (value) {
-        MediaFilter.Ebook -> ebook
-        MediaFilter.Comic -> comic
-        MediaFilter.Audiobook -> audiobook
-    }
-
     fun readingLabel(value: ReadingFilter): String = when (value) {
         ReadingFilter.Unread -> unread
         ReadingFilter.Reading -> reading
@@ -286,10 +320,6 @@ internal fun resolveLibraryFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFi
     description = stringResource(R.string.library_filter_draft_description),
     cancelAction = stringResource(R.string.cancel_action),
     clearAction = stringResource(R.string.clear_all_action),
-    mediaHeading = stringResource(R.string.library_filter_media),
-    ebook = stringResource(R.string.media_ebook),
-    comic = stringResource(R.string.media_comic),
-    audiobook = stringResource(R.string.media_audiobook),
     readingHeading = stringResource(R.string.library_filter_reading),
     unread = stringResource(R.string.reading_unread),
     reading = stringResource(R.string.reading_reading),
@@ -303,7 +333,6 @@ internal fun resolveLibraryFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFi
 private fun LibraryContextRow(
     state: LibraryUiState,
     onOpenFilter: () -> Unit,
-    onRemoveMediaFilter: (MediaFilter) -> Unit,
     onRemoveReadingFilter: (ReadingFilter) -> Unit,
     filterFocusRequester: FocusRequester,
     enabled: Boolean,
@@ -349,11 +378,10 @@ private fun LibraryContextRow(
                 contentPadding = PaddingValues(horizontal = theme.components.page.compactGutter),
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
             ) {
-                items(state.current.filters.media.toList(), key = MediaFilter::name) { filter ->
-                    AppliedFilterChip(stringResource(filter.labelResource)) { onRemoveMediaFilter(filter) }
-                }
-                items(state.current.filters.reading.toList(), key = ReadingFilter::name) { filter ->
-                    AppliedFilterChip(stringResource(filter.labelResource)) { onRemoveReadingFilter(filter) }
+                state.current.filters.reading?.let { filter ->
+                    item(key = filter.name) {
+                        AppliedFilterChip(stringResource(filter.labelResource)) { onRemoveReadingFilter(filter) }
+                    }
                 }
             }
         }
@@ -809,23 +837,13 @@ internal fun LibraryFilterSheetContent(
             verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
         ) {
             Text(
-                text = copy.mediaHeading,
-                style = theme.typography.headline,
-                modifier = Modifier.padding(top = theme.spacing.one),
-            )
-            MediaFilter.entries.forEach { value ->
-                FilterRow(copy.mediaLabel(value), value in filters.media) { checked ->
-                    onChange(filters.copy(media = filters.media.toggle(value, checked)))
-                }
-            }
-            Text(
                 text = copy.readingHeading,
                 style = theme.typography.headline,
                 modifier = Modifier.padding(top = theme.spacing.two),
             )
             ReadingFilter.entries.forEach { value ->
-                FilterRow(copy.readingLabel(value), value in filters.reading) { checked ->
-                    onChange(filters.copy(reading = filters.reading.toggle(value, checked)))
+                FilterRow(copy.readingLabel(value), filters.reading == value) { checked ->
+                    onChange(filters.copy(reading = if (checked) value else null))
                 }
             }
             if (offlineAvailability is OfflineFilterAvailability.Available) {
@@ -937,13 +955,6 @@ private fun FilterRow(
 
 private fun <T> Set<T>.toggle(value: T, enabled: Boolean): Set<T> = if (enabled) this + value else this - value
 
-private val LibraryScope.labelResource: Int
-    get() = when (this) {
-        LibraryScope.Books -> R.string.library_scope_works
-        LibraryScope.Series -> R.string.library_scope_series
-        LibraryScope.Authors -> R.string.library_scope_authors
-    }
-
 private val LibraryScope.searchPlaceholderResource: Int
     get() = when (this) {
         LibraryScope.Books -> R.string.library_search_works_placeholder
@@ -968,13 +979,6 @@ private val ContentSort.labelResource: Int
 
 private val ContentViewMode.labelResource: Int
     get() = if (this == ContentViewMode.Grid) R.string.library_view_grid else R.string.library_view_list
-
-private val MediaFilter.labelResource: Int
-    get() = when (this) {
-        MediaFilter.Ebook -> R.string.media_ebook
-        MediaFilter.Comic -> R.string.media_comic
-        MediaFilter.Audiobook -> R.string.media_audiobook
-    }
 
 private val ReadingFilter.labelResource: Int
     get() = when (this) {

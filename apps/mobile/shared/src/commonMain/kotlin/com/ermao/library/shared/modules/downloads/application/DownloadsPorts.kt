@@ -52,6 +52,7 @@ interface DownloadByteSinkSession {
     suspend fun write(bytes: ByteArray)
     suspend fun commit(expectedTotalBytes: Long): String
     suspend fun abort()
+    suspend fun pause() = abort()
 }
 
 data class DownloadBootstrap(
@@ -74,9 +75,12 @@ data class DownloadTransferRequest(
     val taskId: String,
     val descriptor: DownloadDescriptor,
     val resumeFromBytes: Long = 0,
+    val ifRangeValidator: String? = null,
+    val preservePartialOnCancellation: Boolean = false,
 ) {
     init {
         require(taskId.isNotBlank())
+        require(descriptor.isDownloadable) { "Download descriptor is streaming-only" }
         require(resumeFromBytes in 0 until descriptor.source.totalBytes)
     }
 }

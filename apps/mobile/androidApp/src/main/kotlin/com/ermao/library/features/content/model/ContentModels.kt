@@ -13,19 +13,15 @@ enum class ContentSort { RecentAdded, RecentReading, Title, Author }
 enum class ContentViewMode { Grid, List }
 
 @Serializable
-enum class MediaFilter { Ebook, Comic, Audiobook }
-
-@Serializable
 enum class ReadingFilter { Unread, Reading, Finished }
 
 @Immutable
 @Serializable
 data class WorksFilters(
-    val media: Set<MediaFilter> = emptySet(),
-    val reading: Set<ReadingFilter> = emptySet(),
+    val reading: ReadingFilter? = null,
     val downloadedOnly: Boolean = false,
 ) {
-    val count: Int get() = media.size + reading.size + if (downloadedOnly) 1 else 0
+    val count: Int get() = (if (reading == null) 0 else 1) + if (downloadedOnly) 1 else 0
 }
 
 @Immutable
@@ -35,7 +31,6 @@ data class BookCard(
     val title: String,
     val author: String,
     val coverUrl: String,
-    val mediaKinds: List<String>,
     val progressPercent: Int?,
 )
 
@@ -73,6 +68,7 @@ enum class ContentFreshness { Fresh, Stale }
 @Serializable
 data class ResourceContent(
     val id: String,
+    val sourceNodeId: String = "",
     val title: String,
     val format: String,
     val readerType: String = "reflowable",
@@ -86,7 +82,6 @@ data class ResourceContent(
     val narrator: String? = null,
     val pageCount: Int? = null,
     val metadataSource: String? = null,
-    val suggestedMediaKind: String? = null,
     val kindleSendAvailable: Boolean = false,
     val assets: List<AssetContent> = emptyList(),
     val coverUrl: String = "",

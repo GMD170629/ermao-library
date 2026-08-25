@@ -62,14 +62,13 @@ final class ContentStoreTests: XCTestCase {
         )
 
         store.setQuery("three body")
-        store.applyFilters(LibraryFilters(mediaKinds: [.ebook], readingStatuses: [.reading]))
+        store.applyFilters(LibraryFilters(readingStatus: .reading))
         store.selectScope(.series)
         store.setQuery("trilogy")
         store.selectScope(.books)
 
         XCTAssertEqual(store.current.query, "three body")
-        XCTAssertEqual(store.current.filters.mediaKinds, [.ebook])
-        XCTAssertEqual(store.current.filters.readingStatuses, [.reading])
+        XCTAssertEqual(store.current.filters.readingStatus, .reading)
         store.selectScope(.series)
         XCTAssertEqual(store.current.query, "trilogy")
         XCTAssertTrue(store.current.filters.isEmpty)
@@ -101,7 +100,7 @@ final class ContentStoreTests: XCTestCase {
 
         store.selectScope(.series)
         store.rememberAnchor("group:middle")
-        store.selectScope(.works)
+        store.selectScope(.books)
         store.selectScope(.series)
 
         XCTAssertEqual(store.current.scrollAnchor, "group:middle")
@@ -146,7 +145,7 @@ final class ContentStoreTests: XCTestCase {
         store.reload()
         try await waitUntil { await client.booksRequestCount == 1 }
 
-        store.applyFilters(LibraryFilters(mediaKinds: [.ebook]))
+        store.applyFilters(LibraryFilters(readingStatus: .reading))
         try await waitUntil { await client.booksRequestCount == 2 }
         try await waitUntil {
             guard case .ready(let items, _, _, _) = store.current.results else { return false }
@@ -318,6 +317,50 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertNil(removed)
     }
 
+    func testSingleReadableResourceLoadsChaptersInsteadOfBookContents() async throws {
+        let client = DetailBrowserContentClient(resourceCount: 1)
+        let store = BookDetailStore(
+            context: contentContext,
+            client: client,
+            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
+            bookID: "browser-work",
+            onUnauthorized: {}
+        )
+
+        store.load()
+        try await waitUntil { store.chapterPage?.chapters.map(\.title) == ["Opening", "Arrival"] }
+
+        XCTAssertNil(store.contentsPage)
+        let chapterRequestCount = await client.chapterRequestCount
+        let contentsRequestCount = await client.contentsRequestCount
+        XCTAssertEqual(chapterRequestCount, 1)
+        XCTAssertEqual(contentsRequestCount, 0)
+        guard case .ready(let content, _) = store.state else {
+            return XCTFail("Expected the single-resource detail to remain ready")
+        }
+        XCTAssertEqual(content.chapters.map(\.state), [.read, .current])
+    }
+
+    func testMultipleReadableResourcesLoadsHierarchicalBookContents() async throws {
+        let client = DetailBrowserContentClient(resourceCount: 2)
+        let store = BookDetailStore(
+            context: contentContext,
+            client: client,
+            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
+            bookID: "browser-work",
+            onUnauthorized: {}
+        )
+
+        store.load()
+        try await waitUntil { store.contentsPage?.entries.map(\.title) == ["Volume One"] }
+
+        XCTAssertNil(store.chapterPage)
+        let contentsRequestCount = await client.contentsRequestCount
+        let chapterRequestCount = await client.chapterRequestCount
+        XCTAssertEqual(contentsRequestCount, 1)
+        XCTAssertEqual(chapterRequestCount, 0)
+    }
+
     func testReaderProgressImmediatelyUpdatesVisibleWorkDetailAndChapterStates() async throws {
         let initial = BookDetailContent(
             book: work("reader-work"),
@@ -325,8 +368,6 @@ final class ContentStoreTests: XCTestCase {
             tags: [],
             seriesFacet: nil,
             authorFacets: [],
-            selectedResourceID: "resource-1",
-            readingStatus: .unread,
             resources: [
                 BookResource(
                     id: "resource-1",
@@ -351,6 +392,8 @@ final class ContentStoreTests: XCTestCase {
                     isSelected: false
                 )
             ],
+            selectedResourceID: "resource-1",
+            readingStatus: .unread,
             chapters: [
                 BookChapter(id: "chapter-1", title: "Chapter 1", progress: nil, isCurrent: false, href: "Text/all.xhtml#one", sortOrder: 1),
                 BookChapter(id: "chapter-2", title: "Chapter 2", progress: nil, isCurrent: false, href: "Text/all.xhtml#two", sortOrder: 2),
@@ -437,8 +480,6 @@ final class ContentStoreTests: XCTestCase {
             tags: [],
             seriesFacet: nil,
             authorFacets: [],
-            selectedResourceID: "resource-position",
-            readingStatus: .unread,
             resources: [
                 BookResource(
                     id: "resource-position",
@@ -452,6 +493,8 @@ final class ContentStoreTests: XCTestCase {
                     isSelected: true
                 )
             ],
+            selectedResourceID: "resource-position",
+            readingStatus: .unread,
             chapters: [
                 BookChapter(
                     id: "chapter-1",
@@ -742,13 +785,143 @@ private actor ProgressContentClient: ContentClient {
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
 }
 
+private actor DetailBrowserContentClient: ContentClient {
+    let resourceCount: Int
+    private(set) var contentsRequestCount = 0
+    private(set) var chapterRequestCount = 0
+
+    init(resourceCount: Int) {
+        self.resourceCount = resourceCount
+    }
+
+    func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? { nil }
+    func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+    func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+    func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage {
+        BookPage(books: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
+        GroupingPage(groups: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage {
+        FacetPage(
+            facet: FacetIdentity(id: query.facetID, kind: query.kind, name: "Facet"),
+            books: [],
+            page: 1,
+            pageSize: query.pageSize,
+            total: 0,
+            totalPages: 1
+        )
+    }
+    func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent {
+        let resources = (1...resourceCount).map { index in
+            BookResource(
+                id: "resource-\(index)",
+                bookID: query.bookID,
+                sourceNodeID: "node-\(index)",
+                title: "Volume \(index)",
+                format: "EPUB",
+                sizeLabel: nil,
+                progress: index == 1 ? 40 : nil,
+                isReadable: true,
+                isSelected: index == 1
+            )
+        }
+        return BookDetailContent(
+            book: work(query.bookID),
+            description: "Description",
+            tags: ["Science Fiction"],
+            seriesFacet: FacetIdentity(id: "series-1", kind: .series, name: "Hainish Cycle"),
+            authorFacets: [FacetIdentity(id: "author-1", kind: .author, name: "Ursula K. Le Guin")],
+            resources: resources,
+            selectedResourceID: resources.first?.id,
+            readingStatus: .reading,
+            chapters: []
+        )
+    }
+    func fetchBookContents(
+        context: ContentRequestContext,
+        bookID: String,
+        sourceNodeID: String?,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookContentsPage {
+        contentsRequestCount += 1
+        let root = contentEntry(id: "root", title: "Browser Work", kind: "FOLDER", hasChildren: true)
+        let volume = contentEntry(
+            id: "node-1",
+            title: "Volume One",
+            kind: "FILE",
+            hasChildren: false,
+            resourceID: "resource-1"
+        )
+        return BookContentsPage(
+            bookID: bookID,
+            currentSourceNodeID: nil,
+            currentResourceID: nil,
+            currentNode: root,
+            currentResourceIDs: [],
+            parentSourceNodeID: nil,
+            breadcrumbs: [],
+            entries: [volume],
+            page: page,
+            pageSize: pageSize,
+            total: 1,
+            totalPages: 1
+        )
+    }
+    func fetchBookChapters(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookChapterPage {
+        chapterRequestCount += 1
+        return BookChapterPage(
+            resourceID: resourceID,
+            chapters: [
+                BookChapter(id: "chapter-1", title: "Opening", progress: nil, isCurrent: false, sortOrder: 1, state: .read),
+                BookChapter(id: "chapter-2", title: "Arrival", progress: 40, isCurrent: true, sortOrder: 2, state: .current),
+            ],
+            page: page,
+            pageSize: pageSize,
+            total: 2,
+            totalPages: 1
+        )
+    }
+    func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
+
+    private func contentEntry(
+        id: String,
+        title: String,
+        kind: String,
+        hasChildren: Bool,
+        resourceID: String? = nil
+    ) -> BookContentEntry {
+        BookContentEntry(
+            sourceNodeID: id,
+            parentSourceNodeID: nil,
+            name: title,
+            title: title,
+            description: nil,
+            kind: kind,
+            physicalKind: kind == "FOLDER" ? "DIRECTORY" : "FILE",
+            sizeBytes: nil,
+            hasChildren: hasChildren,
+            resourceID: resourceID,
+            representativeResourceID: resourceID,
+            cover: nil
+        )
+    }
+}
+
 private func work(_ id: String) -> BookCard {
     BookCard(
         id: id,
         title: "Title \(id)",
         author: "Author",
         cover: nil,
-        progress: nil,
-        availableMediaKinds: [.ebook]
+        progress: nil
     )
 }

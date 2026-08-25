@@ -29,7 +29,7 @@ data class BookDetail(
 )
 
 data class ActiveMedia(
-    val key: MediaKind,
+    val key: String,
     val formatLabel: String,
     val selectedResourceId: String,
     val selectedResourceTitle: String,

@@ -28,6 +28,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -84,6 +85,29 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
+    fun imageDirectoryIsOnlineOnlyAndNeverAdvertisesAnArchiveDownload() = runBlocking {
+        val imageDirectory = COMIC_BOOTSTRAP
+            .replace("\"sourceFormat\":\"cbz\"", "\"sourceFormat\":\"image_dir\"")
+            .replace("\"format\":\"cbz\"", "\"format\":\"image_dir\"")
+            .replace("application/vnd.comicbook+zip", "image/png")
+            .replace(
+                "\"imageVariants\":[\"original\",\"data-saver\"],\"downloadArtifact\":{\"url\":\"/api/reader/v4/resources/resource/comic/archive\",\"sourceFormat\":\"image_dir\",\"mimeType\":\"image/png\",\"sizeBytes\":12}",
+                "\"imageVariants\":[\"original\",\"data-saver\"]",
+            )
+        val gateway = gateway {
+            respond(imageDirectory, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+
+        assertFalse(descriptor.isDownloadable)
+        assertEquals("image_dir", descriptor.format)
+        assertEquals("image/png", descriptor.source.mimeType)
+        Unit
+    }
+
+    @Test
     fun transferStreamsChunksToSinkAndValidatesFull200() = runBlocking {
         var requestCount = 0
         val gateway = gateway {
@@ -132,6 +156,7 @@ class KtorDownloadsGatewayTest {
                 respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             } else {
                 assertEquals("bytes=2-", request.headers[HttpHeaders.Range])
+                assertEquals("\"revision-1\"", request.headers[HttpHeaders.IfRange])
                 respond(
                     "cdef",
                     HttpStatusCode.PartialContent,
@@ -143,7 +168,11 @@ class KtorDownloadsGatewayTest {
             }
         }
         val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
-        val result = gateway.transfer(context, DownloadTransferRequest("task", descriptor, 2), RecordingSink())
+        val result = gateway.transfer(
+            context,
+            DownloadTransferRequest("task", descriptor, 2, ifRangeValidator = "\"revision-1\""),
+            RecordingSink(),
+        )
         assertIs<DownloadTransferResult.Success>(result)
         Unit
     }
@@ -233,7 +262,7 @@ class KtorDownloadsGatewayTest {
     }
 
     private companion object {
-        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"book","title":"Book","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.5,"sortOrder":2,"format":"epub","readerType":"reflowable"},"availableResources":[],"assets":[{"id":"asset","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":6,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{}}}"""
-        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"book","title":"Comic","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"cbz","readerType":"comic"},"availableResources":[],"assets":[{"id":"asset","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{},"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
+        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"book","title":"Book","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.5,"sortOrder":2,"format":"epub","readerType":"reflowable"},"availableResources":[],"assets":[{"id":"asset","title":"Resource","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":6,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{}}}"""
+        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"book","title":"Comic","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"cbz","readerType":"comic"},"availableResources":[],"assets":[{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{},"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
     }
 }

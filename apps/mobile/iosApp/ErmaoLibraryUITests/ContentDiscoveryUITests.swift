@@ -6,6 +6,38 @@ final class ContentDiscoveryUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testWorkDetailQuickActionsOpenStableInteractionSurfaces() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        let libraryTab = app.tabBars.buttons["Library"]
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
+        libraryTab.tap()
+        let work = app.buttons["work.pride-and-prejudice"]
+        XCTAssertTrue(work.waitForExistence(timeout: 10))
+        work.tap()
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
+
+        XCTAssertTrue(app.buttons["work.download.action"].isHittable)
+        XCTAssertTrue(app.buttons["work.readingStatus.action"].isHittable)
+
+        app.buttons["work.shelf.action"].tap()
+        XCTAssertTrue(app.navigationBars["Add to Shelf"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Cancel"].isHittable)
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 5))
+
+        let moreMenu = app.buttons["work.book.moreMenu"]
+        XCTAssertTrue(moreMenu.isHittable)
+        moreMenu.tap()
+        XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 2))
+        app.buttons["Edit"].tap()
+        XCTAssertTrue(app.navigationBars["Edit Book"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Close"].isHittable)
+    }
+
     func testLibraryWorkDetailAndFacetJourney() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
@@ -26,12 +58,22 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(readerButton.exists)
         XCTAssertTrue(readerButton.isEnabled)
 
-        XCTAssertTrue(app.staticTexts["About This Work"].exists)
+        XCTAssertFalse(app.staticTexts["About This Work"].exists)
+        XCTAssertTrue(app.staticTexts["Classic"].exists)
+        XCTAssertTrue(app.staticTexts["Romance"].exists)
+        XCTAssertTrue(app.buttons["work.download.action"].isHittable)
+        XCTAssertTrue(app.buttons["work.readingStatus.action"].isHittable)
+        XCTAssertTrue(app.buttons["work.shelf.action"].isHittable)
+        let moreMenu = app.buttons["work.book.moreMenu"]
+        XCTAssertTrue(moreMenu.isHittable)
+        moreMenu.tap()
+        XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 2))
+        app.tap()
+        app.scrollViews["work.detail.screen"].swipeUp()
         XCTAssertTrue(app.staticTexts["Contents"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Chapter 1"].exists)
         XCTAssertTrue(app.staticTexts["Currently Reading"].exists)
         XCTAssertTrue(app.staticTexts["Unread"].exists)
-        XCTAssertTrue(app.buttons["Add to Shelf"].exists)
         attachScreenshot(named: "work-detail-final-single-resource", app: app)
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -69,7 +111,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         attachScreenshot(named: "work-detail-direct-chapters", app: app)
     }
 
-    func testMultiResourceBookUsesSelectableCoverGrid() throws {
+    func testMultiResourceBookUsesHierarchicalContentList() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
@@ -82,17 +124,19 @@ final class ContentDiscoveryUITests: XCTestCase {
         work.tap()
 
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["All Resources"].exists)
+        XCTAssertTrue(app.staticTexts["Book Contents"].waitForExistence(timeout: 5))
         let resourceOne = app.otherElements["work.resource.resource-1"]
-        let resourceTwo = app.otherElements["work.resource.resource-2"]
         XCTAssertTrue(resourceOne.waitForExistence(timeout: 5))
+        let folder = app.buttons["work.contents.folder.winter-cycle"]
+        XCTAssertTrue(folder.exists)
+        folder.tap()
+
+        let resourceTwo = app.otherElements["work.resource.resource-2"]
+        XCTAssertTrue(resourceTwo.waitForExistence(timeout: 5))
         XCTAssertTrue(resourceTwo.exists)
         XCTAssertTrue(app.otherElements["work.resource.resource-3"].exists)
-        XCTAssertEqual(resourceOne.value as? String, "34% read")
 
-        resourceTwo.tap()
-        XCTAssertTrue(resourceTwo.isSelected)
-        attachScreenshot(named: "work-detail-final-resource-rail", app: app)
+        attachScreenshot(named: "work-detail-hierarchical-contents", app: app)
     }
 
     private func attachScreenshot(named name: String, app: XCUIApplication) {

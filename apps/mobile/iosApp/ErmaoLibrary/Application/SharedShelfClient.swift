@@ -16,18 +16,25 @@ actor SharedShelfClient: ShelfClient {
         if let content = result as? ErmaoShared.ShelfResultContent<NSArray> {
             return (content.value ?? []).compactMap { value -> ShelfOption? in
                 guard let shelf = value as? ErmaoShared.ShelfSummary else { return nil }
-                return ShelfOption(id: shelf.id, name: shelf.name, containsWork: shelf.containsBook)
+                return ShelfOption(
+                    id: shelf.id,
+                    name: shelf.name,
+                    containsWork: shelf.containsBook,
+                    isMembershipEditable: shelf.kind.name == "Static"
+                )
             }
         }
         throw mapFailure(result)
     }
 
-    func updateShelf(context: ContentRequestContext, bookID: String, shelfID: String, add: Bool) async throws {
+    func updateShelf(context: ContentRequestContext, bookID: String, shelf: ShelfOption, add: Bool) async throws {
+        guard shelf.isMembershipEditable else { throw ContentClientError.invalidResponse }
         let result = try await repository.updateMembership(
             context: sharedContext(context),
             change: ErmaoShared.ShelfMembershipChange(
                 bookId: bookID,
-                shelfId: shelfID,
+                shelfId: shelf.id,
+                shelfKind: .static_,
                 membership: add ? .add : .remove
             )
         )

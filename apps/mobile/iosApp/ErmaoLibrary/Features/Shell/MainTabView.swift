@@ -142,6 +142,7 @@ struct MainTabView: View {
     @State private var expandedLibraryWorkID: String?
     @State private var readerLaunch: IosReaderLaunchRequest?
     @State private var readerPreparation: ReaderPreparationRequest?
+    @State private var didOpenUITestRoute = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var selection: Binding<String> {
@@ -194,6 +195,7 @@ struct MainTabView: View {
         .task(id: contentContext?.namespaceKey) {
             if let contentContext {
                 downloads.activate(context: contentContext)
+                openInitialUITestRouteIfNeeded()
             }
         }
     }
@@ -213,6 +215,16 @@ struct MainTabView: View {
             baseURL: profile.baseURL,
             acceptsInsecureTLS: profile.tlsMode == .insecureSkipAllValidation
         )
+    }
+
+    private func openInitialUITestRouteIfNeeded() {
+        guard !didOpenUITestRoute,
+              ProcessInfo.processInfo.environment[ContentUITestFixture.launchEnvironmentKey] == "1",
+              let bookID = ProcessInfo.processInfo.environment["ERMAO_UI_TEST_INITIAL_WORK_ID"],
+              !bookID.isEmpty
+        else { return }
+        didOpenUITestRoute = true
+        open(.work(bookID: bookID), in: .home)
     }
 
     private func tabRoot(presentation: TabPresentation, context: ContentRequestContext) -> some View {
@@ -498,7 +510,6 @@ private extension AdministrativeSettingsRoute {
         case .categoryGovernance: "category-governance"
         case .metadataProviders: "metadata-providers"
         case .metadataProvider(let providerID): "metadata-provider:\(providerID)"
-        case .metadataPipeline: "metadata-pipeline"
         case .opds: "opds"
         case .backups: "backups"
         case .workDetailOrder: "work-detail-order"

@@ -2,7 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 enum WorkManagementTask: String, Identifiable {
-    case addSeries, editWork, recognize, cover, editResource, mediaKind, kindle
+    case addSeries, editWork, recognize, cover, editResource, kindle
 
     var id: String { rawValue }
 }
@@ -36,12 +36,11 @@ struct WorkManagementView: View {
     @State private var selectedMetadataFields: Set<ErmaoShared.MetadataField> = []
     @State private var appliesMetadataToAllResources = true
     @State private var managedResourceID: String?
-    @State private var selectedKind: ErmaoShared.ManagedMediaKind = .ebook
     @State private var selectedReadingStatus: ErmaoShared.ManagedReadingStatus = .unread
     @State private var selectedKindleAssetID: String?
     @State private var confirmsCoverRegeneration = false
 
-    private enum Page { case addSeries, editWork, editResource, metadata, cover, readingStatus, mediaKind, kindle }
+    private enum Page { case addSeries, editWork, editResource, metadata, cover, readingStatus, kindle }
 
     private var activeResource: BookResource? {
         managedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
@@ -58,7 +57,6 @@ struct WorkManagementView: View {
         case .recognize: .metadata
         case .cover: .cover
         case .editResource: .editResource
-        case .mediaKind: .mediaKind
         case .kindle: .kindle
         }
     }
@@ -70,7 +68,6 @@ struct WorkManagementView: View {
         case .recognize: "management.metadata"
         case .cover: "management.cover"
         case .editResource: "management.editVolume"
-        case .mediaKind: "management.mediaKind"
         case .kindle: "management.kindle"
         }
     }
@@ -87,7 +84,6 @@ struct WorkManagementView: View {
             case .metadata: metadata
             case .cover: coverManagement
             case .readingStatus: readingStatus
-            case .mediaKind: mediaKind
             case .kindle: kindle
             }
         }
@@ -104,6 +100,7 @@ struct WorkManagementView: View {
             managedResourceID = resource?.id
             page = initialPage
             prepareFields()
+            if task == .recognize { store.loadMetadata() }
         }
         .onChange(of: store.metadataProviders.map(\.id)) { ids in
             if providerID.isEmpty { providerID = ids.first ?? "" }
@@ -138,7 +135,8 @@ struct WorkManagementView: View {
                     description: detail.description ?? "",
                     seriesName: series,
                     seriesIndex: Double(seriesIndex),
-                    tags: detail.tags
+                    tags: detail.tags,
+                    originalTags: detail.tags
                 )
             }
             .disabled(series.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -161,7 +159,8 @@ struct WorkManagementView: View {
                     description: description,
                     seriesName: series.nilIfBlank,
                     seriesIndex: Double(seriesIndex),
-                    tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                    tags: tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) },
+                    originalTags: detail.tags
                 )
             }
             .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -266,27 +265,6 @@ struct WorkManagementView: View {
         }
     }
 
-    @ViewBuilder private var mediaKind: some View {
-        if let resource = activeResource {
-            Section {
-                Picker("management.mediaKind", selection: $selectedKind) {
-                    Text("management.ebook").tag(ErmaoShared.ManagedMediaKind.ebook)
-                    Text("management.comic").tag(ErmaoShared.ManagedMediaKind.comic)
-                    Text("management.audiobook").tag(ErmaoShared.ManagedMediaKind.audiobook)
-                }
-                .pickerStyle(.inline)
-                Button("management.mediaKind") {
-                    store.reclassify(
-                        resource,
-                        kind: selectedKind
-                    )
-                }
-                .disabled(hasActiveDownload || selectedKind == sharedKind(activeResource?.libraryMediaKind ?? .ebook))
-                if hasActiveDownload { Text("management.activeDownloadBlocked") }
-            }
-        }
-    }
-
     private var kindle: some View {
         Section {
             if let settings = store.kindleSettings, kindleReady(settings) {
@@ -343,10 +321,6 @@ struct WorkManagementView: View {
         narrator = activeResource?.narrator ?? ""
         query = detail.book.title
         providerID = store.metadataProviders.first?.id ?? ""
-    }
-
-    private func sharedKind(_ kind: LibraryMediaKind) -> ErmaoShared.ManagedMediaKind {
-        switch kind { case .ebook: .ebook; case .comic: .comic; case .audiobook: .audiobook }
     }
 
     private func kindleAsset(_ asset: ResourceAsset) -> Bool {

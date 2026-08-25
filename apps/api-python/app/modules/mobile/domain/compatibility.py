@@ -27,7 +27,7 @@ class MobileCapabilities:
     media_range: Literal[True]
     managed_offline_downloads: Literal[True]
     book_resource_asset: Literal[True]
-    book_detail_management: Literal[False]
+    book_detail_management: Literal[True]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +65,6 @@ def mobile_compatibility(
             media_range=True,
             managed_offline_downloads=True,
             book_resource_asset=True,
-            book_detail_management=False,
+            book_detail_management=True,
         ),
     )

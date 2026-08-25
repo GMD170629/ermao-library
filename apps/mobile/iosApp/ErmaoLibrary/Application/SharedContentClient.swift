@@ -19,8 +19,7 @@ actor SharedContentClient: ContentClient {
                 title: item.title,
                 author: item.author,
                 cover: cover(item.coverUrl),
-                progress: item.progress,
-                availableMediaKinds: [mapMediaKind(item.mediaKind)].compactMap { $0 }
+                progress: item.progress
             ),
             resourceTitle: item.resourceTitle,
             positionLabel: item.narrator ?? item.chapter
@@ -57,6 +56,12 @@ actor SharedContentClient: ContentClient {
             provenance: payload.provenance,
             isStale: payload.isStale
         )
+    }
+
+    func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption] {
+        let result = try await repository.loadLibraryOptions(context: sharedContext(context))
+        let values: [ErmaoShared.LibraryOption] = try contentValue(result)
+        return values.map { LibrarySourceOption(id: $0.id, name: $0.name) }
     }
 
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
@@ -130,8 +135,7 @@ actor SharedContentClient: ContentClient {
                 title: value.title,
                 author: value.author,
                 cover: cover(value.coverUrl),
-                progress: selectedProgress,
-                availableMediaKinds: value.availableMediaKinds.compactMap(mapMediaKind)
+                progress: selectedProgress
             ),
             description: value.description_,
             tags: value.tags,
@@ -159,6 +163,96 @@ actor SharedContentClient: ContentClient {
         )
     }
 
+    func fetchBookContents(
+        context: ContentRequestContext,
+        bookID: String,
+        sourceNodeID: String?,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookContentsPage {
+        let result = try await repository.loadBookContents(
+            context: sharedContext(context),
+            query: ErmaoShared.BookContentsQuery(
+                bookId: bookID,
+                sourceNodeId: sourceNodeID,
+                page: Int32(page),
+                pageSize: Int32(pageSize)
+            )
+        )
+        let value: ErmaoShared.BookContentsPage = try contentValue(result)
+        return BookContentsPage(
+            bookID: value.bookId,
+            currentSourceNodeID: value.currentSourceNodeId,
+            currentResourceID: value.currentResourceId,
+            currentNode: mapContentEntry(value.currentNode),
+            currentResourceIDs: value.currentResourceIds,
+            parentSourceNodeID: value.parentSourceNodeId,
+            breadcrumbs: value.breadcrumbs.map(mapContentEntry),
+            entries: value.entries.map(mapContentEntry),
+            page: Int(value.page),
+            pageSize: Int(value.pageSize),
+            total: Int(value.total),
+            totalPages: Int(value.totalPages)
+        )
+    }
+
+    func fetchBookChapters(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookChapterPage {
+        let result = try await repository.loadResourceReadingUnits(
+            context: sharedContext(context),
+            query: ErmaoShared.ResourceReadingUnitsQuery(
+                bookId: bookID,
+                resourceId: resourceID,
+                page: Int32(page),
+                pageSize: Int32(pageSize)
+            )
+        )
+        let value: ErmaoShared.ResourceReadingUnitsPage = try contentValue(result)
+        let currentSortOrder = value.currentChapterSortOrder?.intValue
+        let currentIndex = value.currentChapterIndex?.intValue
+        let chapters = value.units.enumerated().compactMap { index, unit -> BookChapter? in
+            guard unit.unitType.lowercased() == "chapter" else { return nil }
+            let sortOrder = Int(unit.sortOrder)
+            let state: ChapterReadingState
+            if sortOrder == currentSortOrder || index == currentIndex {
+                state = .current
+            } else if let currentSortOrder, sortOrder < currentSortOrder {
+                state = .read
+            } else if let currentIndex, index < currentIndex {
+                state = .read
+            } else {
+                state = .unread
+            }
+            return BookChapter(
+                id: unit.id,
+                title: unit.title ?? String(
+                    format: String(localized: "work.chapter.fallback.format"),
+                    locale: .current,
+                    (page - 1) * pageSize + index + 1
+                ),
+                progress: state == .current ? value.progress : nil,
+                isCurrent: state == .current,
+                href: unit.href,
+                sortOrder: sortOrder,
+                readingOrderPosition: unit.metadata.readingOrderPosition?.intValue,
+                state: state
+            )
+        }
+        return BookChapterPage(
+            resourceID: value.resourceId,
+            chapters: chapters,
+            page: Int(value.page),
+            pageSize: Int(value.pageSize),
+            total: Int(value.total),
+            totalPages: Int(value.totalPages)
+        )
+    }
+
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data {
         let result = try await repository.loadCover(context: sharedContext(context), apiPath: reference.path, etag: nil)
         let value: ErmaoShared.AuthenticatedCover = try contentValue(result)
@@ -175,10 +269,9 @@ actor SharedContentClient: ContentClient {
 
     private func sharedBooksQuery(_ query: BooksQuery) -> ErmaoShared.BooksQuery {
         ErmaoShared.BooksQuery(
-            query: query.query, sort: sharedSort(query.sort), viewMode: .grid,
+            query: query.query, libraryId: query.libraryID, sort: sharedSort(query.sort), viewMode: .grid,
             filters: ErmaoShared.PublicKt.createLibraryFilters(
-                mediaKindWireValues: query.filters.mediaKinds.map(\.rawValue),
-                readingStatuses: Set(query.filters.readingStatuses.map(sharedReadingStatus))
+                readingStatus: query.filters.readingStatus.map(sharedReadingStatus)
             ), page: Int32(query.page), pageSize: Int32(query.pageSize)
         )
     }
@@ -214,7 +307,7 @@ actor SharedContentClient: ContentClient {
     }
 
     private func mapBook(_ value: ErmaoShared.BookSummary) -> BookCard {
-        BookCard(id: value.id, title: value.title, author: value.author, cover: cover(value.coverUrl), progress: value.progress > 0 ? value.progress : nil, availableMediaKinds: value.availableMediaKinds.compactMap(mapMediaKind))
+        BookCard(id: value.id, title: value.title, author: value.author, cover: cover(value.coverUrl), progress: value.progress > 0 ? value.progress : nil)
     }
 
     private func mapBooks(_ values: [Any]) throws -> [BookCard] {
@@ -230,15 +323,13 @@ actor SharedContentClient: ContentClient {
         BookResource(
             id: value.id, bookID: value.bookId, sourceNodeID: value.sourceNodeId, title: value.title,
             description: value.description_, format: value.format, readerType: value.readerType,
-            mediaKind: mapMediaKind(value.mediaKind) ?? .ebook,
-            suggestedMediaKind: value.classification.suggestedMediaKind.flatMap(mapMediaKind),
             resourceIndex: value.resourceIndex?.doubleValue, cover: cover(value.coverUrl),
             sizeLabel: ByteCountFormatter.string(fromByteCount: value.sizeBytes, countStyle: .file),
             progress: value.progress > 0 ? value.progress : nil, isReadable: value.readable,
             isSelected: value.id == selectedResourceID, sortOrder: Int(value.sortOrder),
             publisher: value.publisher, publishedAt: value.publishedAt, language: value.language,
             isbn: value.isbn, identifier: value.identifier, narrator: value.narrator,
-            pageCount: value.pageCount?.intValue, metadataSource: value.classification.source,
+            pageCount: value.pageCount?.intValue, metadataSource: nil,
             kindleSendAvailable: value.kindleSendAvailable,
             assets: value.assets.map { asset in
                 ResourceAsset(
@@ -251,16 +342,27 @@ actor SharedContentClient: ContentClient {
         )
     }
 
+    private func mapContentEntry(_ value: ErmaoShared.BookContentEntry) -> BookContentEntry {
+        BookContentEntry(
+            sourceNodeID: value.sourceNodeId,
+            parentSourceNodeID: value.parentSourceNodeId,
+            name: value.name,
+            title: value.title,
+            description: value.description_,
+            kind: value.kind,
+            physicalKind: value.physicalKind,
+            sizeBytes: value.sizeBytes?.int64Value,
+            hasChildren: value.hasChildren,
+            resourceID: value.resourceId,
+            representativeResourceID: value.representativeResourceId,
+            cover: value.coverUrl.flatMap(cover)
+        )
+    }
+
     private func cover(_ path: String) -> CoverReference? { path.isEmpty ? nil : CoverReference(path: path) }
 
     private func mapFacet(_ value: ErmaoShared.AppliedFacet) -> FacetIdentity {
         FacetIdentity(id: value.id, kind: value.kind.name == "Series" ? .series : .author, name: value.name)
-    }
-
-    private func mapMediaKind(_ value: Any) -> LibraryMediaKind? {
-        if let raw = value as? String { return LibraryMediaKind(rawValue: raw) }
-        let description = String(describing: value).uppercased()
-        return LibraryMediaKind.allKnown.first { description.contains($0.rawValue) }
     }
 
     private func sharedSort(_ value: LibrarySort) -> ErmaoShared.LibrarySort {
@@ -276,8 +378,4 @@ actor SharedContentClient: ContentClient {
     private func sharedReadingStatus(_ value: LibraryReadingStatus) -> ErmaoShared.ReadingStatus {
         switch value { case .unread: .unread; case .reading: .reading; case .finished: .finished }
     }
-}
-
-private extension LibraryMediaKind {
-    static let allKnown: [LibraryMediaKind] = [.ebook, .comic, .audiobook]
 }

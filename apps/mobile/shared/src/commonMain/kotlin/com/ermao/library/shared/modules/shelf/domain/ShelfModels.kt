@@ -26,8 +26,11 @@ enum class ShelfMembership { Add, Remove }
 data class ShelfMembershipChange(
     val bookId: String,
     val shelfId: String,
+    val shelfKind: ShelfKind,
     val membership: ShelfMembership,
-)
+) {
+    init { require(shelfKind == ShelfKind.Static) { "Only static shelf membership can be changed" } }
+}
 
 enum class ShelfErrorKind {
     Unauthorized,

@@ -10,10 +10,10 @@ import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.BookDeletionOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
-import com.ermao.library.shared.modules.workmanagement.domain.ManagedMediaKind
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
@@ -35,6 +35,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class KtorWorkManagementRepository(
     private val clientProvider: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
@@ -42,6 +44,8 @@ class KtorWorkManagementRepository(
     constructor(clients: ApiClientFactory) : this(clients::create)
 
     private val encoder = Json { explicitNulls = false; encodeDefaults = true }
+    private val capabilityMutex = Mutex()
+    private val capabilityBySession = mutableMapOf<String, Boolean>()
 
     override suspend fun supportsNativeManagement(
         context: BookManagementContext,
@@ -52,8 +56,7 @@ class KtorWorkManagementRepository(
         bookId: String,
         draft: BookMetadataDraft,
     ): WorkManagementResult<Unit> {
-        if (draft.tags.isNotEmpty()) return unavailable("BOOK_TAG_UPDATE_UNAVAILABLE")
-        return callUnit(
+        val metadataResult = callUnit(
             context,
             ApiMethod.Patch,
             bookPath(bookId),
@@ -66,6 +69,18 @@ class KtorWorkManagementRepository(
                     seriesIndex = draft.seriesIndex,
                 ),
             ),
+        )
+        if (metadataResult is WorkManagementResult.Failure) return metadataResult
+        val current = draft.originalTags.map(String::trim).filter(String::isNotEmpty).associateBy { it.lowercase() }
+        val next = draft.tags.map(String::trim).filter(String::isNotEmpty).associateBy { it.lowercase() }
+        val addTags = next.filterKeys { it !in current }.values.toList()
+        val removeTags = current.filterKeys { it !in next }.values.toList()
+        if (addTags.isEmpty() && removeTags.isEmpty()) return WorkManagementResult.Content(Unit)
+        return callUnit(
+            context,
+            ApiMethod.Post,
+            "/api/library/operations/books/metadata",
+            encoder.encodeToString(BulkBookMetadataRequest(listOf(bookId), addTags, removeTags)),
         )
     }
 
@@ -92,6 +107,35 @@ class KtorWorkManagementRepository(
         "${resourcePath(bookId, resourceId)}/cover/regenerate",
     )
 
+    override suspend fun regenerateBookCover(
+        context: BookManagementContext,
+        bookId: String,
+        anchoredResourceId: String,
+    ): WorkManagementResult<Unit> = regenerateResourceCover(context, bookId, anchoredResourceId)
+
+    override suspend fun rescanBook(
+        context: BookManagementContext,
+        sourceNodeId: String,
+    ): WorkManagementResult<Unit> = callUnit(
+        context,
+        ApiMethod.Post,
+        "/api/source-nodes/${sourceNodeId.encodeURLPathPart()}/continue",
+    )
+
+    override suspend fun deleteBook(
+        context: BookManagementContext,
+        bookId: String,
+    ): WorkManagementResult<BookDeletionOutcome> = call(
+        context,
+        ApiMethod.Post,
+        "/api/library/operations/books/delete-sources",
+        encoder.encodeToString(DeleteBookRequest(listOf(bookId))),
+    ) { data ->
+        val deleted = data.array("deletedBookIds").orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        if (bookId !in deleted) protocolFailure("BOOK_DELETE_IDENTITY_MISMATCH")
+        else WorkManagementResult.Content(BookDeletionOutcome(deleted))
+    }
+
     override suspend fun updateResource(
         context: BookManagementContext,
         bookId: String,
@@ -102,6 +146,7 @@ class KtorWorkManagementRepository(
         ApiMethod.Patch,
         resourcePath(bookId, resourceId),
         bookId,
+        resourceId,
         encoder.encodeToString(
             ResourceMetadataRequest(
                 title = draft.title.normalized(),
@@ -118,22 +163,8 @@ class KtorWorkManagementRepository(
         ),
     )
 
-    override suspend fun reclassifyResource(
-        context: BookManagementContext,
-        bookId: String,
-        resourceId: String,
-        mediaKind: ManagedMediaKind,
-    ): WorkManagementResult<BookMutationOutcome> = mutationCall(
-        context,
-        ApiMethod.Post,
-        "${resourcePath(bookId, resourceId)}/reclassify",
-        bookId,
-        encoder.encodeToString(ReclassifyRequest(mediaKind.wireValue)),
-    )
-
     override suspend fun loadMetadataProviders(
         context: BookManagementContext,
-        mediaKind: ManagedMediaKind,
     ): WorkManagementResult<List<MetadataProvider>> = call(
         context,
         ApiMethod.Get,
@@ -144,16 +175,10 @@ class KtorWorkManagementRepository(
             providers.mapNotNull { element ->
                 val provider = element as? JsonObject ?: return@mapNotNull null
                 val id = provider.string("id") ?: return@mapNotNull null
-                val mediaKinds = provider.array("mediaKinds")
-                    .orEmpty()
-                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.toManagedMediaKind() }
-                    .toSet()
-                if (mediaKind !in mediaKinds) return@mapNotNull null
                 MetadataProvider(
                     id = id,
                     name = provider.string("name") ?: id,
                     enabled = provider.boolean("enabled") == true,
-                    mediaKinds = mediaKinds,
                 )
             },
         )
@@ -189,9 +214,17 @@ class KtorWorkManagementRepository(
         fields: Set<MetadataField>,
         resourceId: String?,
         applyToAllResources: Boolean,
-    ): WorkManagementResult<Unit> =
-        // There is no current apply-candidate endpoint. Do not emulate it with multiple patches.
-        unavailable("METADATA_APPLY_UNAVAILABLE")
+    ): WorkManagementResult<Unit> {
+        val title = if (MetadataField.Title in fields) candidate.title else null
+        val description = if (MetadataField.Description in fields) candidate.description else null
+        if (title.isNullOrBlank()) return unavailable("METADATA_TITLE_REQUIRED")
+        return callUnit(
+            context,
+            ApiMethod.Patch,
+            "${bookPath(bookId)}/source-nodes/${sourceNodeId.encodeURLPathPart()}",
+            encoder.encodeToString(SourceNodeMetadataRequest(title.trim(), description?.trim()?.ifBlank { null })),
+        )
+    }
 
     override suspend fun loadKindleSettings(
         context: BookManagementContext,
@@ -236,17 +269,39 @@ class KtorWorkManagementRepository(
         requiresBookManagement = false,
     )
 
+    override suspend fun setBookReadingStatus(
+        context: BookManagementContext,
+        bookId: String,
+        status: ManagedReadingStatus,
+    ): WorkManagementResult<Unit> = callUnit(
+        context,
+        ApiMethod.Post,
+        "/api/library/operations/books/reading-status",
+        encoder.encodeToString(BookReadingStatusRequest(listOf(bookId), status.wireValue)),
+        requiresBookManagement = false,
+    )
+
     private suspend fun mutationCall(
         context: BookManagementContext,
         method: ApiMethod,
         path: String,
         bookId: String,
+        resourceId: String,
         body: String? = null,
     ): WorkManagementResult<BookMutationOutcome> = call(context, method, path, body) { data ->
+        val resource = data.objectValue("resource")
+            ?: return@call protocolFailure("RESOURCE_MUTATION_RESPONSE_MISSING")
+        val responseBookId = resource.string("bookId")
+            ?: return@call protocolFailure("RESOURCE_MUTATION_BOOK_ID_MISSING")
+        val responseResourceId = resource.string("id")
+            ?: return@call protocolFailure("RESOURCE_MUTATION_RESOURCE_ID_MISSING")
+        if (responseBookId != bookId || responseResourceId != resourceId) {
+            return@call protocolFailure("RESOURCE_MUTATION_IDENTITY_MISMATCH")
+        }
         WorkManagementResult.Content(
             BookMutationOutcome(
-                bookId = data.string("bookId") ?: bookId,
-                operationId = data.objectValue("operation")?.string("id"),
+                bookId = responseBookId,
+                resourceId = responseResourceId,
             ),
         )
     }
@@ -301,6 +356,25 @@ class KtorWorkManagementRepository(
     }
 
     private suspend fun compatibility(context: BookManagementContext): WorkManagementResult<Boolean> {
+        val key = listOf(
+            context.profile.serverIdentity,
+            context.namespace.userId,
+            context.namespace.authorizationVersion.toString(),
+        ).joinToString("|")
+        capabilityBySession[key]?.let { return WorkManagementResult.Content(it) }
+        return capabilityMutex.withLock {
+            capabilityBySession[key]?.let { return@withLock WorkManagementResult.Content(it) }
+            when (val result = loadCompatibility(context)) {
+                is WorkManagementResult.Content -> {
+                    capabilityBySession[key] = result.value
+                    result
+                }
+                is WorkManagementResult.Failure -> result
+            }
+        }
+    }
+
+    private suspend fun loadCompatibility(context: BookManagementContext): WorkManagementResult<Boolean> {
         val client = clientProvider(context.profile)
         return when (val result = try {
             client.execute(
@@ -362,12 +436,6 @@ private data class ResourceMetadataRequest(
 )
 
 @Serializable
-private data class ReclassifyRequest(
-    val targetMediaKind: String,
-    val applyTo: String = "RESOURCE",
-)
-
-@Serializable
 private data class MetadataSearchRequest(val providerId: String, val query: String?)
 
 @Serializable
@@ -375,6 +443,26 @@ private data class KindleSendRequest(val bookId: String, val assetId: String)
 
 @Serializable
 private data class ReadingStatusRequest(val status: String)
+
+@Serializable
+private data class BookReadingStatusRequest(val ids: List<String>, val status: String)
+
+@Serializable
+private data class BulkBookMetadataRequest(
+    val ids: List<String>,
+    val addTags: List<String>,
+    val removeTags: List<String>,
+    val fields: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+private data class DeleteBookRequest(
+    val ids: List<String>,
+    val confirmation: String = "DELETE_SOURCE_FILES",
+)
+
+@Serializable
+private data class SourceNodeMetadataRequest(val title: String, val description: String? = null)
 
 private fun metadataCandidate(element: JsonElement): MetadataCandidate? {
     val value = element as? JsonObject ?: return null
@@ -402,7 +490,6 @@ private fun JsonObject.boolean(name: String): Boolean? = (this[name] as? JsonPri
 private fun JsonObject.array(name: String): JsonArray? = this[name] as? JsonArray
 private fun JsonObject.objectValue(name: String): JsonObject? = this[name] as? JsonObject
 private fun String?.normalized(): String? = this?.trim()?.ifBlank { null }
-private fun String.toManagedMediaKind(): ManagedMediaKind? = ManagedMediaKind.entries.firstOrNull { it.wireValue == this }
 
 private fun AppError.toManagementError() = WorkManagementError(
     kind = when (kind) {

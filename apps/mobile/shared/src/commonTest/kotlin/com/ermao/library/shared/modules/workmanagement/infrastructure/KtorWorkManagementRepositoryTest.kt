@@ -12,7 +12,6 @@ import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcom
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
-import com.ermao.library.shared.modules.workmanagement.domain.ManagedMediaKind
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
 import com.ermao.library.shared.modules.workmanagement.domain.ResourceMetadataDraft
@@ -47,6 +46,54 @@ class KtorWorkManagementRepositoryTest {
 
         assertTrue(result.value)
         assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
+    }
+
+    @Test
+    fun cachesCapabilityForTheAuthenticatedAuthorizationVersion() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE)
+
+        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
+            harness.repository.supportsNativeManagement(context),
+        ).value)
+        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
+            harness.repository.supportsNativeManagement(context),
+        ).value)
+
+        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
+    }
+
+    @Test
+    fun bookLevelCommandsUseCurrentBackendContractsAndCachedCapability() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, OK, OK, DELETE_RESPONSE, OK)
+
+        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
+            harness.repository.supportsNativeManagement(context),
+        ).value)
+        assertIs<WorkManagementResult.Content<Unit>>(
+            harness.repository.regenerateBookCover(context, "book-1", "resource-1"),
+        )
+        assertIs<WorkManagementResult.Content<Unit>>(
+            harness.repository.rescanBook(context, "source-1"),
+        )
+        assertIs<WorkManagementResult.Content<*>>(
+            harness.repository.deleteBook(context, "book-1"),
+        )
+        assertIs<WorkManagementResult.Content<Unit>>(
+            harness.repository.setBookReadingStatus(context, "book-1", ManagedReadingStatus.Finished),
+        )
+
+        assertEquals(
+            listOf(
+                "/base/api/mobile/compatibility",
+                "/base/api/books/book-1/resources/resource-1/cover/regenerate",
+                "/base/api/source-nodes/source-1/continue",
+                "/base/api/library/operations/books/delete-sources",
+                "/base/api/library/operations/books/reading-status",
+            ),
+            harness.requests.map(Request::path),
+        )
+        assertEquals("{\"ids\":[\"book-1\"],\"confirmation\":\"DELETE_SOURCE_FILES\"}", harness.requests[3].body)
+        assertEquals("{\"ids\":[\"book-1\"],\"status\":\"FINISHED\"}", harness.requests[4].body)
     }
 
     @Test
@@ -103,22 +150,7 @@ class KtorWorkManagementRepositoryTest {
         assertTrue(request.body.contains("\"publisher\":\"Publisher\""))
         assertTrue(request.body.contains("\"language\":\"zh-CN\""))
         assertEquals("book-1", result.value.bookId)
-    }
-
-    @Test
-    fun resourceReclassificationUsesCurrentRouteAndFields() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, RECLASSIFY_RESPONSE)
-
-        val result = assertIs<WorkManagementResult.Content<BookMutationOutcome>>(
-            harness.repository.reclassifyResource(context, "book-1", "resource-1", ManagedMediaKind.Comic),
-        )
-
-        val request = harness.requests[1]
-        assertEquals("POST", request.method)
-        assertEquals("/base/api/books/book-1/resources/resource-1/reclassify", request.path)
-        assertTrue(request.body.contains("\"targetMediaKind\":\"COMIC\""))
-        assertTrue(request.body.contains("\"applyTo\":\"RESOURCE\""))
-        assertEquals("op-1", result.value.operationId)
+        assertEquals("resource-1", result.value.resourceId)
     }
 
     @Test
@@ -137,8 +169,8 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun metadataApplyAndCoverUploadAreExplicitlyUnavailable() = runBlocking {
-        val harness = Harness()
+    fun metadataApplyUsesSourceNodePatchWhileCoverUploadRemainsUnavailable() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, OK)
         val candidate = com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate(
             id = "candidate",
             source = "openlibrary",
@@ -172,9 +204,11 @@ class KtorWorkManagementRepositoryTest {
             CoverUpload("cover.jpg", "image/jpeg", byteArrayOf(1)),
         )
 
-        assertEquals(WorkManagementErrorKind.Unavailable, assertIs<WorkManagementResult.Failure>(apply).error.kind)
+        assertIs<WorkManagementResult.Content<Unit>>(apply)
         assertEquals(WorkManagementErrorKind.Unavailable, assertIs<WorkManagementResult.Failure>(upload).error.kind)
-        assertTrue(harness.requests.isEmpty())
+        assertEquals("PATCH", harness.requests[1].method)
+        assertEquals("/base/api/books/book-1/source-nodes/source-1", harness.requests[1].path)
+        assertTrue(harness.requests[1].body.contains("\"title\":\"Candidate\""))
     }
 
     @Test
@@ -241,9 +275,9 @@ class KtorWorkManagementRepositoryTest {
         const val CAPABILITY_TRUE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":true}}}"""
         const val CAPABILITY_FALSE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":false}}}"""
         const val OK = """{"ok":true,"data":{}}"""
-        const val RESOURCE_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1"}}}"""
-        const val RECLASSIFY_RESPONSE = """{"ok":true,"data":{"affectedResourceIds":["resource-1"],"operation":{"id":"op-1"}}}"""
+        const val RESOURCE_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1","bookId":"book-1"}}}"""
         const val METADATA_SEARCH_RESPONSE = """{"ok":true,"data":{"sourceNodeId":"source-1","providerId":"openlibrary","query":"Book","message":null,"candidates":[{"id":"candidate","source":"openlibrary","title":"Candidate","description":null,"coverUrl":null,"confidence":0.9}]}}"""
         const val KINDLE_RESPONSE = """{"ok":true,"data":{"alreadyQueued":true}}"""
+        const val DELETE_RESPONSE = """{"ok":true,"data":{"deletedBookIds":["book-1"]}}"""
     }
 }

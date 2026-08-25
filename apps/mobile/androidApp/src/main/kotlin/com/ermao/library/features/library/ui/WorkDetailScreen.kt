@@ -26,6 +26,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,13 +44,13 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.Equalizer
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Source
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AlertDialog
@@ -61,6 +64,8 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -72,6 +77,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -96,6 +103,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import android.text.Html
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.ermao.library.R
@@ -124,7 +132,6 @@ import com.ermao.library.ui.components.WarmPageSectionHeader
 import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmPageSnackbarHost
 import com.ermao.library.ui.components.WarmPageTextAction
-import com.ermao.library.ui.components.WarmPageIconAction
 import com.ermao.library.ui.components.WarmPageFloatingActionMenu
 import com.ermao.library.ui.components.WarmPageFloatingMenuAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
@@ -134,8 +141,10 @@ import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
+import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
 import com.ermao.library.features.workmanagement.ui.WorkManagementTarget
 import com.ermao.library.features.workmanagement.ui.WorkManagementTask
+import com.ermao.library.features.workmanagement.ui.WorkManagementTaskSheet
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
@@ -163,12 +172,11 @@ private data class WorkManagementSheetState(
 )
 
 private enum class BookControlAction {
-    AddSeries, AddShelf, MarkUnread, Download, Edit, Recognize, UploadCover,
-    RegenerateCover, SendToKindle,
+    Edit, RegenerateCover, Recognize, Rescan, Delete,
 }
 
 private enum class VolumeControlAction {
-    MarkUnread, Download, Edit, ChangeMediaType, SendToKindle,
+    MarkUnread, Download, Edit, SendToKindle,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -199,6 +207,7 @@ fun WorkDetailScreen(
     onSelectReadingStatus: (WorkReadingStatus) -> Unit = {},
     managementViewModel: WorkManagementViewModel? = null,
     canManageSystem: Boolean = managementViewModel != null,
+    onBookDeleted: () -> Unit = {},
 ) {
     var controlMenuState by remember { mutableStateOf<WorkControlMenuState?>(null) }
     var managementSheetState by remember { mutableStateOf<WorkManagementSheetState?>(null) }
@@ -211,6 +220,12 @@ fun WorkDetailScreen(
     val snackbarScope = rememberCoroutineScope()
     val shelvesUpdatedMessage = stringResource(R.string.work_shelves_updated)
     val managementUpdatedMessage = stringResource(R.string.management_updated)
+    val readingStatusUpdatedMessage = stringResource(R.string.work_reading_status_updated)
+    val coverUpdatedMessage = stringResource(R.string.management_cover_updated)
+    val rescanQueuedMessage = stringResource(R.string.management_rescan_queued)
+    val metadataAppliedMessage = stringResource(R.string.management_metadata_applied)
+    val downloadQueuedMessage = stringResource(R.string.work_download_queued)
+    val downloadPausedMessage = stringResource(R.string.work_download_paused)
     val viewShelvesLabel = stringResource(R.string.view_shelves_action)
     val shelfPickerSheetStrings = ShelfPickerSheetStrings(
         title = stringResource(R.string.work_shelf_picker_title),
@@ -232,6 +247,17 @@ fun WorkDetailScreen(
         managementState?.errorCode.orEmpty(),
     )
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { onRefresh() }
+    val selectedDownloadFailure = selectedResource?.let { downloadFailuresByResource[it.id] }
+    val downloadFailureMessage = stringResource(
+        R.string.work_download_failed,
+        selectedDownloadFailure.orEmpty(),
+    )
+    LaunchedEffect(selectedResource?.id, selectedDownloadFailure) {
+        if (selectedDownloadFailure != null) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(downloadFailureMessage)
+        }
+    }
     LaunchedEffect(state.shelfSaveCompleted) {
         if (state.shelfSaveCompleted) {
             snackbarHostState.currentSnackbarData?.dismiss()
@@ -247,68 +273,94 @@ fun WorkDetailScreen(
             onShelfSaveFeedbackShown()
         }
     }
-    WarmPageScaffold(
-        role = WarmPageTopBarRole.Detail,
-        title = stringResource(R.string.work_detail_title),
-        modifier = modifier.testTag("work-detail"),
-        navigation = WarmPageNavigationAction(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            label = stringResource(R.string.navigate_back),
-            onClick = onBack,
-        ),
-        actions = emptyList(),
-        snackbarHost = { WarmPageSnackbarHost(snackbarHostState) },
-    ) { padding ->
-        when {
-            state.isLoading -> WarmPageLoadingState(
-                title = stringResource(R.string.content_loading_title),
-                message = stringResource(R.string.work_detail_loading_message),
-                modifier = Modifier.padding(padding).fillMaxSize(),
-            )
-            state.content == null -> WarmPageErrorState(
-                title = stringResource(R.string.work_unavailable_title),
-                message = stringResource(R.string.work_unavailable_message),
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                retryLabel = stringResource(R.string.retry_action),
-                onRetry = onRetry,
-            )
-            else -> WorkDetailBody(
-                state = state,
-                repository = repository,
-                context = context,
-                onSelectResource = onSelectResource,
-                onLoadMoreResources = onLoadMoreResources,
-                onOpenShelfPicker = onOpenShelfPicker,
-                readingStatus = currentReadingStatus,
-                onToggleReadingStatus = {
-                    val next = nextWorkReadingStatus(currentReadingStatus)
-                    readingStatusOverride = next
-                    val managedStatus = if (next == WorkReadingStatus.Finished) {
-                        ManagedReadingStatus.Finished
-                    } else {
-                        ManagedReadingStatus.Unread
-                    }
-                    if (selectedResource != null && managementViewModel != null) {
-                        managementViewModel.setReadingStatus(selectedResource.id, managedStatus)
-                    } else {
-                        onSelectReadingStatus(next)
-                    }
-                },
-                onOpenBookControl = { anchor ->
-                    controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Book, anchor)
-                },
-                onOpenFacet = onOpenFacet,
-                downloadRecordsByResource = downloadRecordsByResource,
-                downloadFailuresByResource = downloadFailuresByResource,
-                onDownloadResource = onDownloadResource,
-                onCancelDownload = onCancelDownload,
-                onRequestRemoveDownload = { pendingDownloadRemoval = it },
-                onOpenSelectedResource = onOpenSelectedResource,
-                onOpenResourceControl = { resource, anchor ->
-                    controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Resource(resource), anchor)
-                },
-                modifier = Modifier.padding(padding),
-            )
+    val theme = WarmPageThemeValues
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(theme.colors.canvas)
+            .testTag("work-detail"),
+    ) {
+        state.content?.let { content ->
+            WorkDetailBackdrop(content, repository, context)
+        }
+        WarmPageScaffold(
+            role = WarmPageTopBarRole.Detail,
+            title = stringResource(R.string.work_detail_title),
+            modifier = Modifier.fillMaxSize(),
+            navigation = WarmPageNavigationAction(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                label = stringResource(R.string.navigate_back),
+                onClick = onBack,
+            ),
+            actions = emptyList(),
+            snackbarHost = { WarmPageSnackbarHost(snackbarHostState) },
+            containerColor = Color.Transparent,
+            topBarContainerColor = Color.Transparent,
+        ) { padding ->
+            when {
+                state.isLoading -> WarmPageLoadingState(
+                    title = stringResource(R.string.content_loading_title),
+                    message = stringResource(R.string.work_detail_loading_message),
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                )
+                state.content == null -> WarmPageErrorState(
+                    title = stringResource(R.string.work_unavailable_title),
+                    message = stringResource(R.string.work_unavailable_message),
+                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    retryLabel = stringResource(R.string.retry_action),
+                    onRetry = onRetry,
+                )
+                else -> WorkDetailBody(
+                    state = state,
+                    repository = repository,
+                    context = context,
+                    onSelectResource = onSelectResource,
+                    onLoadMoreResources = onLoadMoreResources,
+                    onOpenShelfPicker = onOpenShelfPicker,
+                    readingStatus = currentReadingStatus,
+                    readingStatusBusy = managementState?.isBusy == true,
+                    onToggleReadingStatus = {
+                        val next = nextWorkReadingStatus(currentReadingStatus)
+                        readingStatusOverride = next
+                        val managedStatus = if (next == WorkReadingStatus.Finished) {
+                            ManagedReadingStatus.Finished
+                        } else {
+                            ManagedReadingStatus.Unread
+                        }
+                        if (selectedResource != null && managementViewModel != null) {
+                            managementViewModel.setReadingStatus(managedStatus)
+                        } else {
+                            onSelectReadingStatus(next)
+                        }
+                    },
+                    onOpenBookControl = { anchor ->
+                        controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Book, anchor)
+                    },
+                    onOpenFacet = onOpenFacet,
+                    downloadRecordsByResource = downloadRecordsByResource,
+                    downloadFailuresByResource = downloadFailuresByResource,
+                    onDownloadResource = { resourceId ->
+                        onDownloadResource(resourceId)
+                        snackbarScope.launch {
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            snackbarHostState.showSnackbar(downloadQueuedMessage)
+                        }
+                    },
+                    onCancelDownload = { resourceId ->
+                        onCancelDownload(resourceId)
+                        snackbarScope.launch {
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            snackbarHostState.showSnackbar(downloadPausedMessage)
+                        }
+                    },
+                    onRequestRemoveDownload = { pendingDownloadRemoval = it },
+                    onOpenSelectedResource = onOpenSelectedResource,
+                    onOpenResourceControl = { resource, anchor ->
+                        controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Resource(resource), anchor)
+                    },
+                    modifier = Modifier.padding(padding),
+                )
+            }
         }
     }
 
@@ -341,7 +393,7 @@ fun WorkDetailScreen(
             selectedResource = selectedResource,
             repository = repository,
             context = context,
-            canManageSystem = canManageSystem,
+            canManageSystem = canManageSystem && managementViewModel != null,
             selectedDownload = when (val target = activeMenu.target) {
                 WorkControlMenuTarget.Book -> selectedResource?.let { downloadRecordsByResource[it.id] }
                 is WorkControlMenuTarget.Resource -> downloadRecordsByResource[target.value.id]
@@ -354,7 +406,7 @@ fun WorkDetailScreen(
                 controlMenuState = null
                 readingStatusOverride = WorkReadingStatus.Unread
                 if (managementViewModel != null) {
-                    managementViewModel.setReadingStatus(resource.id, ManagedReadingStatus.Unread)
+                    managementViewModel.setReadingStatus(ManagedReadingStatus.Unread)
                 } else {
                     onSelectReadingStatus(WorkReadingStatus.Unread)
                 }
@@ -375,30 +427,18 @@ fun WorkDetailScreen(
             onBookTask = bookTask@{ action ->
                 controlMenuState = null
                 val task = when (action) {
-                    BookControlAction.AddSeries -> WorkManagementTask.AddSeries
                     BookControlAction.Edit -> WorkManagementTask.EditWork
                     BookControlAction.Recognize -> WorkManagementTask.Recognize
-                    BookControlAction.UploadCover,
-                    BookControlAction.RegenerateCover,
-                    -> WorkManagementTask.Cover
-                    BookControlAction.SendToKindle -> WorkManagementTask.Kindle
-                    BookControlAction.AddShelf,
-                    BookControlAction.MarkUnread,
-                    BookControlAction.Download,
-                    -> return@bookTask
+                    BookControlAction.RegenerateCover -> WorkManagementTask.Cover
+                    BookControlAction.Rescan -> WorkManagementTask.Rescan
+                    BookControlAction.Delete -> WorkManagementTask.Delete
                 }
-                val target = if (action == BookControlAction.SendToKindle && selectedResource != null) {
-                    WorkManagementTarget.Resource(selectedResource)
-                } else {
-                    WorkManagementTarget.Work
-                }
-                managementSheetState = WorkManagementSheetState(task, target)
+                managementSheetState = WorkManagementSheetState(task, WorkManagementTarget.Work)
             },
             onResourceTask = resourceTask@{ action, resource ->
                 controlMenuState = null
                 val task = when (action) {
                     VolumeControlAction.Edit -> WorkManagementTask.EditVolume
-                    VolumeControlAction.ChangeMediaType -> WorkManagementTask.MediaKind
                     VolumeControlAction.SendToKindle -> WorkManagementTask.Kindle
                     VolumeControlAction.MarkUnread,
                     VolumeControlAction.Download,
@@ -410,14 +450,31 @@ fun WorkDetailScreen(
         )
     }
     val activeManagementSheet = managementSheetState
-    // Native management is intentionally disabled for the Book/Resource/Asset cutover.
-    // Shelf, reading status, downloads and Kindle remain available through their own flows.
+    val activeManagementState = managementState
+    if (activeManagementSheet != null && state.content != null && activeManagementState != null && managementViewModel != null) {
+        WorkManagementTaskSheet(
+            task = activeManagementSheet.task,
+            target = activeManagementSheet.target,
+            content = state.content,
+            state = activeManagementState,
+            viewModel = managementViewModel,
+            onDismiss = { managementSheetState = null },
+        )
+    }
     LaunchedEffect(managementState?.completedMutation) {
-        if (managementState?.completedMutation == null) return@LaunchedEffect
+        val completion = managementState?.completedMutation ?: return@LaunchedEffect
         managementSheetState = null
-        onRefresh()
+        if (completion == WorkManagementCompletion.BookDeleted) onBookDeleted() else onRefresh()
         snackbarHostState.currentSnackbarData?.dismiss()
-        snackbarHostState.showSnackbar(managementUpdatedMessage)
+        snackbarHostState.showSnackbar(
+            when (completion) {
+                WorkManagementCompletion.ReadingStatusUpdated -> readingStatusUpdatedMessage
+                WorkManagementCompletion.CoverUpdated -> coverUpdatedMessage
+                WorkManagementCompletion.RescanQueued -> rescanQueuedMessage
+                WorkManagementCompletion.MetadataApplied -> metadataAppliedMessage
+                else -> managementUpdatedMessage
+            },
+        )
         managementViewModel?.consumeFeedback()
     }
     LaunchedEffect(managementState?.errorCode) {
@@ -439,6 +496,36 @@ fun WorkDetailScreen(
 }
 
 @Composable
+private fun WorkDetailBackdrop(
+    content: BookDetailContent,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(460.dp)
+            .clipToBounds(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        BookCover(
+            content.book,
+            repository,
+            context,
+            CoverRole.Hero,
+            Modifier
+                .width(300.dp)
+                .graphicsLayer {
+                    alpha = 0.28f
+                    scaleX = 1.7f
+                    scaleY = 1.7f
+                }
+                .blur(24.dp),
+        )
+    }
+}
+
+@Composable
 private fun WorkDetailBody(
     state: WorkDetailUiState,
     repository: ContentRepository,
@@ -447,6 +534,7 @@ private fun WorkDetailBody(
     onLoadMoreResources: () -> Unit,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
+    readingStatusBusy: Boolean,
     onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
     onOpenFacet: (LibraryScope, String) -> Unit,
@@ -485,6 +573,7 @@ private fun WorkDetailBody(
                 selectedDownload = selectedResource?.let { resource -> downloadRecordsByResource[resource.id] },
                 onOpenShelfPicker = onOpenShelfPicker,
                 readingStatus = readingStatus,
+                readingStatusBusy = readingStatusBusy,
                 onToggleReadingStatus = onToggleReadingStatus,
                 onOpenBookControl = onOpenBookControl,
                 onDownloadResource = onDownloadResource,
@@ -530,6 +619,7 @@ private fun WorkDetailActionRow(
     selectedDownload: AndroidDownloadRecord?,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
+    readingStatusBusy: Boolean,
     onToggleReadingStatus: () -> Unit,
     onOpenBookControl: (Offset) -> Unit,
     onDownloadResource: (String) -> Unit,
@@ -574,7 +664,7 @@ private fun WorkDetailActionRow(
                     WorkDetailDownloadAction.NotDownloaded,
                     WorkDetailDownloadAction.Paused,
                     WorkDetailDownloadAction.Failed,
-                    -> Icons.Outlined.CloudDownload
+                    -> Icons.Outlined.Download
                 },
                 label = stringResource(
                     when (downloadAction) {
@@ -593,7 +683,7 @@ private fun WorkDetailActionRow(
                             WorkDetailDownloadAction.Paused,
                             WorkDetailDownloadAction.Failed,
                             -> onDownloadResource(resource.id)
-                            WorkDetailDownloadAction.Downloaded -> Unit
+                            WorkDetailDownloadAction.Downloaded -> selectedDownload?.let(onRequestRemoveDownload)
                         }
                     }
                 },
@@ -601,16 +691,12 @@ private fun WorkDetailActionRow(
                     { onRequestRemoveDownload(download) }
                 },
                 longClickLabel = stringResource(R.string.work_quick_remove_download),
-                enabled = selectedResource != null,
+                enabled = selectedResource != null && !readingStatusBusy,
                 modifier = Modifier.weight(1f),
                 testTag = "work-download-action",
             )
             WorkDetailQuickAction(
-                icon = if (readingStatus == WorkReadingStatus.Finished) {
-                    Icons.Outlined.CheckCircle
-                } else {
-                    Icons.Outlined.Equalizer
-                },
+                icon = Icons.Outlined.Check,
                 label = stringResource(
                     if (readingStatus == WorkReadingStatus.Finished) {
                         R.string.work_quick_reading_read
@@ -619,7 +705,7 @@ private fun WorkDetailActionRow(
                     },
                 ),
                 onClick = onToggleReadingStatus,
-                enabled = selectedResource != null,
+                enabled = selectedResource != null && !readingStatusBusy,
                 modifier = Modifier.weight(1f),
                 testTag = "work-reading-status-action",
             )
@@ -705,7 +791,9 @@ private fun WorkDetailQuickAction(
             imageVector = icon,
             contentDescription = null,
             tint = if (enabled) theme.colors.textPrimary else theme.colors.textTertiary,
+            modifier = Modifier.size(28.dp),
         )
+        Spacer(Modifier.height(theme.spacing.half))
         Text(
             text = label,
             style = theme.typography.caption,
@@ -1050,12 +1138,16 @@ private fun WorkAboutSection(
             },
         )
         if (workDetailDescriptionActionVisible(expanded, collapsedHasOverflow)) {
-            WarmPageIconAction(
-                icon = if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
-                label = stringResource(if (expanded) R.string.work_collapse else R.string.work_expand),
+            TextButton(
                 onClick = { expanded = !expanded },
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(
+                    stringResource(if (expanded) R.string.work_collapse else R.string.work_expand),
+                    style = theme.typography.caption,
+                    color = theme.colors.textSecondary,
+                )
+            }
         }
     }
 }
@@ -1777,93 +1869,40 @@ private fun WorkDetailControlMenu(
     } == true
     when (target) {
         WorkControlMenuTarget.Book -> {
-            val actions = buildList {
-                if (canManageSystem) add(
-                    WarmPageFloatingMenuAction(
-                        BookControlAction.AddSeries,
-                        stringResource(R.string.work_control_add_series),
-                        Icons.Outlined.Layers,
-                    ),
-                )
-                add(
-                    WarmPageFloatingMenuAction(
-                        BookControlAction.AddShelf,
-                        stringResource(R.string.work_control_add_shelf),
-                        Icons.Outlined.BookmarkBorder,
-                    ),
-                )
-                add(
-                    WarmPageFloatingMenuAction(
-                        BookControlAction.MarkUnread,
-                        stringResource(R.string.work_control_mark_unread),
-                        Icons.Outlined.BookmarkBorder,
-                        enabled = menuResource != null,
-                    ),
-                )
-                add(
-                    WarmPageFloatingMenuAction(
-                        BookControlAction.Download,
-                        downloadLabel,
-                        if (selectedDownload?.status in setOf(
-                                AndroidDownloadStatus.Queued,
-                                AndroidDownloadStatus.Downloading,
-                                AndroidDownloadStatus.Verifying,
-                            )
-                        ) Icons.Outlined.PauseCircle else Icons.Outlined.CloudDownload,
-                        enabled = menuResource != null,
-                    ),
-                )
-                if (canManageSystem) {
-                    add(WarmPageFloatingMenuAction(BookControlAction.Edit, stringResource(R.string.work_control_edit), Icons.Outlined.Edit))
-                    add(WarmPageFloatingMenuAction(BookControlAction.Recognize, stringResource(R.string.work_control_recognize), Icons.Outlined.Source))
-                    add(WarmPageFloatingMenuAction(BookControlAction.UploadCover, stringResource(R.string.work_control_upload_cover), Icons.Outlined.Image))
-                    add(WarmPageFloatingMenuAction(BookControlAction.RegenerateCover, stringResource(R.string.work_control_regenerate_cover), Icons.Outlined.Refresh))
-                    if (kindleEligible) add(
-                        WarmPageFloatingMenuAction(
-                            BookControlAction.SendToKindle,
-                            stringResource(R.string.work_control_send_kindle),
-                            Icons.AutoMirrored.Outlined.Send,
-                        ),
+            if (!canManageSystem) { LaunchedEffect(Unit) { onDismiss() } }
+            Box(
+                Modifier.offset { IntOffset(anchorInWindow.x.toInt(), anchorInWindow.y.toInt()) }
+                    .testTag("work-book-control-menu"),
+            ) {
+                DropdownMenu(expanded = canManageSystem, onDismissRequest = onDismiss) {
+                    fun select(action: BookControlAction) { onDismiss(); onBookTask(action) }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.work_control_edit)) },
+                        leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                        onClick = { select(BookControlAction.Edit) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.work_control_regenerate_cover)) },
+                        leadingIcon = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
+                        onClick = { select(BookControlAction.RegenerateCover) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.work_control_recognize)) },
+                        leadingIcon = { Icon(Icons.Outlined.Source, contentDescription = null) },
+                        onClick = { select(BookControlAction.Recognize) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.management_rescan)) },
+                        leadingIcon = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
+                        onClick = { select(BookControlAction.Rescan) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.management_delete), color = Color.Red) },
+                        leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color.Red) },
+                        onClick = { select(BookControlAction.Delete) },
                     )
                 }
             }
-            WarmPageFloatingActionMenu(
-                actions = actions,
-                anchorInWindow = anchorInWindow,
-                onSelect = { action ->
-                    when (action) {
-                        BookControlAction.AddShelf -> onAddShelf()
-                        BookControlAction.MarkUnread -> menuResource?.let(onMarkUnread)
-                        BookControlAction.Download -> menuResource?.let(onDownload)
-                        BookControlAction.AddSeries,
-                        BookControlAction.Edit,
-                        BookControlAction.Recognize,
-                        BookControlAction.UploadCover,
-                        BookControlAction.RegenerateCover,
-                        BookControlAction.SendToKindle,
-                        -> onBookTask(action)
-                    }
-                },
-                onDismiss = onDismiss,
-                modifier = Modifier.testTag("work-book-control-menu"),
-                header = {
-                    WorkControlMenuHeader(
-                        title = content.book.title,
-                        subtitle = menuResource?.let { resource ->
-                            stringResource(R.string.work_control_selected_resource_format, resource.title, resource.format)
-                        }.orEmpty(),
-                        cover = {
-                            BookCover(
-                                book = content.book,
-                                repository = repository,
-                                context = context,
-                                role = CoverRole.Compact,
-                                modifier = Modifier.width(38.dp),
-                            )
-                        },
-                    )
-                },
-            )
         }
         is WorkControlMenuTarget.Resource -> {
             val resource = target.value
@@ -1877,7 +1916,6 @@ private fun WorkDetailControlMenu(
                 add(WarmPageFloatingMenuAction(VolumeControlAction.Download, downloadLabel, if (activeDownload) Icons.Outlined.PauseCircle else Icons.Outlined.CloudDownload))
                 if (canManageSystem) {
                     add(WarmPageFloatingMenuAction(VolumeControlAction.Edit, stringResource(R.string.work_control_edit), Icons.Outlined.Edit))
-                    add(WarmPageFloatingMenuAction(VolumeControlAction.ChangeMediaType, stringResource(R.string.work_control_change_media_type), Icons.Outlined.Layers, enabled = !activeDownload))
                     if (kindleEligible) add(WarmPageFloatingMenuAction(VolumeControlAction.SendToKindle, stringResource(R.string.work_control_send_kindle), Icons.AutoMirrored.Outlined.Send))
                 }
             }
@@ -1889,7 +1927,6 @@ private fun WorkDetailControlMenu(
                         VolumeControlAction.MarkUnread -> onMarkUnread(resource)
                         VolumeControlAction.Download -> onDownload(resource)
                         VolumeControlAction.Edit,
-                        VolumeControlAction.ChangeMediaType,
                         VolumeControlAction.SendToKindle,
                         -> onResourceTask(action, resource)
                     }
@@ -2196,13 +2233,14 @@ private fun ShelfPickerSheet(
                 else -> {
                     state.shelves.forEach { shelf ->
                         val isSelected = shelf.id in state.selectedShelfIds
+                        val editable = shelf.kind == com.ermao.library.shared.modules.shelf.domain.ShelfKind.Static
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = theme.components.controls.minimumTouchTarget)
                                 .toggleable(
                                     value = isSelected,
-                                    enabled = !state.isSavingShelves,
+                                    enabled = editable && !state.isSavingShelves,
                                     role = Role.Checkbox,
                                     onValueChange = { onToggleShelf(shelf.id) },
                                 )
@@ -2212,7 +2250,7 @@ private fun ShelfPickerSheet(
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = null,
-                                enabled = !state.isSavingShelves,
+                                enabled = editable && !state.isSavingShelves,
                             )
                             Text(shelf.name, style = theme.typography.body, modifier = Modifier.weight(1f))
                         }

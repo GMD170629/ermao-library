@@ -5,6 +5,7 @@ data class ReaderAccessRequest(
     val resourceId: String,
     val readerType: DownloadReaderType,
     val isOnline: Boolean,
+    val isDownloadable: Boolean = true,
 ) {
     init {
         require(resourceId.isNotBlank())
@@ -28,6 +29,10 @@ class ReaderAccessPolicy {
                 artifact.identity.resourceId == request.resourceId
         }
         if (local != null) return ReaderAccessDecision.LocalArtifact(local)
+        if (!request.isDownloadable) {
+            return if (request.isOnline) ReaderAccessDecision.RemoteStream
+            else ReaderAccessDecision.Unavailable("OFFLINE_ARTIFACT_MISSING")
+        }
         return when (request.readerType) {
             DownloadReaderType.Reflowable -> ReaderAccessDecision.NeedsDownload
             DownloadReaderType.Pdf,

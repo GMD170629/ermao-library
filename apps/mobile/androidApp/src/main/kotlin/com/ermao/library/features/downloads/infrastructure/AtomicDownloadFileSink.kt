@@ -11,7 +11,6 @@ import kotlinx.coroutines.withContext
 
 class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink {
     override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession {
-        require(request.resumeFromBytes == 0L) { "Android managed downloads do not support resume yet" }
         return begin(
             namespace = AndroidDownloadNamespace(
                 request.namespace.serverIdentity,
@@ -20,6 +19,7 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             ),
             resourceId = request.resourceId,
             assetId = request.assetId,
+            resumeFromBytes = request.resumeFromBytes,
         )
     }
 
@@ -27,6 +27,7 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         namespace: AndroidDownloadNamespace,
         resourceId: String,
         assetId: String,
+        resumeFromBytes: Long = 0,
     ): Session = withContext(Dispatchers.IO) {
         require(resourceId.isNotBlank())
         require(assetId.isNotBlank())
@@ -36,14 +37,16 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
         val part = File(directory, "$artifactKey.part")
         val final = File(directory, "$artifactKey.bin")
-        // The first Android delivery restarts interrupted foreground transfers. It does not
-        // advertise byte-range resume until the transfer gateway owns an If-Range contract.
-        part.delete()
+        if (resumeFromBytes == 0L) part.delete()
+        require((if (part.exists()) part.length() else 0L) == resumeFromBytes) {
+            "Partial download does not match the requested range"
+        }
         Session(
             part,
             final,
             "$relativeDirectory/$artifactKey.bin",
-            FileOutputStream(part, false),
+            FileOutputStream(part, resumeFromBytes > 0),
+            resumeFromBytes,
         )
     }
 
@@ -85,8 +88,9 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         private val finalFile: File,
         private val localReference: String,
         private var output: FileOutputStream?,
+        resumeFromBytes: Long = 0,
     ) : DownloadByteSinkSession {
-        private var writtenBytes = 0L
+        private var writtenBytes = resumeFromBytes
 
         override suspend fun write(bytes: ByteArray) = withContext(Dispatchers.IO) {
             check(output != null) { "Download sink session is closed" }
@@ -111,6 +115,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         }
 
         override suspend fun abort() = withContext(Dispatchers.IO) { abortInternal() }
+
+        override suspend fun pause() = withContext(Dispatchers.IO) {
+            output?.fd?.sync()
+            output?.close()
+            output = null
+        }
 
         private fun abortInternal() {
             runCatching { output?.close() }

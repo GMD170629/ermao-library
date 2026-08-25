@@ -48,18 +48,18 @@ final class DownloadCenterStore: ObservableObject {
         records.first { $0.resourceID == resourceID && (assetID == nil || $0.assetID == assetID) }
     }
 
-    func enqueue(book: BookCard, resource: BookResource, mediaKind: LibraryMediaKind) {
+    func enqueue(book: BookCard, resource: BookResource) {
         guard let context else { return }
         Task {
             do {
                 let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
-                try await enqueuePrepared(book: book, resource: resource, mediaKind: mediaKind, bootstrap: bootstrap, context: context)
+                try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
             } catch { recordPreparationError(error) }
         }
     }
 
     @discardableResult
-    func requestReaderAccess(book: BookCard, resource: BookResource, mediaKind: LibraryMediaKind, completion: @escaping @MainActor (ManagedReaderAccessOutcome) -> Void) -> Task<Void, Never> {
+    func requestReaderAccess(book: BookCard, resource: BookResource, completion: @escaping @MainActor (ManagedReaderAccessOutcome) -> Void) -> Task<Void, Never> {
         guard let context else { completion(.unavailable("DOWNLOAD_CONTEXT_UNAVAILABLE")); return Task {} }
         return Task {
             do {
@@ -68,7 +68,7 @@ final class DownloadCenterStore: ObservableObject {
                     completion(.open(ReaderHandoff(bookID: book.id, resourceID: resource.id, assetID: bootstrap.assetID, title: book.title, resourceTitle: resource.title, format: completed.format, readerType: completed.readerType, source: .verifiedLocal(recordID: completed.id))))
                 } else if bootstrap.readerType.requiresCompleteDownloadBeforeReading {
                     if let stale = record(for: resource.id), stale.readerType != bootstrap.readerType || stale.assetID != bootstrap.assetID { await removeForReplacement(stale) }
-                    try await enqueuePrepared(book: book, resource: resource, mediaKind: mediaKind, bootstrap: bootstrap, context: context)
+                    try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
                     guard let record = record(for: resource.id, assetID: bootstrap.assetID) else { completion(.unavailable("DOWNLOAD_MANIFEST_WRITE_FAILED")); return }
                     completion(.needsDownload(recordID: record.id))
                 } else if bootstrap.readerType.supportsStreaming {
@@ -95,6 +95,7 @@ final class DownloadCenterStore: ObservableObject {
     }
 
     func remove(resourceID: String) { if let record = record(for: resourceID) { remove(record) } }
+    func remove(bookID: String) { records.filter { $0.bookID == bookID }.forEach(remove) }
     func localFileURL(for record: ManagedDownloadRecord) async -> URL? { await repository.fileURL(for: record) }
 
     private func start(_ original: ManagedDownloadRecord) {
@@ -120,7 +121,7 @@ final class DownloadCenterStore: ObservableObject {
         runningTasks[recordID] = task
     }
 
-    private func enqueuePrepared(book: BookCard, resource: BookResource, mediaKind _: LibraryMediaKind, bootstrap: ManagedDownloadBootstrap, context: ContentRequestContext) async throws {
+    private func enqueuePrepared(book: BookCard, resource: BookResource, bootstrap: ManagedDownloadBootstrap, context: ContentRequestContext) async throws {
         guard !bootstrap.bookID.isEmpty, bootstrap.bookID == book.id, bootstrap.resourceID == resource.id, !bootstrap.assetID.isEmpty else { throw ManagedDownloadTransferError.invalidResponse }
         let record = try await repository.enqueue(namespace: context.namespaceKey, book: book, resource: resource, assetID: bootstrap.assetID, readerType: bootstrap.readerType, expectedBytes: bootstrap.expectedBytes)
         replace(record); start(record)

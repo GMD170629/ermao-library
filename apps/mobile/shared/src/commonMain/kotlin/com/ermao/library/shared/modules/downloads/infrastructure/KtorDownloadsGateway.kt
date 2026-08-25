@@ -93,6 +93,7 @@ class KtorDownloadsGateway(
             ) {
                 if (request.resumeFromBytes > 0) {
                     header(HttpHeaders.Range, "bytes=${request.resumeFromBytes}-")
+                    request.ifRangeValidator?.takeIf(String::isNotBlank)?.let { header(HttpHeaders.IfRange, it) }
                 }
             }
             return statement.execute { response ->
@@ -149,7 +150,9 @@ class KtorDownloadsGateway(
                 )
             }
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { session?.abort() }
+            withContext(NonCancellable) {
+                if (request.preservePartialOnCancellation) session?.pause() else session?.abort()
+            }
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
             session?.abortSafely()
@@ -226,17 +229,28 @@ class KtorDownloadsGateway(
         require(primaryAsset.requiredString("resourceId") == expectedResourceId) {
             "Bootstrap asset does not match resource"
         }
+        // ReaderAssetSummary.title is a required server field even though downloads only need
+        // the asset identity. Validate it here so the download boundary cannot silently accept
+        // the retired asset shape.
+        primaryAsset.requiredString("title")
         val primaryUrl = primaryAsset.requiredString("url")
         require(primaryUrl.isSafeMediaApiPath()) { "Bootstrap asset URL is invalid" }
         val comicArtifact = if (readerType == DownloadReaderType.Comic) {
             val publication = requiredObject("publication")
             require(publication.requiredString("kind") == "comic") { "Comic download contract is invalid" }
-            publication.requiredObject("downloadArtifact").also { artifact ->
+            (publication["downloadArtifact"] as? JsonObject)?.also { artifact ->
                 require(artifact.requiredString("url") == "/api/reader/v4/resources/$expectedResourceId/comic/archive") {
                     "Comic download artifact URL is invalid"
                 }
                 require(artifact.requiredString("sourceFormat").equals(resourceFormat, ignoreCase = true)) {
                     "Comic download source format is inconsistent"
+                }
+            }.also { artifact ->
+                require(resourceFormat == "image_dir" || artifact != null) {
+                    "Comic download artifact is missing"
+                }
+                require(resourceFormat != "image_dir" || artifact == null) {
+                    "IMAGE_DIR must not expose a derived download artifact"
                 }
             }
         } else null
@@ -249,7 +263,10 @@ class KtorDownloadsGateway(
             .lowercase()
             .substringBefore(';')
         require(sourceSize > 0)
-        require(sourceMime in allowedMimeTypes(readerType)) { "Bootstrap asset MIME type is inconsistent" }
+        require(
+            sourceMime in allowedMimeTypes(readerType) ||
+                (resourceFormat == "image_dir" && sourceMime in IMAGE_MIME_TYPES),
+        ) { "Bootstrap asset MIME type is inconsistent" }
         return DownloadDescriptor(
             identity = DownloadIdentity(
                 namespace = context.namespace,
@@ -270,6 +287,7 @@ class KtorDownloadsGateway(
             ),
             resourceIndex = resource.optionalDouble("resourceIndex"),
             resourceSortOrder = resource.requiredNonNegativeInt("sortOrder"),
+            isDownloadable = comicArtifact != null || readerType != DownloadReaderType.Comic,
         )
     }
 
@@ -318,6 +336,7 @@ class KtorDownloadsGateway(
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
         val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc", "txt")
+        val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }
 }
 
@@ -326,8 +345,8 @@ private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when
         "application/epub+zip",
         "application/x-mobipocket-ebook",
         "application/vnd.amazon.ebook",
+        "application/x-fictionbook+xml",
         "text/plain",
-        "application/octet-stream",
     )
     DownloadReaderType.Pdf -> setOf("application/pdf", "application/octet-stream")
     DownloadReaderType.Comic -> setOf(
@@ -340,17 +359,15 @@ private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when
         "application/octet-stream",
     )
     DownloadReaderType.Audio -> setOf(
-        "audio/mpeg",
-        "audio/mp3",
-        "audio/mp4",
-        "audio/x-m4b",
-        "audio/x-m4a",
-        "audio/ogg",
-        "audio/flac",
-        "audio/opus",
-        "audio/wav",
-        "audio/x-wav",
-        "application/octet-stream",
+        "audio/aac", "audio/ac3", "audio/aiff", "audio/amr", "audio/basic",
+        "audio/eac3", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg",
+        "audio/vnd.dts", "audio/vnd.rn-realaudio", "audio/wav", "audio/webm",
+        "audio/x-matroska", "audio/x-ms-wma", "audio/x-adx", "audio/x-ape", "audio/x-aptx",
+        "audio/x-aptxhd", "audio/x-caf", "audio/x-dff", "audio/x-dsf", "audio/x-g722",
+        "audio/x-g726", "audio/x-gsm", "audio/x-lbc", "audio/x-mlp",
+        "audio/x-mpc", "audio/x-oma", "audio/x-qcp", "audio/x-shn",
+        "audio/x-sph", "audio/x-tak", "audio/x-thd", "audio/x-tta",
+        "audio/x-voc", "audio/x-wv", "audio/x-xma",
     )
 }
 

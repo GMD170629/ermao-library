@@ -9,6 +9,7 @@ struct LibraryView: View {
 
     @StateObject private var store: LibraryStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.locale) private var locale
     @Environment(\.appTheme) private var theme
     @State private var presentsFilter = false
     @AccessibilityFocusState private var filterButtonFocused: Bool
@@ -71,30 +72,47 @@ struct LibraryView: View {
             if !isPresented { filterButtonFocused = true }
         }
         .appCanvas()
-        .task { store.reload() }
+        .task {
+            store.loadLibraryOptionsIfNeeded()
+            store.reload()
+        }
     }
 
     private var searchPrompt: LocalizedStringKey {
-        switch store.selectedScope {
-        case .books: "library.search.books"
-        case .series: "library.search.series"
-        case .authors: "library.search.authors"
-        }
+        "library.search.works"
     }
 
     private var scopePicker: some View {
-        Picker("library.scope.accessibility", selection: Binding(
-            get: { store.selectedScope },
-            set: { scope in
-                guard scope != store.selectedScope else { return }
-                store.selectScope(scope)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: .space1) {
+                librarySourceButton(
+                    id: nil,
+                    title: String(localized: "library.scope.works", locale: locale)
+                )
+                ForEach(store.libraryOptions) { option in
+                    librarySourceButton(id: option.id, title: option.name)
+                }
             }
-        )) {
-            Text("library.scope.books").tag(LibraryScope.books)
-            Text("library.scope.series").tag(LibraryScope.series)
-            Text("library.scope.authors").tag(LibraryScope.authors)
         }
-        .pickerStyle(.segmented)
+        .accessibilityLabel(Text("library.scope.accessibility"))
+    }
+
+    private func librarySourceButton(id: String?, title: String) -> some View {
+        let selected = store.selectedLibraryID == id
+        return Button {
+            store.selectLibrary(id)
+        } label: {
+            Text(title)
+                .appTextStyle(.label)
+                .lineLimit(1)
+                .foregroundStyle(selected ? theme.actionAccent : theme.textPrimary)
+                .padding(.horizontal, .space2)
+                .frame(minHeight: .iosMinimumTouchTarget)
+                .background(selected ? theme.accentSoft : theme.canvas)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -102,7 +120,13 @@ struct LibraryView: View {
         VStack(alignment: .leading, spacing: .space1) {
             HStack(spacing: .space1) {
                 if case .ready(_, let total, _, _) = store.current.results {
-                    Text(String(format: NSLocalizedString(resultCountKey, comment: ""), locale: .current, total))
+                    Text(
+                        String(
+                            format: String(localized: "library.results.works.format", locale: locale),
+                            locale: locale,
+                            total
+                        )
+                    )
                         .appTextStyle(.label)
                         .foregroundStyle(theme.textSecondary)
                 }
@@ -141,11 +165,6 @@ struct LibraryView: View {
 
             if store.selectedScope == .books, !store.current.filters.isEmpty {
                 VStack(alignment: .leading, spacing: .spaceHalf) {
-                    ForEach(activeMediaFilters, id: \.self) { mediaKind in
-                        appliedFilterButton(mediaKind.localizedTitle) {
-                            store.removeMediaFilter(mediaKind)
-                        }
-                    }
                     ForEach(activeReadingFilters, id: \.self) { readingStatus in
                         appliedFilterButton(readingStatus.localizedTitle) {
                             store.removeReadingFilter(readingStatus)
@@ -158,12 +177,8 @@ struct LibraryView: View {
         .frame(minHeight: .iosMinimumTouchTarget, alignment: .top)
     }
 
-    private var activeMediaFilters: [LibraryMediaKind] {
-        [LibraryMediaKind.ebook, .comic, .audiobook].filter(store.current.filters.mediaKinds.contains)
-    }
-
     private var activeReadingFilters: [LibraryReadingStatus] {
-        [LibraryReadingStatus.unread, .reading, .finished].filter(store.current.filters.readingStatuses.contains)
+        [LibraryReadingStatus.unread, .reading, .finished].filter { store.current.filters.readingStatus == $0 }
     }
 
     private func appliedFilterButton(_ title: String, remove: @escaping () -> Void) -> some View {
@@ -184,14 +199,6 @@ struct LibraryView: View {
         .accessibilityLabel(
             Text(String(format: String(localized: "library.filter.remove.format"), locale: .current, title))
         )
-    }
-
-    private var resultCountKey: String {
-        switch store.selectedScope {
-        case .books: "library.results.books.format"
-        case .series: "library.results.series.format"
-        case .authors: "library.results.authors.format"
-        }
     }
 
     @ViewBuilder
@@ -226,11 +233,7 @@ struct LibraryView: View {
         case .empty:
             emptyResultsView
         case .ready(let items, _, _, _):
-            if store.selectedScope == .books {
-                worksContent(items.compactMap(\.book))
-            } else {
-                groupingContent(items.compactMap(\.grouping))
-            }
+            worksContent(items.compactMap(\.book))
             PaginationStatusView(
                 isLoading: store.current.isLoadingNextPage,
                 hasError: store.current.hasPaginationError,
@@ -261,11 +264,7 @@ struct LibraryView: View {
     }
 
     private var emptyTitle: LocalizedStringKey {
-        switch store.selectedScope {
-        case .books: "library.empty.books.title"
-        case .series: "library.empty.series.title"
-        case .authors: "library.empty.authors.title"
-        }
+        "library.empty.works.title"
     }
 
     @ViewBuilder
@@ -576,15 +575,10 @@ private struct LibraryFilterSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("library.filter.media.section") {
-                    filterRow("library.media.ebook", value: .ebook, selection: $draft.mediaKinds)
-                    filterRow("library.media.comic", value: .comic, selection: $draft.mediaKinds)
-                    filterRow("library.media.audiobook", value: .audiobook, selection: $draft.mediaKinds)
-                }
                 Section("library.filter.reading.section") {
-                    filterRow("library.reading.unread", value: .unread, selection: $draft.readingStatuses)
-                    filterRow("library.reading.reading", value: .reading, selection: $draft.readingStatuses)
-                    filterRow("library.reading.finished", value: .finished, selection: $draft.readingStatuses)
+                    filterRow("library.reading.unread", value: .unread, selection: $draft.readingStatus)
+                    filterRow("library.reading.reading", value: .reading, selection: $draft.readingStatus)
+                    filterRow("library.reading.finished", value: .finished, selection: $draft.readingStatus)
                 }
             }
             .listStyle(.insetGrouped)
@@ -617,24 +611,20 @@ private struct LibraryFilterSheet: View {
     private func filterRow<Value: Hashable>(
         _ title: LocalizedStringKey,
         value: Value,
-        selection: Binding<Set<Value>>
+        selection: Binding<Value?>
     ) -> some View {
         Button {
-            if selection.wrappedValue.contains(value) {
-                selection.wrappedValue.remove(value)
-            } else {
-                selection.wrappedValue.insert(value)
-            }
+            selection.wrappedValue = selection.wrappedValue == value ? nil : value
         } label: {
             HStack {
                 Text(title).foregroundStyle(Color.primary)
                 Spacer()
-                if selection.wrappedValue.contains(value) {
-                    Image(systemName: "checkmark.square.fill")
+                if selection.wrappedValue == value {
+                    Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(theme.brandAccent)
                         .accessibilityHidden(true)
                 } else {
-                    Image(systemName: "square")
+                    Image(systemName: "circle")
                         .foregroundStyle(theme.textTertiary)
                         .accessibilityHidden(true)
                 }
@@ -643,17 +633,7 @@ private struct LibraryFilterSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(selection.wrappedValue.contains(value) ? .isSelected : [])
-    }
-}
-
-private extension LibraryMediaKind {
-    var localizedTitle: String {
-        switch self {
-        case .ebook: String(localized: "library.media.ebook")
-        case .comic: String(localized: "library.media.comic")
-        case .audiobook: String(localized: "library.media.audiobook")
-        }
+        .accessibilityAddTraits(selection.wrappedValue == value ? .isSelected : [])
     }
 }
 

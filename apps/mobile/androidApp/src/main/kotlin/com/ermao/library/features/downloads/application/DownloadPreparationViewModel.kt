@@ -108,15 +108,17 @@ class DownloadPreparationViewModel(
                     resourceId = descriptor.identity.resourceId,
                     readerType = descriptor.readerType,
                     isOnline = true,
+                    isDownloadable = descriptor.isDownloadable,
                 ),
             )) {
                 is ReaderLocalArtifact -> publishCompletion(decision.artifact)
                 is ReaderUnavailable -> mutableUiState.value = DownloadPreparationUiState.Failed(decision.reasonCode)
-                else -> if (decision == ReaderNeedsDownload) {
+                else -> if (decision == ReaderNeedsDownload && descriptor.isDownloadable) {
                     download(descriptor)
                 } else {
-                    check(decision == ReaderRemoteStream)
-                    mutableUiState.value = DownloadPreparationUiState.Failed("DOWNLOAD_NOT_REQUIRED_FOR_STREAM")
+                    mutableUiState.value = DownloadPreparationUiState.Failed(
+                        if (descriptor.isDownloadable) "DOWNLOAD_NOT_REQUIRED_FOR_STREAM" else "DOWNLOAD_NOT_AVAILABLE_OFFLINE",
+                    )
                 }
             }
         }

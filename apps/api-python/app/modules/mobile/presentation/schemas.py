@@ -31,8 +31,8 @@ class MobileCapabilitiesPayload(HttpContractModel):
         default=True,
         alias="bookResourceAsset",
     )
-    book_detail_management: Literal[False] = Field(
-        default=False,
+    book_detail_management: Literal[True] = Field(
+        default=True,
         alias="bookDetailManagement",
     )
 

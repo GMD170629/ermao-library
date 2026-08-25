@@ -62,6 +62,13 @@ data class AuthenticatedAsset(
     val notModified: Boolean = false,
 )
 
+/** A bounded authenticated JSON response with conditional-request metadata. */
+internal data class AuthenticatedJson(
+    val bytes: ByteArray,
+    val etag: String?,
+    val notModified: Boolean = false,
+)
+
 internal data class AuthenticatedBinary(
     val bytes: ByteArray,
     val mimeType: String,
@@ -295,6 +302,98 @@ class ApiClient internal constructor(
         }
     }
 
+    /**
+     * Loads a JSON endpoint using the same Cookie/redirect policy as media assets.
+     *
+     * This is intentionally separate from [loadAuthenticatedAsset]: the latter validates an
+     * image content type and is unsuitable for Reader progress, whose response is JSON and may
+     * legitimately be `304 Not Modified`.
+     */
+    internal suspend fun loadAuthenticatedJson(
+        apiPath: String,
+        etag: String? = null,
+        maximumBytes: Int = DEFAULT_MAXIMUM_JSON_BYTES,
+    ): ApiResult<AuthenticatedJson> {
+        try {
+            require(apiPath.startsWith("/api/")) { "JSON path must start with /api/" }
+            require(!apiPath.contains('#')) { "JSON path must not contain a fragment" }
+            require(maximumBytes > 0) { "JSON size limit must be positive" }
+            var requestUrl = profile.baseUrl.resolveApiPath(apiPath)
+            var redirectCount = 0
+            while (true) {
+                val response = client.request(requestUrl) {
+                    method = HttpMethod.Get
+                    etag?.let { headers.append(HttpHeaders.IfNoneMatch, it) }
+                }
+                if (response.status.value in REDIRECT_STATUS_CODES) {
+                    response.bodyAsText()
+                    val location = response.headers[HttpHeaders.Location]
+                        ?: return redirectFailure("REDIRECT_LOCATION_MISSING")
+                    val targetUrl = RedirectPolicy.resolve(requestUrl, location)
+                        ?: return redirectFailure("REDIRECT_LOCATION_INVALID")
+                    if (!RedirectPolicy.shouldFollow(requestUrl, targetUrl)) {
+                        return redirectFailure("REDIRECT_REJECTED")
+                    }
+                    if (redirectCount >= MAX_REDIRECTS) {
+                        return redirectFailure("TOO_MANY_REDIRECTS")
+                    }
+                    redirectCount += 1
+                    requestUrl = targetUrl
+                    continue
+                }
+                val responseEtag = response.headers[HttpHeaders.ETag]
+                if (response.status.value == 304) {
+                    response.bodyAsText()
+                    return ApiResult.Success(
+                        AuthenticatedJson(byteArrayOf(), responseEtag ?: etag, notModified = true),
+                        ApiResponseMetadata(response.status.value),
+                    )
+                }
+                if (response.status.value !in 200..299) {
+                    return when (val decoded = decoder.decode(
+                        response.status.value,
+                        response.bodyAsText(),
+                        JsonElement.serializer(),
+                    )) {
+                        is ApiResult.Failure -> decoded
+                        is ApiResult.Success -> redirectFailure("UNEXPECTED_JSON_RESPONSE")
+                    }
+                }
+                val contentType = response.headers[HttpHeaders.ContentType]
+                    ?.substringBefore(';')
+                    ?.trim()
+                    ?.lowercase()
+                    ?: return redirectFailure("JSON_CONTENT_TYPE_MISSING")
+                if (contentType != "application/json" && !contentType.endsWith("+json")) {
+                    response.bodyAsText()
+                    return redirectFailure("JSON_CONTENT_TYPE_INVALID")
+                }
+                val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                if (declaredSize != null && declaredSize > maximumBytes) {
+                    response.bodyAsText()
+                    return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "JSON_TOO_LARGE"))
+                }
+                val bytes = response.bodyAsChannel().readBounded(maximumBytes)
+                    ?: return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "JSON_TOO_LARGE"))
+                return ApiResult.Success(
+                    AuthenticatedJson(bytes, responseEtag),
+                    ApiResponseMetadata(
+                        response.status.value,
+                        response.headers.entries().associate { it.key to it.value },
+                    ),
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (timeout: HttpRequestTimeoutException) {
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
+        } catch (error: PlatformStorageException) {
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
+        } catch (error: Throwable) {
+            return ApiResult.Failure(mapTransportError(error))
+        }
+    }
+
     internal suspend fun loadAuthenticatedBinary(
         apiPath: String,
         maximumBytes: Int,
@@ -509,6 +608,7 @@ class ApiClient internal constructor(
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         const val MAX_REDIRECTS = 3
         const val DEFAULT_MAXIMUM_ASSET_BYTES = 12 * 1024 * 1024
+        const val DEFAULT_MAXIMUM_JSON_BYTES = 196_608
         const val BINARY_READ_BUFFER_BYTES = 64 * 1024
         const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
         const val DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024

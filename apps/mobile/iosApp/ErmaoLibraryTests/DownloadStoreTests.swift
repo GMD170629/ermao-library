@@ -63,8 +63,7 @@ final class DownloadStoreTests: XCTestCase {
                 title: "Styles",
                 author: "Agatha Christie",
                 cover: nil,
-                progress: nil,
-                availableMediaKinds: [.ebook]
+                progress: nil
             ),
             resource: resource,
             assetID: bootstrap.assetID,
@@ -195,8 +194,7 @@ final class DownloadStoreTests: XCTestCase {
                 title: "Book",
                 author: "Author",
                 cover: nil,
-                progress: nil,
-                availableMediaKinds: [.ebook]
+                progress: nil
             ),
             resource: resource,
             assetID: original.assetID,
@@ -231,8 +229,7 @@ final class DownloadStoreTests: XCTestCase {
                 title: "Book",
                 author: "Author",
                 cover: nil,
-                progress: nil,
-                availableMediaKinds: [.ebook]
+                progress: nil
             ),
             resource: resource,
             assetID: "asset-new",
@@ -337,8 +334,7 @@ final class DownloadStoreTests: XCTestCase {
                 title: "Book",
                 author: "Author",
                 cover: nil,
-                progress: nil,
-                availableMediaKinds: [.ebook]
+                progress: nil
             ),
             resource: BookResource(
                 id: resourceID,

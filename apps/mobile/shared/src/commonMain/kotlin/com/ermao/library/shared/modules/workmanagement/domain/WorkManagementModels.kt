@@ -41,6 +41,7 @@ data class BookMetadataDraft(
     val seriesName: String?,
     val seriesIndex: Double?,
     val tags: List<String> = emptyList(),
+    val originalTags: List<String> = emptyList(),
 ) {
     init {
         require(title.isNotBlank())
@@ -61,11 +62,7 @@ data class ResourceMetadataDraft(
     val resourceIndex: Double? = null,
 )
 
-enum class ManagedMediaKind(val wireValue: String) {
-    Ebook("EBOOK"),
-    Comic("COMIC"),
-    Audiobook("AUDIOBOOK"),
-}
+data class BookDeletionOutcome(val deletedBookIds: List<String>)
 
 enum class ManagedReadingStatus(val wireValue: String) {
     Unread("UNREAD"),
@@ -74,14 +71,13 @@ enum class ManagedReadingStatus(val wireValue: String) {
 
 data class BookMutationOutcome(
     val bookId: String,
-    val operationId: String? = null,
+    val resourceId: String,
 )
 
 data class MetadataProvider(
     val id: String,
     val name: String,
     val enabled: Boolean,
-    val mediaKinds: Set<ManagedMediaKind>,
 )
 
 enum class MetadataField(val wireValue: String) {

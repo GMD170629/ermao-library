@@ -6,13 +6,20 @@ enum ManagedDownloadReaderType: String, Codable, Hashable, Sendable {
     case pdf
     case audio
 
-    static func fixtureValue(format: String, mediaKind: LibraryMediaKind) -> Self? {
+    static func fixtureValue(format: String, readerType: String) -> Self? {
+        switch readerType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "reflowable": return .reflowable
+        case "comic": return .comic
+        case "pdf": return .pdf
+        case "audio": return .audio
+        default: break
+        }
         switch format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
-        case "EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT": .reflowable
-        case "PDF": .pdf
-        case "COMIC", "CBR", "CBZ", "RAR", "ZIP": .comic
-        case "AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3": .audio
-        default: mediaKind == .comic ? .comic : mediaKind == .audiobook ? .audio : nil
+        case "EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT": return .reflowable
+        case "PDF": return .pdf
+        case "COMIC", "CBR", "CBZ", "RAR", "ZIP": return .comic
+        case "AUDIO", "AUDIOBOOK", "M4B", "M4A", "MP3": return .audio
+        default: return nil
         }
     }
 
@@ -167,7 +174,6 @@ struct ReaderPreparationRequest: Identifiable, Sendable {
     let context: ContentRequestContext
     let book: BookCard
     let resource: BookResource
-    let mediaKind: LibraryMediaKind
     var id: String { "\(context.namespaceKey)|\(resource.id)" }
 }
 

@@ -9,9 +9,7 @@ data class Resource(
     val resourceIndex: Double?,
     val sortOrder: Int,
     val format: String,
-    val mediaKind: MediaKind,
     val readerType: String,
-    val classification: ResourceClassification,
     val readable: Boolean,
     val kindleSendAvailable: Boolean,
     val publisher: String?,
@@ -38,14 +36,9 @@ data class Resource(
     val assets: List<Asset>,
 )
 
-data class ResourceClassification(
-    val source: String,
-    val reason: String,
-    val suggestedMediaKind: MediaKind?,
-)
-
 data class Asset(
     val id: String,
+    val title: String,
     val resourceId: String?,
     val sourceNodeId: String?,
     val role: String?,

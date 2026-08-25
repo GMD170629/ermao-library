@@ -26,12 +26,12 @@ typealias BookMetadataDraft =
     com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 typealias ResourceMetadataDraft =
     com.ermao.library.shared.modules.workmanagement.domain.ResourceMetadataDraft
-typealias ManagedMediaKind =
-    com.ermao.library.shared.modules.workmanagement.domain.ManagedMediaKind
 typealias ManagedReadingStatus =
     com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 typealias BookMutationOutcome =
     com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
+typealias BookDeletionOutcome =
+    com.ermao.library.shared.modules.workmanagement.domain.BookDeletionOutcome
 typealias MetadataProvider =
     com.ermao.library.shared.modules.workmanagement.domain.MetadataProvider
 typealias MetadataField =
@@ -71,3 +71,38 @@ fun createWorkManagementContext(
         namespace = PrivateDataNamespace(serverIdentity, userId, authorizationVersion),
     )
 }
+
+/** Stable Swift bridge; avoids relying on erased Kotlin generic casts for Unit results. */
+fun workManagementResultSucceeded(result: WorkManagementResult<*>): Boolean =
+    result is com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content
+
+fun workManagementResultErrorCode(result: WorkManagementResult<*>): String? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Failure)?.error?.code
+
+fun workManagementBookDeletionOutcome(
+    result: WorkManagementResult<BookDeletionOutcome>,
+): BookDeletionOutcome? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementBooleanValue(result: WorkManagementResult<Boolean>): Boolean? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementMetadataProviders(
+    result: WorkManagementResult<List<MetadataProvider>>,
+): List<MetadataProvider>? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementMetadataSearchResult(
+    result: WorkManagementResult<MetadataSearchResult>,
+): MetadataSearchResult? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementKindleSettings(
+    result: WorkManagementResult<KindleSettings>,
+): KindleSettings? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementBookMutationOutcome(
+    result: WorkManagementResult<BookMutationOutcome>,
+): BookMutationOutcome? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value

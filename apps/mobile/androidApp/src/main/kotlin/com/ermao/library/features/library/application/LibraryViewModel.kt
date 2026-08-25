@@ -10,7 +10,6 @@ import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.GroupingCard
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
@@ -27,7 +26,6 @@ import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.shared.modules.library.ReadingStatus
 import com.ermao.library.shared.modules.library.BooksQuery
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.library.application.FilterCommitResult
 import com.ermao.library.shared.modules.library.application.LibraryDiscoveryRuntime
@@ -42,6 +40,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class ScrollAnchor(val itemId: String? = null, val offset: Int = 0)
+
+data class LibrarySourceOption(val id: String, val name: String)
 
 data class ScopeUiState(
     val query: String = "",
@@ -63,6 +63,8 @@ data class ScopeUiState(
 
 data class LibraryUiState(
     val selectedScope: LibraryScope = LibraryScope.Books,
+    val libraryOptions: List<LibrarySourceOption> = emptyList(),
+    val selectedLibraryId: String? = null,
     val scopes: Map<LibraryScope, ScopeUiState> = LibraryScope.entries.associateWith { ScopeUiState() },
     val filterDraft: WorksFilters? = null,
     val offlineFilterAvailability: OfflineFilterAvailability = OfflineFilterAvailability.Unavailable(
@@ -83,7 +85,16 @@ class LibraryViewModel(
     private var searchJob: Job? = null
     private val discoveryRuntime = LibraryDiscoveryRuntime()
 
-    init { loadScope(LibraryScope.Books, reset = true) }
+    init {
+        loadLibraryOptions()
+        loadScope(LibraryScope.Books, reset = true)
+    }
+
+    fun selectLibrary(libraryId: String?) {
+        if (libraryId == mutableUiState.value.selectedLibraryId) return
+        mutableUiState.update { it.copy(selectedLibraryId = libraryId) }
+        loadScope(LibraryScope.Books, reset = true)
+    }
 
     fun selectScope(scope: LibraryScope) {
         if (scope == mutableUiState.value.selectedScope) return
@@ -167,20 +178,9 @@ class LibraryViewModel(
 
     fun clearFilters() = updateFilterDraft(WorksFilters())
 
-    fun removeMediaFilter(mediaFilter: MediaFilter) {
-        val filters = mutableUiState.value.scopes.getValue(LibraryScope.Books).filters.let {
-            it.copy(media = it.media - mediaFilter)
-        }
-        discoveryRuntime.applyFilters(filters.toSharedFilters())
-        updateScope(LibraryScope.Books) { state ->
-            state.copy(filters = filters)
-        }
-        if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
-    }
-
     fun removeReadingFilter(readingFilter: ReadingFilter) {
         val filters = mutableUiState.value.scopes.getValue(LibraryScope.Books).filters.let {
-            it.copy(reading = it.reading - readingFilter)
+            it.copy(reading = if (it.reading == readingFilter) null else it.reading)
         }
         discoveryRuntime.applyFilters(filters.toSharedFilters())
         updateScope(LibraryScope.Books) { state ->
@@ -240,7 +240,7 @@ class LibraryViewModel(
         viewModelScope.launch {
             try {
                 val snapshot = mutableUiState.value.scopes.getValue(scope)
-                val worksQuery = snapshot.toBooksQuery(page)
+                val worksQuery = snapshot.toBooksQuery(page, mutableUiState.value.selectedLibraryId)
                 val groupingQuery = snapshot.toGroupingQuery(scope, page)
                 val result = if (scope == LibraryScope.Books) {
                     repository.loadBooks(context, worksQuery)
@@ -291,6 +291,24 @@ class LibraryViewModel(
             } catch (_: Exception) {
                 discoveryRuntime.fail(requestToken, "CONTENT_LOAD_FAILED", hasVisibleContent(scope))
                 applyFailure(scope, "CONTENT_LOAD_FAILED", reset)
+            }
+        }
+    }
+
+    private fun loadLibraryOptions() {
+        viewModelScope.launch {
+            when (val result = repository.loadLibraryOptions(context)) {
+                is ContentResult.Content -> mutableUiState.update { state ->
+                    state.copy(
+                        libraryOptions = result.value.map { LibrarySourceOption(it.id, it.name) },
+                        selectedLibraryId = state.selectedLibraryId?.takeIf { selected ->
+                            result.value.any { it.id == selected }
+                        },
+                    )
+                }
+                is ContentResult.Failure -> if (result.error.kind == AppErrorKind.Unauthorized) {
+                    onSessionUnauthorized()
+                }
             }
         }
     }
@@ -374,22 +392,16 @@ class LibraryViewModel(
     }
 }
 
-private fun ScopeUiState.toBooksQuery(page: Int): BooksQuery = BooksQuery(
+private fun ScopeUiState.toBooksQuery(page: Int, libraryId: String?): BooksQuery = BooksQuery(
     query = query.trim(),
+    libraryId = libraryId,
     sort = sort.toShared(),
     filters = filters.toSharedFilters(),
     page = page,
 )
 
 private fun WorksFilters.toSharedFilters(): LibraryFilters = LibraryFilters(
-        mediaKinds = media.mapTo(mutableSetOf()) {
-            when (it) {
-                MediaFilter.Ebook -> MediaKind.Ebook
-                MediaFilter.Comic -> MediaKind.Comic
-                MediaFilter.Audiobook -> MediaKind.Audiobook
-            }
-        },
-        readingStatuses = reading.mapTo(mutableSetOf()) {
+        readingStatus = reading?.let {
             when (it) {
                 ReadingFilter.Unread -> ReadingStatus.Unread
                 ReadingFilter.Reading -> ReadingStatus.Reading

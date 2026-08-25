@@ -3,7 +3,6 @@ package com.ermao.library.shared.modules.library.infrastructure
 import com.ermao.library.shared.modules.library.domain.ActiveMedia
 import com.ermao.library.shared.modules.library.domain.BookDetail
 import com.ermao.library.shared.modules.library.domain.LocalProgressScope
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.domain.PrimaryAction
 import com.ermao.library.shared.modules.library.domain.ProgressExtra
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
@@ -200,7 +199,7 @@ private fun ResourceSectionWire.toDomain(): ResourceSection {
 internal fun ActiveMediaWire.toDomain(): ActiveMedia {
     require(selectedResourceId.isNotBlank() && progress in 0.0..100.0)
     return ActiveMedia(
-        key = MediaKind(key),
+        key = key,
         formatLabel = formatLabel,
         selectedResourceId = selectedResourceId,
         selectedResourceTitle = selectedResourceTitle,

@@ -54,6 +54,8 @@ data class DownloadDescriptor(
     val source: DownloadSource,
     val resourceIndex: Double? = null,
     val resourceSortOrder: Int? = null,
+    /** False when the server exposes only a streaming representation (for example IMAGE_DIR). */
+    val isDownloadable: Boolean = true,
 ) {
     init {
         require(bookTitle.isNotBlank())

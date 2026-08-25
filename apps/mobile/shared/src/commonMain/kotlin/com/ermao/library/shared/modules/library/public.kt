@@ -4,7 +4,6 @@ import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.domain.BookDetail
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.BookSummary
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.infrastructure.BookDetailPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookSummaryWire
@@ -50,10 +49,8 @@ fun createContentRequestContext(
 }
 
 fun createLibraryFilters(
-    mediaKindWireValues: List<String>,
-    readingStatuses: Set<ReadingStatus>,
+    readingStatus: ReadingStatus?,
 ): LibraryFilters = LibraryFilters(
-    mediaKinds = mediaKindWireValues.map(::MediaKind).toSet(),
-    readingStatuses = readingStatuses,
+    readingStatus = readingStatus,
     downloadedOnly = false,
 )

@@ -1,5 +1,7 @@
 # Content Discovery Design QA
 
+Latest Work Detail refinement (2026-08-25): `design-qa/visual-runs/20260825-work-detail-emby-refinement-v1/report.md`. The selected iOS physical-device visual target passed; the matching Android implementation compiles and is awaiting physical-device runtime evidence.
+
 Status: the historical content-discovery compact/light smoke review passed. Work Detail v6 is now the authoritative target and requires a new physical-device visual and interaction acceptance run before implementation can be called current.
 
 Latest Work Detail control-menu run: option 1 was tightened into a 224 dp pointer-anchored translucent card, and direct task Sheets replaced the standalone management route. Android physical-device visual and runtime QA passed for the book menu, volume-cover long press, and in-detail edit flow. Evidence and the remaining iOS physical-device gate are recorded in `design-qa/visual-runs/20260816-work-detail-control-menu-v2/report.md`.

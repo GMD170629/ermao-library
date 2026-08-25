@@ -6,9 +6,7 @@ import com.ermao.library.shared.modules.library.domain.AppliedFacet
 import com.ermao.library.shared.modules.library.domain.Asset
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.FacetKind
-import com.ermao.library.shared.modules.library.domain.MediaKind
 import com.ermao.library.shared.modules.library.domain.Resource
-import com.ermao.library.shared.modules.library.domain.ResourceClassification
 import java.time.Instant
 import kotlin.test.assertEquals
 import org.junit.Test
@@ -41,7 +39,6 @@ class ContentMappersTest {
             continueResourceId = null,
             continueResourceProgress = 0.0,
             completed = false,
-            availableMediaKinds = listOf(MediaKind.Ebook),
             resources = emptyList(),
         )
 
@@ -63,9 +60,7 @@ class ContentMappersTest {
             resourceIndex = 1.0,
             sortOrder = 0,
             format = "EPUB",
-            mediaKind = MediaKind.Ebook,
             readerType = "reflowable",
-            classification = ResourceClassification("AUTO", "epub", MediaKind.Ebook),
             readable = true,
             kindleSendAvailable = true,
             publisher = null,
@@ -92,6 +87,7 @@ class ContentMappersTest {
             assets = listOf(
                 Asset(
                     id = "asset-1",
+                    title = "golden-dream.epub",
                     resourceId = "resource-completed",
                     sourceNodeId = "source-asset-1",
                     role = "publication",
@@ -126,7 +122,6 @@ class ContentMappersTest {
             continueResourceId = "resource-reading",
             continueResourceProgress = 75.0,
             completed = false,
-            availableMediaKinds = listOf(MediaKind.Ebook),
             resources = listOf(completedResource),
         )
 
@@ -138,7 +133,7 @@ class ContentMappersTest {
         assertEquals("2010-11-01", mappedResource.publishedAt)
         assertEquals("zh-CN", mappedResource.language)
         assertEquals(428, mappedResource.pageCount)
-        assertEquals("AUTO", mappedResource.metadataSource)
+        assertEquals(null, mappedResource.metadataSource)
         assertEquals("library/golden-dream.epub", mappedResource.assets.single().path)
     }
 }

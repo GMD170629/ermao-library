@@ -501,4 +501,26 @@
     <string name="management_resource">管理资源</string>
     <string name="management_failed">操作未完成（%1$s）。</string>
     <string name="management_updated">更改已保存。</string>
+    <string name="work_download_queued">已加入下载。</string>
+    <string name="work_download_paused">下载已暂停。</string>
+    <string name="work_download_failed">下载失败（%1$s）。</string>
+    <string name="work_reading_status_updated">阅读状态已更新。</string>
+    <string name="management_cover_updated">封面已重新生成。</string>
+    <string name="management_rescan_queued">已加入扫描队列。</string>
+    <string name="management_metadata_applied">已应用所选元数据。</string>
+    <string name="management_title">标题</string>
+    <string name="management_author">作者</string>
+    <string name="management_description">简介</string>
+    <string name="management_series">系列</string>
+    <string name="management_series_index">系列序号</string>
+    <string name="management_tags">标签（用逗号分隔）</string>
+    <string name="management_save">保存</string>
+    <string name="management_query">书名或关键词</string>
+    <string name="management_search">搜索</string>
+    <string name="management_apply">应用</string>
+    <string name="management_rescan">重新扫描文件</string>
+    <string name="management_rescan_message">重新扫描真实源节点并刷新当前图书。</string>
+    <string name="management_regenerate_cover_message">从源文件重新生成图书封面。</string>
+    <string name="management_delete">删除图书</string>
+    <string name="management_delete_message">输入“%1$s”以永久删除图书、源文件、资源和阅读记录。</string>
 </resources>

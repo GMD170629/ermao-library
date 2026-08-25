@@ -106,6 +106,7 @@ import com.ermao.library.shared.modules.downloads.createDownloadsGateway
 import com.ermao.library.shared.modules.downloads.toDownloadNamespace
 import com.ermao.library.shared.modules.downloads.DownloadsRuntime
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ContentAreaMessage
@@ -397,14 +398,13 @@ fun MainShell(
                                 state = libraryState,
                                 repository = contentRepository,
                                 context = contentContext,
-                                onSelectScope = libraryViewModel::selectScope,
+                                onSelectLibrary = libraryViewModel::selectLibrary,
                                 onQueryChanged = libraryViewModel::updateQuery,
                                 onClearQuery = libraryViewModel::clearQuery,
                                 onSelectSort = libraryViewModel::selectSort,
                                 onSelectViewMode = libraryViewModel::selectViewMode,
                                 onOpenFilter = libraryViewModel::openFilter,
                                 onUpdateFilterDraft = libraryViewModel::updateFilterDraft,
-                                onRemoveMediaFilter = libraryViewModel::removeMediaFilter,
                                 onRemoveReadingFilter = libraryViewModel::removeReadingFilter,
                                 onClearFilters = libraryViewModel::clearFilters,
                                 onApplyFilter = libraryViewModel::applyFilter,
@@ -442,6 +442,15 @@ fun MainShell(
                                             ),
                                         )
                                         val detailState by detailViewModel.uiState.collectAsState()
+                                        val managementViewModel: WorkManagementViewModel = viewModel(
+                                            key = "expanded-management-$contentKey-$bookId",
+                                            factory = WorkManagementViewModel.factory(
+                                                workManagementRepository,
+                                                contentContext,
+                                                bookId,
+                                                onSessionUnauthorized,
+                                            ),
+                                        )
                                         WorkDetailScreen(
                                             state = detailState,
                                             repository = contentRepository,
@@ -463,8 +472,12 @@ fun MainShell(
                                             onDownloadResource = downloadActionsViewModel::requestDownload,
                                             onCancelDownload = downloadActionsViewModel::cancelDownload,
                                             onRemoveDownload = downloadActionsViewModel::removeDownload,
-                                            managementViewModel = null,
-                                            canManageSystem = false,
+                                            managementViewModel = managementViewModel,
+                                            canManageSystem = session.authorization.canManageSystem,
+                                            onBookDeleted = {
+                                                downloadActionsViewModel.removeBook(bookId)
+                                                libraryViewModel.selectBook(null)
+                                            },
                                             onOpenSelectedResource = { resource ->
                                                 detailState.content?.book?.let { book ->
                                                     openResource(
@@ -674,9 +687,6 @@ fun MainShell(
                 entry<AdministrativeSettingsRoute.MetadataProviderEdit> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
-                entry<AdministrativeSettingsRoute.MetadataPipeline> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
                 entry<AdministrativeSettingsRoute.Opds> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
@@ -698,6 +708,15 @@ fun MainShell(
                         factory = WorkDetailViewModel.factory(contentRepository, shelfRepository, contentContext, appContext, route.bookId, onSessionUnauthorized),
                     )
                     val detailState by detailViewModel.uiState.collectAsState()
+                    val managementViewModel: WorkManagementViewModel = viewModel(
+                        key = "management-${route.bookId}",
+                        factory = WorkManagementViewModel.factory(
+                            workManagementRepository,
+                            contentContext,
+                            route.bookId,
+                            onSessionUnauthorized,
+                        ),
+                    )
                     WorkDetailScreen(
                         state = detailState,
                         repository = contentRepository,
@@ -727,8 +746,12 @@ fun MainShell(
                         onDownloadResource = downloadActionsViewModel::requestDownload,
                         onCancelDownload = downloadActionsViewModel::cancelDownload,
                         onRemoveDownload = downloadActionsViewModel::removeDownload,
-                        managementViewModel = null,
-                        canManageSystem = false,
+                        managementViewModel = managementViewModel,
+                        canManageSystem = session.authorization.canManageSystem,
+                        onBookDeleted = {
+                            downloadActionsViewModel.removeBook(route.bookId)
+                            currentBackStack.removeLastOrNull()
+                        },
                         onOpenSelectedResource = { resource ->
                             detailState.content?.book?.let { book ->
                                 openResource(

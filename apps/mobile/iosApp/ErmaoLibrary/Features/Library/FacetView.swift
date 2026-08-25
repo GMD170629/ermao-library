@@ -159,12 +159,6 @@ struct FacetView: View {
                                 .appTextStyle(.label)
                                 .foregroundStyle(theme.textSecondary)
                                 .lineLimit(1)
-                            if !work.availableMediaKinds.isEmpty {
-                                Text(mediaSummary(for: work))
-                                    .appTextStyle(.caption)
-                                    .foregroundStyle(theme.textSecondary)
-                                    .lineLimit(1)
-                            }
                             if let progress = work.progress, progress > 0 {
                                 VStack(alignment: .leading, spacing: .spaceHalf) {
                                     Text(progress / 100, format: .percent.precision(.fractionLength(0)))
@@ -189,17 +183,6 @@ struct FacetView: View {
                 Divider()
             }
         }
-    }
-
-    private func mediaSummary(for work: BookCard) -> String {
-        work.availableMediaKinds.map { kind in
-            switch kind {
-            case .ebook: String(localized: "library.media.ebook")
-            case .comic: String(localized: "library.media.comic")
-            case .audiobook: String(localized: "library.media.audiobook")
-            }
-        }
-        .joined(separator: " · ")
     }
 
     private func seriesAccessibilityLabel(index: Int, work: BookCard) -> String {

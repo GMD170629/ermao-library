@@ -58,7 +58,7 @@ Mobile 切换建立一个不可与旧客户端混用的新握手代际：
 - `readerSchemaVersion = 4`；
 - `librarySchemaVersion = 1`；
 - `capabilities.bookResourceAsset = true`；
-- `capabilities.bookDetailManagement = false`；第 5 项 Mobile 管理产品范围未在本次决策中启用；
+- `capabilities.bookDetailManagement = true`；详情管理范围由 `docs/mobile-app-work-detail-management.md` 的后续产品决策启用；
 - `capabilities.managedOfflineDownloads = true`。
 
 客户端必须同时验证 protocol、Reader schema、Library schema 与

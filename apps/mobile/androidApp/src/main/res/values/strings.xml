@@ -509,4 +509,26 @@
     <string name="management_resource">Manage resource</string>
     <string name="management_failed">Couldn’t complete the operation (%1$s).</string>
     <string name="management_updated">Changes saved.</string>
+    <string name="work_download_queued">Added to downloads.</string>
+    <string name="work_download_paused">Download paused.</string>
+    <string name="work_download_failed">Download failed (%1$s).</string>
+    <string name="work_reading_status_updated">Reading status updated.</string>
+    <string name="management_cover_updated">Cover regenerated.</string>
+    <string name="management_rescan_queued">Rescan added to the queue.</string>
+    <string name="management_metadata_applied">Selected metadata applied.</string>
+    <string name="management_title">Title</string>
+    <string name="management_author">Author</string>
+    <string name="management_description">Description</string>
+    <string name="management_series">Series</string>
+    <string name="management_series_index">Series number</string>
+    <string name="management_tags">Tags, separated by commas</string>
+    <string name="management_save">Save</string>
+    <string name="management_query">Title or keyword</string>
+    <string name="management_search">Search</string>
+    <string name="management_apply">Apply</string>
+    <string name="management_rescan">Rescan files</string>
+    <string name="management_rescan_message">Scan the real source node again and refresh this book.</string>
+    <string name="management_regenerate_cover_message">Generate a new cover from the source file.</string>
+    <string name="management_delete">Delete book</string>
+    <string name="management_delete_message">Type “%1$s” to permanently delete the book, source files, resources, and reading history.</string>
 </resources>

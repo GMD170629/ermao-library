@@ -1,13 +1,10 @@
 package com.ermao.library.shared.modules.library.domain
 
-import kotlin.jvm.JvmInline
-
 data class BookSummary(
     val id: String,
     val title: String,
     val author: String?,
     val coverUrl: String,
-    val availableMediaKinds: List<MediaKind>,
     val progress: Double,
 )
 
@@ -27,7 +24,6 @@ data class BookDetailSummary(
     val continueResourceId: String?,
     val continueResourceProgress: Double,
     val completed: Boolean,
-    val availableMediaKinds: List<MediaKind>,
     val resources: List<Resource>,
 )
 
@@ -38,12 +34,3 @@ data class AppliedFacet(
 )
 
 enum class FacetKind { Series, Author, Tag }
-
-@JvmInline
-value class MediaKind(val wireValue: String) {
-    companion object {
-        val Ebook = MediaKind("EBOOK")
-        val Comic = MediaKind("COMIC")
-        val Audiobook = MediaKind("AUDIOBOOK")
-    }
-}

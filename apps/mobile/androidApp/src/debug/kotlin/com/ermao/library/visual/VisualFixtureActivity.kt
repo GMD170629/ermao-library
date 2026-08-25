@@ -38,7 +38,6 @@ import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.model.AssetContent
-import com.ermao.library.features.content.model.MediaFilter
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.WorksFilters
@@ -337,8 +336,7 @@ private fun FixtureLibrary(showFilter: Boolean) {
         sort = ContentSort.RecentAdded,
         viewMode = ContentViewMode.Grid,
         filters = WorksFilters(
-            media = setOf(MediaFilter.Ebook),
-            reading = setOf(ReadingFilter.Unread),
+            reading = ReadingFilter.Unread,
         ),
         works = fixtureBooks,
         total = 128,
@@ -350,26 +348,28 @@ private fun FixtureLibrary(showFilter: Boolean) {
     LibraryScreen(
         state = LibraryUiState(
             selectedScope = LibraryScope.Books,
+            libraryOptions = listOf(
+                com.ermao.library.features.library.application.LibrarySourceOption("library-1", "文学"),
+                com.ermao.library.features.library.application.LibrarySourceOption("library-2", "漫画"),
+            ),
             scopes = LibraryScope.entries.associateWith { scope ->
                 if (scope == LibraryScope.Books) booksState else ScopeUiState(isLoading = false)
             },
             offlineFilterAvailability = OfflineFilterAvailability.Available,
             filterDraft = WorksFilters(
-                media = setOf(MediaFilter.Ebook, MediaFilter.Audiobook),
-                reading = setOf(ReadingFilter.Unread),
+                reading = ReadingFilter.Unread,
                 downloadedOnly = true,
             ).takeIf { showFilter },
         ),
         repository = fixtureRepository,
         context = fixtureRequestContext,
-        onSelectScope = {},
+        onSelectLibrary = {},
         onQueryChanged = {},
         onClearQuery = {},
         onSelectSort = {},
         onSelectViewMode = {},
         onOpenFilter = {},
         onUpdateFilterDraft = {},
-        onRemoveMediaFilter = {},
         onRemoveReadingFilter = {},
         onClearFilters = {},
         onApplyFilter = {},
@@ -466,7 +466,6 @@ private fun fixtureBook(id: String, title: String, author: String, progress: Int
     title = title,
     author = author,
     coverUrl = "fixture://cover/$id",
-    mediaKinds = listOf("EBOOK"),
     progressPercent = progress,
 )
 
@@ -494,7 +493,7 @@ private val fixtureDetail = BookDetailContent(
 )
 
 private val fixtureSingleEbookDetail = BookDetailContent(
-    book = fixtureBooks[1].copy(mediaKinds = listOf("EBOOK"), progressPercent = 42),
+    book = fixtureBooks[1].copy(progressPercent = 42),
     seriesId = "series-dune",
     seriesName = "沙丘系列",
     authorFacetId = "author-frank-herbert",

@@ -72,7 +72,6 @@ class DetailViewModelsTest {
             title = "Book",
             author = "Author",
             coverUrl = "",
-            mediaKinds = listOf("EBOOK"),
             progressPercent = null,
         ),
         seriesId = null,

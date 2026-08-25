@@ -3,11 +3,14 @@ package com.ermao.library.shared.modules.library.infrastructure
 import com.ermao.library.shared.core.network.ApiEnvelopeDecoder
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.modules.library.domain.FacetKind
+import com.ermao.library.shared.modules.library.BooksQuery
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertNotNull
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 class ContentWireTest {
@@ -47,7 +50,7 @@ class ContentWireTest {
     fun groupingRepresentativeBooksAreBounded() {
         val result = decoder.decode(
             200,
-            """{"ok":true,"data":{"kind":"AUTHOR","groups":[{"id":"author-1","name":"Ursula","bookCount":4,"updatedAt":"2026-01-01T00:00:00Z","representativeBooks":[${representativeBook("1")},${representativeBook("2")},${representativeBook("3")},${representativeBook("4")}]}],"page":1,"pageSize":30,"total":1,"totalPages":1}}""",
+            """{"ok":true,"data":{"groups":[{"id":"author-1","name":"Ursula","bookCount":4,"updatedAt":"2026-01-01T00:00:00Z","representativeBooks":[${representativeBook("1")},${representativeBook("2")},${representativeBook("3")},${representativeBook("4")}]}],"page":1,"pageSize":30,"total":1,"totalPages":1}}""",
             GroupingPageWire.serializer(),
         )
 
@@ -59,7 +62,7 @@ class ContentWireTest {
     fun decodesCurrentContinueReadingBookResourceContract() {
         val result = decoder.decode(
             200,
-            """{"ok":true,"data":{"item":{"bookId":"book-1","title":"Title","author":null,"coverUrl":"/api/books/book-1/cover","mediaKind":"EBOOK","resourceFormat":"EPUB","readerType":"reflowable","resumeResourceId":"resource-1","progress":42.0,"chapter":null,"lastReadAt":"2026-08-12T00:00:00Z","resourceTitle":"Resource 1","narrator":null}}}""",
+            """{"ok":true,"data":{"item":{"bookId":"book-1","title":"Title","author":null,"coverUrl":"/api/books/book-1/cover","resourceFormat":"EPUB","readerType":"reflowable","resumeResourceId":"resource-1","progress":42.0,"chapter":null,"lastReadAt":"2026-08-12T00:00:00Z","resourceTitle":"Resource 1","narrator":null}}}""",
             ContinueReadingPayloadWire.serializer(),
         )
 
@@ -68,6 +71,20 @@ class ContentWireTest {
         assertEquals("EPUB", item?.resourceFormat)
         assertEquals("resource-1", item?.resumeResourceId)
         assertNull(item?.chapter)
+    }
+
+    @Test
+    fun selectedLibraryUsesTheSupportedFilterExpression() {
+        val allParameters = libraryBooksParameters(BooksQuery())
+        assertFalse("filters" in allParameters)
+        assertFalse("libraryId" in allParameters)
+
+        val selected = libraryBooksParameters(BooksQuery(libraryId = "library-1"))
+        val filter = selected.getValue("filters").single()
+        assertTrue(filter.contains("\"field\":\"library\""))
+        assertTrue(filter.contains("\"operator\":\"equals\""))
+        assertTrue(filter.contains("\"value\":\"library-1\""))
+        assertFalse("libraryId" in selected)
     }
 
     private fun representativeBook(id: String) =

@@ -197,7 +197,7 @@ class VisualFixtureActivityTest {
 
             composeRule.onNodeWithTag("work-download-action")
                 .assertTextEquals(scenario.localizedString(variant, R.string.work_quick_downloaded))
-                .performTouchInput { longClick() }
+                .performClick()
             awaitTextDisplayed(scenario.localizedString(variant, R.string.downloads_remove_title))
         }
 

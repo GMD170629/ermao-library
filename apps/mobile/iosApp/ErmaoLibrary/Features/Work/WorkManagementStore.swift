@@ -1,11 +1,12 @@
 import Foundation
+import Combine
 @preconcurrency import ErmaoShared
 
 @MainActor
 final class WorkManagementStore: ObservableObject {
     enum Action: Equatable {
-        case workUpdated, coverUpdated
-        case resourceUpdated, resourceReclassified
+        case workUpdated, coverUpdated, rescanQueued, bookDeleted
+        case resourceUpdated
         case metadataApplied, kindleQueued, readingStatusUpdated
     }
 
@@ -52,7 +53,8 @@ final class WorkManagementStore: ObservableObject {
         description: String,
         seriesName: String?,
         seriesIndex: Double?,
-        tags: [String]
+        tags: [String],
+        originalTags: [String]
     ) {
         run(.workUpdated) { [repository, context, bookID] in
             try await repository.updateBook(
@@ -64,7 +66,8 @@ final class WorkManagementStore: ObservableObject {
                     description: description,
                     seriesName: seriesName,
                     seriesIndex: seriesIndex.map(KotlinDouble.init(double:)),
-                    tags: tags
+                    tags: tags,
+                    originalTags: originalTags
                 )
             )
         }
@@ -77,6 +80,35 @@ final class WorkManagementStore: ObservableObject {
                 bookId: bookID,
                 resourceId: resourceID
             )
+        }
+    }
+
+    func regenerateBookCover(anchoredResourceID: String) {
+        run(.coverUpdated) { [repository, context, bookID] in
+            try await repository.regenerateBookCover(
+                context: context,
+                bookId: bookID,
+                anchoredResourceId: anchoredResourceID
+            )
+        }
+    }
+
+    func rescanBook(sourceNodeID: String) {
+        run(.rescanQueued) { [repository, context] in
+            try await repository.rescanBook(context: context, sourceNodeId: sourceNodeID)
+        }
+    }
+
+    func deleteBook() {
+        runValue { [repository, context, bookID] in
+            let result = try await repository.deleteBook(context: context, bookId: bookID)
+            guard ErmaoShared.PublicKt.workManagementBookDeletionOutcome(result: result) != nil else {
+                throw WorkManagementClientError(
+                    code: ErmaoShared.PublicKt.workManagementResultErrorCode(result: result)
+                        ?? "MANAGEMENT_INVALID_RESPONSE"
+                )
+            }
+            self.completedAction = .bookDeleted
         }
     }
 
@@ -131,22 +163,13 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    func reclassify(
-        _ resource: BookResource,
-        kind: ErmaoShared.ManagedMediaKind
-    ) {
-        runMutation(.resourceReclassified) { [repository, context, bookID] in
-            try await repository.reclassifyResource(
-                context: context, bookId: bookID, resourceId: resource.id, mediaKind: kind
-            )
-        }
-    }
-
-    func loadMetadata(kind: ErmaoShared.ManagedMediaKind) {
+    func loadMetadata() {
         runValue { [repository, context] in
-            let result = try await repository.loadMetadataProviders(context: context, mediaKind: kind)
-            let values: [ErmaoShared.MetadataProvider] = try Self.value(result)
-            self.metadataProviders = values
+            let result = try await repository.loadMetadataProviders(context: context)
+            guard let values = ErmaoShared.PublicKt.workManagementMetadataProviders(result: result) else {
+                throw Self.error(result)
+            }
+            self.metadataProviders = values.compactMap { $0 as? ErmaoShared.MetadataProvider }
         }
     }
 
@@ -159,7 +182,9 @@ final class WorkManagementStore: ObservableObject {
                 providerId: providerID,
                 query: query
             )
-            let search: ErmaoShared.MetadataSearchResult = try Self.value(result)
+            guard let search = ErmaoShared.PublicKt.workManagementMetadataSearchResult(result: result) else {
+                throw Self.error(result)
+            }
             self.metadataCandidates = search.candidates
         }
     }
@@ -189,7 +214,12 @@ final class WorkManagementStore: ObservableObject {
     func loadKindleSettings() {
         runValue { [repository, context] in
             let result = try await repository.loadKindleSettings(context: context)
-            let settings: ErmaoShared.KindleSettings = try Self.value(result)
+            guard let settings = ErmaoShared.PublicKt.workManagementKindleSettings(result: result) else {
+                throw Self.error(result)
+            }
+            guard let settings = settings as? ErmaoShared.KindleSettings else {
+                throw WorkManagementClientError(code: "MANAGEMENT_INVALID_RESPONSE")
+            }
             self.kindleSettings = settings
         }
     }
@@ -206,11 +236,19 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
+    func setBookReadingStatus(_ status: ErmaoShared.ManagedReadingStatus) {
+        run(.readingStatusUpdated) { [repository, context, bookID] in
+            try await repository.setBookReadingStatus(context: context, bookId: bookID, status: status)
+        }
+    }
+
     private func checkCapability() {
         Task {
             do {
                 let result = try await repository.supportsNativeManagement(context: context)
-                let value: KotlinBoolean = try Self.value(result)
+                guard let value = ErmaoShared.PublicKt.workManagementBooleanValue(result: result) else {
+                    throw Self.error(result)
+                }
                 supported = value.boolValue
                 capabilityChecked = true
             } catch {
@@ -237,7 +275,9 @@ final class WorkManagementStore: ObservableObject {
     ) {
         runValue {
             let result = try await operation()
-            let _: ErmaoShared.BookMutationOutcome = try Self.value(result)
+            guard ErmaoShared.PublicKt.workManagementBookMutationOutcome(result: result) != nil else {
+                throw Self.error(result)
+            }
             self.completedAction = action
         }
     }
@@ -255,21 +295,32 @@ final class WorkManagementStore: ObservableObject {
         }
     }
 
-    private static func value<Value>(_ result: any ErmaoShared.WorkManagementResult) throws -> Value {
-        if let failure = result as? ErmaoShared.WorkManagementResultFailure {
-            throw WorkManagementClientError(code: failure.error.code)
+    private static func requireSuccess(_ result: any ErmaoShared.WorkManagementResult) throws {
+        guard ErmaoShared.PublicKt.workManagementResultSucceeded(result: result) else {
+            throw WorkManagementClientError(
+                code: ErmaoShared.PublicKt.workManagementResultErrorCode(result: result)
+                    ?? "MANAGEMENT_INVALID_RESPONSE"
+            )
         }
-        guard let content = result as? ErmaoShared.WorkManagementResultContent<AnyObject>,
-              let value = content.value as? Value else { throw WorkManagementClientError(code: "MANAGEMENT_INVALID_RESPONSE") }
-        return value
     }
 
-    private static func requireSuccess(_ result: any ErmaoShared.WorkManagementResult) throws {
-        if let failure = result as? ErmaoShared.WorkManagementResultFailure {
-            throw WorkManagementClientError(code: failure.error.code)
-        }
-        guard result is ErmaoShared.WorkManagementResultContent<AnyObject> else {
-            throw WorkManagementClientError(code: "MANAGEMENT_INVALID_RESPONSE")
+    private static func error(_ result: any ErmaoShared.WorkManagementResult) -> WorkManagementClientError {
+        WorkManagementClientError(
+            code: ErmaoShared.PublicKt.workManagementResultErrorCode(result: result)
+                ?? "MANAGEMENT_INVALID_RESPONSE"
+        )
+    }
+}
+
+@MainActor
+final class WorkManagementStoreHolder: ObservableObject {
+    let store: WorkManagementStore?
+    private var observation: AnyCancellable?
+
+    init(store: WorkManagementStore?) {
+        self.store = store
+        observation = store?.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
         }
     }
 }
