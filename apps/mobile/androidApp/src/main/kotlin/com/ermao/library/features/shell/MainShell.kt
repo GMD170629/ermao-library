@@ -494,6 +494,14 @@ fun MainShell(
                                                     onUnavailable = { libraryBackStack.add(it) },
                                                 )
                                             },
+                                            onOpenDownloadedResource = { record ->
+                                                openDownloadedResource(
+                                                    context = appContext,
+                                                    profileId = session.profile.id,
+                                                    record = record,
+                                                    onUnavailable = { libraryBackStack.add(it) },
+                                                )
+                                            },
                                         )
                                     }
                                 }
@@ -773,6 +781,14 @@ fun MainShell(
                                 onUnavailable = { currentBackStack.add(it) },
                             )
                         },
+                        onOpenDownloadedResource = { record ->
+                            openDownloadedResource(
+                                context = appContext,
+                                profileId = session.profile.id,
+                                record = record,
+                                onUnavailable = { currentBackStack.add(it) },
+                            )
+                        },
                     )
                 }
                 entry<FacetRoute> { route ->
@@ -816,6 +832,32 @@ private fun openResource(
         context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
     } else {
         onUnavailable(ReaderUnavailableRoute(resource.id, resource.readerType))
+    }
+}
+
+private fun openDownloadedResource(
+    context: android.content.Context,
+    profileId: String,
+    record: com.ermao.library.features.downloads.model.AndroidDownloadRecord,
+    onUnavailable: (ReaderUnavailableRoute) -> Unit,
+) {
+    val localReference = record.localReference
+    if (!record.isReadable || localReference.isNullOrBlank()) return
+    if (isSupportedNativeDownloadReader(record.readerType, record.format)) {
+        context.startActivity(
+            ReaderActivity.createManagedDownloadIntent(
+                context = context,
+                profileId = profileId,
+                bookId = record.bookId,
+                resourceId = record.resourceId,
+                assetId = record.assetId,
+                displayTitle = record.resourceTitle,
+                localReference = localReference,
+                sourceFormat = record.format,
+            ),
+        )
+    } else {
+        onUnavailable(ReaderUnavailableRoute(record.resourceId, record.readerType))
     }
 }
 

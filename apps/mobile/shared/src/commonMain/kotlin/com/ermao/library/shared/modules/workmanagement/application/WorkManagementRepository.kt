@@ -5,6 +5,7 @@ import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.BookDeletionOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
+import com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
@@ -21,11 +22,9 @@ interface WorkManagementRepository {
     suspend fun uploadCover(
         context: BookManagementContext,
         bookId: String,
-        sourceNodeId: String,
-        title: String,
-        description: String?,
+        resourceId: String,
         upload: CoverUpload,
-    ): WorkManagementResult<Unit>
+    ): WorkManagementResult<CoverMutationOutcome>
     suspend fun regenerateResourceCover(context: BookManagementContext, bookId: String, resourceId: String): WorkManagementResult<Unit>
     suspend fun regenerateBookCover(context: BookManagementContext, bookId: String, anchoredResourceId: String): WorkManagementResult<Unit>
     suspend fun rescanBook(context: BookManagementContext, sourceNodeId: String): WorkManagementResult<Unit>

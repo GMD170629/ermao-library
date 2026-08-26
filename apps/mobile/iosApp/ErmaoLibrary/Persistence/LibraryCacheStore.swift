@@ -99,6 +99,19 @@ actor LibraryCacheStore {
         try FileManager.default.removeItem(at: url)
     }
 
+    func remove(namespace: String, key: String) throws {
+        var index = try loadIndex(namespace: namespace)
+        if let record = index.records[key] {
+            try remove(record, from: &index, namespace: namespace)
+            try saveIndex(index, namespace: namespace)
+            return
+        }
+        let url = cacheURL(namespace: namespace, key: key)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     private func cacheURL(namespace: String, key: String?) -> URL {
         let namespaceURL = rootDirectory.appendingPathComponent(stableFileName(namespace), isDirectory: true)
         guard let key else { return namespaceURL }

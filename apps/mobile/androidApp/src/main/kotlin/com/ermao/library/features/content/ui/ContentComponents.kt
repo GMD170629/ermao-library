@@ -77,6 +77,7 @@ fun BookCover(
     context: ContentRequestContext,
     role: CoverRole,
     modifier: Modifier = Modifier,
+    cacheRevision: Int = 0,
 ) {
     ContentCover(
         contentId = book.id,
@@ -86,6 +87,7 @@ fun BookCover(
         context = context,
         role = role,
         modifier = modifier,
+        cacheRevision = cacheRevision,
     )
 }
 
@@ -96,6 +98,7 @@ fun BookCover(
     context: ContentRequestContext,
     size: CoverSize,
     modifier: Modifier = Modifier,
+    cacheRevision: Int = 0,
 ) {
     BookCover(
         book = book,
@@ -103,6 +106,7 @@ fun BookCover(
         context = context,
         role = size.toCoverRole(),
         modifier = modifier,
+        cacheRevision = cacheRevision,
     )
 }
 
@@ -115,10 +119,11 @@ fun ContentCover(
     context: ContentRequestContext,
     role: CoverRole,
     modifier: Modifier = Modifier,
+    cacheRevision: Int = 0,
 ) {
     val theme = WarmPageThemeValues
     val appContext = LocalContext.current.applicationContext
-    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, role, context.namespace) {
+    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, role, context.namespace, cacheRevision) {
         value = AndroidCoverCache.load(appContext, context, coverUrl, repository)?.let { bytes ->
             withContext(Dispatchers.Default) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()

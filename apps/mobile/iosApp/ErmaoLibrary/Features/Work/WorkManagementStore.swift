@@ -15,6 +15,7 @@ final class WorkManagementStore: ObservableObject {
     @Published private(set) var isBusy = false
     @Published private(set) var errorCode: String?
     @Published private(set) var completedAction: Action?
+    @Published private(set) var coverMutation: ErmaoShared.CoverMutationOutcome?
     @Published private(set) var metadataProviders: [ErmaoShared.MetadataProvider] = []
     @Published private(set) var metadataCandidates: [ErmaoShared.MetadataCandidate] = []
     @Published private(set) var kindleSettings: ErmaoShared.KindleSettings?
@@ -44,6 +45,7 @@ final class WorkManagementStore: ObservableObject {
 
     func consumeCompletion() {
         completedAction = nil
+        coverMutation = nil
         errorCode = nil
     }
 
@@ -116,21 +118,22 @@ final class WorkManagementStore: ObservableObject {
         data: Data,
         mimeType: String,
         fileName: String,
-        sourceNodeID: String,
-        title: String,
-        description: String?
+        resourceID: String
     ) {
         let bytes = KotlinByteArray(size: Int32(data.count))
         for (index, byte) in data.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: byte)) }
-        run(.coverUpdated) { [repository, context, bookID] in
-            try await repository.uploadCover(
+        runValue { [repository, context, bookID] in
+            let result = try await repository.uploadCover(
                 context: context,
                 bookId: bookID,
-                sourceNodeId: sourceNodeID,
-                title: title,
-                description: description,
+                resourceId: resourceID,
                 upload: ErmaoShared.CoverUpload(fileName: fileName, mimeType: mimeType, bytes: bytes)
             )
+            guard let mutation = ErmaoShared.PublicKt.workManagementCoverMutationOutcome(result: result) else {
+                throw Self.error(result)
+            }
+            self.coverMutation = mutation
+            self.completedAction = .coverUpdated
         }
     }
 

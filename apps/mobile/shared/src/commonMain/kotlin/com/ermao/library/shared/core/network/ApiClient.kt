@@ -50,6 +50,7 @@ internal data class ApiMultipartFile(
 )
 
 internal data class ApiMultipartRequest<T>(
+    val method: ApiMethod = ApiMethod.Post,
     val apiPath: String,
     val responseDeserializer: DeserializationStrategy<T>,
     val file: ApiMultipartFile,
@@ -167,12 +168,15 @@ class ApiClient internal constructor(
     internal suspend fun <T> executeMultipart(request: ApiMultipartRequest<T>): ApiResult<T> {
         try {
             require(request.apiPath.startsWith("/api/")) { "API path must start with /api/" }
+            require(request.method in setOf(ApiMethod.Post, ApiMethod.Put, ApiMethod.Patch)) {
+                "Multipart request method must support a body"
+            }
             require(request.file.fieldName.isSafeMultipartToken()) { "Invalid multipart field name" }
             require(request.file.fileName.isSafeMultipartFileName()) { "Invalid multipart file name" }
             require(request.file.bytes.isNotEmpty()) { "Multipart file must not be empty" }
             val contentType = ContentType.parse(request.file.contentType)
             val response = client.request(profile.baseUrl.resolveApiPath(request.apiPath)) {
-                method = HttpMethod.Post
+                method = request.method.toKtorMethod()
                 setBody(
                     MultiPartFormDataContent(
                         formData {

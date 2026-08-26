@@ -74,6 +74,11 @@ data class BookMutationOutcome(
     val resourceId: String,
 )
 
+data class CoverMutationOutcome(
+    val resourceId: String,
+    val coverUrl: String,
+)
+
 data class MetadataProvider(
     val id: String,
     val name: String,
@@ -123,9 +128,11 @@ data class CoverUpload(
         require(fileName.isNotBlank())
         require(mimeType in SUPPORTED_COVER_MIME_TYPES)
         require(bytes.isNotEmpty())
+        require(bytes.size <= MAXIMUM_COVER_BYTES)
     }
 
     companion object {
+        const val MAXIMUM_COVER_BYTES = 10 * 1024 * 1024
         val SUPPORTED_COVER_MIME_TYPES = setOf("image/jpeg", "image/png", "image/webp")
     }
 }

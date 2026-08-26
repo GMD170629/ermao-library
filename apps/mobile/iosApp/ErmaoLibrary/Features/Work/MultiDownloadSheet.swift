@@ -176,6 +176,7 @@ final class MultiDownloadTreeStore: ObservableObject {
 struct MultiDownloadSheet: View {
     let detail: BookDetailContent
     @ObservedObject var downloads: DownloadCenterStore
+    let openReader: (ReaderHandoff) -> Void
     let onDismiss: () -> Void
     let onCompleted: (Int, Int) -> Void
 
@@ -190,11 +191,13 @@ struct MultiDownloadSheet: View {
         client: any ContentClient,
         detail: BookDetailContent,
         downloads: DownloadCenterStore,
+        openReader: @escaping (ReaderHandoff) -> Void,
         onDismiss: @escaping () -> Void,
         onCompleted: @escaping (Int, Int) -> Void
     ) {
         self.detail = detail
         self.downloads = downloads
+        self.openReader = openReader
         self.onDismiss = onDismiss
         self.onCompleted = onCompleted
         _tree = StateObject(
@@ -371,11 +374,35 @@ struct MultiDownloadSheet: View {
             case .failedTerminal:
                 Button("work.multiDownload.deleteTask", role: .destructive) { pendingRemoval = record }
             case .completed:
-                Button("downloads.remove.action", role: .destructive) { pendingRemoval = record }
+                if record.isVerifiedOfflineCopy {
+                    Button("work.download.openOffline") { openOffline(record) }
+                    Button("downloads.remove.action", role: .destructive) { pendingRemoval = record }
+                } else {
+                    Button("common.retry") { downloads.retry(record) }
+                }
             }
         } else {
             Button("work.action.download") { toggleResource(resource.id) }
         }
+    }
+
+    private func openOffline(_ record: ManagedDownloadRecord) {
+        guard record.isVerifiedOfflineCopy else {
+            downloads.retry(record)
+            return
+        }
+        openReader(
+            ReaderHandoff(
+                bookID: record.bookID,
+                resourceID: record.resourceID,
+                assetID: record.assetID,
+                title: record.bookTitle,
+                resourceTitle: record.resourceTitle,
+                format: record.format,
+                readerType: record.readerType,
+                source: .verifiedLocal(recordID: record.id)
+            )
+        )
     }
 
     private var confirmationBar: some View {

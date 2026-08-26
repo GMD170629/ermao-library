@@ -26,13 +26,18 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
-import io.ktor.http.content.TextContent
+import io.ktor.http.content.OutgoingContent
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.readRemaining
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
 
 class KtorWorkManagementRepositoryTest {
@@ -169,8 +174,8 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun metadataApplyUsesSourceNodePatchWhileCoverUploadRemainsUnavailable() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, OK)
+    fun metadataApplyAndCoverUploadUseTheirCurrentResourceContracts() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, OK, RESOURCE_COVER_RESPONSE)
         val candidate = com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate(
             id = "candidate",
             source = "openlibrary",
@@ -198,17 +203,42 @@ class KtorWorkManagementRepositoryTest {
         val upload = harness.repository.uploadCover(
             context,
             "book-1",
-            "source-1",
-            "Book",
-            null,
-            CoverUpload("cover.jpg", "image/jpeg", byteArrayOf(1)),
+            "resource-1",
+            CoverUpload("用户封面.jpg", "image/jpeg", "cover-content".encodeToByteArray()),
         )
 
         assertIs<WorkManagementResult.Content<Unit>>(apply)
-        assertEquals(WorkManagementErrorKind.Unavailable, assertIs<WorkManagementResult.Failure>(upload).error.kind)
+        val coverOutcome = assertIs<com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome>(
+            assertIs<WorkManagementResult.Content<*>>(upload).value,
+        )
+        assertEquals("resource-1", coverOutcome.resourceId)
+        assertEquals("/api/resources/resource-1/cover", coverOutcome.coverUrl)
         assertEquals("PATCH", harness.requests[1].method)
         assertEquals("/base/api/books/book-1/source-nodes/source-1", harness.requests[1].path)
         assertTrue(harness.requests[1].body.contains("\"title\":\"Candidate\""))
+        assertEquals("PUT", harness.requests[2].method)
+        assertEquals("/base/api/books/book-1/resources/resource-1/cover", harness.requests[2].path)
+        assertTrue(harness.requests[2].contentType?.contains("multipart/form-data") == true)
+        assertTrue(harness.requests[2].body.contains("name=\"cover\""))
+        assertTrue(harness.requests[2].body.contains("filename=\"cover.jpg\""))
+        assertTrue(harness.requests[2].body.contains("cover-content"))
+    }
+
+    @Test
+    fun coverUploadRejectsMismatchedResourceIdentity() = runBlocking {
+        val harness = Harness(CAPABILITY_TRUE, MISMATCHED_RESOURCE_COVER_RESPONSE)
+
+        val result = assertIs<WorkManagementResult.Failure>(
+            harness.repository.uploadCover(
+                context,
+                "book-1",
+                "resource-1",
+                CoverUpload("cover.png", "image/png", byteArrayOf(1)),
+            ),
+        )
+
+        assertEquals(WorkManagementErrorKind.Protocol, result.error.kind)
+        assertEquals("COVER_RESOURCE_IDENTITY_MISMATCH", result.error.code)
     }
 
     @Test
@@ -256,8 +286,13 @@ class KtorWorkManagementRepositoryTest {
             ApiClient(
                 profile,
                 HttpClient(MockEngine { request ->
-                    val body = (request.body as? TextContent)?.text.orEmpty()
-                    requests += Request(request.method.value, request.url.encodedPath, body)
+                    val body = request.body.readText()
+                    requests += Request(
+                        request.method.value,
+                        request.url.encodedPath,
+                        body,
+                        request.body.contentType?.toString() ?: request.headers[HttpHeaders.ContentType],
+                    )
                     respond(
                         pending.removeFirstOrNull() ?: OK,
                         HttpStatusCode.OK,
@@ -269,13 +304,37 @@ class KtorWorkManagementRepositoryTest {
         }
     }
 
-    private data class Request(val method: String, val path: String, val body: String)
+    private suspend fun OutgoingContent.readText(): String = when (this) {
+        is OutgoingContent.ByteArrayContent -> bytes().decodeToString()
+        is OutgoingContent.ReadChannelContent -> readFrom().readRemaining().readByteArray().decodeToString()
+        is OutgoingContent.WriteChannelContent -> coroutineScope {
+            val channel = ByteChannel()
+            launch {
+                try {
+                    writeTo(channel)
+                } finally {
+                    channel.close()
+                }
+            }
+            channel.readRemaining().readByteArray().decodeToString()
+        }
+        else -> ""
+    }
+
+    private data class Request(
+        val method: String,
+        val path: String,
+        val body: String,
+        val contentType: String?,
+    )
 
     private companion object {
         const val CAPABILITY_TRUE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":true}}}"""
         const val CAPABILITY_FALSE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":false}}}"""
         const val OK = """{"ok":true,"data":{}}"""
         const val RESOURCE_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1","bookId":"book-1"}}}"""
+        const val RESOURCE_COVER_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1","bookId":"book-1","coverUrl":"/api/resources/resource-1/cover"}}}"""
+        const val MISMATCHED_RESOURCE_COVER_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-2","bookId":"book-1","coverUrl":"/api/resources/resource-2/cover"}}}"""
         const val METADATA_SEARCH_RESPONSE = """{"ok":true,"data":{"sourceNodeId":"source-1","providerId":"openlibrary","query":"Book","message":null,"candidates":[{"id":"candidate","source":"openlibrary","title":"Candidate","description":null,"coverUrl":null,"confidence":0.9}]}}"""
         const val KINDLE_RESPONSE = """{"ok":true,"data":{"alreadyQueued":true}}"""
         const val DELETE_RESPONSE = """{"ok":true,"data":{"deletedBookIds":["book-1"]}}"""

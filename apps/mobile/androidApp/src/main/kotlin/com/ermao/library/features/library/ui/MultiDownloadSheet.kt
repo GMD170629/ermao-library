@@ -68,6 +68,7 @@ internal fun MultiDownloadSheet(
     onPause: (String) -> Unit,
     onResumeOrRetry: (String) -> Unit,
     onRemove: (AndroidDownloadRecord) -> Unit,
+    onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
     onPerformBatch: (Set<String>, (DownloadBatchResult) -> Unit) -> Unit,
     onBatchFeedback: (succeeded: Int, failed: Int) -> Unit,
 ) {
@@ -209,10 +210,14 @@ internal fun MultiDownloadSheet(
                                         .fillMaxWidth()
                                         .combinedClickable(
                                             onClick = {
-                                                if (eligibility.isSelectable()) {
-                                                    selectedIdsList = selectedIds.toMutableSet().apply {
-                                                        if (!add(resource.id)) remove(resource.id)
-                                                    }.sorted()
+                                                when {
+                                                    eligibility == MultiDownloadResourceEligibility.Completed &&
+                                                        record?.isReadable == true -> menuExpanded = true
+                                                    eligibility.isSelectable() -> {
+                                                        selectedIdsList = selectedIds.toMutableSet().apply {
+                                                            if (!add(resource.id)) remove(resource.id)
+                                                        }.sorted()
+                                                    }
                                                 }
                                             },
                                             onLongClick = { if (record != null) menuExpanded = true },
@@ -257,6 +262,7 @@ internal fun MultiDownloadSheet(
                                             onPause = onPause,
                                             onResumeOrRetry = onResumeOrRetry,
                                             onRemove = onRemove,
+                                            onOpenDownloaded = onOpenDownloaded,
                                         )
                                     }
                                 }
@@ -440,6 +446,7 @@ private fun DownloadStatusMenuItems(
     onPause: (String) -> Unit,
     onResumeOrRetry: (String) -> Unit,
     onRemove: (AndroidDownloadRecord) -> Unit,
+    onOpenDownloaded: (AndroidDownloadRecord) -> Unit,
 ) {
     if (record == null) return
     when (record.status) {
@@ -457,6 +464,12 @@ private fun DownloadStatusMenuItems(
             onClick = { onDismiss(); onResumeOrRetry(record.resourceId) },
         )
         else -> Unit
+    }
+    if (record.status == AndroidDownloadStatus.Completed && record.isReadable) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.work_download_open_offline)) },
+            onClick = { onDismiss(); onOpenDownloaded(record) },
+        )
     }
     DropdownMenuItem(
         text = {

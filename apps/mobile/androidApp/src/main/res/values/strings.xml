@@ -177,6 +177,8 @@
     <string name="work_quick_download_paused">Resume</string>
     <string name="work_quick_download_retry">Retry</string>
     <string name="work_quick_downloaded">Downloaded</string>
+    <string name="work_quick_manage_download">Show download actions</string>
+    <string name="work_download_open_offline">Open offline</string>
     <string name="multi_download_title">Download Volumes</string>
     <string name="multi_download_loading">Loading the book resource tree…</string>
     <string name="multi_download_error_title">Unable to load volumes</string>
@@ -532,7 +534,7 @@
     <string name="work_download_paused">Download paused.</string>
     <string name="work_download_failed">Download failed (%1$s).</string>
     <string name="work_reading_status_updated">Reading status updated.</string>
-    <string name="management_cover_updated">Cover regenerated.</string>
+    <string name="management_cover_updated">Cover updated.</string>
     <string name="management_rescan_queued">Rescan added to the queue.</string>
     <string name="management_metadata_applied">Selected metadata applied.</string>
     <string name="management_title">Title</string>
@@ -548,6 +550,14 @@
     <string name="management_rescan">Rescan files</string>
     <string name="management_rescan_message">Scan the real source node again and refresh this book.</string>
     <string name="management_regenerate_cover_message">Generate a new cover from the source file.</string>
+    <string name="management_cover_target">Resource: %1$s</string>
+    <string name="management_choose_cover_photo">Choose from photos</string>
+    <string name="management_choose_cover_file">Choose from files</string>
+    <string name="management_cover_upload_hint">JPEG, PNG, or WebP, up to 10 MiB. Photos are converted without cropping.</string>
+    <string name="management_cover_unsupported">Choose a JPEG, PNG, or WebP image.</string>
+    <string name="management_cover_too_large">The selected image is larger than 10 MiB.</string>
+    <string name="management_cover_empty">The selected image is empty.</string>
+    <string name="management_cover_read_failed">The selected image couldn’t be read.</string>
     <string name="management_delete">Delete book</string>
     <string name="management_delete_message">Type “%1$s” to permanently delete the book, source files, resources, and reading history.</string>
     <string name="work_no_readable_resources_message">No online-readable resource is available for this book.</string>

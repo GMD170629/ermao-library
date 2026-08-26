@@ -80,6 +80,26 @@ object AndroidCoverCache {
         }
     }
 
+    suspend fun invalidate(
+        appContext: Context,
+        requestContext: ContentRequestContext,
+        apiPath: String,
+    ) = withContext(Dispatchers.IO) {
+        if (apiPath.isBlank()) return@withContext
+        val key = cacheKey(requestContext, apiPath)
+        mutex.withLock {
+            memory.remove(key)
+            namespaceByMemoryKey.remove(key)
+        }
+        val destination = File(
+            File(appContext.cacheDir, "authenticated-covers/${namespaceKey(requestContext)}"),
+            key,
+        )
+        if (destination.exists() && !destination.delete()) {
+            throw CoverCacheException("Failed to invalidate cover cache entry")
+        }
+    }
+
     private fun trim(directory: File) {
         val files = directory.listFiles()?.filter(File::isFile)?.sortedByDescending(File::lastModified).orEmpty()
         var retainedBytes = 0L

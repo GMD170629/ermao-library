@@ -3,6 +3,8 @@ package com.ermao.library.shared.modules.workmanagement.infrastructure
 import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.core.network.ApiMethod
+import com.ermao.library.shared.core.network.ApiMultipartFile
+import com.ermao.library.shared.core.network.ApiMultipartRequest
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.core.network.AppError
@@ -12,6 +14,7 @@ import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.BookDeletionOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
+import com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSendOutcome
 import com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
@@ -87,15 +90,55 @@ class KtorWorkManagementRepository(
     override suspend fun uploadCover(
         context: BookManagementContext,
         bookId: String,
-        sourceNodeId: String,
-        title: String,
-        description: String?,
+        resourceId: String,
         upload: CoverUpload,
-    ): WorkManagementResult<Unit> =
-        // The current source-node presentation endpoint requires title/description form fields
-        // in addition to the file. The shared multipart client cannot express those fields yet;
-        // keep this operation explicitly disabled instead of issuing a guaranteed 422 request.
-        unavailable("BOOK_COVER_UPLOAD_UNAVAILABLE")
+    ): WorkManagementResult<CoverMutationOutcome> {
+        when (val capability = checkBookManagement(context)) {
+            is WorkManagementResult.Failure -> return capability
+            is WorkManagementResult.Content -> Unit
+        }
+        val client = clientProvider(context.profile)
+        val result = try {
+            client.executeMultipart(
+                ApiMultipartRequest(
+                    method = ApiMethod.Put,
+                    apiPath = "${resourcePath(bookId, resourceId)}/cover",
+                    responseDeserializer = JsonElement.serializer(),
+                    file = ApiMultipartFile(
+                        fieldName = "cover",
+                        fileName = upload.safeFileName(),
+                        contentType = upload.mimeType,
+                        bytes = upload.bytes,
+                    ),
+                ),
+            )
+        } finally {
+            client.close()
+        }
+        return when (result) {
+            is ApiResult.Failure -> WorkManagementResult.Failure(result.error.toManagementError())
+            is ApiResult.Success -> {
+                val data = result.value as? JsonObject
+                    ?: return protocolFailure("MANAGEMENT_RESPONSE_INVALID")
+                val resource = data.objectValue("resource")
+                    ?: return protocolFailure("COVER_RESOURCE_MISSING")
+                val returnedResourceId = resource.string("id")
+                    ?: return protocolFailure("COVER_RESOURCE_ID_MISSING")
+                val returnedBookId = resource.string("bookId")
+                    ?: return protocolFailure("COVER_BOOK_ID_MISSING")
+                if (returnedResourceId != resourceId || returnedBookId != bookId) {
+                    protocolFailure("COVER_RESOURCE_IDENTITY_MISMATCH")
+                } else {
+                    WorkManagementResult.Content(
+                        CoverMutationOutcome(
+                            resourceId = returnedResourceId,
+                            coverUrl = resource.string("coverUrl").orEmpty(),
+                        ),
+                    )
+                }
+            }
+        }
+    }
 
     override suspend fun regenerateResourceCover(
         context: BookManagementContext,
@@ -410,6 +453,12 @@ class KtorWorkManagementRepository(
     private fun bookPath(bookId: String) = "/api/books/${bookId.encodeURLPathPart()}"
     private fun resourcePath(bookId: String, resourceId: String) =
         "${bookPath(bookId)}/resources/${resourceId.encodeURLPathPart()}"
+}
+
+private fun CoverUpload.safeFileName(): String = when (mimeType) {
+    "image/png" -> "cover.png"
+    "image/webp" -> "cover.webp"
+    else -> "cover.jpg"
 }
 
 @Serializable

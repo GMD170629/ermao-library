@@ -1,4 +1,7 @@
 import SwiftUI
+import PhotosUI
+import UIKit
+import UniformTypeIdentifiers
 @preconcurrency import ErmaoShared
 
 enum WorkManagementTask: String, Identifiable {
@@ -14,7 +17,6 @@ struct WorkManagementView: View {
     let task: WorkManagementTask
     let detail: BookDetailContent
     let resource: BookResource?
-    let chooseCover: () -> Void
     let workCover: AnyView
     let downloadForResource: (String) -> ManagedDownloadRecord?
 
@@ -39,6 +41,9 @@ struct WorkManagementView: View {
     @State private var selectedReadingStatus: ErmaoShared.ManagedReadingStatus = .unread
     @State private var selectedKindleAssetID: String?
     @State private var confirmsCoverRegeneration = false
+    @State private var selectedCoverPhoto: PhotosPickerItem?
+    @State private var importsCoverFile = false
+    @State private var coverSelectionErrorKey: String?
 
     private enum Page { case addSeries, editWork, editResource, metadata, cover, readingStatus, kindle }
 
@@ -102,7 +107,7 @@ struct WorkManagementView: View {
             prepareFields()
             if task == .recognize { store.loadMetadata() }
         }
-        .onChange(of: store.metadataProviders.map(\.id)) { ids in
+        .onChange(of: store.metadataProviders.map(\.id)) { _, ids in
             if providerID.isEmpty { providerID = ids.first ?? "" }
         }
         .confirmationDialog(
@@ -118,6 +123,16 @@ struct WorkManagementView: View {
             Button("common.cancel", role: .cancel) {}
         } message: {
             Text("management.regenerateCoverConfirmMessage")
+        }
+        .fileImporter(
+            isPresented: $importsCoverFile,
+            allowedContentTypes: [.jpeg, .png, .webP],
+            allowsMultipleSelection: false,
+            onCompletion: handleCoverFileSelection
+        )
+        .onChange(of: selectedCoverPhoto) { _, item in
+            guard let item else { return }
+            loadCoverPhoto(item)
         }
     }
 
@@ -172,13 +187,95 @@ struct WorkManagementView: View {
             workCover
                 .frame(maxWidth: .infinity)
                 .frame(height: 240)
-            Button("management.uploadCover", systemImage: "photo.badge.plus", action: chooseCover)
+            if let resource = activeResource ?? detail.resources.first {
+                LabeledContent("management.volume", value: resource.title)
+            }
+            PhotosPicker(selection: $selectedCoverPhoto, matching: .images) {
+                Label("management.chooseCoverPhoto", systemImage: "photo.on.rectangle")
+            }
+            .disabled(store.isBusy || (activeResource ?? detail.resources.first) == nil)
+            Button("management.chooseCoverFile", systemImage: "folder") {
+                importsCoverFile = true
+            }
+            .disabled(store.isBusy || (activeResource ?? detail.resources.first) == nil)
             Button("management.regenerateCover", systemImage: "wand.and.stars") {
                 confirmsCoverRegeneration = true
+            }
+            .disabled(store.isBusy || (activeResource ?? detail.resources.first) == nil)
+            if let coverSelectionErrorKey {
+                Text(LocalizedStringKey(coverSelectionErrorKey))
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("management.cover.selection.error")
             }
         } footer: {
             Text("management.coverUploadHint")
         }
+    }
+
+    private func handleCoverFileSelection(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else {
+            if case .failure = result { coverSelectionErrorKey = "management.coverReadFailed" }
+            return
+        }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url) else {
+            coverSelectionErrorKey = "management.coverReadFailed"
+            return
+        }
+        guard !data.isEmpty else {
+            coverSelectionErrorKey = "management.coverEmpty"
+            return
+        }
+        guard data.count <= CoverImagePreparation.maximumBytes else {
+            coverSelectionErrorKey = "management.coverTooLarge"
+            return
+        }
+        let mimeType: String
+        switch url.pathExtension.lowercased() {
+        case "jpg", "jpeg": mimeType = "image/jpeg"
+        case "png": mimeType = "image/png"
+        case "webp": mimeType = "image/webp"
+        default:
+            coverSelectionErrorKey = "management.coverUnsupported"
+            return
+        }
+        submitCover(data: data, mimeType: mimeType, fileName: url.lastPathComponent)
+    }
+
+    private func loadCoverPhoto(_ item: PhotosPickerItem) {
+        coverSelectionErrorKey = nil
+        Task {
+            defer { selectedCoverPhoto = nil }
+            guard let source = try? await item.loadTransferable(type: Data.self),
+                  let jpeg = CoverImagePreparation.jpeg(from: source) else {
+                coverSelectionErrorKey = "management.coverReadFailed"
+                return
+            }
+            submitCover(data: jpeg, mimeType: "image/jpeg", fileName: "cover.jpg")
+        }
+    }
+
+    private func submitCover(data: Data, mimeType: String, fileName: String) {
+        guard !data.isEmpty else {
+            coverSelectionErrorKey = "management.coverEmpty"
+            return
+        }
+        guard data.count <= CoverImagePreparation.maximumBytes else {
+            coverSelectionErrorKey = "management.coverTooLarge"
+            return
+        }
+        guard let resource = activeResource ?? detail.resources.first else {
+            coverSelectionErrorKey = "management.noVolume"
+            return
+        }
+        coverSelectionErrorKey = nil
+        store.uploadCover(
+            data: data,
+            mimeType: mimeType,
+            fileName: fileName,
+            resourceID: resource.id
+        )
     }
 
     @ViewBuilder private var readingStatus: some View {
@@ -363,6 +460,39 @@ struct WorkManagementView: View {
         case .language: "management.language"
         case .isbn: "management.isbn"
         default: "management.metadata"
+        }
+    }
+}
+
+private enum CoverImagePreparation {
+    static let maximumBytes = 10 * 1024 * 1024
+
+    static func jpeg(from data: Data) -> Data? {
+        guard let source = UIImage(data: data) else { return nil }
+        for maximumDimension in [4096, 3200, 2400, 1800] {
+            let normalized = rendered(source, maximumDimension: CGFloat(maximumDimension))
+            for quality in [0.92, 0.82, 0.72, 0.60, 0.48] {
+                if let encoded = normalized.jpegData(compressionQuality: quality),
+                   encoded.count <= maximumBytes {
+                    return encoded
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func rendered(_ image: UIImage, maximumDimension: CGFloat) -> UIImage {
+        let pixelWidth = CGFloat(image.cgImage?.width ?? Int(image.size.width * image.scale))
+        let pixelHeight = CGFloat(image.cgImage?.height ?? Int(image.size.height * image.scale))
+        let scale = min(1, maximumDimension / max(pixelWidth, pixelHeight))
+        let size = CGSize(width: max(1, pixelWidth * scale), height: max(1, pixelHeight * scale))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIColor.white.setFill()
+            UIRectFill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

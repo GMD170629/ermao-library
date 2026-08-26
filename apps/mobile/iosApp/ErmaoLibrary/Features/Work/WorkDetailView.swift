@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 @preconcurrency import ErmaoShared
 
 struct WorkReaderSelection: Equatable, Sendable {
@@ -69,7 +68,9 @@ struct WorkDetailView: View {
     @State private var managedResourceID: String?
     @State private var readingStatusOverride: LibraryReadingStatus?
     @State private var feedback: WorkDetailFeedback?
-    @State private var importsCover = false
+    @State private var coverRefreshToken = 0
+    @State private var downloadMenuRecord: ManagedDownloadRecord?
+    @State private var pendingDownloadRemoval: ManagedDownloadRecord?
     @State private var controlTarget: WorkControlTarget?
     @State private var controlAnchor = CGPoint(x: 260, y: 220)
     @State private var latestPointerLocation = CGPoint(x: 260, y: 220)
@@ -127,8 +128,12 @@ struct WorkDetailView: View {
     private var managementStore: WorkManagementStore? { managementHolder.store }
 
     var body: some View {
+        observedScreen
+    }
+
+    private var baseScreen: some View {
         ScrollView {
-            content
+            AnyView(content)
                 .padding(.horizontal, .space2)
                 .padding(.bottom, .space4)
         }
@@ -139,6 +144,10 @@ struct WorkDetailView: View {
         .navigationTitle("work.detail.title")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    private var sheetScreen: some View {
+        baseScreen
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .shelves:
@@ -151,6 +160,7 @@ struct WorkDetailView: View {
                         client: client,
                         detail: detail,
                         downloads: downloads,
+                        openReader: openReader,
                         onDismiss: { activeSheet = nil },
                         onCompleted: { succeeded, failed in
                             if failed == 0 {
@@ -175,34 +185,13 @@ struct WorkDetailView: View {
                     .presentationDragIndicator(.visible)
             }
         }
-        .fileImporter(
-            isPresented: $importsCover,
-            allowedContentTypes: [.jpeg, .png, .webP],
-            allowsMultipleSelection: false
-        ) { result in
-            guard case .success(let urls) = result, let url = urls.first else { return }
-            let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url), data.count <= 10 * 1024 * 1024 else { return }
-            let mime = url.pathExtension.lowercased() == "png" ? "image/png"
-                : url.pathExtension.lowercased() == "webp" ? "image/webp" : "image/jpeg"
-            guard let detail = currentDetail,
-                  let resource = selectedResource(detail) else { return }
-            managementStore?.uploadCover(
-                data: data,
-                mimeType: mime,
-                fileName: url.lastPathComponent,
-                sourceNodeID: resource.sourceNodeID,
-                title: detail.book.title,
-                description: detail.description
-            )
-        }
+    }
+
+    private var availabilityDialogScreen: some View {
+        sheetScreen
         .confirmationDialog(
             "work.unavailable.title",
-            isPresented: Binding(
-                get: { unavailableFeature != nil },
-                set: { if !$0 { unavailableFeature = nil } }
-            ),
+            isPresented: unavailableFeatureIsPresented,
             titleVisibility: .visible,
             presenting: unavailableFeature
         ) { _ in
@@ -212,19 +201,60 @@ struct WorkDetailView: View {
         }
         .alert(
             "reader.handoff.error.title",
-            isPresented: Binding(
-                get: { readerAccessErrorCode != nil },
-                set: { if !$0 { readerAccessErrorCode = nil } }
-            )
+            isPresented: readerAccessErrorIsPresented
         ) {
             Button("common.done", role: .cancel) { readerAccessErrorCode = nil }
         } message: {
             Text(readerAccessErrorMessage)
         }
+    }
+
+    private var coverDialogScreen: some View {
+        availabilityDialogScreen
         .confirmationDialog("management.regenerateCoverConfirmTitle", isPresented: $confirmsCoverRegeneration) {
             Button("management.regenerateCover") { regenerateBookCover() }
             Button("common.cancel", role: .cancel) {}
         } message: { Text("management.regenerateCoverConfirmMessage") }
+    }
+
+    private var downloadDialogScreen: some View {
+        coverDialogScreen
+        .confirmationDialog(
+            "work.download.manage",
+            isPresented: downloadMenuIsPresented,
+            titleVisibility: .visible,
+            presenting: downloadMenuRecord
+        ) { record in
+            Button("work.download.openOffline") {
+                downloadMenuRecord = nil
+                openOffline(record)
+            }
+            Button("downloads.remove.action", role: .destructive) {
+                downloadMenuRecord = nil
+                pendingDownloadRemoval = record
+            }
+            Button("common.cancel", role: .cancel) { downloadMenuRecord = nil }
+        } message: { record in
+            Text(record.resourceTitle)
+        }
+        .confirmationDialog(
+            "downloads.remove.confirm.title",
+            isPresented: pendingDownloadRemovalIsPresented,
+            titleVisibility: .visible,
+            presenting: pendingDownloadRemoval
+        ) { record in
+            Button("downloads.remove.action", role: .destructive) {
+                downloads.remove(record)
+                pendingDownloadRemoval = nil
+            }
+            Button("common.cancel", role: .cancel) { pendingDownloadRemoval = nil }
+        } message: { _ in
+            Text("downloads.remove.confirm.message")
+        }
+    }
+
+    private var managementDialogScreen: some View {
+        downloadDialogScreen
         .confirmationDialog("management.rescanConfirmTitle", isPresented: $confirmsRescan) {
             Button("management.rescan") { rescanBook() }
             Button("common.cancel", role: .cancel) {}
@@ -235,6 +265,10 @@ struct WorkDetailView: View {
                 .disabled(deletionConfirmation != currentDetail?.book.title)
             Button("common.cancel", role: .cancel) { deletionConfirmation = "" }
         } message: { Text("management.deleteConfirmMessage") }
+    }
+
+    private var observedScreen: some View {
+        managementDialogScreen
         .overlay { controlMenuOverlay }
         .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
@@ -243,28 +277,58 @@ struct WorkDetailView: View {
         .onChange(of: managementStore?.completedAction) { _, action in
             handleManagementCompletion(action)
         }
-        .onChange(of: managementStore?.errorCode) { _, code in
-            guard let code else { return }
-            readingStatusOverride = nil
-            showFeedback(
-                String(format: String(localized: "management.failed.format"), code),
-                isError: true
-            )
-        }
-        .onChange(of: downloads.storageErrorCode) { _, code in
-            guard let code else { return }
-            showFeedback(
-                downloadFailureMessage(code),
-                isError: true
-            )
-        }
-        .onChange(of: selectedDownloadErrorCode) { _, code in
-            guard let code else { return }
-            showFeedback(
-                downloadFailureMessage(code),
-                isError: true
-            )
-        }
+        .onChange(of: managementStore?.errorCode, initial: false, handleManagementErrorChange)
+        .onChange(of: downloads.storageErrorCode, initial: false, handleStorageErrorChange)
+        .onChange(of: selectedDownloadErrorCode, initial: false, handleSelectedDownloadErrorChange)
+    }
+
+    private var unavailableFeatureIsPresented: Binding<Bool> {
+        Binding(
+            get: { unavailableFeature != nil },
+            set: { if !$0 { unavailableFeature = nil } }
+        )
+    }
+
+    private var readerAccessErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { readerAccessErrorCode != nil },
+            set: { if !$0 { readerAccessErrorCode = nil } }
+        )
+    }
+
+    private var downloadMenuIsPresented: Binding<Bool> {
+        Binding(
+            get: { downloadMenuRecord != nil },
+            set: { if !$0 { downloadMenuRecord = nil } }
+        )
+    }
+
+    private var pendingDownloadRemovalIsPresented: Binding<Bool> {
+        Binding(
+            get: { pendingDownloadRemoval != nil },
+            set: { if !$0 { pendingDownloadRemoval = nil } }
+        )
+    }
+
+    private func handleManagementErrorChange(_ oldValue: String?, _ code: String?) {
+        guard let code else { return }
+        readingStatusOverride = nil
+        let format = String(localized: "management.failed.format")
+        let message = String(format: format, code)
+        showFeedback(message, isError: true)
+    }
+
+    private func handleStorageErrorChange(_ oldValue: String?, _ code: String?) {
+        handleSelectedDownloadError(code)
+    }
+
+    private func handleSelectedDownloadErrorChange(_ oldValue: String?, _ code: String?) {
+        handleSelectedDownloadError(code)
+    }
+
+    private func handleSelectedDownloadError(_ code: String?) {
+        guard let code else { return }
+        showFeedback(downloadFailureMessage(code), isError: true)
     }
 
     @ViewBuilder
@@ -333,6 +397,7 @@ struct WorkDetailView: View {
             cache: cache,
             cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
         )
+        .id("work-cover-\(coverRefreshToken)")
     }
 
     private func identity(_ detail: BookDetailContent) -> some View {
@@ -1530,7 +1595,9 @@ struct WorkDetailView: View {
             if canManageSystem {
                 let managementAvailable = managementStore != nil
                 actions.append(action("edit", "work.control.edit", "pencil", enabled: managementAvailable) { openManagement(.editWork, resourceID: nil) })
-                actions.append(action("regenerateCover", "management.regenerateCover", "photo.badge.arrow.down", enabled: managementAvailable) { controlTarget = nil; confirmsCoverRegeneration = true })
+                actions.append(action("regenerateCover", "management.regenerateCover", "photo.badge.arrow.down", enabled: managementAvailable) {
+                    openManagement(.cover, resourceID: resource?.id)
+                })
                 actions.append(action("recognize", "work.control.recognize", "text.magnifyingglass", enabled: managementAvailable) { openManagement(.recognize, resourceID: nil) })
                 actions.append(action("rescan", "management.rescan", "arrow.clockwise", enabled: managementAvailable) { controlTarget = nil; confirmsRescan = true })
                 actions.append(action("delete", "management.delete", "trash", enabled: managementAvailable, destructive: true) { controlTarget = nil; confirmsDeletion = true })
@@ -1580,7 +1647,7 @@ struct WorkDetailView: View {
         controlTarget = nil
         guard let resource else { return }
         if let record = downloads.record(for: resource.id), record.isVerifiedOfflineCopy {
-            downloads.remove(record)
+            downloadMenuRecord = record
         } else {
             handleDownload(resource, detail: detail)
         }
@@ -1597,10 +1664,26 @@ struct WorkDetailView: View {
                 task: task,
                 detail: detail,
                 resource: resource,
-                chooseCover: { importsCover = true },
-                workCover: AnyView(cover(detail)),
+                workCover: AnyView(managementCover(detail: detail, resource: resource)),
                 downloadForResource: { downloads.record(for: $0) }
             )
+        }
+    }
+
+    @ViewBuilder
+    private func managementCover(detail: BookDetailContent, resource: BookResource?) -> some View {
+        if let resource {
+            BookCoverView(
+                reference: resource.cover,
+                title: resource.title,
+                context: context,
+                client: client,
+                cache: cache,
+                cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
+            )
+            .id("management-cover-\(coverRefreshToken)")
+        } else {
+            cover(detail)
         }
     }
 
@@ -1611,6 +1694,26 @@ struct WorkDetailView: View {
             managementStore.consumeCompletion()
             dismiss()
             return
+        }
+        if action == .coverUpdated {
+            let mutatedResourceCover = managementStore.coverMutation.flatMap { mutation in
+                currentDetail?.resources.first { $0.id == mutation.resourceId }?.cover?.path
+            }
+            let paths = Set(
+                [
+                    currentDetail?.book.cover?.path,
+                    mutatedResourceCover,
+                    managementStore.coverMutation?.coverUrl,
+                ]
+                    .compactMap { $0 }
+                    .filter { !$0.isEmpty }
+            )
+            Task {
+                for path in paths {
+                    try? await cache.remove(namespace: context.namespaceKey, key: "cover|\(path)")
+                }
+                await MainActor.run { coverRefreshToken += 1 }
+            }
         }
         activeSheet = nil
         showFeedback(managementFeedback(action), isError: false)
@@ -1820,7 +1923,7 @@ struct WorkDetailView: View {
                 showFeedback(String(localized: "work.download.resumed"), isError: false)
             case .completed:
                 if record.isVerifiedOfflineCopy {
-                    openDownloads()
+                    downloadMenuRecord = record
                 } else {
                     downloads.retry(record)
                     showFeedback(String(localized: "work.download.resumed"), isError: false)
@@ -1848,7 +1951,8 @@ struct WorkDetailView: View {
             switch record.state {
             case .downloading, .queued: downloads.pause(record)
             case .paused, .failedRetryable, .failedTerminal: downloads.resume(record)
-            case .completed: break
+            case .completed:
+                if record.isVerifiedOfflineCopy { downloadMenuRecord = record }
             }
         } else {
             downloads.enqueue(book: detail.book, resource: resource)
@@ -1869,6 +1973,26 @@ struct WorkDetailView: View {
         downloads.record(for: resourceID)?.isVerifiedOfflineCopy == true
             ? theme.brandAccent
             : theme.textSecondary
+    }
+
+    private func openOffline(_ record: ManagedDownloadRecord) {
+        guard record.isVerifiedOfflineCopy else {
+            downloads.retry(record)
+            showFeedback(String(localized: "downloads.error.invalid"), isError: true)
+            return
+        }
+        openReader(
+            ReaderHandoff(
+                bookID: record.bookID,
+                resourceID: record.resourceID,
+                assetID: record.assetID,
+                title: record.bookTitle,
+                resourceTitle: record.resourceTitle,
+                format: record.format,
+                readerType: record.readerType,
+                source: .verifiedLocal(recordID: record.id)
+            )
+        )
     }
 
     private func downloadAccessibilityLabel(resourceID: String) -> LocalizedStringKey {

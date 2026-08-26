@@ -9,6 +9,8 @@ import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.MetadataField
@@ -25,6 +27,7 @@ data class WorkManagementUiState(
     val isBusy: Boolean = false,
     val errorCode: String? = null,
     val completedMutation: WorkManagementCompletion? = null,
+    val coverMutation: CoverMutationOutcome? = null,
     val metadataProviders: List<MetadataProvider> = emptyList(),
     val metadataCandidates: List<MetadataCandidate> = emptyList(),
 )
@@ -46,7 +49,11 @@ class WorkManagementViewModel(
     init { checkCapability() }
 
     fun consumeFeedback() {
-        mutableUiState.value = mutableUiState.value.copy(errorCode = null, completedMutation = null)
+        mutableUiState.value = mutableUiState.value.copy(
+            errorCode = null,
+            completedMutation = null,
+            coverMutation = null,
+        )
     }
 
     fun setReadingStatus(status: ManagedReadingStatus) = run(WorkManagementCompletion.ReadingStatusUpdated) {
@@ -60,6 +67,16 @@ class WorkManagementViewModel(
     fun regenerateCover(anchoredResourceId: String) = run(WorkManagementCompletion.CoverUpdated) {
         repository.regenerateBookCover(context, bookId, anchoredResourceId)
     }
+
+    fun uploadCover(resourceId: String, upload: CoverUpload) = runValue(
+        assign = { mutation ->
+            mutableUiState.value = mutableUiState.value.copy(
+                coverMutation = mutation,
+                completedMutation = WorkManagementCompletion.CoverUpdated,
+            )
+        },
+        operation = { repository.uploadCover(context, bookId, resourceId, upload) },
+    )
 
     fun rescan(sourceNodeId: String) = run(WorkManagementCompletion.RescanQueued) {
         repository.rescanBook(context, sourceNodeId)

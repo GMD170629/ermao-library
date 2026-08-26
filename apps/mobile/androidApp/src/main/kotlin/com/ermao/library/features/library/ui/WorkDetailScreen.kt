@@ -71,6 +71,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,6 +85,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
@@ -154,6 +156,7 @@ import com.ermao.library.features.workmanagement.ui.WorkManagementTarget
 import com.ermao.library.features.workmanagement.ui.WorkManagementTask
 import com.ermao.library.features.workmanagement.ui.WorkManagementTaskSheet
 import com.ermao.library.shared.modules.workmanagement.domain.ManagedReadingStatus
+import com.ermao.library.platform.persistence.AndroidCoverCache
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
 import java.time.LocalDate
@@ -225,6 +228,7 @@ fun WorkDetailScreen(
         completion(DownloadBatchResult(emptyList()))
     },
     onOpenSelectedResource: (ResourceContent) -> Unit = {},
+    onOpenDownloadedResource: (AndroidDownloadRecord) -> Unit = {},
     onSelectReadingStatus: (WorkReadingStatus) -> Unit = {},
     managementViewModel: WorkManagementViewModel? = null,
     canManageSystem: Boolean = managementViewModel != null,
@@ -237,6 +241,8 @@ fun WorkDetailScreen(
         mutableStateOf<WorkReadingStatus?>(null)
     }
     var pendingDownloadRemoval by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
+    var coverRefreshToken by remember { mutableIntStateOf(0) }
+    val appContext = LocalContext.current.applicationContext
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
     val shelvesUpdatedMessage = stringResource(R.string.work_shelves_updated)
@@ -387,10 +393,12 @@ fun WorkDetailScreen(
                     },
                     onRequestRemoveDownload = { pendingDownloadRemoval = it },
                     onOpenSelectedResource = onOpenSelectedResource,
+                    onOpenDownloadedResource = onOpenDownloadedResource,
                     onOpenMultiDownload = onOpenMultiDownload,
                     onOpenResourceControl = { resource, anchor ->
                         controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Resource(resource), anchor)
                     },
+                    coverRefreshToken = coverRefreshToken,
                     listState = detailListState,
                     modifier = Modifier.padding(padding),
                 )
@@ -492,11 +500,32 @@ fun WorkDetailScreen(
             content = state.content,
             state = activeManagementState,
             viewModel = managementViewModel,
+            workCover = {
+                BookCover(
+                    state.content.book,
+                    repository,
+                    context,
+                    CoverRole.Hero,
+                    Modifier.width(132.dp),
+                    cacheRevision = coverRefreshToken,
+                )
+            },
             onDismiss = { managementSheetState = null },
         )
     }
     LaunchedEffect(managementState?.completedMutation) {
         val completion = managementState?.completedMutation ?: return@LaunchedEffect
+        if (completion == WorkManagementCompletion.CoverUpdated) {
+            val coverPaths = buildSet {
+                state.content?.book?.coverUrl?.takeIf(String::isNotBlank)?.let(::add)
+                selectedResource?.coverUrl?.takeIf(String::isNotBlank)?.let(::add)
+                managementState?.coverMutation?.coverUrl?.takeIf(String::isNotBlank)?.let(::add)
+            }
+            coverPaths.forEach { path ->
+                runCatching { AndroidCoverCache.invalidate(appContext, context, path) }
+            }
+            coverRefreshToken += 1
+        }
         managementSheetState = null
         if (completion == WorkManagementCompletion.BookDeleted) onBookDeleted() else onRefresh()
         snackbarHostState.currentSnackbarData?.dismiss()
@@ -540,6 +569,7 @@ fun WorkDetailScreen(
             onPause = onCancelDownload,
             onResumeOrRetry = onDownloadResource,
             onRemove = { pendingDownloadRemoval = it },
+            onOpenDownloaded = onOpenDownloadedResource,
             onPerformBatch = onPerformDownloadBatch,
             onBatchFeedback = { succeeded, failed ->
                 snackbarScope.launch {
@@ -585,8 +615,10 @@ private fun WorkDetailBody(
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedResource: (ResourceContent) -> Unit,
+    onOpenDownloadedResource: (AndroidDownloadRecord) -> Unit,
     onOpenMultiDownload: () -> Unit,
     onOpenResourceControl: (ResourceContent, Offset) -> Unit,
+    coverRefreshToken: Int,
     listState: LazyListState,
     modifier: Modifier,
 ) {
@@ -608,7 +640,7 @@ private fun WorkDetailBody(
     ) {
         item {
             Box(Modifier.testTag("work-identity")) {
-                IdentityHeader(content, repository, context, onOpenFacet)
+                IdentityHeader(content, repository, context, onOpenFacet, coverRefreshToken)
             }
         }
         item {
@@ -625,6 +657,7 @@ private fun WorkDetailBody(
                 onCancelDownload = onCancelDownload,
                 onRequestRemoveDownload = onRequestRemoveDownload,
                 onOpenSelectedResource = onOpenSelectedResource,
+                onOpenDownloadedResource = onOpenDownloadedResource,
                 onOpenMultiDownload = onOpenMultiDownload,
             )
         }
@@ -689,6 +722,7 @@ private fun WorkDetailActionRow(
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedResource: (ResourceContent) -> Unit,
+    onOpenDownloadedResource: (AndroidDownloadRecord) -> Unit,
     onOpenMultiDownload: () -> Unit,
 ) {
     val theme = WarmPageThemeValues
@@ -698,6 +732,7 @@ private fun WorkDetailActionRow(
     )
     val primaryLabel = primaryActionLabel(primaryAction.label)
     val downloadAction = workDetailDownloadActionPresentation(selectedDownload)
+    var downloadMenuExpanded by remember(selectedDownload?.assetId) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
         WarmPagePrimaryAction(
             label = primaryLabel,
@@ -715,46 +750,69 @@ private fun WorkDetailActionRow(
             modifier = Modifier.fillMaxWidth().testTag("work-reader-action"),
         )
         Row(Modifier.fillMaxWidth()) {
-            WorkDetailQuickAction(
-                icon = when (downloadAction) {
-                    WorkDetailDownloadAction.Downloading -> Icons.Outlined.PauseCircle
-                    WorkDetailDownloadAction.Downloaded -> Icons.Outlined.CheckCircle
-                    WorkDetailDownloadAction.NotDownloaded,
-                    WorkDetailDownloadAction.Paused,
-                    WorkDetailDownloadAction.Failed,
-                    -> Icons.Outlined.Download
-                },
-                label = stringResource(
-                    when (downloadAction) {
-                        WorkDetailDownloadAction.NotDownloaded -> R.string.work_quick_download
-                        WorkDetailDownloadAction.Downloading -> R.string.work_quick_downloading
-                        WorkDetailDownloadAction.Paused -> R.string.work_quick_download_paused
-                        WorkDetailDownloadAction.Failed -> R.string.work_quick_download_retry
-                        WorkDetailDownloadAction.Downloaded -> R.string.work_quick_downloaded
+            Box(Modifier.weight(1f)) {
+                WorkDetailQuickAction(
+                    icon = when (downloadAction) {
+                        WorkDetailDownloadAction.Downloading -> Icons.Outlined.PauseCircle
+                        WorkDetailDownloadAction.Downloaded -> Icons.Outlined.CheckCircle
+                        WorkDetailDownloadAction.NotDownloaded,
+                        WorkDetailDownloadAction.Paused,
+                        WorkDetailDownloadAction.Failed,
+                        -> Icons.Outlined.Download
                     },
-                ),
-                onClick = {
-                    if (selectedResource == null && hasMultipleReadableResources) {
-                        onOpenMultiDownload()
-                    } else selectedResource?.let { resource ->
+                    label = stringResource(
                         when (downloadAction) {
-                            WorkDetailDownloadAction.Downloading -> onCancelDownload(resource.id)
-                            WorkDetailDownloadAction.NotDownloaded,
-                            WorkDetailDownloadAction.Paused,
-                            WorkDetailDownloadAction.Failed,
-                            -> onDownloadResource(resource.id)
-                            WorkDetailDownloadAction.Downloaded -> selectedDownload?.let(onRequestRemoveDownload)
+                            WorkDetailDownloadAction.NotDownloaded -> R.string.work_quick_download
+                            WorkDetailDownloadAction.Downloading -> R.string.work_quick_downloading
+                            WorkDetailDownloadAction.Paused -> R.string.work_quick_download_paused
+                            WorkDetailDownloadAction.Failed -> R.string.work_quick_download_retry
+                            WorkDetailDownloadAction.Downloaded -> R.string.work_quick_downloaded
+                        },
+                    ),
+                    onClick = {
+                        if (selectedResource == null && hasMultipleReadableResources) {
+                            onOpenMultiDownload()
+                        } else selectedResource?.let { resource ->
+                            when (downloadAction) {
+                                WorkDetailDownloadAction.Downloading -> onCancelDownload(resource.id)
+                                WorkDetailDownloadAction.NotDownloaded,
+                                WorkDetailDownloadAction.Paused,
+                                WorkDetailDownloadAction.Failed,
+                                -> onDownloadResource(resource.id)
+                                WorkDetailDownloadAction.Downloaded -> downloadMenuExpanded = true
+                            }
                         }
+                    },
+                    onLongClick = selectedDownload?.takeIf { it.isReadable }?.let {
+                        { downloadMenuExpanded = true }
+                    },
+                    longClickLabel = stringResource(R.string.work_quick_manage_download),
+                    enabled = (selectedResource != null || hasMultipleReadableResources) && !readingStatusBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "work-download-action",
+                )
+                DropdownMenu(
+                    expanded = downloadMenuExpanded,
+                    onDismissRequest = { downloadMenuExpanded = false },
+                ) {
+                    selectedDownload?.takeIf(AndroidDownloadRecord::isReadable)?.let { download ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.work_download_open_offline)) },
+                            onClick = {
+                                downloadMenuExpanded = false
+                                onOpenDownloadedResource(download)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.downloads_remove_action)) },
+                            onClick = {
+                                downloadMenuExpanded = false
+                                onRequestRemoveDownload(download)
+                            },
+                        )
                     }
-                },
-                onLongClick = selectedDownload?.takeIf { it.isReadable }?.let { download ->
-                    { onRequestRemoveDownload(download) }
-                },
-                longClickLabel = stringResource(R.string.work_quick_remove_download),
-                enabled = (selectedResource != null || hasMultipleReadableResources) && !readingStatusBusy,
-                modifier = Modifier.weight(1f),
-                testTag = "work-download-action",
-            )
+                }
+            }
             WorkDetailQuickAction(
                 icon = Icons.Outlined.Check,
                 label = stringResource(
@@ -868,6 +926,7 @@ private fun IdentityHeader(
     repository: ContentRepository,
     context: ContentRequestContext,
     onOpenFacet: (LibraryScope, String) -> Unit,
+    coverRefreshToken: Int,
 ) {
     val theme = WarmPageThemeValues
     Column(
@@ -881,6 +940,7 @@ private fun IdentityHeader(
             context,
             CoverRole.Hero,
             Modifier.width(theme.components.workDetail.heroCoverWidth),
+            cacheRevision = coverRefreshToken,
         )
         WorkIdentityText(content, onOpenFacet, Modifier.fillMaxWidth())
         ReadingSummary(content)

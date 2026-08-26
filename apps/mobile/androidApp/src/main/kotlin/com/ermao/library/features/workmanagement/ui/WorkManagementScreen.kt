@@ -1,5 +1,8 @@
 package com.ermao.library.features.workmanagement.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -20,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
@@ -27,7 +32,11 @@ import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.workmanagement.application.WorkManagementUiState
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
+import com.ermao.library.features.workmanagement.infrastructure.AndroidCoverSelectionReader
+import com.ermao.library.features.workmanagement.infrastructure.CoverSelectionResult
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 sealed interface WorkManagementTarget {
     data object Work : WorkManagementTarget
@@ -53,6 +62,28 @@ fun WorkManagementTaskSheet(
             ?: content.resources.firstOrNull()
         is WorkManagementTarget.Resource -> target.value
     }
+    val appContext = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    val coverReader = remember(appContext) { AndroidCoverSelectionReader(appContext.contentResolver) }
+    var coverSelectionFailure by remember { mutableStateOf<CoverSelectionFailure?>(null) }
+    fun handleCoverSelection(result: CoverSelectionResult) {
+        when (result) {
+            is CoverSelectionResult.Ready -> {
+                coverSelectionFailure = null
+                resource?.let { viewModel.uploadCover(it.id, result.upload) }
+            }
+            CoverSelectionResult.UnsupportedType -> coverSelectionFailure = CoverSelectionFailure.Unsupported
+            CoverSelectionResult.TooLarge -> coverSelectionFailure = CoverSelectionFailure.TooLarge
+            CoverSelectionResult.Empty -> coverSelectionFailure = CoverSelectionFailure.Empty
+            CoverSelectionResult.Unreadable -> coverSelectionFailure = CoverSelectionFailure.Unreadable
+        }
+    }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { handleCoverSelection(coverReader.readPhoto(uri)) }
+    }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { handleCoverSelection(coverReader.read(uri)) }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
@@ -62,11 +93,19 @@ fun WorkManagementTaskSheet(
             when (task) {
                 WorkManagementTask.EditWork, WorkManagementTask.AddSeries -> EditBookForm(content, state, viewModel)
                 WorkManagementTask.Recognize -> MetadataLookup(resource, content, state, viewModel)
-                WorkManagementTask.Cover -> ConfirmAction(
-                    message = stringResource(R.string.management_regenerate_cover_message),
-                    enabled = resource != null && !state.isBusy,
-                    actionLabel = stringResource(R.string.work_control_regenerate_cover),
-                ) { resource?.let { viewModel.regenerateCover(it.id) } }
+                WorkManagementTask.Cover -> CoverManagement(
+                    resource = resource,
+                    state = state,
+                    workCover = workCover,
+                    failure = coverSelectionFailure,
+                    onChoosePhoto = {
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    onChooseFile = {
+                        filePicker.launch(arrayOf("image/jpeg", "image/png", "image/webp"))
+                    },
+                    onRegenerate = { resource?.let { viewModel.regenerateCover(it.id) } },
+                )
                 WorkManagementTask.Rescan -> ConfirmAction(
                     message = stringResource(R.string.management_rescan_message),
                     enabled = resource?.sourceNodeId?.isNotBlank() == true && !state.isBusy,
@@ -77,6 +116,51 @@ fun WorkManagementTaskSheet(
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.cancel_action)) }
         }
+    }
+}
+
+private enum class CoverSelectionFailure { Unsupported, TooLarge, Empty, Unreadable }
+
+@Composable
+private fun CoverManagement(
+    resource: ResourceContent?,
+    state: WorkManagementUiState,
+    workCover: (@Composable () -> Unit)?,
+    failure: CoverSelectionFailure?,
+    onChoosePhoto: () -> Unit,
+    onChooseFile: () -> Unit,
+    onRegenerate: () -> Unit,
+) {
+    workCover?.invoke()
+    resource?.let { Text(stringResource(R.string.management_cover_target, it.title)) }
+    if (state.isBusy) CircularProgressIndicator()
+    Button(
+        onClick = onChoosePhoto,
+        enabled = resource != null && !state.isBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(stringResource(R.string.management_choose_cover_photo)) }
+    Button(
+        onClick = onChooseFile,
+        enabled = resource != null && !state.isBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(stringResource(R.string.management_choose_cover_file)) }
+    Button(
+        onClick = onRegenerate,
+        enabled = resource != null && !state.isBusy,
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(stringResource(R.string.work_control_regenerate_cover)) }
+    Text(stringResource(R.string.management_cover_upload_hint))
+    failure?.let {
+        Text(
+            stringResource(
+                when (it) {
+                    CoverSelectionFailure.Unsupported -> R.string.management_cover_unsupported
+                    CoverSelectionFailure.TooLarge -> R.string.management_cover_too_large
+                    CoverSelectionFailure.Empty -> R.string.management_cover_empty
+                    CoverSelectionFailure.Unreadable -> R.string.management_cover_read_failed
+                },
+            ),
+        )
     }
 }
 

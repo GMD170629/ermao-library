@@ -42,6 +42,8 @@ typealias MetadataSearchResult =
     com.ermao.library.shared.modules.workmanagement.domain.MetadataSearchResult
 typealias CoverUpload =
     com.ermao.library.shared.modules.workmanagement.domain.CoverUpload
+typealias CoverMutationOutcome =
+    com.ermao.library.shared.modules.workmanagement.domain.CoverMutationOutcome
 typealias KindleSettings =
     com.ermao.library.shared.modules.workmanagement.domain.KindleSettings
 typealias KindleSendOutcome =
@@ -105,4 +107,9 @@ fun workManagementKindleSettings(
 fun workManagementBookMutationOutcome(
     result: WorkManagementResult<BookMutationOutcome>,
 ): BookMutationOutcome? =
+    (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+fun workManagementCoverMutationOutcome(
+    result: WorkManagementResult<CoverMutationOutcome>,
+): CoverMutationOutcome? =
     (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
