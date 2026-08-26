@@ -184,7 +184,7 @@ class KtorReaderBootstrapGatewayTest {
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
               "book":{"id":"book-1","title":"Book","author":"Author","coverUrl":"/api/books/book-1/cover"},
-              "resource":{"id":"resource-1","bookId":"book-1","sourceNodeId":"node-1","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"epub","mediaKind":"BOOK","readerType":"reflowable","pageCount":null,"chapterCount":1,"durationMs":null,"trackCount":null,"progress":0.0,"resourceCompleted":false,"lastReadAt":null},
+              "resource":{"id":"resource-1","bookId":"book-1","sourceNodeId":"node-1","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"epub","readerType":"reflowable","pageCount":null,"chapterCount":1,"durationMs":null,"trackCount":null,"progress":0.0,"resourceCompleted":false,"lastReadAt":null},
               "availableResources":[],
               "assets":[{"id":"asset-1","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":1234,"durationMs":null,"discNumber":null,"trackNumber":null,"sortOrder":0,"url":"/api/assets/asset-1","codec":null}],
               "units":[],"resourceUrl":"/api/resources/resource-1","capabilities":{},$REFLOWABLE_PUBLICATION,

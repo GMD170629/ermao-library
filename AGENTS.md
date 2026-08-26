@@ -423,6 +423,18 @@ TXT support must use their parser-backed in-memory Publication directly. The
 existing dormant import conversion subsystem is not a Reader fallback and must
 not be connected to Reader bootstrap, delivery, download, cache, or progress.
 
+### Mobile Work Detail single source of truth
+
+Mobile Work Detail behavior must follow the current Web implementation in
+`apps/web/features/books/book-detail-page.tsx`,
+`apps/web/features/books/ui/book-content-browser.tsx`, and
+`apps/web/features/books/ui/resource-detail-view.tsx`. A single readable resource opens
+its resource detail without auto-starting the Reader; multiple resources open the real
+server content browser with breadcrumbs, folders, pagination, view modes, and the same six
+sort orders as Web. Reading and listening are online-first and never require a prior
+download. Offline download remains a separate optional action. Phase documents and visual
+artifacts may adapt this behavior to native controls, but must not redefine it.
+
 ### Android Physical-Device-Default Development
 
 Android local development, debugging, test APK installation, instrumentation, visual

@@ -4,6 +4,8 @@ import com.ermao.library.shared.core.network.ApiEnvelopeDecoder
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.BooksQuery
+import com.ermao.library.shared.modules.library.BookContentSort
+import com.ermao.library.shared.modules.library.BookContentsQuery
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -85,6 +87,25 @@ class ContentWireTest {
         assertTrue(filter.contains("\"operator\":\"equals\""))
         assertTrue(filter.contains("\"value\":\"library-1\""))
         assertFalse("libraryId" in selected)
+    }
+
+    @Test
+    fun bookContentsParametersPreserveBreadcrumbNodePaginationAndWebSort() {
+        val parameters = bookContentsParameters(
+            BookContentsQuery(
+                bookId = "book-1",
+                sourceNodeId = "nested/source",
+                sort = BookContentSort.UpdatedAscending,
+                page = 3,
+                pageSize = 24,
+            ),
+        )
+
+        assertEquals(listOf("nested/source"), parameters["sourceNodeId"])
+        assertEquals(listOf("updated"), parameters["sort"])
+        assertEquals(listOf("asc"), parameters["direction"])
+        assertEquals(listOf("3"), parameters["page"])
+        assertEquals(listOf("24"), parameters["pageSize"])
     }
 
     private fun representativeBook(id: String) =

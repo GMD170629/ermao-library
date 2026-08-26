@@ -4,6 +4,7 @@ import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.domain.BookDetail
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.BookSummary
+import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.library.infrastructure.BookDetailPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookSummaryWire
@@ -54,3 +55,9 @@ fun createLibraryFilters(
     readingStatus = readingStatus,
     downloadedOnly = false,
 )
+
+/** Swift-friendly access to the shared Web-parity Work Detail selection policy. */
+fun selectBookDetail(
+    resources: List<Resource>,
+    requestedResourceId: String?,
+): BookDetailSelection = selectBookDetailPresentation(resources, requestedResourceId)

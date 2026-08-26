@@ -368,7 +368,6 @@ private data class ReaderBootstrapResourceWire(
     val resourceIndex: Double? = null,
     val sortOrder: Int,
     val format: String,
-    val mediaKind: String,
     val readerType: String,
     val pageCount: Int? = null,
     val chapterCount: Int? = null,

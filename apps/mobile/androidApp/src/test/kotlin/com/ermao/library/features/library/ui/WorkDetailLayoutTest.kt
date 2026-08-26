@@ -13,6 +13,14 @@ import org.junit.Test
 
 class WorkDetailLayoutTest {
     @Test
+    fun backdropFadesWithTheHeaderAndIsGoneAfterTheFirstItemScrollsAway() {
+        assertEquals(0f, workDetailBackdropCollapseFraction(0, 0, 240f))
+        assertEquals(0.5f, workDetailBackdropCollapseFraction(0, 120, 240f))
+        assertEquals(1f, workDetailBackdropCollapseFraction(0, 480, 240f))
+        assertEquals(1f, workDetailBackdropCollapseFraction(1, 0, 240f))
+    }
+
+    @Test
     fun selectedVolumePublicationDateUsesTheActiveLocaleAndPreservesUnknownValues() {
         assertEquals("Nov 1, 2010", formatWorkMetadataDate("2010-11-01T00:00:00Z", Locale.US))
         assertEquals("legacy date", formatWorkMetadataDate("legacy date", Locale.US))
@@ -67,20 +75,20 @@ class WorkDetailLayoutTest {
     }
 
     @Test
-    fun audiobookActionStaysUnavailableUntilTheNowPlayingDestinationExists() {
+    fun audiobookActionOpensOnlinePlayerWithoutACompletedDownload() {
         val audiobook = testResource(readerType = "audio", format = "M4B", progressPercent = 12)
 
         assertEquals(
-            WorkDetailPrimaryActionIntent.Unavailable,
+            WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(audiobook, download = null).intent,
         )
-        assertFalse(
+        assertTrue(
             workDetailPrimaryActionPresentation(audiobook, download = null).enabled,
         )
     }
 
     @Test
-    fun reflowableProgressDoesNotPretendThePublicationArtifactIsDownloaded() {
+    fun reflowableProgressKeepsDownloadIndependentFromOnlineReading() {
         val currentResource = testResource(
             readerType = "reflowable",
             format = "EPUB",
@@ -101,13 +109,13 @@ class WorkDetailLayoutTest {
         assertEquals(WorkDetailVolumeReadingState.Reading, resource.readingState)
         assertEquals(WorkDetailVolumeDownloadState.NotDownloaded, resource.downloadState)
         assertEquals(3.dp, WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH)
-        assertEquals(WorkDetailPrimaryActionIntent.DownloadThenRead, primaryAction.intent)
-        assertEquals(WorkDetailPrimaryActionLabel.DownloadToRead, primaryAction.label)
+        assertEquals(WorkDetailPrimaryActionIntent.OpenSelectedVolume, primaryAction.intent)
+        assertEquals(WorkDetailPrimaryActionLabel.ContinueReading, primaryAction.label)
         assertTrue(primaryAction.enabled)
     }
 
     @Test
-    fun onlyACompletedReflowableArtifactChangesThePrimaryIntentToReader() {
+    fun completedArtifactDoesNotChangeTheOnlineReaderIntent() {
         val resource = testResource(readerType = "reflowable", format = "EPUB", progressPercent = 34)
         val completedDownload = completedDownload(resource)
 
@@ -121,7 +129,7 @@ class WorkDetailLayoutTest {
         )
 
         assertEquals(
-            WorkDetailPrimaryActionIntent.DownloadThenRead,
+            WorkDetailPrimaryActionIntent.OpenSelectedVolume,
             workDetailPrimaryActionPresentation(
                 resource.copy(id = "different-resource"),
                 completedDownload,

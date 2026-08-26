@@ -209,15 +209,7 @@ class KtorContentRepository(
                 ApiMethod.Get,
                 "/api/books/${query.bookId.encodeURLPathPart()}/contents",
                 BookContentsPayloadWire.serializer(),
-                queryParameters = buildMap {
-                    query.sourceNodeId?.takeIf(String::isNotBlank)?.let {
-                        put("sourceNodeId", listOf(it))
-                    }
-                    put("sort", listOf("name"))
-                    put("direction", listOf("asc"))
-                    put("page", listOf(query.page.toString()))
-                    put("pageSize", listOf(query.pageSize.toString()))
-                },
+                queryParameters = bookContentsParameters(query),
             ),
         )
     }) {
@@ -346,6 +338,14 @@ internal fun libraryBooksParameters(query: BooksQuery): Map<String, List<String>
             }
             put("filters", listOf(expression.toString()))
         }
+}
+
+internal fun bookContentsParameters(query: BookContentsQuery): Map<String, List<String>> = buildMap {
+    query.sourceNodeId?.takeIf(String::isNotBlank)?.let { put("sourceNodeId", listOf(it)) }
+    put("sort", listOf(query.sort.sortWireValue))
+    put("direction", listOf(query.sort.directionWireValue))
+    put("page", listOf(query.page.toString()))
+    put("pageSize", listOf(query.pageSize.toString()))
 }
 
 @Serializable
@@ -509,6 +509,9 @@ private data class ResourceReadingUnitWire(
         ),
         createdAt = null,
         updatedAt = null,
+        previewUrl = previewUrl,
+        discNumber = discNumber,
+        trackNumber = trackNumber,
     )
 }
 

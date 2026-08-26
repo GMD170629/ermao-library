@@ -737,6 +737,9 @@ final class BookDetailStore: ObservableObject {
     @Published private(set) var cacheIssue: ContentCacheIssue?
     @Published private(set) var contentsPage: BookContentsPage?
     @Published private(set) var chapterPage: BookChapterPage?
+    @Published private(set) var resourceDetailPage: BookResourceDetailPage?
+    @Published private(set) var contentSort: BookContentSort = .nameAscending
+    @Published private(set) var contentLayout: BookContentLayout = .grid
     @Published private(set) var isLoadingContentBrowser = false
     @Published private(set) var contentBrowserFailed = false
     @Published private(set) var isLoadingMoreResources = false
@@ -751,6 +754,7 @@ final class BookDetailStore: ObservableObject {
     private let onUnauthorized: @MainActor () -> Void
     private var requestGeneration = UUID()
     private var activeResourceID: String?
+    var selectedResourceID: String? { activeResourceID }
     private var latestProgressUpdatesByResourceID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
@@ -773,6 +777,7 @@ final class BookDetailStore: ObservableObject {
             state = .loading
             contentsPage = nil
             chapterPage = nil
+            resourceDetailPage = nil
         }
         let generation = UUID()
         requestGeneration = generation
@@ -787,6 +792,7 @@ final class BookDetailStore: ObservableObject {
                 let latestProgressUpdate = value.selectedResourceID
                     .flatMap { latestProgressUpdatesByResourceID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
+                activeResourceID = presented.selectedResourceID
                 state = .ready(presented, isCached: false)
                 await loadContentBrowser(for: presented, generation: generation)
             } catch {
@@ -853,6 +859,7 @@ final class BookDetailStore: ObservableObject {
                     context: context,
                     bookID: bookID,
                     sourceNodeID: sourceNodeID,
+                    sort: contentSort,
                     page: 1,
                     pageSize: 200
                 )
@@ -867,14 +874,46 @@ final class BookDetailStore: ObservableObject {
         }
     }
 
+    func showContentBrowser() {
+        activeResourceID = nil
+        resourceDetailPage = nil
+        chapterPage = nil
+        openContents(contentsPage?.currentSourceNodeID)
+    }
+
+    func selectResource(_ resourceID: String) {
+        guard let content = currentContent,
+              content.resources.contains(where: { $0.id == resourceID && $0.isReadable != false })
+        else { return }
+        activeResourceID = resourceID
+        contentsPage = nil
+        chapterPage = nil
+        loadResourceDetail(resourceID: resourceID, page: 1)
+    }
+
+    func selectContentSort(_ sort: BookContentSort) {
+        guard contentSort != sort else { return }
+        contentSort = sort
+        openContents(contentsPage?.currentSourceNodeID)
+    }
+
+    func selectContentLayout(_ layout: BookContentLayout) {
+        contentLayout = layout
+    }
+
+    func selectContentPage(_ page: Int) {
+        loadContents(sourceNodeID: contentsPage?.currentSourceNodeID, page: page)
+    }
+
+    func selectResourceDetailPage(_ page: Int) {
+        guard let resourceID = activeResourceID else { return }
+        loadResourceDetail(resourceID: resourceID, page: page)
+    }
+
     func retryContentBrowser() {
         guard let content = currentContent else { return }
-        if content.resources.filter({ $0.isReadable != false }).count == 1 {
-            let generation = requestGeneration
-            Task { [weak self] in
-                guard let self else { return }
-                await loadContentBrowser(for: content, generation: generation, force: true)
-            }
+        if let resourceID = activeResourceID {
+            loadResourceDetail(resourceID: resourceID, page: resourceDetailPage?.page ?? 1)
         } else {
             openContents(contentsPage?.currentSourceNodeID)
         }
@@ -885,27 +924,41 @@ final class BookDetailStore: ObservableObject {
         generation: UUID,
         force: Bool = false
     ) async {
-        let readableResources = content.resources.filter { $0.isReadable != false }
         isLoadingContentBrowser = true
         contentBrowserFailed = false
         do {
-            if readableResources.count == 1, let resource = readableResources.first {
-                if !force, chapterPage?.resourceID == resource.id {
+            if let resourceID = activeResourceID ?? content.selectedResourceID {
+                if !force, resourceDetailPage?.resourceID == resourceID {
                     isLoadingContentBrowser = false
                     return
                 }
-                let page = try await client.fetchBookChapters(
+                let resource = content.resources.first(where: { $0.id == resourceID })
+                let page = try await client.fetchResourceDetail(
                     context: context,
                     bookID: bookID,
-                    resourceID: resource.id,
+                    resourceID: resourceID,
                     page: 1,
-                    pageSize: 500
+                    pageSize: resourceDetailPageSize(resource)
                 )
                 guard requestGeneration == generation else { return }
-                chapterPage = page
+                activeResourceID = resourceID
+                resourceDetailPage = page
+                let chapters = page.units.compactMap { unit -> BookChapter? in
+                    guard unit.unitType.lowercased() == "chapter" else { return nil }
+                    return BookChapter(
+                        id: unit.id,
+                        title: unit.title,
+                        progress: unit.chapterState == .current ? page.progress : nil,
+                        isCurrent: unit.chapterState == .current,
+                        href: unit.href,
+                        sortOrder: unit.sortOrder,
+                        readingOrderPosition: nil,
+                        state: unit.chapterState
+                    )
+                }
                 contentsPage = nil
                 if case .ready(let current, let isCached) = state {
-                    state = .ready(current.replacingChapters(page.chapters), isCached: isCached)
+                    state = .ready(current.replacingChapters(chapters), isCached: isCached)
                 }
             } else {
                 if !force, contentsPage != nil {
@@ -916,18 +969,80 @@ final class BookDetailStore: ObservableObject {
                     context: context,
                     bookID: bookID,
                     sourceNodeID: nil,
+                    sort: contentSort,
                     page: 1,
                     pageSize: 200
                 )
                 guard requestGeneration == generation else { return }
                 contentsPage = page
                 chapterPage = nil
+                resourceDetailPage = nil
             }
             isLoadingContentBrowser = false
         } catch {
             guard requestGeneration == generation else { return }
             isLoadingContentBrowser = false
             contentBrowserFailed = true
+        }
+    }
+
+    private func loadContents(sourceNodeID: String?, page: Int) {
+        let generation = requestGeneration
+        isLoadingContentBrowser = true
+        contentBrowserFailed = false
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let value = try await client.fetchBookContents(
+                    context: context,
+                    bookID: bookID,
+                    sourceNodeID: sourceNodeID,
+                    sort: contentSort,
+                    page: page,
+                    pageSize: 200
+                )
+                guard requestGeneration == generation else { return }
+                contentsPage = value
+                isLoadingContentBrowser = false
+            } catch {
+                guard requestGeneration == generation else { return }
+                isLoadingContentBrowser = false
+                contentBrowserFailed = true
+            }
+        }
+    }
+
+    private func loadResourceDetail(resourceID: String, page: Int) {
+        let generation = requestGeneration
+        isLoadingContentBrowser = true
+        contentBrowserFailed = false
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let resource = currentContent?.resources.first(where: { $0.id == resourceID })
+                let value = try await client.fetchResourceDetail(
+                    context: context,
+                    bookID: bookID,
+                    resourceID: resourceID,
+                    page: page,
+                    pageSize: resourceDetailPageSize(resource)
+                )
+                guard requestGeneration == generation, activeResourceID == resourceID else { return }
+                resourceDetailPage = value
+                isLoadingContentBrowser = false
+            } catch {
+                guard requestGeneration == generation, activeResourceID == resourceID else { return }
+                isLoadingContentBrowser = false
+                contentBrowserFailed = true
+            }
+        }
+    }
+
+    private func resourceDetailPageSize(_ resource: BookResource?) -> Int {
+        switch resource?.readerType.lowercased() {
+        case "comic", "pdf": 24
+        case "audio": 100
+        default: 50
         }
     }
 

@@ -379,16 +379,21 @@ class ReaderActivity : AppCompatActivity() {
             bootstrapGateway = serverGateway,
             downloadPort = serverGateway,
             sinkFactory = publicationStore.downloadSinkFactory(),
-            localSourceResolver = publicationStore.localSourceResolver(),
             nativePdfiumRangeV1 = AndroidPdfiumFeatureFlags.NATIVE_PDFIUM_RANGE_V1 &&
                 !forceCompletePdfDownload,
         )
         when (val result = bootstrapper.execute(
             ReaderBootstrapRequest(authenticated.profile, namespace, request.resourceId),
         )) {
-            is ReaderPublicationBootstrapFailure -> showOpenError(
-                if (result.recoverable) ReaderErrorCode.NetworkUnavailable else ReaderErrorCode.ResourceMissing,
-            )
+            is ReaderPublicationBootstrapFailure -> {
+                LOGGER.log(
+                    Level.SEVERE,
+                    "reader_bootstrap_failed code=${result.failureCode} recoverable=${result.recoverable}",
+                )
+                showOpenError(
+                    if (result.recoverable) ReaderErrorCode.NetworkUnavailable else ReaderErrorCode.ResourceMissing,
+                )
+            }
             is ReaderPublicationBootstrapContent -> {
                 navigationCache.save(
                     namespace,
@@ -914,7 +919,7 @@ class ReaderActivity : AppCompatActivity() {
             pendingManagedRepair = null
             opening = false
             openError = failure.readerError
-            LOGGER.log(Level.SEVERE, "reader_open_failed code={0}", failure.readerError.code.wireValue)
+            LOGGER.log(Level.SEVERE, "reader_open_failed code=${failure.readerError.code.wireValue}")
             return false
         } catch (_: RuntimeException) {
             readerSession.release()
@@ -927,7 +932,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun showOpenError(code: ReaderErrorCode) {
         opening = false
         openError = ReaderError(code)
-        LOGGER.log(Level.SEVERE, "reader_open_failed code={0}", code.wireValue)
+        LOGGER.log(Level.SEVERE, "reader_open_failed code=${code.wireValue}")
     }
 
     private suspend fun retryPendingUploadWithinLifecycleBudget() {

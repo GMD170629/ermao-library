@@ -170,7 +170,6 @@ private fun book(id: String, title: String, progress: Int?): BookCard = BookCard
     title = title,
     author = "Author",
     coverUrl = "/covers/$id",
-    mediaKinds = listOf("EBOOK"),
     progressPercent = progress,
 )
 

@@ -239,6 +239,7 @@ private struct FixtureContentClient: ContentClient {
         context: ContentRequestContext,
         bookID: String,
         sourceNodeID: String?,
+        sort: BookContentSort,
         page: Int,
         pageSize: Int
     ) async throws -> BookContentsPage {
@@ -314,6 +315,38 @@ private struct FixtureContentClient: ContentClient {
             pageSize: pageSize,
             total: 2,
             totalPages: 1
+        )
+    }
+
+    func fetchResourceDetail(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookResourceDetailPage {
+        BookResourceDetailPage(
+            resourceID: resourceID,
+            units: [
+                BookResourceDetailUnit(
+                    id: "chapter-1", title: "Chapter 1", unitType: "chapter", assetID: nil,
+                    href: "chapter-1.xhtml", sortOrder: 1, pageNumber: nil, previewURL: nil, level: 0,
+                    durationMillis: nil, discNumber: nil, trackNumber: nil, chapterState: .current
+                ),
+                BookResourceDetailUnit(
+                    id: "chapter-2", title: "Chapter 2", unitType: "chapter", assetID: nil,
+                    href: "chapter-2.xhtml", sortOrder: 2, pageNumber: nil, previewURL: nil, level: 0,
+                    durationMillis: nil, discNumber: nil, trackNumber: nil, chapterState: .unread
+                ),
+            ],
+            page: page,
+            pageSize: pageSize,
+            total: 2,
+            totalPages: 1,
+            currentHref: "chapter-1.xhtml",
+            currentChapterSortOrder: 1,
+            currentPageNumber: nil,
+            progress: 32
         )
     }
 

@@ -92,8 +92,6 @@
     <string name="library_search_series_placeholder">搜索系列</string>
     <string name="library_search_authors_placeholder">搜索作者</string>
     <string name="library_scope_works">全部</string>
-    <string name="library_scope_series">系列</string>
-    <string name="library_scope_authors">作者</string>
     <plurals name="library_result_count">
         <item quantity="other">%1$d 个结果</item>
     </plurals>
@@ -134,15 +132,11 @@
     <string name="close_action">关闭</string>
     <string name="library_filter_title">筛选作品</string>
     <string name="library_filter_draft_description">选择后应用，不会立即改变结果。</string>
-    <string name="library_filter_media">媒介类型</string>
     <string name="library_filter_reading">阅读状态</string>
     <string name="library_filter_offline">已下载</string>
     <string name="library_filter_downloaded">已下载</string>
     <string name="library_permission_revalidating_title">正在检查访问权限</string>
     <string name="library_permission_revalidating_message">重新检查访问权限期间，私有结果将保持隐藏。</string>
-    <string name="media_ebook">电子书</string>
-    <string name="media_comic">漫画</string>
-    <string name="media_audiobook">有声书</string>
     <string name="reading_unread">未读</string>
     <string name="reading_reading">阅读中</string>
     <string name="reading_finished">已读完</string>
@@ -165,17 +159,13 @@
     <string name="work_resource_accessibility_finished">已读完</string>
     <string name="work_resource_accessibility_not_started">未开始</string>
     <string name="work_download_pause">暂停此卷下载</string>
-    <string name="work_control_add_series">添加到系列</string>
     <string name="work_control_add_shelf">添加到书架</string>
     <string name="work_control_mark_unread">标记为未读</string>
     <string name="work_control_download">下载</string>
     <string name="work_control_edit">编辑</string>
     <string name="work_control_recognize">识别</string>
-    <string name="work_control_upload_cover">上传封面</string>
     <string name="work_control_regenerate_cover">重新生成封面</string>
     <string name="work_control_send_kindle">发送到 Kindle</string>
-    <string name="work_control_change_media_type">修改媒体类型</string>
-    <string name="work_control_selected_resource_format">%1$s · %2$s</string>
     <string name="work_quick_download">下载</string>
     <string name="work_quick_downloading">下载中</string>
     <string name="work_quick_download_paused">继续下载</string>
@@ -214,8 +204,6 @@
     <string name="view_shelves_action">查看书架</string>
     <string name="work_primary_read_action">继续阅读</string>
     <string name="work_primary_start_read_action">开始阅读</string>
-    <string name="work_primary_download_to_read">下载后阅读</string>
-    <string name="work_primary_downloading">正在下载…</string>
     <string name="work_primary_listen_action">继续收听</string>
     <string name="work_primary_start_listen_action">开始收听</string>
     <string name="cancel_action">取消</string>
@@ -432,7 +420,7 @@
     <string name="reader_error_memory">此出版物过大，无法在本设备上安全打开。</string>
     <string name="reader_error_location">无法恢复保存的阅读位置。</string>
     <string name="reader_error_generic">阅读引擎无法打开此出版物。</string>
-    <string name="reader_error_pdf_range_unsupported">服务器不支持 PDF 按需读取，请先下载后阅读。</string>
+    <string name="reader_error_pdf_range_unsupported">服务器不支持 PDF 按需读取，请联系服务器管理员。</string>
     <string name="reader_error_pdf_range_invalid">PDF 字节区间响应无效，请重试。</string>
     <string name="reader_error_pdf_resource_changed">PDF 文件已更新，请重新打开。</string>
     <string name="reader_error_pdf_cache">PDF 缓存读写失败。</string>
@@ -523,4 +511,46 @@
     <string name="management_regenerate_cover_message">从源文件重新生成图书封面。</string>
     <string name="management_delete">删除图书</string>
     <string name="management_delete_message">输入“%1$s”以永久删除图书、源文件、资源和阅读记录。</string>
+    <string name="work_no_readable_resources_message">当前图书没有可在线打开的可读资源。</string>
+    <string name="work_contents_title">图书内容</string>
+    <plurals name="work_contents_count">
+        <item quantity="other">共 %1$d 项</item>
+    </plurals>
+    <string name="work_contents_grid">网格</string>
+    <string name="work_contents_list">列表</string>
+    <string name="work_contents_root">目录</string>
+    <string name="work_contents_folder">文件夹</string>
+    <string name="work_contents_file">文件</string>
+    <string name="work_contents_loading">正在加载来源目录…</string>
+    <string name="work_contents_error_title">图书内容加载失败</string>
+    <string name="work_contents_error_message">来源目录加载失败（%1$s）。</string>
+    <string name="work_contents_empty_title">当前目录为空</string>
+    <string name="work_contents_empty_message">这里没有可见文件夹或可读资源。</string>
+    <string name="work_sort_name_asc">名称 A–Z</string>
+    <string name="work_sort_name_desc">名称 Z–A</string>
+    <string name="work_sort_updated_desc">最近更新</string>
+    <string name="work_sort_updated_asc">最早更新</string>
+    <string name="work_sort_type_asc">内容类型</string>
+    <string name="work_sort_size_desc">内容大小</string>
+    <string name="work_back_to_contents">返回图书内容</string>
+    <string name="work_resource_chapters_title">章节</string>
+    <string name="work_resource_pages_title">页面</string>
+    <string name="work_resource_tracks_title">音轨</string>
+    <plurals name="work_resource_units_count">
+        <item quantity="other">共 %1$d 项</item>
+    </plurals>
+    <string name="work_open_reader">打开阅读器</string>
+    <string name="work_open_player">打开播放器</string>
+    <string name="work_resource_importing">资源仍在导入中。%1$s</string>
+    <string name="work_resource_import_failed">导入失败。%1$s</string>
+    <string name="work_resource_detail_loading">正在加载资源详情…</string>
+    <string name="work_resource_detail_error_title">资源详情加载失败</string>
+    <string name="work_resource_detail_error_message">资源详情加载失败（%1$s），仍可直接在线打开。</string>
+    <string name="work_resource_detail_empty_title">暂无可定位内容</string>
+    <string name="work_resource_detail_empty_message">可直接打开在线阅读器或播放器使用此资源。</string>
+    <string name="work_resource_page_number">第 %1$d 页</string>
+    <string name="work_resource_unit_number">第 %1$d 项</string>
+    <string name="work_chapter_current">正在阅读</string>
+    <string name="work_pagination">第 %1$d / %2$d 页</string>
+    <string name="download_bootstrap_invalid">离线下载信息无效（DOWNLOAD_BOOTSTRAP_INVALID），在线阅读仍可使用。</string>
 </resources>

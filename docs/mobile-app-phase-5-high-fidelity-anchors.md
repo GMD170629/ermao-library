@@ -58,11 +58,7 @@
 
 ## 5. Work Detail
 
-![Work Detail Selected Volume Metadata Light and Dark v6](assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png)
-
-文件：[Work Detail 选中卷册元数据 Light/Dark v6](assets/mobile-app-hifi-v1/work-detail-selected-volume-metadata-light-dark-v6.png)
-
-`work-detail-selected-volume-metadata-light-dark-v6.png` 是 Work Detail 唯一页面级视觉基线。详情页 v2–v5 旧图已从权威资产目录删除，禁止作为布局、覆盖层或回归验收依据。v6 是并列 Light/Dark 概念板，冻结 App 自有内容构图、密度和层级；真实实现仍分别使用 iOS/Android 原生画布和系统组件，不按设备外框逐像素仿制。字段、交互和状态的文字合同以 [`mobile-app-work-detail-selected-volume-design.md`](mobile-app-work-detail-selected-volume-design.md) 为准。
+Work Detail 的产品和内容结构不再由 App 专属基准图定义。唯一行为来源是当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx` 和 `resource-detail-view.tsx`；本节仅约束原生视觉适配。
 
 冻结项：
 
@@ -70,17 +66,14 @@
 - 只显示一张当前作品 Cover，不显示封面轮播、圆点或虚构的备用封面；Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
 - Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者 / 系列 / 当前媒介、填充背景标签、阅读状态”组织，作者与系列不再拆成独立行；
 - 主 CTA 下方快捷动作固定为“下载 / 阅读状态 / 加入 / 更多”；`加入` 使用书架语义图标并打开 `shelf-picker`，`更多` 展开图书控制菜单。详情页右上角不显示三点或管理入口；
-- 简介、目录版本选择、横向卷册轨道和选中卷册元数据在同一滚动流中连续展示，不使用“简介 / 版本”一级 Tab；简介展开控件使用居中 chevron；“版本”在左、服务器返回的真实目录版本名称在右，单版本也显示唯一选项；格式与媒介种类跟随当前卷册展示；详情页不显示目录；
-- 多卷 Volume 使用与 Mobile Work card 统一的 2:3 横向轨道：标准 Compact 单项约为内容宽度三分之一，首屏完整显示三项并露出下一项；大字体或窄屏可增加单项宽度但不得压缩文字或触摸目标。轨道支持分页加载、尾部行内重试和稳定滚动锚点；
-- 左上显示卷序号，阅读进度以 2pt 轨道紧贴封面底部，当前卷使用 2pt `brandAccent` 描边；单卷也显示同一卷册轨道，保证元数据、下载状态和授权长按管理入口不分叉；
-- 下方“当前卷册元数据信息”严格跟随当前选中卷册，固定显示格式、语言、出版日期、页数、元数据信息来源和文件路径。缺失值显示 `—`；示例 EPUB 无页数，因此 v6 的页数值为 `—`。被动元数据行不显示导航箭头；
-- 版本控件只显示当前作品真实存在的目录版本；v6 示例中的格式和电子书、漫画、有声书种类跟随所选卷册展示，不把媒介种类伪装成版本 identity，也不把有声书画成禁用或“即将支持”；
-- 卷册主视觉不显示编辑按钮。长按卷册封面打开卷册控制菜单，卷册标题不触发管理；平台辅助技术和非触摸输入在封面提供“卷册操作”等价动作；
+- 单个可读资源直接显示资源详情但不自动进入 Reader；多个资源显示真实来源目录、面包屑、文件夹、可读资源、分页、网格/列表切换和 Web 相同的六种排序；
+- 资源详情按 `readerType` 显示章节与已读状态、漫画/PDF 页面预览或音轨信息；加载、空、导入中、导入失败和分页错误均保留稳定布局与原位反馈；
+- 封面氛围背景使用约 `1.25` 缩放、`12dp/pt` 模糊与 `0.36` 顶部有效不透明度，从背景高度约 `45%` 连续淡出到底部语义页面背景；不得出现固定裁剪边缘或硬分界；
 - “未开始 / 未读”是默认状态，不在身份区重复显示；只有正在阅读或已完成时显示阅读状态；
 - 下载状态与阅读进度严格分离：云朵直接开始下载，环形控件可暂停/取消，勾选圆圈表示完成；详情行不显示“下载中 68%”一类文字；
-- 格式访问优先级沿用 Phase 1：可重排格式未完成下载时，主动作表达“下载后阅读”且不得进入 Reader；PDF/漫画在线主动作仍是流式阅读，云朵只表示另存完整离线工件。本构图规则不得覆盖这一功能差异；
+- 所有受支持格式的主动作均为在线“开始/继续阅读”或“开始/继续收听”；已验证本地副本可优先使用，但不改变主按钮。云朵及下载进度只表示独立离线下载；
 - 编辑、识别、封面和其他管理能力由详情页控制菜单进入聚焦 Sheet；下载、阅读状态、加入书架和更多保持详情页快捷入口。能力与权限不足时隐藏对应操作或给出真实原因，不使用伪成功状态；
-- 图书控制菜单与卷册控制菜单使用触点锚定的紧凑半透明悬浮卡：卷册长按取真实按压坐标，`更多`取触发控件位置，卡片在安全区内自动翻转/夹取，不固定在右上角。宽度、紧凑标题、行密度和任务 Sheet 合同以 [`mobile-app-work-detail-management-interaction-design-v2.md`](mobile-app-work-detail-management-interaction-design-v2.md) v2 为准；[`work-detail-book-control-menu-floating-card-v1.png`](assets/mobile-app-hifi-v1/work-detail-book-control-menu-floating-card-v1.png) 仅继续约束半透明材质、层级和分组，不再约束固定右侧位置、旧宽度或图中已退役的结构操作。菜单不是底部 Sheet 或独立页面；其内容按需独立滚动，背景详情保持可辨认且不可交互；
+- 图书、来源目录与资源的控制菜单直接采用 Web 当前动作集合和权限过滤，并使用平台原生 Menu/Sheet/Dialog 承载；
 
 ## 6. Reader Paper
 

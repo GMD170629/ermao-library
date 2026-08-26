@@ -11,7 +11,7 @@ import org.junit.Test
 class HomeProgressProjectionTest {
     @Test
     fun matchingReaderProgressImmediatelyUpdatesContinueReadingAndRelatedCards() {
-        val book = BookCard("book-1", "Title", "Author", "", listOf("COMIC"), 75)
+        val book = BookCard("book-1", "Title", "Author", "", 75)
         val home = HomeContent(
             continueReading = ContinueReadingCard(
                 book = book,

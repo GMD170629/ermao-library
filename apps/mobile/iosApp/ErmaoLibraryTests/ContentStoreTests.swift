@@ -843,6 +843,7 @@ private actor DetailBrowserContentClient: ContentClient {
         context: ContentRequestContext,
         bookID: String,
         sourceNodeID: String?,
+        sort: BookContentSort,
         page: Int,
         pageSize: Int
     ) async throws -> BookContentsPage {
@@ -888,6 +889,41 @@ private actor DetailBrowserContentClient: ContentClient {
             pageSize: pageSize,
             total: 2,
             totalPages: 1
+        )
+    }
+
+    func fetchResourceDetail(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookResourceDetailPage {
+        let chapterPage = try await fetchBookChapters(
+            context: context,
+            bookID: bookID,
+            resourceID: resourceID,
+            page: page,
+            pageSize: pageSize
+        )
+        return BookResourceDetailPage(
+            resourceID: resourceID,
+            units: chapterPage.chapters.map { chapter in
+                BookResourceDetailUnit(
+                    id: chapter.id, title: chapter.title, unitType: "chapter", assetID: nil,
+                    href: chapter.href, sortOrder: chapter.sortOrder, pageNumber: nil, previewURL: nil,
+                    level: 0, durationMillis: nil, discNumber: nil, trackNumber: nil,
+                    chapterState: chapter.state
+                )
+            },
+            page: chapterPage.page,
+            pageSize: chapterPage.pageSize,
+            total: chapterPage.total,
+            totalPages: chapterPage.totalPages,
+            currentHref: chapterPage.chapters.first(where: \.isCurrent)?.href,
+            currentChapterSortOrder: chapterPage.chapters.first(where: \.isCurrent)?.sortOrder,
+            currentPageNumber: nil,
+            progress: chapterPage.chapters.first(where: \.isCurrent)?.progress ?? 0
         )
     }
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }

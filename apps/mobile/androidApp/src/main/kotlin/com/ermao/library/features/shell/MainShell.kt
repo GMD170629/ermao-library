@@ -48,7 +48,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ermao.library.R
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ResourceContent
-import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.home.application.HomeViewModel
 import com.ermao.library.features.home.ui.HomeScreen
 import com.ermao.library.features.library.application.FacetViewModel
@@ -89,13 +88,11 @@ import com.ermao.library.BuildConfig
 import com.ermao.library.features.downloads.application.DownloadCenterViewModel
 import com.ermao.library.features.downloads.application.DownloadedBookViewModel
 import com.ermao.library.features.downloads.application.DownloadActionsViewModel
-import com.ermao.library.features.downloads.application.AndroidReaderAccessOutcome
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
 import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
-import com.ermao.library.features.downloads.model.DownloadReaderEntryAction
-import com.ermao.library.features.downloads.model.downloadReaderEntryAction
 import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
+import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedBookScreen
 import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
@@ -457,7 +454,12 @@ fun MainShell(
                                             context = contentContext,
                                             onBack = { libraryViewModel.selectBook(null) },
                                             onSelectResource = detailViewModel::selectResource,
-                                            onLoadMoreResources = detailViewModel::loadMoreResources,
+                                            onShowContentBrowser = detailViewModel::showContentBrowser,
+                                            onOpenSourceNode = detailViewModel::openSourceNode,
+                                            onSelectContentsSort = detailViewModel::selectContentsSort,
+                                            onSelectContentsPage = detailViewModel::selectContentsPage,
+                                            onSelectReadingUnitsPage = detailViewModel::selectReadingUnitsPage,
+                                            onRetrySurface = detailViewModel::retrySurface,
                                             onOpenShelfPicker = detailViewModel::openShelfPicker,
                                             onDismissShelfPicker = detailViewModel::dismissShelfPicker,
                                             onToggleShelf = detailViewModel::toggleShelf,
@@ -479,18 +481,12 @@ fun MainShell(
                                                 libraryViewModel.selectBook(null)
                                             },
                                             onOpenSelectedResource = { resource ->
-                                                detailState.content?.book?.let { book ->
-                                                    openResource(
-                                                        context = appContext,
-                                                        profileId = session.profile.id,
-                                                        book = book,
-                                                        resource = resource,
-                                                        existing = downloadRecordsByResource[resource.id],
-                                                        files = downloadFiles,
-                                                        requestAccess = downloadActionsViewModel::requestReaderAccess,
-                                                        onUnavailable = { libraryBackStack.add(it) },
-                                                    )
-                                                }
+                                                openResource(
+                                                    context = appContext,
+                                                    profileId = session.profile.id,
+                                                    resource = resource,
+                                                    onUnavailable = { libraryBackStack.add(it) },
+                                                )
                                             },
                                         )
                                     }
@@ -723,7 +719,12 @@ fun MainShell(
                         context = contentContext,
                         onBack = { currentBackStack.removeLastOrNull() },
                         onSelectResource = detailViewModel::selectResource,
-                        onLoadMoreResources = detailViewModel::loadMoreResources,
+                        onShowContentBrowser = detailViewModel::showContentBrowser,
+                        onOpenSourceNode = detailViewModel::openSourceNode,
+                        onSelectContentsSort = detailViewModel::selectContentsSort,
+                        onSelectContentsPage = detailViewModel::selectContentsPage,
+                        onSelectReadingUnitsPage = detailViewModel::selectReadingUnitsPage,
+                        onRetrySurface = detailViewModel::retrySurface,
                         onOpenShelfPicker = detailViewModel::openShelfPicker,
                         onDismissShelfPicker = detailViewModel::dismissShelfPicker,
                         onToggleShelf = detailViewModel::toggleShelf,
@@ -753,18 +754,12 @@ fun MainShell(
                             currentBackStack.removeLastOrNull()
                         },
                         onOpenSelectedResource = { resource ->
-                            detailState.content?.book?.let { book ->
-                                openResource(
-                                    context = appContext,
-                                    profileId = session.profile.id,
-                                    book = book,
-                                    resource = resource,
-                                    existing = downloadRecordsByResource[resource.id],
-                                    files = downloadFiles,
-                                    requestAccess = downloadActionsViewModel::requestReaderAccess,
-                                    onUnavailable = { currentBackStack.add(it) },
-                                )
-                            }
+                            openResource(
+                                context = appContext,
+                                profileId = session.profile.id,
+                                resource = resource,
+                                onUnavailable = { currentBackStack.add(it) },
+                            )
                         },
                     )
                 }
@@ -799,71 +794,17 @@ fun MainShell(
     }
 }
 
-private fun AndroidReaderAccessOutcome.toReaderRoute(resourceId: String): ReaderUnavailableRoute? = when (this) {
-    is AndroidReaderAccessOutcome.LocalArtifact -> ReaderUnavailableRoute(resourceId, readerType)
-    is AndroidReaderAccessOutcome.RemoteStream -> ReaderUnavailableRoute(resourceId, readerType)
-    AndroidReaderAccessOutcome.DownloadRequired -> null
-    is AndroidReaderAccessOutcome.Unavailable -> ReaderUnavailableRoute(resourceId, "unavailable")
-}
-
 private fun openResource(
     context: android.content.Context,
     profileId: String,
-    book: BookCard,
     resource: ResourceContent,
-    existing: com.ermao.library.features.downloads.model.AndroidDownloadRecord?,
-    files: AtomicDownloadFileSink,
-    requestAccess: (String, Boolean, (AndroidReaderAccessOutcome) -> Unit) -> Unit,
     onUnavailable: (ReaderUnavailableRoute) -> Unit,
 ) {
-    when (downloadReaderEntryAction(resource.readerType, resource.format, existing) { record ->
-        files.hasLocalArtifact(record.localReference)
-    }) {
-        DownloadReaderEntryAction.OpenServerReader -> {
-            context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
-            return
-        }
-        DownloadReaderEntryAction.OpenLocalArtifact,
-        DownloadReaderEntryAction.ValidateUnsupportedAccess,
-        -> Unit
+    if (isSupportedNativeReaderEntry(resource.readerType, resource.format)) {
+        context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
+    } else {
+        onUnavailable(ReaderUnavailableRoute(resource.id, resource.readerType))
     }
-    requestAccess(resource.id, true) { outcome ->
-        when (outcome) {
-            AndroidReaderAccessOutcome.DownloadRequired -> {
-                context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
-            }
-            is AndroidReaderAccessOutcome.RemoteStream -> {
-                context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
-            }
-            else -> {
-                val readerIntent = outcome.toNativeReaderIntent(context, profileId, book.id, book.title, resource.id, existing?.assetId)
-                if (readerIntent != null) context.startActivity(readerIntent)
-                else outcome.toReaderRoute(resource.id)?.let(onUnavailable)
-            }
-        }
-    }
-}
-
-private fun AndroidReaderAccessOutcome.toNativeReaderIntent(
-    context: android.content.Context,
-    profileId: String,
-    bookId: String,
-    bookTitle: String,
-    resourceId: String,
-    assetId: String?,
-): android.content.Intent? {
-    val artifact = this as? AndroidReaderAccessOutcome.LocalArtifact ?: return null
-    if (!isSupportedNativeDownloadReader(artifact.readerType, artifact.format)) return null
-    return ReaderActivity.createManagedDownloadIntent(
-        context = context,
-        profileId = profileId,
-        bookId = bookId,
-        resourceId = resourceId,
-        assetId = assetId ?: resourceId,
-        displayTitle = bookTitle,
-        localReference = artifact.localReference,
-        sourceFormat = artifact.format,
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

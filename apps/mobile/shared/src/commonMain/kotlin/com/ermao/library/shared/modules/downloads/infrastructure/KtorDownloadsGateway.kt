@@ -265,6 +265,7 @@ class KtorDownloadsGateway(
         require(sourceSize > 0)
         require(
             sourceMime in allowedMimeTypes(readerType) ||
+                (sourceMime == GENERIC_BINARY_MIME && isSupportedOriginalFormat(readerType, resourceFormat)) ||
                 (resourceFormat == "image_dir" && sourceMime in IMAGE_MIME_TYPES),
         ) { "Bootstrap asset MIME type is inconsistent" }
         return DownloadDescriptor(
@@ -335,10 +336,20 @@ class KtorDownloadsGateway(
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
-        val DOWNLOADABLE_REFLOWABLE_FORMATS = setOf("epub", "mobi", "azw", "azw3", "prc", "txt")
+        const val GENERIC_BINARY_MIME = "application/octet-stream"
         val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }
 }
+
+private fun isSupportedOriginalFormat(readerType: DownloadReaderType, resourceFormat: String): Boolean =
+    when (readerType) {
+        DownloadReaderType.Reflowable -> resourceFormat in setOf("epub", "mobi", "azw", "azw3", "prc", "txt")
+        DownloadReaderType.Pdf -> resourceFormat == "pdf"
+        DownloadReaderType.Comic -> resourceFormat in setOf("cbz", "cbr", "zip", "rar")
+        DownloadReaderType.Audio -> resourceFormat in setOf(
+            "aac", "ac3", "aiff", "amr", "flac", "m4a", "mp3", "ogg", "opus", "wav", "webm", "wma",
+        )
+    }
 
 private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when (readerType) {
     DownloadReaderType.Reflowable -> setOf(

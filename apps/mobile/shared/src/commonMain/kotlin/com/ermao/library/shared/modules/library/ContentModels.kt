@@ -119,9 +119,46 @@ data class BookResourcePage(
     val hasNext: Boolean get() = page < totalPages
 }
 
+enum class BookContentSort(
+    val sortWireValue: String,
+    val directionWireValue: String,
+) {
+    NameAscending("name", "asc"),
+    NameDescending("name", "desc"),
+    UpdatedDescending("updated", "desc"),
+    UpdatedAscending("updated", "asc"),
+    TypeAscending("type", "asc"),
+    SizeDescending("size", "desc"),
+}
+
+enum class BookDetailPresentation { ContentBrowser, ResourceDetail }
+
+data class BookDetailSelection(
+    val presentation: BookDetailPresentation,
+    val resourceId: String?,
+)
+
+/** Shared Web-parity rule used by both native clients when entering Work Detail. */
+fun selectBookDetailPresentation(
+    resources: List<Resource>,
+    requestedResourceId: String? = null,
+): BookDetailSelection {
+    val readableResources = resources.filter { it.readable && !it.hidden }
+    val requestedResource = requestedResourceId
+        ?.takeIf(String::isNotBlank)
+        ?.let { requestedId -> readableResources.firstOrNull { it.id == requestedId } }
+    val detailResource = requestedResource ?: readableResources.singleOrNull()
+    return if (detailResource != null) {
+        BookDetailSelection(BookDetailPresentation.ResourceDetail, detailResource.id)
+    } else {
+        BookDetailSelection(BookDetailPresentation.ContentBrowser, null)
+    }
+}
+
 data class BookContentsQuery(
     val bookId: String,
     val sourceNodeId: String? = null,
+    val sort: BookContentSort = BookContentSort.NameAscending,
     val page: Int = 1,
     val pageSize: Int = 100,
 ) {

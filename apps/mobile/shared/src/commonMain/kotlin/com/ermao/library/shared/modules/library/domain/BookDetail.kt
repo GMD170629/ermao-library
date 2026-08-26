@@ -86,6 +86,9 @@ data class ReadingUnit(
     val metadata: ReadingUnitMetadata,
     val createdAt: String?,
     val updatedAt: String?,
+    val previewUrl: String? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
 )
 
 data class ReadingUnitMetadata(

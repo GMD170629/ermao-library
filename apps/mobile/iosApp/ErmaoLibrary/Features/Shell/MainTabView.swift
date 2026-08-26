@@ -321,8 +321,7 @@ struct MainTabView: View {
                             onUnauthorized: store.refreshForForeground,
                             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
                             openDownloads: openDownloadsCenter,
-                            openReader: { openReader($0, context: context, fallbackTab: .library) },
-                            prepareReader: { readerPreparation = $0 }
+                            openReader: { openReader($0, context: context, fallbackTab: .library) }
                         )
                         .id(bookID)
                     } else {
@@ -360,8 +359,7 @@ struct MainTabView: View {
                 onUnauthorized: store.refreshForForeground,
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
                 openDownloads: openDownloadsCenter,
-                openReader: { openReader($0, context: context, fallbackTab: presentation) },
-                prepareReader: { readerPreparation = $0 }
+                openReader: { openReader($0, context: context, fallbackTab: presentation) }
             )
         case .downloads:
             DownloadCenterView(

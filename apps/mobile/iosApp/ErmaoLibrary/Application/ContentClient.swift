@@ -341,6 +341,20 @@ struct BookContentsPage: Equatable, Sendable {
     let totalPages: Int
 }
 
+enum BookContentSort: String, CaseIterable, Equatable, Sendable {
+    case nameAscending
+    case nameDescending
+    case updatedDescending
+    case updatedAscending
+    case typeAscending
+    case sizeDescending
+}
+
+enum BookContentLayout: String, CaseIterable, Equatable, Sendable {
+    case grid
+    case list
+}
+
 enum ChapterReadingState: String, Codable, Equatable, Sendable {
     case current
     case read
@@ -385,6 +399,35 @@ struct BookChapterPage: Equatable, Sendable {
     let pageSize: Int
     let total: Int
     let totalPages: Int
+}
+
+struct BookResourceDetailUnit: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let unitType: String
+    let assetID: String?
+    let href: String?
+    let sortOrder: Int
+    let pageNumber: Int?
+    let previewURL: String?
+    let level: Int?
+    let durationMillis: Int64?
+    let discNumber: Int?
+    let trackNumber: Int?
+    let chapterState: ChapterReadingState?
+}
+
+struct BookResourceDetailPage: Equatable, Sendable {
+    let resourceID: String
+    let units: [BookResourceDetailUnit]
+    let page: Int
+    let pageSize: Int
+    let total: Int
+    let totalPages: Int
+    let currentHref: String?
+    let currentChapterSortOrder: Int?
+    let currentPageNumber: Int?
+    let progress: Double
 }
 
 struct BookDetailContent: Codable, Equatable, Sendable {
@@ -446,6 +489,7 @@ protocol ContentClient: Sendable {
         context: ContentRequestContext,
         bookID: String,
         sourceNodeID: String?,
+        sort: BookContentSort,
         page: Int,
         pageSize: Int
     ) async throws -> BookContentsPage
@@ -456,6 +500,13 @@ protocol ContentClient: Sendable {
         page: Int,
         pageSize: Int
     ) async throws -> BookChapterPage
+    func fetchResourceDetail(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookResourceDetailPage
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data
 }
 
@@ -475,6 +526,7 @@ extension ContentClient {
         context: ContentRequestContext,
         bookID: String,
         sourceNodeID: String?,
+        sort: BookContentSort,
         page: Int,
         pageSize: Int
     ) async throws -> BookContentsPage {
@@ -488,6 +540,16 @@ extension ContentClient {
         page: Int,
         pageSize: Int
     ) async throws -> BookChapterPage {
+        throw ContentClientError.invalidResponse
+    }
+
+    func fetchResourceDetail(
+        context: ContentRequestContext,
+        bookID: String,
+        resourceID: String,
+        page: Int,
+        pageSize: Int
+    ) async throws -> BookResourceDetailPage {
         throw ContentClientError.invalidResponse
     }
 

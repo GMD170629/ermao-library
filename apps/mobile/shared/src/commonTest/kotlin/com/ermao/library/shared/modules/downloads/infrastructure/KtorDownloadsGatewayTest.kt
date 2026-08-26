@@ -68,6 +68,39 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
+    fun bootstrapAcceptsGenericBinaryMimeForValidatedOriginalFormat() = runBlocking {
+        val gateway = gateway {
+            respond(
+                BOOTSTRAP.replace("application/epub+zip", "application/octet-stream"),
+                HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+
+        assertEquals("epub", descriptor.format)
+        assertEquals("application/octet-stream", descriptor.source.mimeType)
+        Unit
+    }
+
+    @Test
+    fun genericBinaryMimeDoesNotBypassOriginalFormatOrSafePathChecks() = runBlocking {
+        val unsupportedFormat = BOOTSTRAP
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"exe\"")
+            .replace("\"format\":\"epub\"", "\"format\":\"exe\"")
+            .replace("application/epub+zip", "application/octet-stream")
+        val unsafePath = BOOTSTRAP
+            .replace("application/epub+zip", "application/octet-stream")
+            .replace("/api/assets/asset", "https://evil.example/asset")
+
+        assertIs<DownloadBootstrapResult.Failure>(gateway { respond(unsupportedFormat) }.load(context, "resource"))
+        assertIs<DownloadBootstrapResult.Failure>(gateway { respond(unsafePath) }.load(context, "resource"))
+        Unit
+    }
+
+    @Test
     fun bootstrapMapsComicResourceToPrimaryAssetDownload() = runBlocking {
         val gateway = gateway {
             respond(COMIC_BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))

@@ -49,7 +49,6 @@ struct WorkDetailView: View {
     let openFacet: (FacetKind, String) -> Void
     let openDownloads: () -> Void
     let openReader: (ReaderHandoff) -> Void
-    let prepareReader: (ReaderPreparationRequest) -> Void
     let managementRepository: (any ErmaoShared.WorkManagementRepository)?
     let canManageSystem: Bool
 
@@ -93,8 +92,7 @@ struct WorkDetailView: View {
         onUnauthorized: @escaping @MainActor () -> Void,
         openFacet: @escaping (FacetKind, String) -> Void,
         openDownloads: @escaping () -> Void,
-        openReader: @escaping (ReaderHandoff) -> Void,
-        prepareReader: @escaping (ReaderPreparationRequest) -> Void
+        openReader: @escaping (ReaderHandoff) -> Void
     ) {
         self.context = context
         self.client = client
@@ -106,7 +104,6 @@ struct WorkDetailView: View {
         self.openFacet = openFacet
         self.openDownloads = openDownloads
         self.openReader = openReader
-        self.prepareReader = prepareReader
         _store = StateObject(
             wrappedValue: BookDetailStore(
                 context: context,
@@ -236,14 +233,14 @@ struct WorkDetailView: View {
         .onChange(of: downloads.storageErrorCode) { _, code in
             guard let code else { return }
             showFeedback(
-                String(format: String(localized: "work.download.failed.format"), code),
+                downloadFailureMessage(code),
                 isError: true
             )
         }
         .onChange(of: selectedDownloadErrorCode) { _, code in
             guard let code else { return }
             showFeedback(
-                String(format: String(localized: "work.download.failed.format"), code),
+                downloadFailureMessage(code),
                 isError: true
             )
         }
@@ -304,10 +301,10 @@ struct WorkDetailView: View {
                 cornerRadius: 0
             )
             .frame(width: 300, height: 450)
-            .scaleEffect(1.7)
+            .scaleEffect(1.25)
             .saturation(0.9)
-            .blur(radius: 24, opaque: false)
-            .opacity(0.32)
+            .blur(radius: 12, opaque: false)
+            .opacity(0.36)
             .drawingGroup(opaque: false)
         }
         .frame(maxWidth: .infinity)
@@ -317,7 +314,7 @@ struct WorkDetailView: View {
             LinearGradient(
                 stops: [
                     .init(color: .black, location: 0),
-                    .init(color: .black.opacity(0.82), location: 0.62),
+                    .init(color: .black, location: 0.45),
                     .init(color: .clear, location: 1),
                 ],
                 startPoint: .top,
@@ -446,9 +443,12 @@ struct WorkDetailView: View {
     private func readerAction(_ detail: BookDetailContent) -> some View {
         let selected = selectedResource(detail)
         let readingStatus = readingStatusOverride ?? detail.readingStatus ?? .unread
+        let isAudio = selected?.readerType.lowercased() == "audio"
         return VStack(spacing: .space1) {
             PrimaryActionButton(
-                detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action",
+                isAudio
+                    ? (detail.readingStatus == .reading ? "work.listener.continue.action" : "work.listener.start.action")
+                    : (detail.readingStatus == .reading ? "work.reader.continue.action" : "work.reader.start.action"),
                 systemImage: "play.fill",
                 isDisabled: selected == nil || selected?.isReadable == false,
                 action: { requestReaderAccess(detail: detail) }
@@ -563,15 +563,11 @@ struct WorkDetailView: View {
 
     @ViewBuilder
     private func mediaSection(_ detail: BookDetailContent) -> some View {
-        let readableResources = detail.resources.filter { $0.isReadable != false }
-        if readableResources.count == 1 {
-            chapterSection(detail, resource: readableResources[0])
+        if let resourceID = store.selectedResourceID,
+           let resource = detail.resources.first(where: { $0.id == resourceID }) {
+            resourceDetailSection(detail, resource: resource)
         } else {
             contentBrowserSection(detail)
-            if let selected = selectedResource(detail) {
-                selectedResourceMetadata(selected)
-                    .padding(.top, .space3)
-            }
         }
     }
 
@@ -590,6 +586,22 @@ struct WorkDetailView: View {
                     .appTextStyle(.label)
                     .foregroundStyle(theme.textSecondary)
                 }
+                Menu {
+                    ForEach(BookContentSort.allCases, id: \.self) { sort in
+                        Button(contentSortTitle(sort)) { store.selectContentSort(sort) }
+                    }
+                } label: {
+                    Label(contentSortTitle(store.contentSort), systemImage: "arrow.up.arrow.down")
+                        .labelStyle(.iconOnly)
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                }
+                Button {
+                    store.selectContentLayout(store.contentLayout == .grid ? .list : .grid)
+                } label: {
+                    Image(systemName: store.contentLayout == .grid ? "list.bullet" : "square.grid.2x2")
+                        .frame(width: .iosMinimumTouchTarget, height: .iosMinimumTouchTarget)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.bottom, .space1)
 
@@ -601,6 +613,12 @@ struct WorkDetailView: View {
                         .appTextStyle(.body)
                         .foregroundStyle(theme.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+                } else if store.contentLayout == .grid {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: .space2) {
+                        ForEach(entries) { entry in
+                            contentGridEntry(entry, detail: detail)
+                        }
+                    }
                 } else {
                     VStack(spacing: 0) {
                         ForEach(entries) { entry in
@@ -615,6 +633,10 @@ struct WorkDetailView: View {
                             Divider().overlay(theme.divider.opacity(0.72))
                         }
                     }
+                }
+                if page.totalPages > 1 {
+                    paginationRow(page: page.page, totalPages: page.totalPages, action: store.selectContentPage)
+                        .padding(.top, .space2)
                 }
             } else if store.isLoadingContentBrowser {
                 HStack(spacing: .space1) {
@@ -640,6 +662,44 @@ struct WorkDetailView: View {
                 }
             }
         }
+    }
+
+    private func contentGridEntry(_ entry: BookContentEntry, detail: BookDetailContent) -> some View {
+        let resource = entry.resourceID.flatMap { id in detail.resources.first(where: { $0.id == id }) }
+        return Button {
+            if let resource { store.selectResource(resource.id) }
+            else { store.openContents(entry.sourceNodeID) }
+        } label: {
+            VStack(alignment: .leading, spacing: .space1) {
+                if let resource {
+                    BookCoverView(
+                        reference: entry.cover ?? resource.cover,
+                        title: resource.title,
+                        context: context,
+                        client: client,
+                        cache: cache
+                    )
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(Color.orange.opacity(0.88))
+                        .frame(maxWidth: .infinity, minHeight: 150)
+                        .background(theme.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                Text(entry.title)
+                    .appTextStyle(.body)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(2)
+                Text(resource?.formatLabel ?? String(localized: "work.contents.folder"))
+                    .appTextStyle(.caption)
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
     }
 
     private func visibleContentEntries(_ page: BookContentsPage) -> [BookContentEntry] {
@@ -714,7 +774,7 @@ struct WorkDetailView: View {
     private func unresolvedResourceRow(_ entry: BookContentEntry) -> some View {
         Button {
             guard let resourceID = entry.resourceID else { return }
-            store.load(resourceID: resourceID, showBlockingLoading: false)
+            store.selectResource(resourceID)
         } label: {
             HStack(spacing: .space2) {
                 BookCoverView(
@@ -758,7 +818,7 @@ struct WorkDetailView: View {
                 .foregroundStyle(resource.isSelected ? theme.brandAccent : theme.textSecondary)
                 .frame(width: 28, alignment: .leading)
 
-            Button { store.load(resourceID: resource.id, showBlockingLoading: false) } label: {
+            Button { store.selectResource(resource.id) } label: {
                 HStack(spacing: .space2) {
                     BookCoverView(
                         reference: entry?.cover ?? resource.cover,
@@ -852,14 +912,22 @@ struct WorkDetailView: View {
     }
 
     @ViewBuilder
-    private func chapterSection(_ detail: BookDetailContent, resource: BookResource) -> some View {
+    private func resourceDetailSection(_ detail: BookDetailContent, resource: BookResource) -> some View {
         VStack(alignment: .leading, spacing: 0) {
+            if detail.resources.filter({ $0.isReadable != false }).count > 1 {
+                Button { store.showContentBrowser() } label: {
+                    Label("work.contents.back", systemImage: "arrow.left")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.textSecondary)
+                .frame(minHeight: .iosMinimumTouchTarget)
+            }
             HStack(alignment: .firstTextBaseline) {
-                Text("work.chapters.title").appTextStyle(.sectionTitle)
+                Text(resourceDetailTitle(resource)).appTextStyle(.sectionTitle)
                 Spacer()
-                if let page = store.chapterPage {
+                if let page = store.resourceDetailPage {
                     Text(String(
-                        format: String(localized: "work.chapters.count.format"),
+                        format: String(localized: "work.resource.units.count.format"),
                         locale: locale,
                         page.total
                     ))
@@ -873,22 +941,34 @@ struct WorkDetailView: View {
                 .padding(.top, .spaceHalf)
                 .padding(.bottom, .space1)
 
-            if let page = store.chapterPage {
-                if page.chapters.isEmpty {
-                    Text("work.chapters.empty")
+            if let page = store.resourceDetailPage {
+                if page.units.isEmpty {
+                    Text("work.resource.units.empty")
                         .appTextStyle(.body)
                         .foregroundStyle(theme.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
                 } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(page.chapters.enumerated()), id: \.element.id) { index, chapter in
-                            chapterRow(
-                                chapter,
-                                displayIndex: (page.page - 1) * page.pageSize + index + 1,
-                                detail: detail
-                            )
-                            Divider().overlay(theme.divider.opacity(0.72))
+                    if resource.readerType.lowercased() == "comic" || resource.readerType.lowercased() == "pdf" {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: .space2) {
+                            ForEach(page.units) { unit in
+                                resourcePageTile(unit, detail: detail)
+                            }
                         }
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(page.units.enumerated()), id: \.element.id) { index, unit in
+                                resourceUnitRow(
+                                    unit,
+                                    displayIndex: (page.page - 1) * page.pageSize + index + 1,
+                                    detail: detail
+                                )
+                                Divider().overlay(theme.divider.opacity(0.72))
+                            }
+                        }
+                    }
+                    if page.totalPages > 1 {
+                        paginationRow(page: page.page, totalPages: page.totalPages, action: store.selectResourceDetailPage)
+                            .padding(.top, .space2)
                     }
                 }
             } else if store.isLoadingContentBrowser {
@@ -903,6 +983,116 @@ struct WorkDetailView: View {
                 contentBrowserRetry
             }
         }
+    }
+
+    private func resourcePageTile(_ unit: BookResourceDetailUnit, detail: BookDetailContent) -> some View {
+        Button { requestReaderAccess(detail: detail) } label: {
+            VStack(alignment: .leading, spacing: .space1) {
+                if let previewURL = unit.previewURL, !previewURL.isEmpty {
+                    BookCoverView(
+                        reference: CoverReference(path: previewURL),
+                        title: unit.title,
+                        context: context,
+                        client: client,
+                        cache: cache
+                    )
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Image(systemName: "photo")
+                        .frame(maxWidth: .infinity, minHeight: 150)
+                        .background(theme.surface)
+                }
+                Text(unit.title.isEmpty
+                     ? String(format: String(localized: "work.resource.page.format"), unit.pageNumber ?? unit.sortOrder + 1)
+                     : unit.title)
+                    .appTextStyle(.body)
+                    .foregroundStyle(theme.textPrimary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func resourceUnitRow(
+        _ unit: BookResourceDetailUnit,
+        displayIndex: Int,
+        detail: BookDetailContent
+    ) -> some View {
+        Button { requestReaderAccess(detail: detail) } label: {
+            HStack(spacing: .space1) {
+                Text(String(format: "%02d", displayIndex))
+                    .appTextStyle(.body)
+                    .monospacedDigit()
+                    .foregroundStyle(unit.chapterState == .current ? theme.brandAccent : theme.textSecondary)
+                    .frame(width: 36, alignment: .leading)
+                VStack(alignment: .leading, spacing: .spaceHalf) {
+                    Text(unit.title.isEmpty
+                         ? String(format: String(localized: "work.resource.unit.format"), displayIndex)
+                         : unit.title)
+                        .appTextStyle(.body)
+                        .fontWeight(unit.chapterState == .current ? .semibold : .regular)
+                        .foregroundStyle(unit.chapterState == .current ? theme.brandAccent : theme.textPrimary)
+                        .lineLimit(2)
+                    if unit.unitType.lowercased() == "track" {
+                        Text(formatDuration(unit.durationMillis))
+                            .appTextStyle(.caption)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                }
+                Spacer(minLength: .space1)
+                if let state = unit.chapterState {
+                    Text(chapterStateTitle(state))
+                        .appTextStyle(.caption)
+                        .foregroundStyle(state == .current ? theme.brandAccent : theme.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .frame(minHeight: 56)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func paginationRow(page: Int, totalPages: Int, action: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Text(String(format: String(localized: "work.pagination.format"), locale: locale, page, totalPages))
+                .appTextStyle(.caption)
+                .foregroundStyle(theme.textSecondary)
+            Spacer()
+            Button("common.previous") { action(page - 1) }.disabled(page <= 1)
+            Button("common.next") { action(page + 1) }.disabled(page >= totalPages)
+        }
+    }
+
+    private func resourceDetailTitle(_ resource: BookResource) -> LocalizedStringKey {
+        switch resource.readerType.lowercased() {
+        case "audio": "work.tracks.title"
+        case "comic", "pdf": "work.pages.title"
+        default: "work.chapters.title"
+        }
+    }
+
+    private func contentSortTitle(_ sort: BookContentSort) -> LocalizedStringKey {
+        switch sort {
+        case .nameAscending: "work.sort.nameAscending"
+        case .nameDescending: "work.sort.nameDescending"
+        case .updatedDescending: "work.sort.updatedDescending"
+        case .updatedAscending: "work.sort.updatedAscending"
+        case .typeAscending: "work.sort.typeAscending"
+        case .sizeDescending: "work.sort.sizeDescending"
+        }
+    }
+
+    private func formatDuration(_ milliseconds: Int64?) -> String {
+        let seconds = max(0, milliseconds ?? 0) / 1_000
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%d:%02d", minutes, remainder)
     }
 
     private func chapterRow(
@@ -965,7 +1155,7 @@ struct WorkDetailView: View {
         return VStack(alignment: .leading, spacing: .space1) {
             ZStack(alignment: .topLeading) {
                 Button {
-                    store.load(resourceID: resource.id)
+                    store.selectResource(resource.id)
                 } label: {
                     BookCoverView(
                         reference: resource.cover,
@@ -1126,7 +1316,9 @@ struct WorkDetailView: View {
     }
 
     private func selectedResource(_ detail: BookDetailContent) -> BookResource? {
-        detail.resources.first(where: \.isSelected) ?? detail.resources.first
+        store.selectedResourceID.flatMap { id in detail.resources.first(where: { $0.id == id }) }
+            ?? detail.resources.first(where: \.isSelected)
+            ?? detail.resources.first
     }
 
     private func kindleAsset(_ asset: ResourceAsset) -> Bool {
@@ -1591,16 +1783,35 @@ struct WorkDetailView: View {
             openReader(handoff)
             return
         }
-        prepareReader(ReaderPreparationRequest(
-            context: context,
-            book: detail.book,
-            resource: resource
+        guard let readerType = ManagedDownloadReaderType.fixtureValue(
+            format: resource.format,
+            readerType: resource.readerType
+        ) else {
+            readerAccessErrorCode = "READER_TYPE_UNSUPPORTED"
+            return
+        }
+        openReader(ReaderHandoff(
+            bookID: detail.book.id,
+            resourceID: resource.id,
+            assetID: resource.primaryAssetID,
+            title: detail.book.title,
+            resourceTitle: resource.title,
+            format: resource.format,
+            readerType: readerType,
+            source: .remoteStream
         ))
     }
 
     private func requestReaderAccessForSelectedResource() {
         guard case .ready(let detail, _) = store.state else { return }
         requestReaderAccess(detail: detail)
+    }
+
+    private func downloadFailureMessage(_ code: String) -> String {
+        if code == "DOWNLOAD_BOOTSTRAP_INVALID" {
+            return String(localized: "download.bootstrap.invalid")
+        }
+        return String(format: String(localized: "work.download.failed.format"), code)
     }
 
     private func handlePrimaryDownload(_ detail: BookDetailContent) {
