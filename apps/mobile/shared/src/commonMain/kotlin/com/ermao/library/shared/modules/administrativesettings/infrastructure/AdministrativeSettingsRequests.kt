@@ -81,15 +81,13 @@ private fun ProviderSettingValue.toJson(): JsonElement = when (this) {
 }
 
 internal fun MetadataProviderUpdate.toRequest(): JsonObject = buildJsonObject {
-    put("enabled", enabled)
-    put("priority", priority)
     put("config", JsonObject(config.mapValues { (_, value) -> value.toJson() }))
     put("clearSecrets", JsonArray(clearSecrets.map(::JsonPrimitive)))
 }
 
-internal fun List<MetadataPipelineEntry>.toPipelineRequest(): JsonObject = buildJsonObject {
+internal fun List<MetadataProviderOrderItem>.toProviderOrderRequest(): JsonObject = buildJsonObject {
     put("items", buildJsonArray {
-        this@toPipelineRequest.forEach { entry ->
+        this@toProviderOrderRequest.forEach { entry ->
             add(buildJsonObject {
                 put("providerId", entry.providerId)
                 put("enabled", entry.enabled)

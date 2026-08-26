@@ -18,7 +18,7 @@ from app.modules.imports.domain.directory_probe import (
     decide_directory_probe,
 )
 from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
-from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
+from app.modules.library.public import SourceNodePhysicalKind
 
 
 class OsSourceTreeFilesystem(SourceTreeFilesystemPort):

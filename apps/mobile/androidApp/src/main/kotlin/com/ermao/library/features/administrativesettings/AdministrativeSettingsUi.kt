@@ -74,7 +74,7 @@ fun AdministrativeSettingsDestination(
     LaunchedEffect(route) { viewModel.load(route) }
     LaunchedEffect(route, state.snapshot) {
         if ((state.snapshot as? ImportScanJobSnapshot)?.job?.active == true ||
-            (state.snapshot as? HealthSnapshot)?.let { it.status == HealthStatus.Checking || it.importQueueRestarting } == true
+            (state.snapshot as? HealthSnapshot)?.let { it.status == HealthStatus.Checking } == true
         ) viewModel.poll(route)
     }
     LaunchedEffect(viewModel) {
@@ -165,9 +165,6 @@ fun AdministrativeSettingsDestination(
         )
         is AdministrativeSettingsRoute.MetadataProviderEdit -> MetadataProviderEditScreen(
             state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
-        )
-        is AdministrativeSettingsRoute.MetadataPipeline -> MetadataPipelineScreen(
-            route.mediaKind, state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
         )
         AdministrativeSettingsRoute.Opds -> OpdsScreen(
             state.typed(), locale, systemActions::copyText, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,

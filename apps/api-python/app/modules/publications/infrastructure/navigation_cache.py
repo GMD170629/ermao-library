@@ -8,9 +8,9 @@ from collections.abc import Mapping
 from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
-from app.models import ReadableResourceNavigationUnit
-from app.modules.library.infrastructure.readable_resource_schema import (
-    LibraryReadableResourceMetadata,
+from app.contracts.library_navigation import (
+    LibraryNavigationEntry,
+    LibraryNavigationProjection,
 )
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.navigation import (
@@ -37,8 +37,13 @@ class ConfiguredPublicationParserProfiles:
 
 
 class SqlAlchemyPublicationNavigationCacheReader:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        library_projection: LibraryNavigationProjection,
+    ) -> None:
         self._session = session
+        self._library_projection = library_projection
 
     def find(self, *, resource_id: str) -> PublicationNavigationCacheState | None:
         cache = self._session.get(PublicationNavigationCache, resource_id)
@@ -58,20 +63,15 @@ class SqlAlchemyPublicationNavigationCacheReader:
         )
 
     def has_materialized_projection(self, *, resource_id: str) -> bool:
-        cache_exists, chapter_exists, count_exists = self._session.execute(
+        cache_exists = self._session.scalar(
             select(
-                exists().where(PublicationNavigationCache.resource_id == resource_id),
-                exists().where(
-                    ReadableResourceNavigationUnit.resource_id == resource_id,
-                    ReadableResourceNavigationUnit.unit_type == "chapter",
-                ),
-                exists().where(
-                    LibraryReadableResourceMetadata.resource_id == resource_id,
-                    LibraryReadableResourceMetadata.chapter_count.is_not(None),
-                ),
+                exists().where(PublicationNavigationCache.resource_id == resource_id)
             )
-        ).one()
-        return bool(cache_exists or chapter_exists or count_exists)
+        )
+        return bool(
+            cache_exists
+            or self._library_projection.has_materialized(resource_id=resource_id)
+        )
 
 
 def _navigation_metadata(entry: PublicationNavigationEntry) -> str:
@@ -91,8 +91,13 @@ def _navigation_metadata(entry: PublicationNavigationEntry) -> str:
 
 
 class SqlAlchemyPublicationNavigationWriteRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        library_projection: LibraryNavigationProjection,
+    ) -> None:
         self._session = session
+        self._library_projection = library_projection
 
     def replace(
         self,
@@ -103,14 +108,12 @@ class SqlAlchemyPublicationNavigationWriteRepository:
     ) -> None:
         """Replace the materialized navigation projection atomically."""
 
-        self._delete_projection(resource_id=source.resource_id)
-        self._session.add_all(
-            [
-                ReadableResourceNavigationUnit(
+        self._library_projection.replace(
+            resource_id=source.resource_id,
+            entries=tuple(
+                LibraryNavigationEntry(
                     id=entry.id,
-                    resource_id=source.resource_id,
                     asset_id=source.asset_id,
-                    unit_type="chapter",
                     title=entry.title,
                     href=entry.href,
                     media_type=entry.media_type,
@@ -118,8 +121,9 @@ class SqlAlchemyPublicationNavigationWriteRepository:
                     metadata_json=_navigation_metadata(entry),
                 )
                 for entry in entries
-            ]
+            ),
         )
+        self._delete_cache(resource_id=source.resource_id)
         cache = self._session.get(PublicationNavigationCache, source.resource_id)
         if cache is None:
             cache = PublicationNavigationCache(resource_id=source.resource_id)
@@ -131,29 +135,12 @@ class SqlAlchemyPublicationNavigationWriteRepository:
         cache.normalization = identity.normalization
         cache.projection_version = CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION
         cache.chapter_count = len(entries)
-        metadata = self._session.get(
-            LibraryReadableResourceMetadata,
-            source.resource_id,
-        )
-        if metadata is not None:
-            metadata.chapter_count = len(entries)
 
     def invalidate(self, *, resource_id: str) -> None:
-        self._delete_projection(resource_id=resource_id)
-        metadata = self._session.get(
-            LibraryReadableResourceMetadata,
-            resource_id,
-        )
-        if metadata is not None:
-            metadata.chapter_count = None
+        self._library_projection.invalidate(resource_id=resource_id)
+        self._delete_cache(resource_id=resource_id)
 
-    def _delete_projection(self, *, resource_id: str) -> None:
-        self._session.execute(
-            delete(ReadableResourceNavigationUnit).where(
-                ReadableResourceNavigationUnit.resource_id == resource_id,
-                ReadableResourceNavigationUnit.unit_type == "chapter",
-            )
-        )
+    def _delete_cache(self, *, resource_id: str) -> None:
         self._session.execute(
             delete(PublicationNavigationCache).where(
                 PublicationNavigationCache.resource_id == resource_id

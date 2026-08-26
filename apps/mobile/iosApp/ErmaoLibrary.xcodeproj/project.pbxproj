@@ -29,7 +29,7 @@
 		B04100000000000000000041 /* ContentStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04100000000000000000041 /* ContentStores.swift */; };
 		B15600000000000000000156 /* ReaderProgressPresentationCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */; };
 		B04200000000000000000042 /* ContentComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04200000000000000000042 /* ContentComponents.swift */; };
-		B04300000000000000000043 /* LibraryCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04300000000000000000043 /* LibraryCacheStore.swift */; };
+		B04300000000000000000043 /* AuthenticatedCoverCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04300000000000000000043 /* AuthenticatedCoverCache.swift */; };
 		B04400000000000000000044 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04400000000000000000044 /* HomeView.swift */; };
 		B04500000000000000000045 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04500000000000000000045 /* LibraryView.swift */; };
 		B04600000000000000000046 /* FacetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04600000000000000000046 /* FacetView.swift */; };
@@ -91,6 +91,11 @@
 		B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18900000000000000000189 /* IosPdfiumDocument.swift */; };
 		B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19000000000000000000190 /* IosPdfiumNavigator.swift */; };
 		B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19200000000000000000192 /* IosReaderPrivateContentCache.swift */; };
+		B19500000000000000000195 /* IosFb2PublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19400000000000000000194 /* IosFb2PublicationFactory.swift */; };
+		B19600000000000000000196 /* IosImageDirectoryPublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19600000000000000000196 /* IosImageDirectoryPublicationFactory.swift */; };
+		B19700000000000000000197 /* IosArchiveCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19700000000000000000197 /* IosArchiveCore.swift */; };
+		B19800000000000000000198 /* 04 归山.cbr in Resources */ = {isa = PBXBuildFile; fileRef = F19800000000000000000198 /* 04 归山.cbr */; };
+		B19900000000000000000199 /* 02 雨师借伞.rar in Resources */ = {isa = PBXBuildFile; fileRef = F19900000000000000000199 /* 02 雨师借伞.rar */; };
 		B19100000000000000000191 /* ShukuPdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19100000000000000000191 /* ShukuPdfium.xcframework */; };
 		B19300000000000000000193 /* Pdfium.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = F19300000000000000000193 /* Pdfium.xcframework */; };
 		B19400000000000000000194 /* Pdfium.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = F19300000000000000000193 /* Pdfium.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -141,6 +146,7 @@
 		BR0300000000000000000003 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = PR0300000000000000000003 /* ReadiumNavigator */; };
 		BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */; };
 		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
+		BR0700000000000000000007 /* ErmaoArchiveCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0700000000000000000007 /* ErmaoArchiveCore */; };
 		A17400000000000000000174 /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17400000000000000000174 /* DownloadModels.swift */; };
 		A17500000000000000000175 /* DownloadCenterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17500000000000000000175 /* DownloadCenterStore.swift */; };
 		A17600000000000000000176 /* DownloadCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17600000000000000000176 /* DownloadCenterView.swift */; };
@@ -189,7 +195,7 @@
 		F04100000000000000000041 /* ContentStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentStores.swift; sourceTree = "<group>"; };
 		F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderProgressPresentationCenter.swift; sourceTree = "<group>"; };
 		F04200000000000000000042 /* ContentComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentComponents.swift; sourceTree = "<group>"; };
-		F04300000000000000000043 /* LibraryCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCacheStore.swift; sourceTree = "<group>"; };
+		F04300000000000000000043 /* AuthenticatedCoverCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticatedCoverCache.swift; sourceTree = "<group>"; };
 		F04400000000000000000044 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		F04500000000000000000045 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		F04600000000000000000046 /* FacetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacetView.swift; sourceTree = "<group>"; };
@@ -251,6 +257,11 @@
 		F18900000000000000000189 /* IosPdfiumDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumDocument.swift; sourceTree = "<group>"; };
 		F19000000000000000000190 /* IosPdfiumNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumNavigator.swift; sourceTree = "<group>"; };
 		F19200000000000000000192 /* IosReaderPrivateContentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderPrivateContentCache.swift; sourceTree = "<group>"; };
+		F19400000000000000000194 /* IosFb2PublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosFb2PublicationFactory.swift; sourceTree = "<group>"; };
+		F19600000000000000000196 /* IosImageDirectoryPublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosImageDirectoryPublicationFactory.swift; sourceTree = "<group>"; };
+		F19700000000000000000197 /* IosArchiveCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosArchiveCore.swift; sourceTree = "<group>"; };
+		F19800000000000000000198 /* 04 归山.cbr */ = {isa = PBXFileReference; lastKnownFileType = file; name = "04 归山.cbr"; path = "../../../books/comics/山海邮差/典藏版/终章/04 归山.cbr"; sourceTree = SOURCE_ROOT; };
+		F19900000000000000000199 /* 02 雨师借伞.rar */ = {isa = PBXFileReference; lastKnownFileType = file; name = "02 雨师借伞.rar"; path = "../../../books/comics/山海邮差/单行本/02 雨师借伞.rar"; sourceTree = SOURCE_ROOT; };
 		F08700000000000000000087 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		F02000000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F02100000000000000000021 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -334,6 +345,7 @@
 				BR0300000000000000000003 /* ReadiumNavigator in Frameworks */,
 				BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */,
 				BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */,
+				BR0700000000000000000007 /* ErmaoArchiveCore in Frameworks */,
 				B08700000000000000000087 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -395,6 +407,8 @@
 				F08900000000000000000089 /* MobiCoreTests.swift */,
 				F16000000000000000000160 /* MobiPublicationFactoryTests.swift */,
 				F18300000000000000000183 /* CbzPublicationTests.swift */,
+				F19800000000000000000198 /* 04 归山.cbr */,
+				F19900000000000000000199 /* 02 雨师借伞.rar */,
 				F18700000000000000000187 /* PdfReaderTests.swift */,
 				E13800000000000000000138 /* DownloadStoreTests.swift */,
 				F09000000000000000000090 /* 01-basic-mobi6.mobi */,
@@ -503,7 +517,7 @@
 			children = (
 				F01500000000000000000015 /* KeychainCookiePayloadStore.swift */,
 				F01600000000000000000016 /* UserDefaultsServerProfileStore.swift */,
-				F04300000000000000000043 /* LibraryCacheStore.swift */,
+				F04300000000000000000043 /* AuthenticatedCoverCache.swift */,
 				E17700000000000000000177 /* ManagedDownloadStore.swift */,
 			);
 			path = Persistence;
@@ -613,6 +627,9 @@
 				F15800000000000000000158 /* IosMobiLazyContainer.swift */,
 				F15900000000000000000159 /* IosMobiPublicationFactory.swift */,
 				F17600000000000000000176 /* IosTxtPublicationFactory.swift */,
+				F19400000000000000000194 /* IosFb2PublicationFactory.swift */,
+				F19600000000000000000196 /* IosImageDirectoryPublicationFactory.swift */,
+				F19700000000000000000197 /* IosArchiveCore.swift */,
 				F18000000000000000000180 /* IosCbzPublicationFactory.swift */,
 				F18100000000000000000181 /* IosComicReaderSession.swift */,
 				F18200000000000000000182 /* IosComicReaderView.swift */,
@@ -683,6 +700,7 @@
 				PR0300000000000000000003 /* ReadiumNavigator */,
 				PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */,
 				PR0500000000000000000005 /* ErmaoMobiCore */,
+				PR0700000000000000000007 /* ErmaoArchiveCore */,
 			);
 			productName = ErmaoLibrary;
 			productReference = F80000000000000000000800 /* ErmaoLibrary.app */;
@@ -760,6 +778,7 @@
 			packageReferences = (
 				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */,
 				PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */,
+				PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */,
 			);
 			productRefGroup = G20100000000000000000201 /* Products */;
 			projectDirPath = "";
@@ -811,6 +830,8 @@
 				B11000000000000000000110 /* negative-truncated.mobi in Resources */,
 				B11100000000000000000111 /* negative-corrupt-record-offset.mobi in Resources */,
 				B11200000000000000000112 /* negative-pseudo.mobi in Resources */,
+				B19800000000000000000198 /* 04 归山.cbr in Resources */,
+				B19900000000000000000199 /* 02 雨师借伞.rar in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -874,7 +895,7 @@
 				B04100000000000000000041 /* ContentStores.swift in Sources */,
 				B15600000000000000000156 /* ReaderProgressPresentationCenter.swift in Sources */,
 				B04200000000000000000042 /* ContentComponents.swift in Sources */,
-				B04300000000000000000043 /* LibraryCacheStore.swift in Sources */,
+				B04300000000000000000043 /* AuthenticatedCoverCache.swift in Sources */,
 				B04400000000000000000044 /* HomeView.swift in Sources */,
 				B04500000000000000000045 /* LibraryView.swift in Sources */,
 				B04600000000000000000046 /* FacetView.swift in Sources */,
@@ -934,6 +955,9 @@
 				B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */,
 				B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */,
 				B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */,
+				B19500000000000000000195 /* IosFb2PublicationFactory.swift in Sources */,
+				B19600000000000000000196 /* IosImageDirectoryPublicationFactory.swift in Sources */,
+				B19700000000000000000197 /* IosArchiveCore.swift in Sources */,
 				A17400000000000000000174 /* DownloadModels.swift in Sources */,
 				A17500000000000000000175 /* DownloadCenterStore.swift in Sources */,
 				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,
@@ -1217,6 +1241,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../native/mobi-core";
 		};
+		PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../native/archive-core";
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -1255,6 +1283,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */;
 			productName = ErmaoMobiCore;
+		};
+		PR0700000000000000000007 /* ErmaoArchiveCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */;
+			productName = ErmaoArchiveCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

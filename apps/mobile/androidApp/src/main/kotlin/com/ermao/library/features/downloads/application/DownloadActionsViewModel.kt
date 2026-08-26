@@ -16,11 +16,6 @@ import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.shared.modules.downloads.DownloadRequestContext
 import com.ermao.library.shared.modules.downloads.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.DownloadProgressObserver
-import com.ermao.library.shared.modules.downloads.ReaderLocalArtifact
-import com.ermao.library.shared.modules.downloads.ReaderNeedsDownload
-import com.ermao.library.shared.modules.downloads.ReaderRemoteStream
-import com.ermao.library.shared.modules.downloads.ReaderUnavailable
-import com.ermao.library.shared.modules.downloads.ReaderAccessRequest
 import com.ermao.library.shared.modules.downloads.DownloadTask
 import com.ermao.library.shared.modules.downloads.DownloadTransferRequest
 import com.ermao.library.shared.modules.downloads.DownloadsRuntime
@@ -49,18 +44,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-sealed interface AndroidReaderAccessOutcome {
-    data class LocalArtifact(
-        val readerType: String,
-        val format: String,
-        val localReference: String,
-        val expectedBytes: Long,
-    ) : AndroidReaderAccessOutcome
-    data class RemoteStream(val readerType: String, val format: String) : AndroidReaderAccessOutcome
-    data object DownloadRequired : AndroidReaderAccessOutcome
-    data class Unavailable(val reasonCode: String) : AndroidReaderAccessOutcome
-}
-
 class DownloadActionsViewModel(
     private val androidCatalog: AndroidDownloadCatalog,
     private val sharedCatalog: DownloadCatalogRepository,
@@ -80,7 +63,6 @@ class DownloadActionsViewModel(
     private val mutableFailureByResource = MutableStateFlow<Map<String, String>>(emptyMap())
     val failureByResource: StateFlow<Map<String, String>> = mutableFailureByResource.asStateFlow()
     private val activeTransfers = mutableMapOf<String, Job>()
-    private val activeReaderChecks = mutableMapOf<String, Job>()
     private val pauseRequests = mutableSetOf<String>()
 
     init {
@@ -151,61 +133,6 @@ class DownloadActionsViewModel(
         onComplete(DownloadBatchResult(results))
     }
 
-    fun requestReaderAccess(
-        resourceId: String,
-        isOnline: Boolean = true,
-        onOutcome: (AndroidReaderAccessOutcome) -> Unit,
-    ) {
-        if (resourceId.isBlank() || activeReaderChecks[resourceId]?.isActive == true) return
-        mutableFailureByResource.value -= resourceId
-        val job = viewModelScope.launch {
-            sharedCatalog.listArtifacts(context.namespace)
-                .filter { it.identity.resourceId == resourceId }
-                .maxByOrNull { it.completedAtEpochMillis }
-                ?.let { artifact ->
-                    onOutcome(artifact.toReaderAccessOutcome())
-                    return@launch
-                }
-            val descriptor = when (val bootstrap = gateway.load(context, resourceId)) {
-                is DownloadBootstrapSuccess -> bootstrap.bootstrap.descriptor
-                is DownloadBootstrapFailure -> {
-                    saveBootstrapFailure(resourceId, bootstrap.error.code)
-                    onOutcome(AndroidReaderAccessOutcome.Unavailable(bootstrap.error.code))
-                    return@launch
-                }
-            }
-            when (val decision = runtime.readerAccess(
-                ReaderAccessRequest(
-                    namespace = context.namespace,
-                    resourceId = descriptor.identity.resourceId,
-                    readerType = descriptor.readerType,
-                    isOnline = isOnline,
-                    isDownloadable = descriptor.isDownloadable,
-                ),
-            )) {
-                is ReaderLocalArtifact -> onOutcome(decision.artifact.toReaderAccessOutcome())
-                is ReaderUnavailable -> onOutcome(
-                    AndroidReaderAccessOutcome.Unavailable(decision.reasonCode),
-                )
-                else -> if (decision == ReaderRemoteStream) {
-                    onOutcome(AndroidReaderAccessOutcome.RemoteStream(descriptor.readerType.name, descriptor.format))
-                } else {
-                    check(decision == ReaderNeedsDownload)
-                    onOutcome(AndroidReaderAccessOutcome.DownloadRequired)
-                }
-            }
-        }
-        activeReaderChecks[resourceId] = job
-        job.invokeOnCompletion { activeReaderChecks.remove(resourceId, job) }
-    }
-
-    private fun CompletedDownloadArtifact.toReaderAccessOutcome() = AndroidReaderAccessOutcome.LocalArtifact(
-        readerType = descriptor.readerType.name,
-        format = descriptor.format,
-        localReference = localReference,
-        expectedBytes = verifiedBytes,
-    )
-
     private suspend fun transfer(resourceId: String, descriptor: DownloadDescriptor, existing: DownloadTask? = null) {
         var task: DownloadTask? = null
         var progressJob: Job? = null
@@ -225,7 +152,7 @@ class DownloadActionsViewModel(
                 progressJob = viewModelScope.launch {
                     var persistedBytes = 0L
                     for (transferredBytes in progressUpdates) {
-                        if (transferredBytes <= persistedBytes || transferredBytes >= descriptor.source.totalBytes) continue
+                        if (transferredBytes <= persistedBytes || transferredBytes >= descriptor.totalBytes) continue
                         runtime.transitionTask(
                             context.namespace,
                             task.id,
@@ -239,7 +166,9 @@ class DownloadActionsViewModel(
                     request = DownloadTransferRequest(
                         task.id,
                         descriptor,
-                        resumeFromBytes = task.transferredBytes,
+                        resumeFromBytes = if (
+                            descriptor.artifactKind == com.ermao.library.shared.modules.downloads.DownloadArtifactKind.SingleOriginalAsset
+                        ) task.transferredBytes else 0,
                         preservePartialOnCancellation = true,
                     ),
                     sink = sink,
@@ -311,7 +240,6 @@ class DownloadActionsViewModel(
     }
 
     fun cancelAll() {
-        activeReaderChecks.values.forEach(Job::cancel)
         activeTransfers.values.forEach(Job::cancel)
     }
 
@@ -336,10 +264,9 @@ class DownloadActionsViewModel(
     }
 
     suspend fun cancelAllAndJoin() {
-        val jobs = (activeReaderChecks.values + activeTransfers.values).distinct()
+        val jobs = activeTransfers.values.distinct()
         cancelAll()
         jobs.forEach { it.cancelAndJoin() }
-        activeReaderChecks.clear()
         activeTransfers.clear()
     }
 

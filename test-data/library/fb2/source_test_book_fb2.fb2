@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:xlink="http://www.w3.org/1999/xlink">
+<description>
+    <title-info>
+        <genre>computers</genre>
+        <author>
+            <first-name>Chris</first-name>
+            <last-name>Clark</last-name>
+        </author>
+        <book-title>Sample FB2 book</book-title>
+        <annotation>
+            <p>Short sample of a FictionBook2 book with simple metadata. Based on test_book.md from https://github.com/clach04/sample_reading_media</p>
+        </annotation>
+        <keywords>ebook,sample,markdown,fb2,FictionBook2</keywords>
+    </title-info>
+    <document-info>
+        <author>
+            <nickname>clach04</nickname>
+            <home-page>https://github.com/clach04/sample_reading_media</home-page>
+        </author>
+
+        <program-used>vim and scite</program-used>
+        <src-url>https://github.com/clach04/sample_reading_media</src-url>
+        <version>1.1</version>
+        <history>
+            <p>1.1 TODO review is this section following FB2 format correctly? Added sections to test formatting, non-ascii text, and dictionary lookup test - written by hand.</p>
+            <p>Initial version, written by hand.</p>
+        </history>
+    </document-info>
+</description>
+<body>
+    <title>
+        <p>This is a title</p>
+    </title>
+
+    <section id="test-header-h1">
+        <title>
+            <p>Test Header h1</p>
+        </title>
+
+        <p>A test paragraph.</p>
+        <p>Another test paragraph.</p>
+    </section>
+
+    <section id="copyright">
+        <title>
+            <p>Copyright</p>
+        </title>
+
+        <p>This ebook is copyright 2021 Chris Clark</p>
+        <p>This ebook is © 2021 Chris Clark</p>
+        <p>Latest version available from https://github.com/clach04/sample_reading_media</p>
+    </section>
+
+    <section id="another-test-header-h1">
+        <title>
+            <p>Another Test Header h1</p>
+        </title>
+
+        <section id="a-test-header-h2">
+            <title>
+                <p>A Test Header h2</p>
+            </title>
+        
+            <section id="a-test-header-h3">
+                <title>
+                    <p>A Test Header h3</p>
+                </title>
+
+                <p>Yet more copy</p>
+            </section>
+        </section>
+    </section>
+
+    <section id="more-complex-text">
+        <title>
+            <p>More complex text</p>
+        </title>
+
+        <section id="basic-formatting">
+            <title>
+                <p>Basic formatting</p>
+            </title>
+
+            <section id="emphasis">
+                <title>
+                    <p>Emphasis</p>
+                </title>
+
+                <p>Italic and bold.</p>
+                <p>Is <emphasis>emphasis</emphasis> supported?</p>
+                <p>What about <strong>strong</strong> support?</p>
+                <p>Another test with different style indicators, should match above.</p>
+                <p>Is <emphasis>emphasis</emphasis> supported?</p>
+                <p>What about <strong>strong</strong> support?</p>
+            </section>
+        </section>
+
+        <section id="more-formatting">
+            <title>
+                <p>More formatting</p>
+            </title>
+
+            <section id="preformatted">
+                <title>
+                <p>preformatted</p>
+                </title>
+
+                <p>Are code blocks supported:</p>
+                <empty-line />
+                <p>
+                    <code>12345678901234567890</code>
+                </p>
+                <p>
+                    <code>Hello world</code>
+                </p>
+                <p>
+                    <code>2 == 1 + 1</code>
+                </p>
+                <empty-line />
+                <p>What about inline <code>pre formatted text</code>?</p>
+            </section>
+
+        <section id="quoted">
+            <title>
+                <p>quoted</p>
+            </title>
+
+            <p>Are quoted blocks supported:</p>
+            <cite>
+                <p>This is a quoted text block.</p>
+            </cite>
+        </section>
+
+
+        <section id="lists">
+            <title>
+                <p>Lists</p>
+            </title>
+
+            <!-- TODO review, this came out of Pandoc -->
+            <p>Bullet points:</p>
+            <p>
+            • like</p>
+            <p>
+            • these</p>
+
+            <!-- TODO review, this came out of Pandoc -->
+            <p>Ordered/numbered lists:</p>
+            <p>
+            1. like</p>
+            <p>
+            2. these</p>
+            </section>
+
+            <section id="links">
+                <title>
+                    <p>Links</p>
+                </title>
+                <p>External link to this <a l:href="https://github.com/clach04/sample_reading_media">ebook project page</a>.</p>
+                <p>Internal link to <a l:href="#copyright">Copyright section</a>.</p>
+            </section>
+        </section>
+    </section>
+
+    <section id="non-ascii-characters">
+        <title>
+            <p>Non-ascii characters</p>
+        </title>
+
+        <section id="latin15">
+            <title>
+                <p>Latin15</p>
+            </title>
+            <p>Some latin15 characters:</p>
+            <p>British pound currency £</p>
+            <p>Euro currency symbol €</p>
+            <p>München is a city in Germany.</p>
+        </section>
+
+        <section id="cjk">
+            <title>
+            <p>CJK</p>
+            </title>
+            <p>Inside the Basic Multilingual Plane (BMP).</p>
+            <p>10 strokes Kanji for house, 家</p>
+        </section>
+
+        <section id="emoji">
+            <title>
+                <p>Emoji</p>
+            </title>
+            <p>
+            Outside the Basic Multilingual Plane (BMP).</p>
+            <p>Slightly Smiling Face 🙂</p>
+            <p>Thumbs Up 👍</p>
+        </section>
+    </section>
+
+    <section id="dictionary-words">
+        <title>
+            <p>Dictionary words</p>
+        </title>
+        <p>This section has some words to help test dictionary lookup.</p>
+        <p>Ostentatiously lookup should work, as should ostentatious.</p>
+    </section>
+
+
+</body>
+</FictionBook>

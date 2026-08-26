@@ -30,7 +30,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.R
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.ui.BookGridItem
@@ -46,7 +45,6 @@ import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPagePaginationError
 import com.ermao.library.ui.components.WarmPagePaginationLoading
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageStaleStatus
 import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -106,13 +104,6 @@ fun FacetScreen(
                     style = theme.typography.caption,
                     color = theme.colors.textSecondary,
                 )
-            }
-            when (state.freshness) {
-                ContentFreshness.Stale -> WarmPageStaleStatus(
-                    message = stringResource(R.string.content_stale_banner),
-                    modifier = Modifier.padding(horizontal = theme.components.page.compactGutter),
-                )
-                ContentFreshness.Fresh -> Unit
             }
             when {
                 state.isLoading -> WarmPageLoadingState(

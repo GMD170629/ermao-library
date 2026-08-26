@@ -6,7 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class ReaderDomainTest {
     @Test
@@ -103,7 +102,75 @@ class ReaderDomainTest {
         )
 
         val useServer = assertIs<StartupDecision.UseServer>(decision)
-        assertTrue(useServer.discardPending)
+        assertEquals("mutation-1", useServer.discardPendingMutationId)
+    }
+
+    @Test
+    fun newerLocalPendingRebasesOntoTheFreshServerRevisionWithoutAChoice() {
+        val local = progress(updatedAt = 3_000)
+        val pending = createReaderProgressUpload(
+            ReaderProgressSyncTarget(ReaderSyncNamespace("server", "user", 1), "work-1", "volume-1", ReaderFormat.Epub),
+            local,
+            4,
+            "mutation-1",
+        ).mutation
+        val remote = ReaderProgressSnapshotV4(
+            "volume-1", "ios-client", 5, envelope("#remote", "remote"), 80.0, 4_000, 2_000,
+        )
+
+        val decision = decidePendingVsServerStartup(
+            local,
+            ReaderProgressDurableState(confirmedRevision = 4, pending = pending),
+            remote,
+            source(),
+        )
+
+        val useLocal = assertIs<StartupDecision.UseLocalPending>(decision)
+        assertEquals(5, useLocal.rebaseRevision)
+    }
+
+    @Test
+    fun pendingAtTheFreshServerRevisionRetriesWithoutRebase() {
+        val local = progress(updatedAt = 3_000)
+        val pending = createReaderProgressUpload(
+            ReaderProgressSyncTarget(ReaderSyncNamespace("server", "user", 1), "work-1", "volume-1", ReaderFormat.Epub),
+            local,
+            5,
+            "mutation-1",
+        ).mutation
+
+        val decision = decidePendingVsServerStartup(
+            local,
+            ReaderProgressDurableState(confirmedRevision = 5, pending = pending),
+            ReaderProgressSnapshotV4(
+                "volume-1", "ios-client", 5, envelope("#remote", "remote"), 80.0, 4_000, 2_000,
+            ),
+            source(),
+        )
+
+        val useLocal = assertIs<StartupDecision.UseLocalPending>(decision)
+        assertNull(useLocal.rebaseRevision)
+    }
+
+    @Test
+    fun pendingForAnotherResourceIsRetiredWithoutBlockingStartup() {
+        val local = progress(updatedAt = 3_000)
+        val pending = createReaderProgressUpload(
+            ReaderProgressSyncTarget(ReaderSyncNamespace("server", "user", 1), "work-1", "volume-1", ReaderFormat.Epub),
+            local,
+            4,
+            "mutation-1",
+        ).mutation.copy(resourceId = "other-resource")
+
+        val decision = decidePendingVsServerStartup(
+            local,
+            ReaderProgressDurableState(confirmedRevision = 4, pending = pending),
+            null,
+            source(),
+        )
+
+        val useServer = assertIs<StartupDecision.UseServer>(decision)
+        assertEquals("mutation-1", useServer.discardPendingMutationId)
     }
 
     @Test

@@ -1,0 +1,6 @@
+{
+    global:
+        Java_com_ermao_library_archive_infrastructure_ArchiveCoreNative_*;
+    local:
+        *;
+};

@@ -313,15 +313,21 @@ internal fun JsonElement.toDirectoryNode(): DirectoryNode {
 
 internal fun JsonElement.toImportTask(): ImportTask {
     val task = objectValue("INVALID_IMPORT_TASK").expectKeys(
-        "id", "kind", "libraryId", "resourceId", "sourceNodeId", "role", "state", "errorSummary",
+        "id", "kind", "libraryId", "libraryName", "resourceId", "resourceTitle", "sourceNodeId", "sourceName",
+        "sourceRelativePath", "bookTitle", "role", "state", "errorSummary",
         "createdAt", "startedAt", "finishedAt",
     )
     return ImportTask(
         id = task.requiredString("id"),
         kind = task.requiredString("kind"),
         libraryId = task.requiredString("libraryId"),
+        libraryName = task.requiredNullableString("libraryName"),
         resourceId = task.requiredNullableString("resourceId"),
+        resourceTitle = task.requiredNullableString("resourceTitle"),
         sourceNodeId = task.requiredNullableString("sourceNodeId"),
+        sourceName = task.requiredNullableString("sourceName"),
+        sourceRelativePath = task.requiredNullableString("sourceRelativePath"),
+        bookTitle = task.requiredNullableString("bookTitle"),
         role = task.requiredNullableString("role"),
         state = enumValue(task.requiredString("state"), ImportTaskState.entries, ImportTaskState::wireValue, "UNSUPPORTED_IMPORT_STATE"),
         errorSummary = task.requiredNullableString("errorSummary"),
@@ -420,9 +426,6 @@ private fun JsonObject.toOrganizeBook(): OrganizeBookSummary = OrganizeBookSumma
     id = requiredString("id"),
     title = requiredString("title"),
     author = requiredNullableString("author"),
-    availableMediaKinds = requiredStringList("availableMediaKinds").map {
-        enumValue(it, MediaKind.entries, MediaKind::wireValue, "UNSUPPORTED_MEDIA_KIND")
-    },
 )
 
 internal fun JsonElement.toOrganizeJob(): OrganizeJob {
@@ -526,15 +529,12 @@ internal fun JsonElement.toOrganizeCandidates(): OrganizeCandidates {
         reasonCounts = candidates.stringIntMap("reasonCounts"),
         books = candidates.requiredArray("books").map { element ->
             val work = element.objectValue("INVALID_CANDIDATE").expectKeys(
-                "id", "title", "author", "availableMediaKinds", "coverPath", "metadataQuality", "reasonCodes", "createdAt",
+                "id", "title", "author", "coverPath", "metadataQuality", "reasonCodes", "createdAt",
             )
             OrganizeCandidate(
                 id = work.requiredString("id"),
                 title = work.requiredNullableString("title"),
                 author = work.requiredNullableString("author"),
-                availableMediaKinds = work.requiredStringList("availableMediaKinds").map {
-                    enumValue(it, MediaKind.entries, MediaKind::wireValue, "UNSUPPORTED_MEDIA_KIND")
-                },
                 coverPath = work.requiredNullableString("coverPath"),
                 metadataQuality = work.requiredInt("metadataQuality"),
                 reasonCodes = work.requiredStringList("reasonCodes"),
@@ -572,10 +572,16 @@ internal fun JsonElement.toCategoryPage(): CategoryPage {
     )
 }
 
-internal fun JsonElement.toCategoryOperation(): LibraryOperation =
-    objectValue("INVALID_CATEGORY_OPERATION").expectKeys(
-        "facetId", "name", "kind", "affectedBookCount", "targetId", "mergedIds", "operation",
-    ).requiredObject("operation").toLibraryOperation()
+internal fun JsonElement.toCategoryOperation(expectedDeletedId: String? = null): LibraryOperation {
+    val root = objectValue("INVALID_CATEGORY_OPERATION").expectKeys(
+        "facetId", "name", "kind", "affectedBookCount", "targetId", "mergedIds", "deleted", "operation",
+    )
+    expectedDeletedId?.let { expectedId ->
+        if (root.requiredString("facetId") != expectedId) contract("CATEGORY_ID_MISMATCH")
+        if (!root.requiredBoolean("deleted")) contract("CATEGORY_NOT_DELETED")
+    }
+    return root.requiredObject("operation").toLibraryOperation()
+}
 
 internal fun JsonElement.toOrganizePolicy(): OrganizePolicy {
     val policy = objectValue("INVALID_ORGANIZE_POLICY").expectKeys(
@@ -648,7 +654,7 @@ private fun JsonElement.toProviderValue(): ProviderSettingValue = when (this) {
 
 internal fun JsonElement.toMetadataProvider(): MetadataProvider {
     val provider = objectValue("INVALID_METADATA_PROVIDER").expectKeys(
-        "id", "sourceId", "name", "version", "description", "mode", "mediaKinds", "fields", "capabilities",
+        "id", "sourceId", "name", "version", "description", "mode", "fields", "capabilities",
         "automaticRateLimit", "configFields", "config", "configuredSecrets", "enabled", "priority", "lastTestAt",
         "lastTestStatus", "lastError",
     )
@@ -660,7 +666,6 @@ internal fun JsonElement.toMetadataProvider(): MetadataProvider {
         version = provider.requiredString("version"),
         description = provider.requiredString("description"),
         mode = provider.requiredString("mode"),
-        mediaKinds = provider.requiredStringList("mediaKinds").map { enumValue(it, MediaKind.entries, MediaKind::wireValue, "UNSUPPORTED_MEDIA_KIND") },
         fields = provider.requiredStringList("fields"),
         capabilities = provider.requiredStringList("capabilities"),
         automaticRateLimit = rateLimit?.let { ProviderAutomaticRateLimit(it.requiredInt("requests"), it.requiredDouble("periodSeconds")) },
@@ -692,33 +697,9 @@ internal fun JsonElement.toMetadataProvider(): MetadataProvider {
     )
 }
 
-private fun JsonElement.toMetadataPipeline(): MetadataPipeline {
-    val pipeline = objectValue("INVALID_METADATA_PIPELINE").expectKeys("mediaKind", "providers")
-    return MetadataPipeline(
-        mediaKind = enumValue(pipeline.requiredString("mediaKind"), MediaKind.entries, MediaKind::wireValue, "UNSUPPORTED_MEDIA_KIND"),
-        providers = pipeline.requiredArray("providers").map { item ->
-            val provider = item.objectValue("INVALID_PIPELINE_PROVIDER").expectKeys(
-                "providerId", "name", "description", "enabled", "position", "lastTestStatus", "lastError",
-            )
-            PipelineProvider(
-                providerId = provider.requiredString("providerId"),
-                name = provider.requiredString("name"),
-                description = provider.requiredString("description"),
-                enabled = provider.requiredBoolean("enabled"),
-                position = provider.requiredInt("position"),
-                lastTestStatus = provider.requiredNullableString("lastTestStatus"),
-                lastError = provider.requiredNullableString("lastError"),
-            )
-        },
-    )
-}
-
 internal fun JsonElement.toMetadataProviders(): MetadataProviders {
-    val root = objectValue("INVALID_METADATA_PROVIDERS").expectKeys("providers", "pipelines")
-    return MetadataProviders(
-        providers = root.requiredArray("providers").map(JsonElement::toMetadataProvider),
-        pipelines = root.requiredArray("pipelines").map(JsonElement::toMetadataPipeline),
-    )
+    val root = objectValue("INVALID_METADATA_PROVIDERS").expectKeys("providers")
+    return MetadataProviders(providers = root.requiredArray("providers").map(JsonElement::toMetadataProvider))
 }
 
 internal fun JsonElement.toMetadataProviderPayload(): MetadataProvider =
@@ -786,6 +767,20 @@ private fun JsonElement.stableText(): String = when (this) {
     else -> toString()
 }
 
+private fun JsonElement.toEventMetadataValue(): EventMetadataValue = when (this) {
+    JsonNull -> EventMetadataValue.Empty
+    is JsonArray -> EventMetadataValue.ListValue(map(JsonElement::toEventMetadataValue))
+    is JsonObject -> EventMetadataValue.ObjectValue(mapValues { (_, value) -> value.toEventMetadataValue() })
+    is JsonPrimitive -> if (isString) {
+        EventMetadataValue.Text(content)
+    } else {
+        booleanOrNull?.let(EventMetadataValue::Toggle)
+            ?: longOrNull?.let(EventMetadataValue::Integer)
+            ?: doubleOrNull?.let(EventMetadataValue::Decimal)
+            ?: contract("INVALID_EVENT_METADATA_VALUE")
+    }
+}
+
 private fun JsonObject.toHealthRun(): HealthRun {
     expectKeys("runId", "status", "version", "startedAt", "finishedAt", "groups", "items", "summary", "created")
     val summary = requiredObject("summary").expectKeys("total", "completed", "ok", "warning", "error", "skipped")
@@ -833,27 +828,6 @@ private fun JsonObject.toHealthRun(): HealthRun {
 internal fun JsonElement.toHealthRun(): HealthRun =
     objectValue("INVALID_HEALTH_PAYLOAD").expectKeys("run", "created").requiredObject("run").toHealthRun()
 
-internal fun JsonElement.toQueueOperation(): QueueOperation {
-    val operation = objectValue("INVALID_QUEUE_OPERATION").expectKeys(
-        "id", "queueName", "action", "status", "actorUserId", "messageCode", "requestedAt", "startedAt", "finishedAt", "updatedAt",
-    )
-    operation.requiredString("actorUserId")
-    return QueueOperation(
-        id = operation.requiredString("id"),
-        queueName = operation.requiredString("queueName"),
-        action = operation.requiredString("action"),
-        status = operation.requiredString("status"),
-        messageCode = operation.requiredString("messageCode"),
-        requestedAt = operation.requiredString("requestedAt"),
-        startedAt = operation.requiredNullableString("startedAt"),
-        finishedAt = operation.requiredNullableString("finishedAt"),
-        updatedAt = operation.requiredString("updatedAt"),
-    )
-}
-
-internal fun JsonElement.toQueueOperationPayload(): QueueOperation =
-    objectValue("INVALID_QUEUE_OPERATION_PAYLOAD").expectKeys("operation", "created").requiredObject("operation").toQueueOperation()
-
 internal fun JsonElement.toEventStorage(): EventStorage {
     val storage = objectValue("INVALID_EVENT_STORAGE").expectKeys("deleted", "sizeBytes", "maxBytes", "lastPrunedAt")
     return EventStorage(
@@ -883,7 +857,7 @@ internal fun JsonElement.toManagementEventPage(): ManagementEventPage {
                 targetType = event.requiredNullableString("targetType"),
                 targetId = event.requiredNullableString("targetId"),
                 message = event.requiredString("message"),
-                metadata = event.requiredObject("metadata").mapValues { (_, value) -> value.stableText() },
+                metadata = event.requiredObject("metadata").mapValues { (_, value) -> value.toEventMetadataValue() },
                 createdAt = event.requiredNullableString("createdAt"),
             )
         },

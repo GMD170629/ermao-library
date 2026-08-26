@@ -490,6 +490,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private var expectedRestoredEnvelope: ErmaoShared.ReadiumLocatorEnvelope?
     private var didOpen = false
     private let navigationQueue = IosReaderNavigationQueue()
+    private var lastHandledTapAt = TimeInterval.zero
 
     init(
         resourceID: String,
@@ -801,6 +802,28 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         controlsVisible = true
     }
 
+    func handleTap(at point: CGPoint, width: CGFloat) {
+        let now = Date.timeIntervalSinceReferenceDate
+        guard now - lastHandledTapAt >= 0.15 else { return }
+        lastHandledTapAt = now
+        guard preferences.tapZones != .disabled else {
+            controlsVisible.toggle()
+            return
+        }
+        switch point.x / max(1, width) {
+        case ..<0.3:
+            Task {
+                if preferences.tapZones == .reversed { await goRight() } else { await goLeft() }
+            }
+        case 0.7...:
+            Task {
+                if preferences.tapZones == .reversed { await goLeft() } else { await goRight() }
+            }
+        default:
+            controlsVisible.toggle()
+        }
+    }
+
     func enterBackground() async {
         phase = .background
         await flushProgress()
@@ -1084,7 +1107,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     nonisolated fileprivate static func sharedBookmark(_ value: IosReaderBookmarkRecord) -> ErmaoShared.ReaderBookmark {
         ErmaoShared.ReaderBookmark(
             id: value.id,
-            location: ErmaoShared.ReaderBookmarkLocation(
+            location: ErmaoShared.ReaderBookmarkLocation.companion.reflow(
                 resourceKey: value.resourceKey,
                 progression: value.progression.map(KotlinDouble.init(double:))
             ),
@@ -1203,23 +1226,10 @@ extension IosReflowableReaderSession: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
-        guard preferences.tapZones != .disabled else {
-            controlsVisible.toggle()
-            return
-        }
-        let width = max(1, self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width)
-        switch point.x / width {
-        case ..<0.3:
-            Task {
-                if preferences.tapZones == .reversed { await goRight() } else { await goLeft() }
-            }
-        case 0.7...:
-            Task {
-                if preferences.tapZones == .reversed { await goLeft() } else { await goRight() }
-            }
-        default:
-            controlsVisible.toggle()
-        }
+        handleTap(
+            at: point,
+            width: self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width
+        )
     }
 
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {

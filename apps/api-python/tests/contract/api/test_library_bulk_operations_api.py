@@ -167,6 +167,9 @@ def test_bulk_metadata_updates_facets_and_writes_library_operation(
     payload = response.json()["data"]
     assert payload["updated"] == 2
     assert payload["operation"]["action"] == "BULK_UPDATE_METADATA"
+    refreshed = client.get(f"/api/books/{book_ids[0]}")
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["data"]["book"]["tags"] == ["科幻"]
     operation = db_session.get(LibraryOperation, payload["operation"]["id"])
     assert operation is not None and operation.user_id == user.id
     for book_id in book_ids:
@@ -203,6 +206,9 @@ def test_bulk_metadata_updates_facets_and_writes_library_operation(
             ).all()
         )
         assert facets == {"临时"}
+    restored = client.get(f"/api/books/{book_ids[0]}")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["data"]["book"]["tags"] == ["临时"]
     repeated = client.post(f"/api/library/operations/{payload['operation']['id']}/undo")
     assert repeated.status_code == 409
 

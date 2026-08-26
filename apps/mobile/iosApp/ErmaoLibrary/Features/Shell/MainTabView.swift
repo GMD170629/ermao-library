@@ -130,7 +130,7 @@ struct MainTabView: View {
     @ObservedObject var downloads: DownloadCenterStore
     let contentClient: any ContentClient
     let shelfClient: any ShelfClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     var settingsViewModel: SettingsViewModel? = nil
     var administrativeSettingsStore: AdministrativeSettingsStore? = nil
     var workManagementRepository: (any ErmaoShared.WorkManagementRepository)? = nil
@@ -218,13 +218,29 @@ struct MainTabView: View {
     }
 
     private func openInitialUITestRouteIfNeeded() {
+        #if DEBUG
+        let environment = ProcessInfo.processInfo.environment
+        if !didOpenUITestRoute,
+           environment["ERMAO_UI_TEST_INITIAL_DOWNLOADS"] == "1" {
+            didOpenUITestRoute = true
+            if let resourceID = environment["ERMAO_UI_TEST_INITIAL_DOWNLOAD_RESOURCE_ID"],
+               !resourceID.isEmpty {
+                downloads.uiTestResourceFilterID = resourceID
+            }
+            openDownloadsCenter()
+            return
+        }
+        let fixtureBookID = environment[ContentUITestFixture.launchEnvironmentKey] == "1"
+            ? environment["ERMAO_UI_TEST_INITIAL_WORK_ID"]
+            : nil
+        let liveBookID = environment["ERMAO_UI_TEST_LIVE_INITIAL_WORK_ID"]
         guard !didOpenUITestRoute,
-              ProcessInfo.processInfo.environment[ContentUITestFixture.launchEnvironmentKey] == "1",
-              let bookID = ProcessInfo.processInfo.environment["ERMAO_UI_TEST_INITIAL_WORK_ID"],
+              let bookID = fixtureBookID ?? liveBookID,
               !bookID.isEmpty
         else { return }
         didOpenUITestRoute = true
         open(.work(bookID: bookID), in: .home)
+        #endif
     }
 
     private func tabRoot(presentation: TabPresentation, context: ContentRequestContext) -> some View {

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
-
-from sqlalchemy.sql.base import Executable
+from datetime import datetime
+from typing import Literal, Protocol
 
 
 class BackupRecordValidationError(ValueError):
@@ -13,9 +12,27 @@ class BackupRecordValidationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class RestoreTableBatch:
+    export_key: str
+    table_name: str
+    records: tuple[dict[str, object], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MaintenanceStateChange:
+    setting_key: str
+    setting_value: str | None
+    changed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedRestorePlan:
-    statements: tuple[Executable, ...]
+    kind: Literal["database", "maintenance"]
     restored_counts: dict[str, int]
+    delete_order: tuple[str, ...] = ()
+    batches: tuple[RestoreTableBatch, ...] = ()
+    maintenance_setting_key: str | None = None
+    maintenance_change: MaintenanceStateChange | None = None
 
 
 class BackupRestoreWriter(Protocol):
@@ -29,7 +46,7 @@ class BackupRestoreUnitOfWork(Protocol):
 
 
 class ApplyValidatedBackupRestore:
-    """Execute only preconstructed typed SQL inside the live write interval."""
+    """Apply an immutable validated restore plan in one explicit transaction."""
 
     def __init__(
         self,

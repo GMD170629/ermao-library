@@ -25,11 +25,11 @@ from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
     ResourceAdapterSpec,
 )
-from app.modules.library.domain.readable_resource_states import (
+from app.modules.library.public import (
     AssetImportState,
     AssetRole,
+    ResourceAssetMetadataInput,
 )
-from app.modules.library.public import ResourceAssetMetadataInput
 
 
 @dataclass(frozen=True, slots=True)

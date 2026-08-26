@@ -6,6 +6,27 @@ import XCTest
 
 @MainActor
 final class ContentStoreTests: XCTestCase {
+    func testWorkDescriptionPlainTextDoesNotUseUIKitHTMLRendering() {
+        let value = WorkDescriptionPlainText.normalize(
+            """
+            <p>Hello&nbsp;<strong>reader</strong></p>
+            <script>throw new Error('not visible')</script>
+            <style>.hidden { display: none }</style>
+            <div>Next &amp; &#x4E2D;&#25991;</div>
+            """
+        )
+
+        XCTAssertEqual(value, "Hello reader\n\nNext & 中文")
+    }
+
+    func testWorkDescriptionPlainTextKeepsUnknownAndMalformedTextSafe() {
+        XCTAssertEqual(
+            WorkDescriptionPlainText.normalize("Text &unknown; <not closed"),
+            "Text &unknown; <not closed"
+        )
+        XCTAssertNil(WorkDescriptionPlainText.normalize("<script>only script</script>"))
+    }
+
     func testResourceIndexUsesServerValueAndFallsBackToOneBasedPosition() {
         let base = BookResource(
             id: "resource-1",
@@ -52,12 +73,182 @@ final class ContentStoreTests: XCTestCase {
         )
     }
 
+    func testWorkContentPresentationMatchesWebDirectoryAndResourceRules() {
+        func entry(
+            id: String,
+            title: String,
+            kind: String,
+            resourceID: String? = nil,
+            representativeResourceID: String? = nil,
+            coverPath: String? = nil
+        ) -> BookContentEntry {
+            BookContentEntry(
+                sourceNodeID: id,
+                parentSourceNodeID: "root",
+                name: title,
+                title: title,
+                description: nil,
+                kind: kind,
+                physicalKind: kind == "FOLDER" ? "DIRECTORY" : "REGULAR_FILE",
+                sizeBytes: nil,
+                hasChildren: kind == "FOLDER",
+                resourceID: resourceID,
+                representativeResourceID: representativeResourceID,
+                cover: coverPath.map { CoverReference(path: $0) }
+            )
+        }
+        func resource(
+            id: String,
+            title: String,
+            coverPath: String?,
+            resourceIndex: Double? = nil
+        ) -> BookResource {
+            BookResource(
+                id: id,
+                bookID: "book-1",
+                sourceNodeID: "node-\(id)",
+                title: title,
+                format: "CBZ",
+                resourceIndex: resourceIndex,
+                cover: coverPath.map { CoverReference(path: $0) },
+                sizeLabel: nil,
+                progress: 25,
+                isReadable: true,
+                isSelected: false
+            )
+        }
+
+        let root = entry(id: "root", title: "Star Harbor", kind: "FOLDER")
+        let detail = BookDetailContent(
+            book: BookCard(
+                id: "book-1",
+                title: "Star Harbor",
+                author: "Author",
+                cover: CoverReference(path: "/book-cover"),
+                progress: nil
+            ),
+            description: nil,
+            tags: [],
+            seriesFacet: nil,
+            authorFacets: [],
+            resources: [
+                resource(id: "representative-1", title: "Representative 1", coverPath: "/representative-cover"),
+                resource(id: "representative-2", title: "Representative 2", coverPath: "/ignored-cover"),
+                resource(id: "direct", title: "01 Launch", coverPath: "/resource-cover", resourceIndex: 7),
+            ],
+            selectedResourceID: nil,
+            readingStatus: .unread,
+            chapters: []
+        )
+        let page = BookContentsPage(
+            bookID: "book-1",
+            currentSourceNodeID: "root",
+            currentResourceID: nil,
+            currentNode: root,
+            currentResourceIDs: ["direct"],
+            parentSourceNodeID: nil,
+            breadcrumbs: [],
+            entries: [
+                entry(id: "direct-node", title: "01 Launch.cbz", kind: "FILE", resourceID: "direct"),
+                entry(
+                    id: "directory-1",
+                    title: "Single Volumes",
+                    kind: "FOLDER",
+                    representativeResourceID: "representative-1"
+                ),
+                entry(
+                    id: "directory-2",
+                    title: "Color Edition",
+                    kind: "FOLDER",
+                    representativeResourceID: "representative-2",
+                    coverPath: "/entry-cover"
+                ),
+                entry(id: "directory-3", title: "Extras", kind: "FOLDER"),
+            ],
+            page: 1,
+            pageSize: 100,
+            total: 4,
+            totalPages: 1
+        )
+
+        let items = workContentItemPresentations(page: page, detail: detail)
+
+        XCTAssertEqual(items.map(\.kind), [.sourceDirectory, .sourceDirectory, .sourceDirectory, .readableResource])
+        XCTAssertEqual(items.map(\.title), ["Single Volumes", "Color Edition", "Extras", "01 Launch"])
+        XCTAssertEqual(items.map(\.cover?.path), ["/representative-cover", "/entry-cover", "/book-cover", "/resource-cover"])
+        XCTAssertEqual(items.map(\.indexLabel), ["01", "02", "03", "07"])
+    }
+
+    func testWorkContentBreadcrumbsUseBookTitleOnceAndOnlyApiBreadcrumbsAfterIt() {
+        let root = BookContentEntry(
+            sourceNodeID: "root",
+            parentSourceNodeID: nil,
+            name: "Star Harbor",
+            title: "Star Harbor",
+            description: nil,
+            kind: "FOLDER",
+            physicalKind: "DIRECTORY",
+            sizeBytes: nil,
+            hasChildren: true,
+            resourceID: nil,
+            representativeResourceID: nil,
+            cover: nil
+        )
+        let directory = BookContentEntry(
+            sourceNodeID: "single-volumes",
+            parentSourceNodeID: "root",
+            name: "Single Volumes",
+            title: "Single Volumes",
+            description: nil,
+            kind: "FOLDER",
+            physicalKind: "DIRECTORY",
+            sizeBytes: nil,
+            hasChildren: true,
+            resourceID: nil,
+            representativeResourceID: nil,
+            cover: nil
+        )
+        let rootPage = BookContentsPage(
+            bookID: "book-1",
+            currentSourceNodeID: "root",
+            currentResourceID: nil,
+            currentNode: root,
+            currentResourceIDs: [],
+            parentSourceNodeID: nil,
+            breadcrumbs: [],
+            entries: [],
+            page: 1,
+            pageSize: 100,
+            total: 0,
+            totalPages: 1
+        )
+        let nestedPage = BookContentsPage(
+            bookID: "book-1",
+            currentSourceNodeID: directory.sourceNodeID,
+            currentResourceID: nil,
+            currentNode: directory,
+            currentResourceIDs: [],
+            parentSourceNodeID: root.sourceNodeID,
+            breadcrumbs: [directory],
+            entries: [],
+            page: 1,
+            pageSize: 100,
+            total: 0,
+            totalPages: 1
+        )
+
+        XCTAssertEqual(workContentBreadcrumbs(bookTitle: "Star Harbor", page: rootPage).map(\.title), ["Star Harbor"])
+        XCTAssertEqual(
+            workContentBreadcrumbs(bookTitle: "Star Harbor", page: nestedPage).map(\.title),
+            ["Star Harbor", "Single Volumes"]
+        )
+    }
+
     func testLibraryScopesKeepIndependentQueriesAndFilters() async {
         let client = ContentClientStub()
         let store = LibraryStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -78,7 +269,6 @@ final class ContentStoreTests: XCTestCase {
         let store = LibraryStore(
             context: contentContext,
             client: ContentClientStub(),
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -94,7 +284,6 @@ final class ContentStoreTests: XCTestCase {
         let store = LibraryStore(
             context: contentContext,
             client: ContentClientStub(),
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -111,7 +300,6 @@ final class ContentStoreTests: XCTestCase {
         let store = LibraryStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -138,7 +326,6 @@ final class ContentStoreTests: XCTestCase {
         let store = LibraryStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -148,12 +335,12 @@ final class ContentStoreTests: XCTestCase {
         store.applyFilters(LibraryFilters(readingStatus: .reading))
         try await waitUntil { await client.booksRequestCount == 2 }
         try await waitUntil {
-            guard case .ready(let items, _, _, _) = store.current.results else { return false }
+            guard case .ready(let items, _) = store.current.results else { return false }
             return items.compactMap(\.bookValue).map(\.id) == ["filtered"]
         }
         try await Task.sleep(for: .milliseconds(350))
 
-        guard case .ready(let items, _, _, _) = store.current.results else {
+        guard case .ready(let items, _) = store.current.results else {
             return XCTFail("Expected the filtered request to remain visible")
         }
         XCTAssertEqual(items.compactMap(\.bookValue).map(\.id), ["filtered"])
@@ -166,7 +353,6 @@ final class ContentStoreTests: XCTestCase {
         let store = LibraryStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             onUnauthorized: {}
         )
 
@@ -189,12 +375,10 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(seriesRequestCount, 2)
     }
 
-    func testGroupingProtocolFailureDoesNotMasqueradeAsCachedContent() async throws {
-        let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
+    func testGroupingProtocolFailureShowsFailureWithoutFallback() async throws {
         let store = LibraryStore(
             context: contentContext,
             client: FailingGroupingContentClient(error: .invalidResponse),
-            cache: cache,
             onUnauthorized: {}
         )
 
@@ -210,11 +394,9 @@ final class ContentStoreTests: XCTestCase {
     }
 
     func testGroupingNetworkFailureShowsFailureWithoutPersistentFallback() async throws {
-        let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
         let store = LibraryStore(
             context: contentContext,
             client: FailingGroupingContentClient(error: .offline),
-            cache: cache,
             onUnauthorized: {}
         )
 
@@ -223,6 +405,24 @@ final class ContentStoreTests: XCTestCase {
             if case .failure = store.current.results { return true }
             return false
         }
+    }
+
+    func testPaginationFailureKeepsTheAcceptedFirstPage() async throws {
+        let store = LibraryStore(
+            context: contentContext,
+            client: PaginationFailureContentClient(),
+            onUnauthorized: {}
+        )
+        store.reload()
+        try await waitUntil {
+            store.current.readyItems?.map(\.id) == ["page-1"]
+        }
+
+        store.loadNextPageIfNeeded(visibleItemID: "page-1")
+        try await waitUntil { store.current.hasPaginationError }
+
+        XCTAssertEqual(store.current.readyItems?.map(\.id), ["page-1"])
+        XCTAssertEqual(store.current.loadedPage, 1)
     }
 
     func testTypedRoutesReuseExistingEntityInsteadOfStackingDuplicates() {
@@ -234,87 +434,61 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(paths.path(for: .library), [.work(bookID: "one")])
     }
 
-    func testLibraryCacheIsNamespacedAndPersistsAtomically() async throws {
-        let root = temporaryDirectory()
-        let cache = LibraryCacheStore(rootDirectory: root)
-        let page = BookPage(books: [work("one")], page: 1, pageSize: 24, total: 1, totalPages: 1)
+    func testAuthenticatedCoverCacheIsNamespacedAndPersistsAtomically() async throws {
+        let cache = AuthenticatedCoverCache(rootDirectory: temporaryDirectory())
+        let cover = Data([0x89, 0x50, 0x4E, 0x47])
 
-        try await cache.save(page, namespace: "server|user|1", key: "works")
+        try await cache.save(cover, namespace: "server|user|1", key: "cover|work-1")
 
-        let loaded = try await cache.load(BookPage.self, namespace: "server|user|1", key: "works")
-        let differentNamespace = try await cache.load(BookPage.self, namespace: "server|user|2", key: "works")
-        XCTAssertEqual(loaded, page)
+        let loaded = try await cache.load(namespace: "server|user|1", key: "cover|work-1")
+        let differentNamespace = try await cache.load(namespace: "server|user|2", key: "cover|work-1")
+        XCTAssertEqual(loaded, cover)
         XCTAssertNil(differentNamespace)
-        let isFresh = try await cache.isFresh(namespace: "server|user|1", key: "works")
-        XCTAssertTrue(isFresh)
     }
 
     func testRemovingCurrentNamespaceDoesNotRemoveAnotherUsersCache() async throws {
-        let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
-        try await cache.save("current", namespace: "server|current-user|1", key: "home")
-        try await cache.save("other", namespace: "server|other-user|1", key: "home")
+        let cache = AuthenticatedCoverCache(rootDirectory: temporaryDirectory())
+        let current = Data("current".utf8)
+        let other = Data("other".utf8)
+        try await cache.save(current, namespace: "server|current-user|1", key: "cover|home")
+        try await cache.save(other, namespace: "server|other-user|1", key: "cover|home")
 
         try await cache.removeNamespace("server|current-user|1")
 
-        let removed = try await cache.load(String.self, namespace: "server|current-user|1", key: "home")
-        let retained = try await cache.load(String.self, namespace: "server|other-user|1", key: "home")
+        let removed = try await cache.load(namespace: "server|current-user|1", key: "cover|home")
+        let retained = try await cache.load(namespace: "server|other-user|1", key: "cover|home")
         XCTAssertNil(removed)
-        XCTAssertEqual(retained, "other")
+        XCTAssertEqual(retained, other)
     }
 
-    func testLibraryCacheRetainsAtMostThreePagesPerQueryIdentity() async throws {
-        let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
-        for page in 1...4 {
-            try await cache.save(page, namespace: "server|user|1", key: "library|works|query|title|||\(page)")
+    func testAuthenticatedCoverCacheEvictsLeastRecentlyUsedEntryAtCapacity() async throws {
+        let cache = AuthenticatedCoverCache(rootDirectory: temporaryDirectory())
+        for index in 0...200 {
+            try await cache.save(
+                Data([UInt8(index % 255)]),
+                namespace: "server|user|1",
+                key: "cover|work-\(index)"
+            )
+            try await Task.sleep(for: .milliseconds(1))
         }
 
-        let evicted = try await cache.load(Int.self, namespace: "server|user|1", key: "library|works|query|title|||1")
-        let retained = try await cache.load(Int.self, namespace: "server|user|1", key: "library|works|query|title|||4")
-        XCTAssertNil(evicted)
-        XCTAssertEqual(retained, 4)
+        let oldest = try await cache.load(namespace: "server|user|1", key: "cover|work-0")
+        let newest = try await cache.load(namespace: "server|user|1", key: "cover|work-200")
+        XCTAssertNil(oldest)
+        XCTAssertEqual(newest, Data([200]))
     }
 
-    func testInaccessibleWorkPurgesCachedPrivateContentInsteadOfDisplayingIt() async throws {
-        let cache = LibraryCacheStore(rootDirectory: temporaryDirectory())
-        let cached = BookDetailContent(
-            book: work("revoked"),
-            description: "private",
-            tags: [],
-            seriesFacet: nil,
-            authorFacets: [],
-            resources: [],
-            selectedResourceID: nil,
-            readingStatus: .unread,
-            chapters: []
-        )
-        try await cache.save(
-            cached,
-            namespace: contentContext.namespaceKey,
-            key: "work|revoked|default|default"
-        )
-        let store = BookDetailStore(
-            context: contentContext,
-            client: ContentClientStub(),
-            cache: cache,
-            bookID: "revoked",
-            onUnauthorized: {}
+    func testAuthenticatedCoverCacheDeletesLegacyPageCacheWithoutParsingPayloads() throws {
+        let root = temporaryDirectory()
+        let legacyRoot = temporaryDirectory()
+        try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
+        try Data("legacy-page-payload".utf8).write(
+            to: legacyRoot.appendingPathComponent("snapshot.json")
         )
 
-        store.load()
-        for _ in 0..<20 {
-            if case .inaccessible = store.state { break }
-            try await Task.sleep(for: .milliseconds(25))
-        }
+        _ = AuthenticatedCoverCache(rootDirectory: root, legacyRootDirectory: legacyRoot)
 
-        guard case .inaccessible = store.state else {
-            return XCTFail("Expected inaccessible state")
-        }
-        let removed = try await cache.load(
-            BookDetailContent.self,
-            namespace: contentContext.namespaceKey,
-            key: "work|revoked|default|default"
-        )
-        XCTAssertNil(removed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyRoot.path))
     }
 
     func testSingleReadableResourceLoadsChaptersInsteadOfBookContents() async throws {
@@ -322,7 +496,6 @@ final class ContentStoreTests: XCTestCase {
         let store = BookDetailStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             bookID: "browser-work",
             onUnauthorized: {}
         )
@@ -335,7 +508,7 @@ final class ContentStoreTests: XCTestCase {
         let contentsRequestCount = await client.contentsRequestCount
         XCTAssertEqual(chapterRequestCount, 1)
         XCTAssertEqual(contentsRequestCount, 0)
-        guard case .ready(let content, _) = store.state else {
+        guard case .ready(let content) = store.state else {
             return XCTFail("Expected the single-resource detail to remain ready")
         }
         XCTAssertEqual(content.chapters.map(\.state), [.read, .current])
@@ -346,7 +519,6 @@ final class ContentStoreTests: XCTestCase {
         let store = BookDetailStore(
             context: contentContext,
             client: client,
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             bookID: "browser-work",
             onUnauthorized: {}
         )
@@ -402,7 +574,6 @@ final class ContentStoreTests: XCTestCase {
         let store = BookDetailStore(
             context: contentContext,
             client: ProgressContentClient(content: initial),
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             bookID: "reader-work",
             onUnauthorized: {}
         )
@@ -425,7 +596,7 @@ final class ContentStoreTests: XCTestCase {
             chapterTitle: "Chapter 2"
         )
 
-        guard case .ready(let content, _) = store.state else {
+        guard case .ready(let content) = store.state else {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(content.book.progress, 42)
@@ -446,7 +617,7 @@ final class ContentStoreTests: XCTestCase {
             chapterTitle: "Chapter 1"
         )
 
-        guard case .ready(let unchanged, _) = store.state else {
+        guard case .ready(let unchanged) = store.state else {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(unchanged.book.progress, 42)
@@ -466,7 +637,7 @@ final class ContentStoreTests: XCTestCase {
             chapterTitle: "Chapter 1"
         )
 
-        guard case .ready(let reordered, _) = store.state else {
+        guard case .ready(let reordered) = store.state else {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(reordered.book.progress, 55)
@@ -528,7 +699,6 @@ final class ContentStoreTests: XCTestCase {
         let store = BookDetailStore(
             context: contentContext,
             client: ProgressContentClient(content: initial),
-            cache: LibraryCacheStore(rootDirectory: temporaryDirectory()),
             bookID: "position-work",
             onUnauthorized: {}
         )
@@ -552,7 +722,7 @@ final class ContentStoreTests: XCTestCase {
             chapterTitle: "Chapter 2"
         )
 
-        guard case .ready(let content, _) = store.state else {
+        guard case .ready(let content) = store.state else {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(content.book.progress, 15.2)
@@ -632,7 +802,7 @@ final class ContentStoreTests: XCTestCase {
 
 private extension LibraryScopeState {
     var groupingNames: [String] {
-        guard case .ready(let items, _, _, _) = results else { return [] }
+        guard case .ready(let items, _) = results else { return [] }
         return items.compactMap {
             guard case .grouping(let grouping) = $0 else { return nil }
             return grouping.name
@@ -697,6 +867,41 @@ private actor RacingContentClient: ContentClient {
         FacetPage(facet: FacetIdentity(id: query.facetID, kind: query.kind, name: "Facet"), books: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
     }
     func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent { throw ContentClientError.inaccessible }
+    func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
+}
+
+private actor PaginationFailureContentClient: ContentClient {
+    func fetchContinueReading(context: ContentRequestContext) async throws -> ContinueReadingItem? { nil }
+    func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+    func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard] { [] }
+
+    func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage {
+        guard query.page == 1 else { throw ContentClientError.offline }
+        return BookPage(
+            books: [work("page-1")],
+            page: 1,
+            pageSize: query.pageSize,
+            total: 2,
+            totalPages: 2
+        )
+    }
+
+    func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
+        GroupingPage(groups: [], page: 1, pageSize: query.pageSize, total: 0, totalPages: 1)
+    }
+    func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage {
+        FacetPage(
+            facet: FacetIdentity(id: query.facetID, kind: query.kind, name: "Facet"),
+            books: [],
+            page: 1,
+            pageSize: query.pageSize,
+            total: 0,
+            totalPages: 1
+        )
+    }
+    func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent {
+        throw ContentClientError.inaccessible
+    }
     func fetchCoverData(context: ContentRequestContext, reference: CoverReference) async throws -> Data { Data() }
 }
 

@@ -11,6 +11,9 @@ final class DownloadCenterStore: ObservableObject {
     @Published private(set) var records: [ManagedDownloadRecord] = []
     @Published private(set) var storageErrorCode: String?
     @Published var completedSearch = ""
+    #if DEBUG
+    @Published var uiTestResourceFilterID: String?
+    #endif
 
     private let repository: ManagedDownloadStore
     private let transfer: any ManagedDownloadTransferring
@@ -24,7 +27,16 @@ final class DownloadCenterStore: ObservableObject {
 
     var activeRecords: [ManagedDownloadRecord] { records.filter { [.queued, .downloading, .paused].contains($0.state) } }
     var failedRecords: [ManagedDownloadRecord] { records.filter { [.failedRetryable, .failedTerminal].contains($0.state) } }
-    var completedGroups: [ManagedDownloadBookGroup] { ManagedDownloadGrouping.completed(records: records, query: completedSearch) }
+    var completedGroups: [ManagedDownloadBookGroup] {
+        #if DEBUG
+        let projectedRecords = uiTestResourceFilterID.map { resourceID in
+            records.filter { $0.resourceID == resourceID }
+        } ?? records
+        #else
+        let projectedRecords = records
+        #endif
+        return ManagedDownloadGrouping.completed(records: projectedRecords, query: completedSearch)
+    }
     var usedBytes: Int64 { records.filter(\.isVerifiedOfflineCopy).reduce(0) { $0 + $1.receivedBytes } }
 
     func activate(context: ContentRequestContext) {
@@ -122,10 +134,20 @@ final class DownloadCenterStore: ObservableObject {
         return Task {
             do {
                 let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
-                if let completed = record(for: resource.id, assetID: bootstrap.assetID), completed.isVerifiedOfflineCopy, completed.readerType == bootstrap.readerType {
+                if let completed = record(for: resource.id, assetID: bootstrap.assetID),
+                   completed.isVerifiedOfflineCopy,
+                   completed.readerType == bootstrap.readerType,
+                   completed.format == bootstrap.sourceFormat,
+                   completed.mimeType == bootstrap.mimeType {
                     completion(.open(ReaderHandoff(bookID: book.id, resourceID: resource.id, assetID: bootstrap.assetID, title: book.title, resourceTitle: resource.title, format: completed.format, readerType: completed.readerType, source: .verifiedLocal(recordID: completed.id))))
                 } else if bootstrap.readerType.requiresCompleteDownloadBeforeReading {
-                    if let stale = record(for: resource.id), stale.readerType != bootstrap.readerType || stale.assetID != bootstrap.assetID { await removeForReplacement(stale) }
+                    if let stale = record(for: resource.id),
+                       stale.readerType != bootstrap.readerType ||
+                       stale.assetID != bootstrap.assetID ||
+                       stale.format != bootstrap.sourceFormat ||
+                       stale.mimeType != bootstrap.mimeType {
+                        await removeForReplacement(stale)
+                    }
                     try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
                     guard let record = record(for: resource.id, assetID: bootstrap.assetID) else { completion(.unavailable("DOWNLOAD_MANIFEST_WRITE_FAILED")); return }
                     completion(.needsDownload(recordID: record.id))
@@ -181,7 +203,17 @@ final class DownloadCenterStore: ObservableObject {
 
     private func enqueuePrepared(book: BookCard, resource: BookResource, bootstrap: ManagedDownloadBootstrap, context: ContentRequestContext) async throws {
         guard !bootstrap.bookID.isEmpty, bootstrap.bookID == book.id, bootstrap.resourceID == resource.id, !bootstrap.assetID.isEmpty else { throw ManagedDownloadTransferError.invalidResponse }
-        let record = try await repository.enqueue(namespace: context.namespaceKey, book: book, resource: resource, assetID: bootstrap.assetID, readerType: bootstrap.readerType, expectedBytes: bootstrap.expectedBytes)
+        let record = try await repository.enqueue(
+            namespace: context.namespaceKey,
+            book: book,
+            resource: resource,
+            assetID: bootstrap.assetID,
+            sourceFormat: bootstrap.sourceFormat,
+            mimeType: bootstrap.mimeType,
+            readerType: bootstrap.readerType,
+            expectedBytes: bootstrap.expectedBytes,
+            artifactKind: bootstrap.artifactKind
+        )
         replace(record); start(record)
     }
 
@@ -193,22 +225,22 @@ final class DownloadCenterStore: ObservableObject {
 }
 
 struct CompositePrivateContentCache: PrivateContentCacheClearing {
-    let libraryCache: LibraryCacheStore
+    let coverCache: AuthenticatedCoverCache
     let downloads: ManagedDownloadStore
     let reader: (any PrivateContentCacheClearing)?
 
     init(
-        libraryCache: LibraryCacheStore,
+        coverCache: AuthenticatedCoverCache,
         downloads: ManagedDownloadStore,
         reader: (any PrivateContentCacheClearing)? = nil
     ) {
-        self.libraryCache = libraryCache
+        self.coverCache = coverCache
         self.downloads = downloads
         self.reader = reader
     }
 
     func removeNamespace(_ namespace: String) async throws {
-        try await libraryCache.removeNamespace(namespace)
+        try await coverCache.removeNamespace(namespace)
         try await downloads.removeNamespace(namespace)
         try await reader?.removeNamespace(namespace)
     }

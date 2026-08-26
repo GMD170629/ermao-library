@@ -12,7 +12,7 @@ struct ReaderDownloadTransitionView: View {
     let request: ReaderPreparationRequest
     @ObservedObject var store: DownloadCenterStore
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let readerComposition: IosReaderComposition?
 
     @Environment(\.dismiss) private var dismiss
@@ -286,6 +286,7 @@ struct DownloadCenterView: View {
         }
         .listStyle(.plain)
         .settingsListSurface()
+        .accessibilityIdentifier("downloads.screen")
         .navigationTitle("downloads.title")
         .searchable(text: $store.completedSearch, prompt: "downloads.search.prompt")
         .overlay { emptyOverlay }
@@ -377,8 +378,10 @@ struct DownloadCenterView: View {
                                                 .foregroundStyle(theme.textTertiary)
                                         }
                                         .frame(minHeight: .iosMinimumTouchTarget)
+                                        .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityIdentifier("downloads.open.\(record.resourceID)")
                                     .accessibilityHint(Text("downloads.open.hint"))
                                     .contextMenu {
                                         Button("downloads.remove.action", role: .destructive) {

@@ -1,11 +1,9 @@
 package com.ermao.library.shared.modules.library.application
 
-import com.ermao.library.shared.modules.library.ContentSource
 import com.ermao.library.shared.modules.library.LibraryFilters
 import com.ermao.library.shared.modules.library.LibraryScope
 import com.ermao.library.shared.modules.library.LibrarySort
 import com.ermao.library.shared.modules.library.LibraryViewMode
-import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.shared.modules.library.domain.FacetKind
 
 data class LoadedPageWindow(
@@ -42,7 +40,6 @@ data class LibraryScopeSnapshot(
         if (scope == LibraryScope.Books) sort.name else "stable_name",
         if (scope == LibraryScope.Books) viewMode.name else "list",
         if (scope == LibraryScope.Books) filters.readingStatus?.wireValue.orEmpty() else "",
-        if (scope == LibraryScope.Books) filters.downloadedOnly.toString() else "false",
     ).joinToString("|")
 }
 
@@ -55,11 +52,6 @@ sealed interface LibraryContentPhase {
     data object Inaccessible : LibraryContentPhase
 }
 
-sealed interface RefreshPhase {
-    data object Idle : RefreshPhase
-    data object StaleRefreshing : RefreshPhase
-}
-
 sealed interface PaginationPhase {
     data object Idle : PaginationPhase
     data class Loading(val requestKey: String) : PaginationPhase
@@ -69,7 +61,6 @@ sealed interface PaginationPhase {
 data class LibraryDiscoveryScopeState(
     val snapshot: LibraryScopeSnapshot = LibraryScopeSnapshot(),
     val contentPhase: LibraryContentPhase = LibraryContentPhase.InitialLoading,
-    val refreshPhase: RefreshPhase = RefreshPhase.Idle,
     val paginationPhase: PaginationPhase = PaginationPhase.Idle,
 )
 
@@ -78,9 +69,6 @@ data class LibraryDiscoveryState(
     val scopes: Map<LibraryScope, LibraryDiscoveryScopeState> = LibraryScope.entries.associateWith {
         LibraryDiscoveryScopeState()
     },
-    val offlineFilterAvailability: OfflineFilterAvailability = OfflineFilterAvailability.Unavailable(
-        LibraryDiscoveryRuntime.OFFLINE_FILTER_NOT_SUPPORTED,
-    ),
 ) {
     val current: LibraryDiscoveryScopeState get() = scopes.getValue(selectedScope)
 }
@@ -131,23 +119,12 @@ data class LibraryRequestToken(
     val requestKey: String get() = "$queryFingerprint|$page"
 }
 
-sealed interface FilterCommitResult {
-    data object Applied : FilterCommitResult
-    data class Rejected(val reasonCode: String) : FilterCommitResult
-}
-
 /**
  * Shared state owner for Library Discovery. Platform stores retain only coroutine/lifecycle and UI mapping.
  * Network responses are guarded by query identity and generation so an obsolete response cannot mutate state.
  */
-class LibraryDiscoveryRuntime(
-    offlineFilterAvailability: OfflineFilterAvailability = OfflineFilterAvailability.Unavailable(
-        OFFLINE_FILTER_NOT_SUPPORTED,
-    ),
-) {
-    var state: LibraryDiscoveryState = LibraryDiscoveryState(
-        offlineFilterAvailability = offlineFilterAvailability,
-    )
+class LibraryDiscoveryRuntime {
+    var state: LibraryDiscoveryState = LibraryDiscoveryState()
         private set
 
     private val generations = LibraryScope.entries.associateWith { 0L }.toMutableMap()
@@ -172,23 +149,17 @@ class LibraryDiscoveryRuntime(
     fun selectBook(scope: LibraryScope, bookId: String?) =
         updateSnapshot(scope) { it.copy(selectedBookId = bookId) }
 
-    fun applyFilters(filters: LibraryFilters): FilterCommitResult {
-        val availability = state.offlineFilterAvailability
-        if (filters.downloadedOnly && availability is OfflineFilterAvailability.Unavailable) {
-            return FilterCommitResult.Rejected(availability.reasonCode)
-        }
+    fun applyFilters(filters: LibraryFilters) {
         updateSnapshot(LibraryScope.Books) { it.copy(filters = filters) }
-        return FilterCommitResult.Applied
     }
 
-    fun beginInitialRequest(scope: LibraryScope, retainsVisibleContent: Boolean): LibraryRequestToken {
+    fun beginInitialRequest(scope: LibraryScope): LibraryRequestToken {
         val generation = generations.getValue(scope) + 1
         generations[scope] = generation
         val snapshot = state.scopes.getValue(scope).snapshot
         updateScope(scope) {
             it.copy(
-                contentPhase = if (retainsVisibleContent) LibraryContentPhase.Ready else LibraryContentPhase.InitialLoading,
-                refreshPhase = if (retainsVisibleContent) RefreshPhase.StaleRefreshing else RefreshPhase.Idle,
+                contentPhase = LibraryContentPhase.InitialLoading,
                 paginationPhase = PaginationPhase.Idle,
             )
         }
@@ -206,7 +177,7 @@ class LibraryDiscoveryRuntime(
         return token
     }
 
-    fun acceptPage(token: LibraryRequestToken, isEmpty: Boolean, source: ContentSource, isStale: Boolean): Boolean {
+    fun acceptPage(token: LibraryRequestToken, isEmpty: Boolean): Boolean {
         if (!isCurrent(token)) return false
         updateScope(token.scope) { current ->
             val priorWindow = current.snapshot.loadedPageWindow
@@ -218,21 +189,19 @@ class LibraryDiscoveryRuntime(
             current.copy(
                 snapshot = current.snapshot.copy(loadedPageWindow = nextWindow),
                 contentPhase = if (isEmpty) LibraryContentPhase.Empty else LibraryContentPhase.Ready,
-                refreshPhase = if (isStale) RefreshPhase.StaleRefreshing else RefreshPhase.Idle,
                 paginationPhase = PaginationPhase.Idle,
             )
         }
         return true
     }
 
-    fun fail(token: LibraryRequestToken, errorCode: String, hasVisibleContent: Boolean): Boolean {
+    fun fail(token: LibraryRequestToken, errorCode: String): Boolean {
         if (!isCurrent(token)) return false
         updateScope(token.scope) { current ->
             if (token.page > 1) {
                 current.copy(paginationPhase = PaginationPhase.Failed(token.requestKey, errorCode))
             } else {
                 current.copy(
-                    refreshPhase = RefreshPhase.Idle,
                     contentPhase = LibraryContentPhase.InitialError(errorCode),
                 )
             }
@@ -250,7 +219,6 @@ class LibraryDiscoveryRuntime(
                         selectedBookId = null,
                     ),
                     contentPhase = LibraryContentPhase.PermissionRevalidating,
-                    refreshPhase = RefreshPhase.Idle,
                     paginationPhase = PaginationPhase.Idle,
                 )
             },
@@ -263,7 +231,6 @@ class LibraryDiscoveryRuntime(
             it.copy(
                 snapshot = it.snapshot.copy(loadedPageWindow = null, scrollAnchor = null, selectedBookId = null),
                 contentPhase = LibraryContentPhase.Inaccessible,
-                refreshPhase = RefreshPhase.Idle,
                 paginationPhase = PaginationPhase.Idle,
             )
         }
@@ -286,6 +253,5 @@ class LibraryDiscoveryRuntime(
 
     companion object {
         const val SEARCH_DEBOUNCE_MILLIS: Long = 300L
-        const val OFFLINE_FILTER_NOT_SUPPORTED: String = "MANAGED_DOWNLOADS_UNAVAILABLE"
     }
 }

@@ -37,6 +37,7 @@ import com.ermao.library.shared.modules.reader.ReaderRestoreAudioPosition
 import com.ermao.library.shared.modules.reader.ReaderRestorePosition
 import com.ermao.library.shared.modules.reader.ReaderRestorePublicEngineLocator
 import com.ermao.library.shared.modules.reader.ReaderRestoreQuotedText
+import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderRestoreResourceProgression
 import com.ermao.library.shared.modules.reader.ReaderRestoreTotalProgression
 import com.ermao.library.shared.modules.reader.ReaderProgressStore
@@ -195,7 +196,13 @@ internal class ReadiumEpubSession(
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         }
-        val openedPublication = if (source.format == ReaderFormat.Mobi) {
+        val openedPublication = if (source.sourceFormat == ReaderSourceFormat.Fb2) {
+            try {
+                Fb2ReadiumPublicationFactory().open(file, source.displayTitle)
+            } catch (error: IllegalArgumentException) {
+                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), cause = error)
+            }
+        } else if (source.format == ReaderFormat.Mobi) {
             val opened = try {
                 MobiReadiumPublicationFactory().open(file, EpubContentSecurityPolicy::apply)
             } catch (error: MobiPublicationOpenException) {
@@ -309,9 +316,12 @@ internal class ReadiumEpubSession(
             initialPreferences = preferencesMapper.toReadium(_preferences.value),
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onResourceLoadFailed(href: Url, error: ReadError) {
+                    @Suppress("UNUSED_VARIABLE")
+                    val ignoredBoundaryDetails = href to error
                     LOGGER.log(
                         Level.SEVERE,
-                        "reader_epub_resource_load_failed href=$href error=${error.toDebugDescription()}",
+                        "reader_error platform=android format=epub entry=reader stage=resource_load " +
+                            "code=READIUM_RESOURCE_LOAD_FAILED",
                     )
                 }
 

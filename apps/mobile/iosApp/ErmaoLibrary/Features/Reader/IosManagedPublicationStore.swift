@@ -71,9 +71,19 @@ actor IosManagedPublicationStore {
         parserVersion: String,
         normalizationVersion: String
     ) async throws -> IosManagedPublication {
+        if sourceFormat == .imagedir {
+            return try importOriginalPageSet(
+                from: sourceURL,
+                resourceID: resourceID,
+                displayTitle: displayTitle,
+                bookID: bookID,
+                assetID: assetID,
+                namespace: namespace
+            )
+        }
         guard !resourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !displayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              Self.pathExtension(for: sourceFormat) == sourceURL.pathExtension.lowercased(),
+              Self.acceptsSourceExtension(sourceURL.pathExtension, for: sourceFormat),
               !parserVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !normalizationVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
@@ -147,6 +157,60 @@ actor IosManagedPublicationStore {
             assetID: assetID,
             namespace: namespace,
             sourceFormat: sourceFormat
+        )
+    }
+
+    private func importOriginalPageSet(
+        from sourceURL: URL,
+        resourceID: String,
+        displayTitle: String,
+        bookID: String?,
+        assetID: String?,
+        namespace: String?
+    ) throws -> IosManagedPublication {
+        guard !resourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !displayTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw IosReaderFailure(code: .unsupportedFormat)
+        }
+        let sourceBundle = try IosImageDirectoryBundle(directory: sourceURL, expectedResourceID: resourceID)
+        let key = opaqueKey(resourceID)
+        let destination = root.appendingPathComponent(key).appendingPathExtension("image_dir")
+        let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
+        let staging = root.appendingPathComponent(".\(key).\(UUID().uuidString).bundle.partial", isDirectory: true)
+        try requireContained(destination)
+        try requireContained(metadataURL)
+        try requireContained(staging)
+        defer { try? fileManager.removeItem(at: staging) }
+        try fileManager.copyItem(at: sourceURL, to: staging)
+        let stagedBundle = try IosImageDirectoryBundle(directory: staging, expectedResourceID: resourceID)
+        guard stagedBundle.totalBytes == sourceBundle.totalBytes,
+              stagedBundle.artifactID == sourceBundle.artifactID else {
+            throw IosReaderFailure(code: .corruptFile)
+        }
+        let metadata = Metadata(
+            resourceID: resourceID,
+            displayTitle: displayTitle,
+            byteCount: stagedBundle.totalBytes,
+            bookID: bookID,
+            assetID: assetID,
+            namespace: namespace,
+            sourceFormat: ErmaoShared.ReaderSourceFormat.imagedir.wireValue
+        )
+        try installPublication(
+            staging: staging,
+            destination: destination,
+            metadata: try JSONEncoder().encode(metadata),
+            metadataURL: metadataURL
+        )
+        return IosManagedPublication(
+            resourceID: resourceID,
+            displayTitle: displayTitle,
+            fileURL: destination,
+            byteCount: stagedBundle.totalBytes,
+            bookID: bookID,
+            assetID: assetID,
+            namespace: namespace,
+            sourceFormat: .imagedir
         )
     }
 
@@ -263,14 +327,22 @@ actor IosManagedPublicationStore {
         let publicationURL = root.appendingPathComponent(key)
             .appendingPathExtension(Self.pathExtension(for: sourceFormat))
         try requireContained(publicationURL)
-        let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-        guard values.isRegularFile == true, values.isSymbolicLink != true,
-              Int64(values.fileSize ?? -1) > 0,
-              Int64(values.fileSize ?? -1) <= Self.maximumPublicationBytes
-        else {
-            throw IosReaderFailure(code: .corruptFile)
+        let byteCount: Int64
+        if sourceFormat == .imagedir {
+            byteCount = try IosImageDirectoryBundle(
+                directory: publicationURL,
+                expectedResourceID: resourceID
+            ).totalBytes
+        } else {
+            let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true,
+                  Int64(values.fileSize ?? -1) > 0,
+                  Int64(values.fileSize ?? -1) <= Self.maximumPublicationBytes
+            else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            byteCount = Int64(values.fileSize ?? 0)
         }
-        let byteCount = Int64(values.fileSize ?? 0)
         return IosManagedPublication(
             resourceID: metadata.resourceID,
             displayTitle: metadata.displayTitle,
@@ -303,6 +375,7 @@ actor IosManagedPublicationStore {
             root.appendingPathComponent(key).appendingPathExtension("zip"),
             root.appendingPathComponent(key).appendingPathExtension("cbr"),
             root.appendingPathComponent(key).appendingPathExtension("rar"),
+            root.appendingPathComponent(key).appendingPathExtension("image_dir"),
             root.appendingPathComponent(key).appendingPathExtension("pdf"),
             root.appendingPathComponent(key).appendingPathExtension("json"),
         ] where fileManager.fileExists(atPath: url.path) {
@@ -383,8 +456,11 @@ actor IosManagedPublicationStore {
     }
 
     private func requireContained(_ url: URL) throws {
-        let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path + "/"
-        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let resolvedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = resolvedRoot.path + "/"
+        let standardizedURL = url.standardizedFileURL
+        let resolvedParent = standardizedURL.deletingLastPathComponent().resolvingSymlinksInPath()
+        let path = resolvedParent.appendingPathComponent(standardizedURL.lastPathComponent).path
         guard path.hasPrefix(rootPath) else { throw IosReaderFailure(code: .corruptFile) }
     }
 
@@ -438,9 +514,27 @@ actor IosManagedPublicationStore {
         case .txt:
             let data = try Data(contentsOf: url, options: [.mappedIfSafe])
             guard data.count <= 64 * 1_024 * 1_024,
-                  !data.contains(0),
-                  Self.decodeText(data) != nil
+                  IosStrictTxtDecoder.decode(data) != nil
             else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+        case .fb2:
+            let probe = IosManagedPublication(
+                resourceID: "fb2-validation",
+                displayTitle: url.deletingPathExtension().lastPathComponent,
+                fileURL: url,
+                byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
+                bookID: nil,
+                assetID: nil,
+                namespace: nil,
+                sourceFormat: .fb2
+            )
+            do {
+                let publication = try IosFb2PublicationFactory().open(probe)
+                publication.close()
+            } catch IosFb2PublicationError.limitExceeded {
+                throw IosReaderFailure(code: .outOfMemoryRisk)
+            } catch {
                 throw IosReaderFailure(code: .corruptFile)
             }
         case .pdf:
@@ -449,7 +543,7 @@ actor IosManagedPublicationStore {
             guard try handle.read(upToCount: 5) == Data("%PDF-".utf8) else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-        case .cbz, .zip:
+        case .cbz, .zip, .cbr, .rar:
             do {
                 _ = try IosCbzArchiveIndex(fileURL: url)
             } catch IosCbzError.limitExceeded {
@@ -459,8 +553,6 @@ actor IosManagedPublicationStore {
             } catch {
                 throw IosReaderFailure(code: .corruptFile)
             }
-        case .cbr, .rar:
-            throw IosReaderFailure(code: .comicArchiveFormatUnsupported)
         default:
             throw IosReaderFailure(code: .unsupportedFormat)
         }
@@ -509,6 +601,13 @@ actor IosManagedPublicationStore {
         sourceFormat.wireValue
     }
 
+    private static func acceptsSourceExtension(
+        _ pathExtension: String,
+        for sourceFormat: ErmaoShared.ReaderSourceFormat
+    ) -> Bool {
+        pathExtension.lowercased() == Self.pathExtension(for: sourceFormat)
+    }
+
     static func sourceFormat(_ wireValue: String) -> ErmaoShared.ReaderSourceFormat? {
         switch wireValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "epub": .epub
@@ -517,23 +616,15 @@ actor IosManagedPublicationStore {
         case "azw3": .azw3
         case "prc": .prc
         case "txt": .txt
+        case "fb2": .fb2
         case "cbz": .cbz
+        case "zip": .zip
+        case "cbr": .cbr
+        case "rar": .rar
+        case "image_dir": .imagedir
         case "pdf": .pdf
         default: nil
         }
     }
 
-    private static func decodeText(_ data: Data) -> String? {
-        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
-            return String(data: data.dropFirst(3), encoding: .utf8)
-        }
-        if data.starts(with: [0xFF, 0xFE]) {
-            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
-        }
-        if data.starts(with: [0xFE, 0xFF]) {
-            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
-        }
-        return String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
-    }
 }

@@ -160,7 +160,7 @@ class DownloadResourceRuntime(
 private fun DownloadTask.observation(
     kind: DownloadResourceObservationKind,
     transferredBytes: Long = this.transferredBytes,
-    totalBytes: Long = descriptor.source.totalBytes,
+    totalBytes: Long = descriptor.totalBytes,
     artifact: CompletedDownloadArtifact? = null,
     error: AppError? = null,
 ) = DownloadResourceObservation(

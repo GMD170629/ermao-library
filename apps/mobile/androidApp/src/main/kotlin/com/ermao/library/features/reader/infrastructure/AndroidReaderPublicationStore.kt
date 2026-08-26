@@ -16,7 +16,6 @@ import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.util.Locale
 import java.util.zip.ZipFile
 import com.ermao.library.mobi.infrastructure.MobiReadiumPublicationFactory
 import kotlinx.coroutines.Dispatchers
@@ -251,13 +250,16 @@ internal class AndroidReaderPublicationStore(
     ) {
         when (sourceFormat) {
             ReaderSourceFormat.Epub -> validateEpubArchive(file)
+            ReaderSourceFormat.ImageDir,
+            ReaderSourceFormat.AudiobookDir,
+            -> throw IllegalArgumentException("Reader source format is not a local publication")
+            ReaderSourceFormat.Fb2 -> Fb2ReadiumPublicationFactory().open(file, file.nameWithoutExtension).close()
             ReaderSourceFormat.Txt -> validateText(file)
             ReaderSourceFormat.Cbz,
             ReaderSourceFormat.Zip,
-            -> validateComicArchive(file)
             ReaderSourceFormat.Cbr,
             ReaderSourceFormat.Rar,
-            -> throw IllegalArgumentException("RAR comic archives are available through server page streaming only")
+            -> validateComicArchive(file)
             ReaderSourceFormat.Pdf -> validatePdf(file)
             ReaderSourceFormat.Mobi,
             ReaderSourceFormat.Azw,
@@ -283,30 +285,7 @@ internal class AndroidReaderPublicationStore(
     }
 
     private fun validateComicArchive(file: File) {
-        ZipFile(file).use { archive ->
-            val seen = mutableSetOf<String>()
-            var imageCount = 0
-            var expandedBytes = 0L
-            val entries = archive.entries().asSequence().toList()
-            require(entries.size in 1..MAX_COMIC_ENTRIES) { "CBZ entry count is invalid" }
-            entries.forEach { entry ->
-                val name = entry.name
-                require(isSafeComicArchiveEntryPath(name, entry.isDirectory)) { "CBZ entry path is unsafe" }
-                require(seen.add(name.lowercase(Locale.ROOT))) { "CBZ contains duplicate entry names" }
-                require(entry.method != java.util.zip.ZipEntry.STORED || entry.compressedSize == entry.size) {
-                    "CBZ stored entry metadata is invalid"
-                }
-                if (!entry.isDirectory) {
-                    require(entry.size in 0..MAX_COMIC_ENTRY_BYTES) { "CBZ entry exceeds the size limit" }
-                    expandedBytes += entry.size
-                    require(expandedBytes <= MAX_COMIC_EXPANDED_BYTES) { "CBZ expands beyond the size limit" }
-                    if (name.substringAfterLast('.', "").lowercase(Locale.ROOT) in COMIC_IMAGE_EXTENSIONS) {
-                        imageCount += 1
-                    }
-                }
-            }
-            require(imageCount > 0) { "CBZ has no supported image pages" }
-        }
+        CbzReadiumPublicationFactory().indexPages(file)
     }
 
     private fun validatePdf(file: File) {
@@ -330,12 +309,8 @@ internal class AndroidReaderPublicationStore(
         private const val MAX_PUBLICATION_BYTES = 512L * 1024 * 1024
         private const val MAXIMUM_MIMETYPE_BYTES = 64L
         private const val MAX_TEXT_BYTES = 64L * 1024 * 1024
-        private const val MAX_COMIC_ENTRIES = 10_000
-        private const val MAX_COMIC_ENTRY_BYTES = 128L * 1024 * 1024
-        private const val MAX_COMIC_EXPANDED_BYTES = 2L * 1024 * 1024 * 1024
         private const val EPUB_MIME_TYPE = "application/epub+zip"
         private val PDF_HEADER = "%PDF-".toByteArray(Charsets.US_ASCII)
-        private val COMIC_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp")
         private val SUPPORTED_LOCAL_FORMATS = setOf(
             ReaderFormat.Epub,
             ReaderFormat.Mobi,

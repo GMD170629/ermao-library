@@ -38,7 +38,7 @@ from app.modules.publications.domain.model import (
 from app.modules.publications.domain.model import (
     PublicationTocEntry as DomainPublicationTocEntry,
 )
-from app.modules.publications.infrastructure.locator_dom import WEB_SECURITY_PROFILE
+from app.modules.publications.domain.security import WEB_SECURITY_PROFILE
 from app.modules.publications.presentation.schemas import (
     PositionLocations,
     PublicationLink,

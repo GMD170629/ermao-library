@@ -45,6 +45,11 @@ MAX_SECTIONS = 10_000
 MAX_XML_ELEMENTS = 200_000
 MAX_XML_DEPTH = 128
 _UNSAFE_XML_DECLARATION = re.compile(rb"<!DOCTYPE\b|<!ENTITY\b", re.IGNORECASE)
+_XLINK_NAMESPACE_DECLARATION = re.compile(
+    rb"\bxmlns:xlink\s*=\s*(['\"])http://www\.w3\.org/1999/xlink\1"
+)
+_L_NAMESPACE_DECLARATION = re.compile(rb"\bxmlns:l\s*=")
+_LEGACY_L_HREF_ATTRIBUTE = re.compile(rb"(?P<spacing>\s)l:href(?P<equals>\s*=)")
 _STYLESHEET_HREF = "fb2/reader.css"
 _STYLESHEET = b"""body {
   margin: 0; padding: 1rem; line-height: 1.6; overflow-wrap: anywhere;
@@ -116,6 +121,7 @@ def _xml_root(content: bytes) -> ElementTree.Element:
         raise PublicationCorruptError("FB2 source exceeds the size limit")
     if _UNSAFE_XML_DECLARATION.search(content):
         raise PublicationCorruptError("active XML declarations are not allowed")
+    content = _normalize_legacy_link_prefix(content)
     try:
         root = ElementTree.fromstring(content)
     except ElementTree.ParseError as error:
@@ -124,6 +130,25 @@ def _xml_root(content: bytes) -> ElementTree.Element:
         raise PublicationCorruptError("FB2 root element is invalid")
     _validate_tree_shape(root)
     return root
+
+
+def _normalize_legacy_link_prefix(content: bytes) -> bytes:
+    """Repair the common FB2 `l:href` / `xmlns:xlink` namespace mismatch.
+
+    Some otherwise valid reading-media fixtures declare the standard XLink
+    namespace under `xlink` but use the conventional FB2 `l:href` spelling.
+    Rebinding only that attribute to the already-declared namespace keeps the
+    original file untouched and does not make arbitrary undeclared prefixes
+    parseable.
+    """
+
+    if (
+        _L_NAMESPACE_DECLARATION.search(content)
+        or not _XLINK_NAMESPACE_DECLARATION.search(content)
+        or not _LEGACY_L_HREF_ATTRIBUTE.search(content)
+    ):
+        return content
+    return _LEGACY_L_HREF_ATTRIBUTE.sub(rb"\g<spacing>xlink:href\g<equals>", content)
 
 
 def _validate_tree_shape(root: ElementTree.Element) -> None:

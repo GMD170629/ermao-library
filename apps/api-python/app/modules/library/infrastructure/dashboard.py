@@ -16,25 +16,20 @@ from app.core.authorization import (
     resource_visibility_predicate,
 )
 from app.models import (
-    DownloadTask,
     Library,
     LibraryBook,
     LibraryBookMetadata,
-    LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    OrganizeJob,
     ReaderResourceProgress,
-    SystemEvent,
 )
 from app.modules.library.application.dashboard import (
     DashboardActivityQueryPort,
     DashboardContinueReading,
 )
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
-from app.modules.library.infrastructure.books import entity_record
 
 
 def _visible_book_filter(context: AuthorizationContext):
@@ -264,63 +259,6 @@ def continue_reading_progress(
     }
 
 
-def management_card_counts(db: Session) -> dict[str, int]:
-    failed_imports = int(
-        db.scalar(
-            select(func.count())
-            .select_from(LibraryImportTask)
-            .where(LibraryImportTask.state == "FAILED")
-        )
-        or 0
-    )
-    failed_downloads = int(
-        db.scalar(
-            select(func.count())
-            .select_from(DownloadTask)
-            .where(DownloadTask.status == "failed")
-        )
-        or 0
-    )
-    pending_organize = int(
-        db.scalar(
-            select(func.count())
-            .select_from(OrganizeJob)
-            .where(
-                OrganizeJob.status.in_(
-                    (
-                        "LOOKUP_PENDING",
-                        "PENDING",
-                        "QUEUED",
-                        "RUNNING",
-                        "RETRY_WAIT",
-                        "REVIEWING",
-                        "FAILED",
-                    )
-                )
-            )
-        )
-        or 0
-    )
-    storage = int(
-        db.scalar(
-            select(func.coalesce(func.sum(LibrarySourceNode.observed_size_bytes), 0))
-            .select_from(LibraryResourceAsset)
-            .join(
-                LibrarySourceNode,
-                LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
-            )
-            .where(LibraryResourceAsset.import_state == "READY")
-        )
-        or 0
-    )
-    return {
-        "failedImports": failed_imports,
-        "failedDownloads": failed_downloads,
-        "pendingOrganize": pending_organize,
-        "managedStorageBytes": storage,
-    }
-
-
 def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, Any]]:
     rows = db.execute(
         select(
@@ -338,7 +276,6 @@ def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, An
         .order_by(LibraryBook.updated_at.desc(), LibraryBook.id.desc())
         .limit(limit)
     ).all()
-    book_ids = [str(row.id) for row in rows]
     return [
         {
             "id": row.id,
@@ -351,13 +288,6 @@ def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, An
         }
         for row in rows
     ]
-
-
-def recent_system_events(db: Session, *, limit: int = 8) -> list[dict[str, Any]]:
-    rows = db.scalars(
-        select(SystemEvent).order_by(SystemEvent.created_at.desc()).limit(limit)
-    ).all()
-    return [entity_record(row) for row in rows]
 
 
 class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):

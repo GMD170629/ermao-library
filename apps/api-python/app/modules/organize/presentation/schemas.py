@@ -7,8 +7,8 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
+from app.contracts.library_views import BookView
 from app.contracts.metadata_writeback import MetadataWritebackOperationContract
-from app.modules.library.public import BookView
 
 
 class OrganizeRules(HttpContractModel):

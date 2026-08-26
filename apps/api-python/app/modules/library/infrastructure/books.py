@@ -10,7 +10,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
-from app.models import LibraryBook, LibraryBookMetadata, LibraryReadableResource
+from app.models import (
+    LibraryBook,
+    LibraryBookFacet,
+    LibraryBookMetadata,
+    LibraryFacet,
+    LibraryReadableResource,
+)
 from app.modules.library.domain.facets import normalize_facet_name
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
 
@@ -86,6 +92,7 @@ def _book_record(
     metadata: LibraryBookMetadata | None,
     effective_cover_path: str | None = None,
     resource_import_summary: ResourceImportSummary | None = None,
+    tags: Collection[str] = (),
 ) -> dict[str, Any]:
     cover_path = effective_cover_path or (metadata.cover_path if metadata else None)
     import_summary = resource_import_summary or ResourceImportSummary()
@@ -102,6 +109,7 @@ def _book_record(
         "description": metadata.description if metadata else None,
         "seriesName": metadata.series_name if metadata else None,
         "seriesIndex": metadata.series_index if metadata else None,
+        "tags": list(tags),
         "coverPath": cover_path,
         "coverStatus": "READY"
         if effective_cover_path
@@ -125,6 +133,32 @@ def _book_statement(book_ids: str | Collection[str] | None = None):
     return statement
 
 
+def _tag_names_by_book(
+    db: Session,
+    book_ids: Collection[str],
+) -> dict[str, tuple[str, ...]]:
+    unique_book_ids = tuple(dict.fromkeys(str(book_id) for book_id in book_ids))
+    result: dict[str, list[str]] = {book_id: [] for book_id in unique_book_ids}
+    if not unique_book_ids:
+        return {}
+    rows = db.execute(
+        select(LibraryBookFacet.book_id, LibraryFacet.name)
+        .join(LibraryFacet, LibraryFacet.id == LibraryBookFacet.facet_id)
+        .where(
+            LibraryBookFacet.book_id.in_(unique_book_ids),
+            LibraryFacet.kind == "TAG",
+        )
+        .order_by(
+            LibraryBookFacet.book_id.asc(),
+            LibraryBookFacet.sort_order.asc(),
+            LibraryFacet.id.asc(),
+        )
+    ).all()
+    for book_id, name in rows:
+        result[str(book_id)].append(str(name))
+    return {book_id: tuple(names) for book_id, names in result.items()}
+
+
 def get_visible_book(db: Session, book_id: str) -> dict[str, Any] | None:
     row = db.execute(
         _book_statement(book_id).where(LibraryBook.visibility_state == "VISIBLE")
@@ -133,7 +167,8 @@ def get_visible_book(db: Session, book_id: str) -> dict[str, Any] | None:
         return None
     cover_path = SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
     import_summary = resource_import_summaries(db, (book_id,))[book_id]
-    return _book_record(row[0], row[1], cover_path, import_summary)
+    tags = _tag_names_by_book(db, (book_id,))[book_id]
+    return _book_record(row[0], row[1], cover_path, import_summary, tags)
 
 
 def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
@@ -142,7 +177,8 @@ def get_book(db: Session, book_id: str) -> dict[str, Any] | None:
         return None
     cover_path = SqlAlchemyBookCoverQueries(db).preferred_paths((book_id,)).get(book_id)
     import_summary = resource_import_summaries(db, (book_id,))[book_id]
-    return _book_record(row[0], row[1], cover_path, import_summary)
+    tags = _tag_names_by_book(db, (book_id,))[book_id]
+    return _book_record(row[0], row[1], cover_path, import_summary, tags)
 
 
 def list_books_by_ids(
@@ -154,12 +190,14 @@ def list_books_by_ids(
     rows = db.execute(_book_statement(book_ids)).all()
     cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(tuple(book_ids))
     import_summaries = resource_import_summaries(db, book_ids)
+    tags_by_book = _tag_names_by_book(db, book_ids)
     by_id = {
         str(row[0].id): _book_record(
             row[0],
             row[1],
             cover_paths.get(str(row[0].id)),
             import_summaries[str(row[0].id)],
+            tags_by_book[str(row[0].id)],
         )
         for row in rows
     }

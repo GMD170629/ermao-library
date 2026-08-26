@@ -98,7 +98,6 @@ struct AdministrativeSettingsDestination: View {
         case .categoryGovernance: CategoryGovernanceView(store: store)
         case .metadataProviders: MetadataProvidersView(store: store)
         case let .metadataProvider(providerID): MetadataProviderDetailView(store: store, providerID: providerID)
-        case .metadataPipeline: MetadataPipelineView(store: store)
         case .opds: OPDSSettingsView(store: store)
         case .backups: BackupsView(store: store)
         case .workDetailOrder: WorkDetailOrderView(store: store)
@@ -167,7 +166,7 @@ struct AdministrativeNoticeView: View {
                     .frame(minWidth: .iosMinimumTouchTarget, minHeight: .iosMinimumTouchTarget)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
+            .accessibilityLabel(Text("common.close"))
         }
         .padding(.horizontal, .space2)
         .background(theme.surface)

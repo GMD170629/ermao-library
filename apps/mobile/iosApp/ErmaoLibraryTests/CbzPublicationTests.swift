@@ -11,7 +11,7 @@ final class CbzPublicationTests: XCTestCase {
         ])
         defer { try? FileManager.default.removeItem(at: url) }
         let index = try IosCbzArchiveIndex(fileURL: url)
-        XCTAssertEqual(index.pages.map(\.resourceHref), ["pages/2.jpg", "pages/10.png"])
+        XCTAssertEqual(index.pages.map(\.resourceHref), ["pages/0", "pages/1"])
         XCTAssertEqual(index.pages.map(\.pageIndex), [0, 1])
         XCTAssertNoThrow(try index.requireCanonicalPages(index.pages))
         XCTAssertThrowsError(try index.requireCanonicalPages(Array(index.pages.reversed())))
@@ -36,11 +36,38 @@ final class CbzPublicationTests: XCTestCase {
         XCTAssertThrowsError(try IosCbzArchiveIndex(fileURL: url))
     }
 
+    func testReadsOriginalRar5AndCbrPagesOnPhysicalDevice() throws {
+        for (name, extensionName) in [("04 归山", "cbr"), ("02 雨师借伞", "rar")] {
+            let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: extensionName))
+            let index = try IosCbzArchiveIndex(fileURL: url)
+            XCTAssertFalse(index.pages.isEmpty)
+            XCTAssertEqual(index.pages.map(\.pageIndex), Array(index.pages.indices))
+            XCTAssertEqual(index.pages.map(\.resourceHref), index.pages.indices.map { "pages/\($0)" })
+            let core = try IosArchiveCore(fileURL: url)
+            defer { core.close() }
+            let firstPage = try core.readPage(at: 0)
+            XCTAssertGreaterThan(firstPage.count, 16)
+            XCTAssertNotNil(detectImageMime(firstPage))
+            XCTAssertEqual(IosArchiveCore.version, "libarchive 3.8.9")
+        }
+    }
+
     private struct Entry {
         let name: String
         let bytes: Data
         var flags: UInt16 = 0x0800
         var unixMode: UInt16 = 0
+    }
+
+    private func detectImageMime(_ data: Data) -> String? {
+        if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return "image/jpeg" }
+        if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
+        if data.count >= 6, String(data: data.prefix(6), encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true {
+            return "image/gif"
+        }
+        if data.count >= 12, String(data: data.prefix(4), encoding: .ascii) == "RIFF",
+           String(data: data[8 ..< 12], encoding: .ascii) == "WEBP" { return "image/webp" }
+        return nil
     }
 
     private func makeArchive(_ entries: [Entry]) throws -> URL {

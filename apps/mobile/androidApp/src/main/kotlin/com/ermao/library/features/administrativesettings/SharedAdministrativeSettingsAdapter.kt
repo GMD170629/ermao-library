@@ -26,10 +26,14 @@ import com.ermao.library.shared.modules.administrativesettings.ManagedUser as Sh
 import com.ermao.library.shared.modules.administrativesettings.ManagedUserRole as SharedUserRole
 import com.ermao.library.shared.modules.administrativesettings.ManagedUserStatus as SharedUserStatus
 import com.ermao.library.shared.modules.administrativesettings.ManagementEventFilter as SharedEventFilter
-import com.ermao.library.shared.modules.administrativesettings.MediaKind as SharedMediaKind
+import com.ermao.library.shared.modules.administrativesettings.EventMetadataValue as SharedEventMetadataValue
+import com.ermao.library.shared.modules.administrativesettings.domain.EventMetadataValue.Decimal as SharedEventMetadataDecimal
+import com.ermao.library.shared.modules.administrativesettings.domain.EventMetadataValue.Integer as SharedEventMetadataInteger
+import com.ermao.library.shared.modules.administrativesettings.domain.EventMetadataValue.Text as SharedEventMetadataText
+import com.ermao.library.shared.modules.administrativesettings.domain.EventMetadataValue.Toggle as SharedEventMetadataToggle
 import com.ermao.library.shared.modules.administrativesettings.LibraryOrganizationMode as SharedLibraryOrganizationMode
-import com.ermao.library.shared.modules.administrativesettings.MetadataPipelineEntry as SharedPipelineEntry
 import com.ermao.library.shared.modules.administrativesettings.MetadataProvider as SharedProvider
+import com.ermao.library.shared.modules.administrativesettings.MetadataProviderOrderItem as SharedProviderOrderItem
 import com.ermao.library.shared.modules.administrativesettings.MetadataProviderUpdate as SharedProviderUpdate
 import com.ermao.library.shared.modules.administrativesettings.LibraryDraft as SharedLibraryDraft
 import com.ermao.library.shared.modules.administrativesettings.OrganizeJobFilter as SharedOrganizeFilter
@@ -49,7 +53,6 @@ class SharedAdministrativeSettingsAdapter(
     private val maximumBackupBytes: Int = 512 * 1024 * 1024,
 ) : AdministrativeSettingsRepository {
     private var currentHealthRun: SharedHealthRun? = null
-    private var currentQueueOperationId: String? = null
 
     override suspend fun load(
         context: AdministrativeSettingsContext,
@@ -83,6 +86,11 @@ class SharedAdministrativeSettingsAdapter(
                         id = task.id,
                         fileName = task.kind,
                         sourcePath = task.sourceNodeId ?: task.resourceId ?: task.libraryId,
+                        libraryName = task.libraryName,
+                        resourceTitle = task.resourceTitle,
+                        sourceName = task.sourceName,
+                        sourceRelativePath = task.sourceRelativePath,
+                        bookTitle = task.bookTitle,
                         createdAtLabel = task.createdAt,
                         status = task.state.toLocal(),
                         statusCode = task.errorSummary,
@@ -125,13 +133,9 @@ class SharedAdministrativeSettingsAdapter(
             CategoryGovernanceSnapshot(route.kind, page.categories.map { CategoryEntry(it.id, it.name, it.aliases, it.bookCount, false) })
         }
         AdministrativeSettingsRoute.MetadataProviders -> sharedRepository.loadMetadataProviders(sharedContext).map { result ->
-            MetadataProvidersSnapshot(result.providers.map(SharedProvider::toLocal), result.pipelines.joinToString(" · ") { it.mediaKind.wireValue })
+            MetadataProvidersSnapshot(result.providers.map(SharedProvider::toLocal))
         }
         is AdministrativeSettingsRoute.MetadataProviderEdit -> sharedRepository.loadMetadataProvider(sharedContext, route.providerId).map { it.toEditor() }
-        is AdministrativeSettingsRoute.MetadataPipeline -> sharedRepository.loadMetadataProviders(sharedContext).map { result ->
-            val pipeline = result.pipelines.firstOrNull { it.mediaKind == route.mediaKind.toShared() }
-            MetadataPipelineSnapshot(pipeline?.providers.orEmpty().sortedBy { it.position }.map { MetadataPipelineStep(it.providerId, it.name, it.enabled) })
-        }
         AdministrativeSettingsRoute.Opds -> sharedRepository.loadOpdsSettings(sharedContext).map {
             OpdsSnapshot(it.enabled, it.configured, it.publicBaseUrl.orEmpty(), it.catalogUrl.orEmpty())
         }
@@ -186,13 +190,8 @@ class SharedAdministrativeSettingsAdapter(
         is AdministrativeCommand.DeleteCategory -> sharedRepository.deleteCategory(sharedContext, command.categoryId).receipt(command)
         is AdministrativeCommand.UndoLibraryOperation -> sharedRepository.undoLibraryOperation(sharedContext, command.operationId).receipt(command)
         is AdministrativeCommand.SaveMetadataProviders -> saveMetadataProviders(command)
-        is AdministrativeCommand.SaveMetadataProvider -> sharedRepository.updateMetadataProvider(
-            sharedContext, command.draft.id, command.draft.toShared(),
-        ).receipt(command)
+        is AdministrativeCommand.SaveMetadataProvider -> saveMetadataProvider(command)
         is AdministrativeCommand.TestMetadataProvider -> sharedRepository.testMetadataProvider(sharedContext, command.providerId).receipt(command)
-        is AdministrativeCommand.SaveMetadataPipeline -> sharedRepository.updateMetadataPipeline(
-            sharedContext, command.mediaKind.toShared(), command.steps.map { SharedPipelineEntry(it.id, it.enabled) },
-        ).receipt(command)
         is AdministrativeCommand.SaveOpds -> sharedRepository.updateOpdsSettings(sharedContext, command.enabled, command.publicBaseUrl.ifBlank { null }).receipt(command)
         AdministrativeCommand.CreateBackup -> sharedRepository.createBackup(sharedContext).receipt(command)
         is AdministrativeCommand.DownloadBackup -> sharedRepository.downloadBackup(sharedContext, command.backupId, maximumBackupBytes).map { file ->
@@ -211,10 +210,6 @@ class SharedAdministrativeSettingsAdapter(
         AdministrativeCommand.RunHealthCheck -> sharedRepository.startHealthRun(sharedContext).map { run ->
             currentHealthRun = run
             AdministrativeCommandReceipt(setOf(AdministrativeSettingsRoute.Health(run.runId)))
-        }
-        AdministrativeCommand.RestartImportQueue -> sharedRepository.restartImportQueue(sharedContext).map { operation ->
-            currentQueueOperationId = operation.id
-            AdministrativeCommandReceipt(setOf(command.ownerRoute))
         }
         is AdministrativeCommand.SaveLogCapacity -> sharedRepository.updateLogCapacity(sharedContext, command.megabytes.toLong() * 1024L * 1024L).receipt(command)
         is AdministrativeCommand.ExportLogs -> exportLogs(command)
@@ -290,8 +285,11 @@ class SharedAdministrativeSettingsAdapter(
         return sharedRepository.listImportTaskLogs(sharedContext, taskId).map { page ->
             ImportTaskDetailSnapshot(
                 task = task.toLocal(),
-                requestedTitle = null,
-                requestedAuthor = null,
+                libraryName = task.libraryName,
+                resourceTitle = task.resourceTitle,
+                sourceName = task.sourceName,
+                sourceRelativePath = task.sourceRelativePath,
+                bookTitle = task.bookTitle,
                 processedAssetCount = 0,
                 assetCount = 0,
                 attempts = 0,
@@ -310,21 +308,12 @@ class SharedAdministrativeSettingsAdapter(
             }
             else -> currentHealthRun
         }
-        val operation = currentQueueOperationId?.let { operationId ->
-            when (val result = sharedRepository.loadQueueOperation(sharedContext, operationId)) {
-                is SharedContent -> result.value
-                is SharedFailure -> return result.toLocalFailure()
-            }
-        }
         if (run == null) {
             return AdministrativeResult.Content(
-                HealthSnapshot(
-                    null, null, null, 0, 0, emptyList(), operation?.status.isActiveQueueStatus(),
-                    operation?.id, operation?.status, operation?.messageCode,
-                ),
+                HealthSnapshot(null, null, null, 0, 0, emptyList()),
             )
         }
-        return AdministrativeResult.Content(run.toLocal(operation?.id, operation?.status, operation?.messageCode))
+        return AdministrativeResult.Content(run.toLocal())
     }
 
     private suspend fun loadLogs(): AdministrativeResult<AdministrativePageSnapshot> {
@@ -336,7 +325,7 @@ class SharedAdministrativeSettingsAdapter(
             LogsSnapshot(
                 LogQuery(), (page.storage.sizeBytes / 1_048_576L).toInt(), (page.storage.maximumBytes / 1_048_576L).toInt(),
                 page.events.map { event ->
-                    LogRecord(event.id, event.createdAt.orEmpty(), event.level.toLogLevel(), event.source, event.message, event.metadata["correlation_id"], event.targetId)
+                    LogRecord(event.id, event.createdAt.orEmpty(), event.level.toLogLevel(), event.source, event.message, event.metadata["correlation_id"].asText(), event.targetId)
                 },
             ),
         )
@@ -418,19 +407,25 @@ class SharedAdministrativeSettingsAdapter(
     }
 
     private suspend fun saveMetadataProviders(command: AdministrativeCommand.SaveMetadataProviders): AdministrativeResult<AdministrativeCommandReceipt> {
-        for (provider in command.providers) {
-            val existing = when (val result = sharedRepository.loadMetadataProvider(sharedContext, provider.id)) {
-                is SharedContent -> result.value
-                is SharedFailure -> return result.toLocalFailure()
-            }
-            when (val result = sharedRepository.updateMetadataProvider(
-                sharedContext, provider.id, SharedProviderUpdate(provider.enabled, provider.priority, existing.config, emptyList()),
-            )) {
-                is SharedContent -> Unit
-                is SharedFailure -> return result.toLocalFailure()
-            }
+        return sharedRepository.updateMetadataProviderOrder(
+            sharedContext,
+            command.providers.map { SharedProviderOrderItem(it.id, it.enabled) },
+        ).receipt(command)
+    }
+
+    private suspend fun saveMetadataProvider(command: AdministrativeCommand.SaveMetadataProvider): AdministrativeResult<AdministrativeCommandReceipt> {
+        when (val result = sharedRepository.updateMetadataProvider(sharedContext, command.draft.id, command.draft.toShared())) {
+            is SharedFailure -> return result.toLocalFailure()
+            is SharedContent -> Unit
         }
-        return AdministrativeResult.Content(AdministrativeCommandReceipt(setOf(command.ownerRoute)))
+        val providers = when (val result = sharedRepository.loadMetadataProviders(sharedContext)) {
+            is SharedFailure -> return result.toLocalFailure()
+            is SharedContent -> result.value.providers
+        }
+        return sharedRepository.updateMetadataProviderOrder(
+            sharedContext,
+            providers.map { SharedProviderOrderItem(it.id, if (it.id == command.draft.id) command.draft.enabled else it.enabled) },
+        ).receipt(command)
     }
 
     private suspend fun exportLogs(command: AdministrativeCommand.ExportLogs): AdministrativeResult<AdministrativeCommandReceipt> {
@@ -494,8 +489,9 @@ private fun com.ermao.library.shared.modules.administrativesettings.KindleTaskSt
     SharedKindleTaskStatus.Queued -> QueueStatus.Queued
     SharedKindleTaskStatus.Sending -> QueueStatus.Running
     SharedKindleTaskStatus.Sent -> QueueStatus.Completed
-    SharedKindleTaskStatus.Failed, SharedKindleTaskStatus.Unknown -> QueueStatus.Failed
+    SharedKindleTaskStatus.Failed -> QueueStatus.Failed
     SharedKindleTaskStatus.Cancelled -> QueueStatus.Cancelled
+    SharedKindleTaskStatus.Unknown -> QueueStatus.Unknown
 }
 
 private fun SharedImportTaskState.toLocal(): QueueStatus = when (this) {
@@ -509,6 +505,11 @@ private fun com.ermao.library.shared.modules.administrativesettings.ImportTask.t
     id = id,
     fileName = kind,
     sourcePath = sourceNodeId ?: resourceId ?: libraryId,
+    libraryName = libraryName,
+    resourceTitle = resourceTitle,
+    sourceName = sourceName,
+    sourceRelativePath = sourceRelativePath,
+    bookTitle = bookTitle,
     createdAtLabel = createdAt,
     status = state.toLocal(),
     statusCode = errorSummary,
@@ -537,6 +538,14 @@ private fun com.ermao.library.shared.modules.administrativesettings.ImportScanJo
 private fun com.ermao.library.shared.modules.administrativesettings.LibraryOperation.toLocal() = LibraryOperationSummary(
     id, action, status, summary, createdAt, expiresAt, undoAvailable,
 )
+
+private fun SharedEventMetadataValue?.asText(): String? = when (this) {
+    is SharedEventMetadataText -> value
+    is SharedEventMetadataInteger -> value.toString()
+    is SharedEventMetadataDecimal -> value.toString()
+    is SharedEventMetadataToggle -> value.toString()
+    else -> null
+}
 
 private fun com.ermao.library.shared.modules.administrativesettings.OrganizeJob.toLocal() = OrganizeTask(
     id, book.title, book.author.orEmpty(),
@@ -648,13 +657,7 @@ private fun ProviderFieldValue.toShared(): SharedProviderValue = when (this) {
     ProviderFieldValue.Empty -> SharedProviderValue.Empty
 }
 
-private fun MetadataProviderDraft.toShared() = SharedProviderUpdate(enabled, priority, fields.mapValues { it.value.toShared() }, clearSecrets.toList())
-
-private fun MediaKind.toShared() = when (this) {
-    MediaKind.Ebook -> SharedMediaKind.Ebook
-    MediaKind.Comic -> SharedMediaKind.Comic
-    MediaKind.Audiobook -> SharedMediaKind.Audiobook
-}
+private fun MetadataProviderDraft.toShared() = SharedProviderUpdate(fields.mapValues { it.value.toShared() }, clearSecrets.toList())
 
 private fun SmtpEncryption.toShared() = when (this) {
     SmtpEncryption.None -> SharedSmtpSecurity.None
@@ -676,18 +679,12 @@ private fun SmtpSettingsDraft.toShared() = SharedSmtpUpdate(
     host, port, encryption.toShared(), username, newPassword, senderEmail, senderName, maximumAttachmentMegabytes, false,
 )
 
-private fun SharedHealthRun.toLocal(
-    queueOperationId: String?,
-    queueOperationStatus: String?,
-    queueOperationMessageCode: String?,
-) = HealthSnapshot(
+private fun SharedHealthRun.toLocal() = HealthSnapshot(
     runId, startedAt.toString(), status.toLocal(), summary.ok, summary.total,
     items.map { item ->
         HealthCheck(item.id, item.labelCode, item.group.toHealthGroup(), item.status.toLocal(), item.messageCode)
-    }, queueOperationStatus.isActiveQueueStatus(), queueOperationId, queueOperationStatus, queueOperationMessageCode,
+    },
 )
-
-private fun String?.isActiveQueueStatus(): Boolean = this?.lowercase() in setOf("pending", "queued", "running", "processing")
 
 private fun SharedHealthRunStatus.toLocal() = when (this) {
     SharedHealthRunStatus.Running -> HealthStatus.Checking

@@ -148,7 +148,6 @@ class KtorAdministrativeSettingsRepositoryTest {
             Response(200, OPDS),
             Response(201, BACKUP_PAYLOAD),
             Response(200, HEALTH_RUN),
-            Response(202, QUEUE_OPERATION),
             Response(200, EVENTS),
             Response(200, LOG_SETTINGS),
         )
@@ -159,7 +158,6 @@ class KtorAdministrativeSettingsRepositoryTest {
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadOpdsSettings(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.createBackup(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.startHealthRun(context()))
-        assertIs<AdministrativeSettingsContent<*>>(harness.repository.restartImportQueue(context()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.listManagementEvents(context(), ManagementEventFilter()))
         assertIs<AdministrativeSettingsContent<*>>(harness.repository.loadLogSettings(context()))
 
@@ -172,7 +170,6 @@ class KtorAdministrativeSettingsRepositoryTest {
                 "/base/api/system-settings/opds",
                 "/base/api/backups",
                 "/base/api/system/health/runs",
-                "/base/api/system/queues/import/restart",
                 "/base/api/management/events",
                 "/base/api/system/log-settings",
             ),
@@ -261,7 +258,7 @@ class KtorAdministrativeSettingsRepositoryTest {
     fun localizedMessagesNeverEscapeTypedFailures() = runBlocking {
         val harness = Harness(Response(409, """{"ok":false,"error":{"message":"健康检查运行期间无法操作","code":"HEALTH_RUN_ACTIVE"}}"""))
 
-        val failure = assertIs<AdministrativeSettingsFailure>(harness.repository.restartImportQueue(context()))
+        val failure = assertIs<AdministrativeSettingsFailure>(harness.repository.loadKindleSettings(context()))
 
         assertEquals(AdministrativeSettingsErrorKind.Conflict, failure.error.kind)
         assertEquals("HEALTH_RUN_ACTIVE", failure.error.code)
@@ -309,7 +306,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         val harness = Harness(
             Response(
                 200,
-                """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","resourceId":null,"sourceNodeId":null,"role":null,"state":"SUCCEEDED","errorSummary":null,"startedAt":null,"finishedAt":null}}}""",
+                """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","libraryName":null,"resourceId":null,"resourceTitle":null,"sourceNodeId":null,"sourceName":null,"sourceRelativePath":null,"bookTitle":null,"role":null,"state":"SUCCEEDED","errorSummary":null,"createdAt":null,"startedAt":null,"finishedAt":null}}}""",
             ),
         )
 
@@ -522,19 +519,18 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val LIBRARIES = """{"ok":true,"data":{"libraries":[],"lastUploadTargetPath":null,"lastDownloadTargetPath":null}}"""
         const val LIBRARY_PAYLOAD = """{"ok":true,"data":{"library":{"id":"folder-1","name":"Books","rootPath":"/books","organizationMode":"VOLUMES","enabled":true,"ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val DIRECTORY = """{"ok":true,"data":{"node":{"name":"books","path":"/books","readable":true,"error":null,"children":[]}}}"""
-        const val IMPORT_TASK_DETAIL = """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","state":"SUCCEEDED","errorSummary":null,"createdAt":"2026-08-12T00:00:00Z","startedAt":"2026-08-12T00:00:01Z","finishedAt":"2026-08-12T00:00:02Z"}}}"""
+        const val IMPORT_TASK_DETAIL = """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","libraryName":"Books","resourceId":"resource-1","resourceTitle":"Book","sourceNodeId":"node-1","sourceName":"book.epub","sourceRelativePath":"book.epub","bookTitle":"Book","role":"PRIMARY","state":"SUCCEEDED","errorSummary":null,"createdAt":"2026-08-12T00:00:00Z","startedAt":"2026-08-12T00:00:01Z","finishedAt":"2026-08-12T00:00:02Z"}}}"""
         const val ORGANIZE_POLICY = """{"ok":true,"data":{"policy":{"id":"default","enabled":false,"scheduleMode":"MANUAL","intervalMinutes":60,"autoRunOnNew":false,"autoRunOnNewSince":null,"rules":{"unrecognized":true,"missingMetadata":true},"writeMetadataToFiles":false,"preferLocalMetadata":true,"localMetadataPriority":["SIDECAR_OPF","EMBEDDED","PATH"],"lastScheduledAt":null,"nextRunAt":null,"updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val PENDING_ORGANIZE = """{"ok":true,"data":{"jobs":[],"books":[],"total":0}}"""
-        const val ORGANIZE_JOBS = """{"ok":true,"data":{"jobs":[{"id":"job-1","trigger":"SCHEDULE","statusCategory":"WAITING","issueCodes":[],"reasonCodes":["MISSING_METADATA"],"metadataSources":[],"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z","book":{"id":"book-1","title":"Book","author":"Author","availableMediaKinds":["EBOOK"]}}],"page":1,"pageSize":20,"total":1,"totalPages":1,"statusCounts":{"SUCCESS":0,"FAILED":0,"RECOGNIZING":0,"WAITING":1},"providerNames":{}}}"""
+        const val ORGANIZE_JOBS = """{"ok":true,"data":{"jobs":[{"id":"job-1","trigger":"SCHEDULE","statusCategory":"WAITING","issueCodes":[],"reasonCodes":["MISSING_METADATA"],"metadataSources":[],"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z","book":{"id":"book-1","title":"Book","author":"Author"}}],"page":1,"pageSize":20,"total":1,"totalPages":1,"statusCounts":{"SUCCESS":0,"FAILED":0,"RECOGNIZING":0,"WAITING":1},"providerNames":{}}}"""
         const val ORGANIZE_RUNS = """{"ok":true,"data":{"runs":[{"id":"run-1","trigger":"MANUAL","scope":{"bookIds":[],"rules":{"unrecognized":true,"missingMetadata":true}},"status":"COMPLETED","queuedCount":1,"completedCount":1,"reviewCount":0,"failedCount":0,"startedAt":"2026-08-12T00:00:00Z","finishedAt":"2026-08-12T00:01:00Z","createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z"}]}}"""
-        const val PROVIDER_PAYLOAD = """{"ok":true,"data":{"provider":{"id":"provider-1","sourceId":null,"name":"Provider","version":"1","description":"Metadata provider","mode":"REMOTE","mediaKinds":["EBOOK"],"fields":["title"],"capabilities":["search"],"automaticRateLimit":null,"configFields":[],"config":{},"configuredSecrets":{},"enabled":true,"priority":1,"lastTestAt":null,"lastTestStatus":null,"lastError":null}}}"""
+        const val PROVIDER_PAYLOAD = """{"ok":true,"data":{"provider":{"id":"provider-1","sourceId":null,"name":"Provider","version":"1","description":"Metadata provider","mode":"REMOTE","fields":["title"],"capabilities":["search"],"automaticRateLimit":null,"configFields":[],"config":{},"configuredSecrets":{},"enabled":true,"priority":1,"lastTestAt":null,"lastTestStatus":null,"lastError":null}}}"""
         const val OPDS = """{"ok":true,"data":{"enabled":false,"configured":false,"publicBaseUrl":null,"catalogUrl":null}}"""
         const val BACKUP_PAYLOAD = """{"ok":true,"data":{"backup":{"id":"backup-1","kind":"full","name":"backup.zip","filename":"backup.zip","sizeBytes":42,"createdAt":"2026-08-12T00:00:00Z","counts":{"works":1}}}}"""
         const val BACKUP_RESTORED = """{"ok":true,"data":{"id":"backup-1","restored":true,"restoredAt":"2026-08-12T00:00:00Z","counts":{"works":1},"restoredCounts":{"works":1},"actualCounts":{"works":1}}}"""
         const val BACKUP_DELETED = """{"ok":true,"data":{"deleted":true,"id":"backup-1"}}"""
         const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
-        const val QUEUE_OPERATION = """{"ok":true,"data":{"operation":{"id":"operation-1","queueName":"import","action":"restart","status":"requested","actorUserId":"user-1","messageCode":"queue.restart.requested","requestedAt":"2026-08-12T00:00:00Z","startedAt":null,"finishedAt":null,"updatedAt":"2026-08-12T00:00:00Z"},"created":true}}"""
         const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""
         const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"minBytes":1048576,"maxBytes":104857600}}"""
         const val KINDLE_TASK_PAYLOAD = """{"ok":true,"data":{"task":{"id":"task-1","userId":"user-1","bookId":"book-1","resourceId":"resource-1","assetId":"asset-1","bookTitle":"Book","resourceTitle":"EPUB","fileName":"book.epub","format":"EPUB","mimeType":"application/epub+zip","sizeBytes":42,"senderEmail":"sender@example.com","recipientEmail":"reader@kindle.com","subject":"Book","smtpHost":"smtp.example.com","smtpPort":587,"smtpSecurity":"starttls","smtpUsername":"reader","messageId":null,"status":"queued","attemptCount":0,"nextAttemptAt":null,"errorMessage":null,"startedAt":null,"sentAt":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z","canCancel":true,"canRetry":false,"canDelete":false}}}"""

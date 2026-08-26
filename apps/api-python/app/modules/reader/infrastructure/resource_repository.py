@@ -9,6 +9,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.contracts.media_capabilities import (
+    exact_source_format,
+    resolve_asset_mime_type,
+)
 from app.core.natural_sort import natural_sort_key
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
@@ -67,6 +71,10 @@ def _resource_dto(
         source_node_id=resource.source_node_id,
         title=title,
         format=resource.format,
+        source_format=exact_source_format(
+            resource_format=resource.format,
+            filename=source_node.name,
+        ),
         resource_index=(
             resource_metadata.resource_index if resource_metadata is not None else None
         ),
@@ -299,6 +307,13 @@ class SqlAlchemyReaderResourceRepository:
         )
 
     def list_assets(self, resource_id: str) -> list[ReaderAssetDto]:
+        resource_format = self._session.scalar(
+            select(LibraryReadableResource.format).where(
+                LibraryReadableResource.id == resource_id
+            )
+        )
+        if resource_format is None:
+            return []
         rows = self._session.execute(
             select(
                 LibraryResourceAsset,
@@ -347,11 +362,13 @@ class SqlAlchemyReaderResourceRepository:
                 resource_id=asset.resource_id,
                 source_node_id=asset.source_node_id,
                 role=asset.role,
-                mime_type=(
-                    asset_metadata.mime_type
-                    if asset_metadata is not None
-                    and asset_metadata.mime_type is not None
-                    else "application/octet-stream"
+                mime_type=resolve_asset_mime_type(
+                    resource_format=resource_format,
+                    asset_role=asset.role,
+                    filename=source_node.name,
+                    stored_mime_type=(
+                        asset_metadata.mime_type if asset_metadata is not None else None
+                    ),
                 ),
                 size_bytes=source_node.observed_size_bytes or 0,
                 duration_ms=(

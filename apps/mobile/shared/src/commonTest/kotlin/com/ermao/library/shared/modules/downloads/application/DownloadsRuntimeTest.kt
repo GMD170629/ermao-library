@@ -9,12 +9,9 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadSource
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
-import com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision
-import com.ermao.library.shared.modules.downloads.domain.ReaderAccessRequest
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 
 class DownloadsRuntimeTest {
     @Test
@@ -38,12 +35,6 @@ class DownloadsRuntimeTest {
         assertEquals("book", book.bookId)
         assertEquals(listOf("resource"), book.resources.map { it.resourceId })
         assertEquals(listOf("asset"), book.artifacts.map { it.identity.assetId })
-        assertIs<ReaderAccessDecision.LocalArtifact>(
-            runtime.readerAccess(
-                ReaderAccessRequest(namespace, "resource", DownloadReaderType.Reflowable, false),
-            ),
-        )
-        Unit
     }
 
     private val namespace = DownloadNamespace("server", "user", 1)

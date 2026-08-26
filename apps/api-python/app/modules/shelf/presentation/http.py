@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import bookshelf_items as get_bookshelf_items
-from app.bootstrap.library import smart_shelf_book_ids
+from app.bootstrap.library import get_book, smart_shelf_book_ids
 from app.bootstrap.shelf import shelf_store
 from app.core.authorization import (
     AuthorizationContext,
@@ -23,7 +23,6 @@ from app.core.authorization import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.library.public import bookshelf_item_views, get_book
 from app.modules.shelf.application import (
     ShelfReference,
     validate_collection_replacement,
@@ -203,7 +202,16 @@ def _shelf_book_views(
         context=context,
         book_ids=tuple(book_ids),
     )
-    return bookshelf_item_views(summaries)
+    return [
+        {
+            "id": summary.id,
+            "title": summary.title,
+            "author": summary.author,
+            "coverUrl": f"/api/books/{summary.id}/cover?size=medium",
+            "progress": float(summary.progress),
+        }
+        for summary in summaries
+    ]
 
 
 def _shelf_base_view(shelf: dict[str, Any]) -> dict[str, Any]:

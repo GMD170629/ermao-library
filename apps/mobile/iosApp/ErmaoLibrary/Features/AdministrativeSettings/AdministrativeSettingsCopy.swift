@@ -24,7 +24,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case includeSubdirectories, autoImportNewFiles, deleteSource, deleteSourceTitle
     case deleteSourceMessage, selectServerDirectory, parentDirectory, chooseDirectory
     case scanning, cancelScan, lastScan, scanFileCount
-    case importTasksTitle, queueNormal, taskSource, taskCreated, parsing, pending, cancelled
+    case importTasksTitle, queueNormal, taskSource, taskCreated, importLibrary, importResource, importSourcePath, importBook, parsing, pending, cancelled
     case importTaskDetail, importTaskLogs, scanJobs, directoriesScanned, filesScanned
     case candidatesFound, queuedCount, errorCount
     case deleteImportTitle, deleteImportMessage, rescanAll
@@ -44,7 +44,7 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case selectedCount, aliases, bookCount, deleteCategory, mergeCategoriesTitle
     case targetCategory, confirmMerge, renameCategory, newCategoryName, confirmRename
     case operationHistory, undoOperation, undoOperationMessage
-    case providersTitle, provider, queryPipeline, editPriority, autoMatching
+    case providersTitle, provider, autoMatching
     case confidenceThreshold, autoApply, testProviders, saveConfiguration
     case providerConfigurationTitle, apiBaseURL, apiKey, keepSecretHint, countryRegion
     case languageCode, rateLimit, connectionTest, saveAndTest, connected, responseTime
@@ -55,8 +55,8 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case deleteBackupMessage, backupBookCount, backupProgressCount, backupLibraryCount
     case workOrderTitle, workOrderHint, restoreDefault, saveOrder
     case overview, ebook, comic, audiobook, chaptersContent
-    case healthTitle, lastChecked, runHealthCheck, restartImportQueue, restartQueueTitle
-    case restartQueueMessage, safeRestart, waitForCurrentImports, directoryDatabase, backgroundQueues
+    case healthTitle, lastChecked, runHealthCheck
+    case directoryDatabase, backgroundQueues
     case featureConfiguration, healthy, warning, checking
     case logsTitle, searchLogs, allLevels, allSources, recentSevenDays, logCapacity
     case manageLogs, exportFiltered, clearInformationWarning, saveCapacity, capacityMegabytes
@@ -134,7 +134,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .importTaskDetail: "Import Task Detail", .importTaskLogs: "Task Logs", .scanJobs: "Directory Scans",
         .directoriesScanned: "Directories Scanned", .filesScanned: "Files Scanned",
         .candidatesFound: "Candidates Found", .queuedCount: "Queued", .errorCount: "Errors",
-        .queueNormal: "Queue operating normally", .taskSource: "Source", .taskCreated: "Created",
+        .queueNormal: "Queue operating normally", .taskSource: "Source", .taskCreated: "Created", .importLibrary: "Library", .importResource: "Resource", .importSourcePath: "Source relative path", .importBook: "Book",
         .parsing: "Parsing", .pending: "Pending", .cancelled: "Cancelled",
         .deleteImportTitle: "Delete this import task?", .deleteImportMessage: "The task record will be removed.",
         .rescanAll: "Rescan All Sources", .importPreferencesTitle: "Import Preferences",
@@ -165,7 +165,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .newCategoryName: "New Name", .confirmRename: "Rename", .operationHistory: "Operation History",
         .undoOperation: "Undo Operation", .undoOperationMessage: "Undo this library operation?",
         .providersTitle: "Metadata Providers",
-        .provider: "Providers", .queryPipeline: "Query Pipeline", .editPriority: "Edit Priority",
+        .provider: "Providers",
         .autoMatching: "Automatic Matching", .confidenceThreshold: "Confidence Threshold",
         .autoApply: "Automatically Apply High Confidence Results", .testProviders: "Test Providers",
         .saveConfiguration: "Save Configuration", .providerConfigurationTitle: "Provider Configuration",
@@ -188,9 +188,6 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .restoreDefault: "Restore Default", .saveOrder: "Save Order", .overview: "Overview", .ebook: "Ebook",
         .comic: "Comic", .audiobook: "Audiobook", .chaptersContent: "Chapters & Content",
         .healthTitle: "System Health", .lastChecked: "Last Checked", .runHealthCheck: "Run Health Check",
-        .restartImportQueue: "Safely Restart Import Queue", .restartQueueTitle: "Safely restart the import queue?",
-        .restartQueueMessage: "Running import tasks will finish before the queue restarts. Keep this page open until completion.",
-        .safeRestart: "Safe Restart", .waitForCurrentImports: "Waiting for current imports",
         .directoryDatabase: "Directories & Database", .backgroundQueues: "Background Queues",
         .featureConfiguration: "Feature Configuration", .healthy: "Healthy", .warning: "Warning", .checking: "Checking",
         .logsTitle: "System Logs", .searchLogs: "Search summary, action, or related object", .allLevels: "All Levels",
@@ -257,7 +254,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .importTaskDetail: "导入任务详情", .importTaskLogs: "任务日志", .scanJobs: "目录扫描任务",
         .directoriesScanned: "已扫描目录", .filesScanned: "已扫描文件", .candidatesFound: "发现候选",
         .queuedCount: "已入队", .errorCount: "错误数",
-        .importTasksTitle: "导入任务", .queueNormal: "队列正常", .taskSource: "来源", .taskCreated: "创建于",
+        .importTasksTitle: "导入任务", .queueNormal: "队列正常", .taskSource: "来源", .taskCreated: "创建于", .importLibrary: "书库", .importResource: "资源", .importSourcePath: "来源相对路径", .importBook: "作品",
         .parsing: "解析中", .pending: "待处理", .cancelled: "已取消", .deleteImportTitle: "删除此导入任务？",
         .deleteImportMessage: "任务记录将被移除。", .rescanAll: "重新扫描全部来源", .importPreferencesTitle: "导入偏好",
         .ignoreHiddenFiles: "忽略隐藏文件", .ignorePatterns: "忽略规则", .minimumFileSize: "最小文件大小",
@@ -281,7 +278,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .mergeCategoriesTitle: "合并分类", .targetCategory: "目标分类", .confirmMerge: "确认合并",
         .renameCategory: "重命名分类", .newCategoryName: "新名称", .confirmRename: "重命名",
         .operationHistory: "操作历史", .undoOperation: "撤销操作", .undoOperationMessage: "撤销此书库操作？",
-        .providersTitle: "元数据提供者", .provider: "提供者", .queryPipeline: "查询流水线", .editPriority: "编辑优先级",
+        .providersTitle: "元数据提供者", .provider: "提供者",
         .autoMatching: "自动匹配", .confidenceThreshold: "置信度阈值", .autoApply: "自动应用高置信度结果",
         .testProviders: "测试提供者", .saveConfiguration: "保存配置", .providerConfigurationTitle: "提供者配置",
         .apiBaseURL: "API 地址", .apiKey: "API 密钥", .keepSecretHint: "已配置，留空不修改", .countryRegion: "国家/地区",
@@ -300,9 +297,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .workOrderHint: "不包含内容的媒体将自动隐藏。", .restoreDefault: "恢复默认", .saveOrder: "保存顺序",
         .overview: "简介", .ebook: "电子书", .comic: "漫画", .audiobook: "有声书", .chaptersContent: "章节与内容",
         .healthTitle: "系统健康", .lastChecked: "上次检查", .runHealthCheck: "运行健康检查",
-        .restartImportQueue: "安全重启导入队列", .restartQueueTitle: "安全重启导入队列？",
-        .restartQueueMessage: "当前正在进行的导入任务将完成后再重启。请勿离开此页面或锁屏，以确保队列安全重启。",
-        .safeRestart: "安全重启", .waitForCurrentImports: "正在等待当前导入任务结束", .directoryDatabase: "目录与数据库",
+        .directoryDatabase: "目录与数据库",
         .backgroundQueues: "后台队列", .featureConfiguration: "功能配置", .healthy: "正常", .warning: "警告",
         .checking: "检查中", .logsTitle: "系统日志", .searchLogs: "搜索摘要、动作或关联对象", .allLevels: "全部级别",
         .allSources: "全部来源", .recentSevenDays: "近 7 天", .logCapacity: "日志容量", .manageLogs: "管理日志",

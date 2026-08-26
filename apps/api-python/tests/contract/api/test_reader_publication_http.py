@@ -6,6 +6,7 @@ import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -490,13 +491,21 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     request: pytest.FixtureRequest,
 ) -> None:
     _login(client, db_session)
-    runtime = (
-        Path(__file__).parents[5]
-        / "build"
-        / "mobi-core-runtime"
-        / "libermao_mobi_core.so"
+    runtime_root = Path(__file__).parents[5] / "build" / "mobi-core-runtime"
+    runtime = next(
+        (
+            candidate
+            for candidate in (
+                runtime_root / "libermao_mobi_core.so",
+                runtime_root / "libermao_mobi_core.dylib",
+                runtime_root / "ermao_mobi_core.dll",
+                runtime_root / "libermao_mobi_core.dll",
+            )
+            if candidate.is_file()
+        ),
+        None,
     )
-    if not runtime.is_file():
+    if runtime is None:
         pytest.skip("pinned libmobi test runtime is not built")
     monkeypatch.setenv("ERMAO_MOBI_CORE_LIBRARY", str(runtime))
     load_mobi_core.cache_clear()
@@ -542,6 +551,30 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert resource_response.status_code == 200
     assert resource_response.headers["content-type"].startswith("text/html")
     assert "天地玄黄" in resource_response.text
+    progress_response = client.put(
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json={
+            "schemaVersion": 4,
+            "clientId": "reader-publication-contract",
+            "mutationId": str(uuid4()),
+            "baseRevision": 0,
+            "capturedAtEpochMillis": 1_787_725_000_000,
+            "locator": {
+                "kind": "reflowable",
+                "engineLocator": {
+                    "engine": "readium",
+                    "platform": "ios",
+                    "version": "readium-swift:3.8.0",
+                    "payload": {
+                        "href": "part00000.html",
+                        "type": "text/html",
+                        "locations": {"cssSelector": "body"},
+                    },
+                },
+            },
+        },
+    )
+    assert progress_response.status_code == 200
     assert hashlib.sha256(target.read_bytes()).hexdigest() == source_hash_before
     assert not list(test_settings.resolved_storage_root.rglob("*.epub"))
     assert not (

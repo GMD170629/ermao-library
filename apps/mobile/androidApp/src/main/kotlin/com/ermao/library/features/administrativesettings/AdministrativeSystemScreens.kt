@@ -183,7 +183,6 @@ fun HealthScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var restartOpen by remember { mutableStateOf(false) }
     AdministrativePage(AdministrativeCopy.SystemHealth, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { snapshot ->
             ListItem(
@@ -192,7 +191,6 @@ fun HealthScreen(
                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             )
             TextButton({ onCommand(AdministrativeCommand.RunHealthCheck) }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.RunHealthCheck.text(locale)) }
-            TextButton({ restartOpen = true }, enabled = !state.mutationInFlight, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.RestartImportQueue.text(locale)) }
             HealthGroup.entries.forEach { group ->
                 AdministrativeSection(group.copy(), locale)
                 snapshot.checks.filter { it.group == group }.forEach { check ->
@@ -206,18 +204,8 @@ fun HealthScreen(
                     AdministrativeDivider()
                 }
             }
-            if (snapshot.importQueueRestarting) {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Text(AdministrativeCopy.Checking.text(locale))
-                }
-            }
         }
     }
-    if (restartOpen) AdministrativeConfirmDialog(
-        AdministrativeCopy.RestartQueueTitle, AdministrativeCopy.RestartQueueBody, AdministrativeCopy.SafeRestart, locale,
-        onConfirm = { restartOpen = false; onCommand(AdministrativeCommand.RestartImportQueue) }, onDismiss = { restartOpen = false },
-    )
 }
 
 private fun HealthGroup.copy(): AdministrativeCopy = when (this) {

@@ -30,14 +30,14 @@ import kotlinx.coroutines.yield
 
 class DefaultMobileRuntimeLifecycleTest {
     @Test
-    fun savedVerifiedSessionPublishesAuthenticatedBeforeNetworkValidationCompletes() = runBlocking {
+    fun nonExpiringSavedVerifiedSessionPublishesAuthenticatedBeforeNetworkValidationCompletes() = runBlocking {
         val activeProfile = profile("profile-a", "server-a", true)
         val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
         val verifiedSessions = InMemoryVerifiedSessionRepository()
         val identity = identity(activeProfile)
         val authorization = authorization()
         verifiedSessions.save(
-            VerifiedSessionRecord.from(activeProfile.id, identity, authorization, validatedAtEpochMillis = 500),
+            VerifiedSessionRecord.from(activeProfile.id, identity, authorization, validatedAtEpochMillis = 0),
         )
         val probeGate = CompletableDeferred<Unit>()
         val runtime = runtime(
@@ -62,15 +62,48 @@ class DefaultMobileRuntimeLifecycleTest {
     }
 
     @Test
-    fun serverIdentityChangeRefreshesTheProfileWithoutBlockingTheSession() = runBlocking {
+    fun transientNetworkTlsAndServerFailuresKeepTheRestoredShell() = runBlocking {
+        val failures = listOf(
+            AppError(AppErrorKind.NetworkUnavailable, "NETWORK_UNAVAILABLE"),
+            AppError(AppErrorKind.Timeout, "TIMEOUT"),
+            AppError(AppErrorKind.TlsFailure, "TLS_FAILURE"),
+            AppError(AppErrorKind.ServiceUnavailable, "SERVICE_UNAVAILABLE"),
+            AppError(AppErrorKind.ServerFailure, "SERVER_FAILURE"),
+        )
+        failures.forEach { failure ->
+            val activeProfile = profile("profile-a", "server-a", true)
+            val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
+            val verifiedSessions = InMemoryVerifiedSessionRepository().also {
+                it.save(
+                    VerifiedSessionRecord.from(
+                        activeProfile.id,
+                        identity(activeProfile),
+                        authorization(),
+                        validatedAtEpochMillis = 0,
+                    ),
+                )
+            }
+            val runtime = runtime(
+                profiles = profiles,
+                verifiedSessions = verifiedSessions,
+                probe = ServerProbe { ServerProbeResult.Failure(failure) },
+            )
+
+            assertIs<RuntimeOperationResult.Success>(runtime.start())
+            assertIs<AppSession.Authenticated>(runtime.currentSession)
+            assertEquals(true, verifiedSessions.load(activeProfile.id) != null)
+        }
+    }
+
+    @Test
+    fun serverIdentityChangeClearsTheVerifiedSessionAndPrivateShell() = runBlocking {
         val activeProfile = profile("profile-a", "server-a", true)
         val profiles = InMemoryServerProfileRepository().also { it.upsert(activeProfile) }
         val verifiedSessions = InMemoryVerifiedSessionRepository().also {
-            val previouslyVerifiedProfile = activeProfile.copy(serverIdentity = "previous-session-server")
             it.save(
                 VerifiedSessionRecord.from(
                     activeProfile.id,
-                    identity(previouslyVerifiedProfile),
+                    identity(activeProfile),
                     authorization(),
                     validatedAtEpochMillis = 500,
                 ),
@@ -86,10 +119,11 @@ class DefaultMobileRuntimeLifecycleTest {
 
         assertIs<RuntimeOperationResult.Success>(runtime.start())
 
-        val authenticated = assertIs<AppSession.Authenticated>(runtime.currentSession)
-        assertEquals("different-server", authenticated.profile.serverIdentity)
+        val signedOut = assertIs<AppSession.SignedOut>(runtime.currentSession)
+        assertEquals("different-server", signedOut.profile.serverIdentity)
         assertEquals("different-server", profiles.activeProfile()?.serverIdentity)
-        assertEquals(false, cookies.cleared)
+        assertEquals(true, cookies.cleared)
+        assertEquals(null, verifiedSessions.load(activeProfile.id))
     }
 
     @Test

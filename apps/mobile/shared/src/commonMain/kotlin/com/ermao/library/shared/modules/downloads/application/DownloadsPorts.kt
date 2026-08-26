@@ -6,6 +6,7 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.domain.DownloadTask
+import com.ermao.library.shared.modules.downloads.domain.DownloadArtifactKind
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 data class DownloadRequestContext(
@@ -55,6 +56,49 @@ interface DownloadByteSinkSession {
     suspend fun pause() = abort()
 }
 
+data class DownloadBundleSinkRequest(
+    val namespace: DownloadNamespace,
+    val taskId: String,
+    val resourceId: String,
+    val artifactId: String,
+    val artifactKind: DownloadArtifactKind,
+    val memberCount: Int,
+    val expectedTotalBytes: Long,
+) {
+    init {
+        require(taskId.isNotBlank())
+        require(resourceId.isNotBlank())
+        require(artifactId.isNotBlank())
+        require(artifactKind == DownloadArtifactKind.OriginalPageSet)
+        require(memberCount > 0)
+        require(expectedTotalBytes > 0)
+    }
+}
+
+data class DownloadBundleMemberSinkRequest(
+    val assetId: String,
+    val sequenceIndex: Int,
+    val mimeType: String,
+    val expectedBytes: Long,
+) {
+    init {
+        require(assetId.isNotBlank())
+        require(sequenceIndex >= 0)
+        require(mimeType.isNotBlank())
+        require(expectedBytes > 0)
+    }
+}
+
+interface DownloadBundleByteSink {
+    suspend fun beginBundle(request: DownloadBundleSinkRequest): DownloadBundleByteSinkSession
+}
+
+interface DownloadBundleByteSinkSession {
+    suspend fun beginMember(request: DownloadBundleMemberSinkRequest): DownloadByteSinkSession
+    suspend fun commit(): String
+    suspend fun abort()
+}
+
 data class DownloadBootstrap(
     val descriptor: DownloadDescriptor,
 )
@@ -81,7 +125,10 @@ data class DownloadTransferRequest(
     init {
         require(taskId.isNotBlank())
         require(descriptor.isDownloadable) { "Download descriptor is streaming-only" }
-        require(resumeFromBytes in 0 until descriptor.source.totalBytes)
+        require(resumeFromBytes in 0 until descriptor.totalBytes)
+        require(resumeFromBytes == 0L || descriptor.artifactKind == DownloadArtifactKind.SingleOriginalAsset) {
+            "Page-set downloads restart as an atomic bundle"
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import XCTest
 @preconcurrency import ErmaoShared
@@ -5,25 +6,104 @@ import XCTest
 
 @MainActor
 final class DownloadStoreTests: XCTestCase {
+    func testOriginalPageSetPublishesAsOneVerifiedDirectoryArtifact() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let page = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01])
+        let record = try await store.enqueue(
+            namespace: namespace,
+            book: BookCard(id: "book", title: "Book", author: "Author", cover: nil, progress: nil),
+            resource: BookResource(
+                id: "image-resource", bookID: "book", sourceNodeID: "directory", title: "Pages",
+                format: "IMAGE_DIR", sizeLabel: nil, progress: nil, isReadable: true, isSelected: true
+            ),
+            assetID: "page-set:image-resource",
+            readerType: .comic,
+            expectedBytes: Int64(page.count),
+            artifactKind: .originalPageSet
+        )
+        let destination = try await store.destination(for: record)
+        try FileManager.default.createDirectory(at: destination.partialFileURL, withIntermediateDirectories: true)
+        let fileName = "000000-page.png"
+        try page.write(to: destination.partialFileURL.appendingPathComponent(fileName))
+        let manifest: [String: Any] = [
+            "contractVersion": 4,
+            "artifactKind": "OriginalPageSet",
+            "resourceId": "image-resource",
+            "artifactId": "page-set:image-resource",
+            "totalBytes": page.count,
+            "members": [[
+                "assetId": "page-1", "sequenceIndex": 0, "mimeType": "image/png",
+                "sizeBytes": page.count, "fileName": fileName,
+            ]],
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(
+            to: destination.partialFileURL.appendingPathComponent("bundle.json")
+        )
+
+        let completed = try await store.publish(
+            record: record,
+            destination: destination,
+            receipt: ManagedDownloadReceipt(receivedBytes: Int64(page.count), expectedBytes: Int64(page.count))
+        )
+        let resolvedLocalURL = await store.fileURL(for: completed)
+        let localURL = try XCTUnwrap(resolvedLocalURL)
+        let bundle = try IosImageDirectoryBundle(directory: localURL, expectedResourceID: "image-resource")
+
+        XCTAssertTrue(completed.isVerifiedOfflineCopy)
+        XCTAssertTrue((try localURL.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true)
+        XCTAssertEqual(bundle.pages.map(\.resourceHref), ["pages/0"])
+    }
+
+    func testManifestV3RecordMigratesToV4WithoutDeletingCompletedFile() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let record = try await makeRecord(store: store)
+        let completed = try await complete(record, in: store)
+        let namespaceDirectory = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+                .first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true })
+        )
+        let manifestURL = namespaceDirectory.appendingPathComponent("manifest.json")
+        var manifest = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
+        )
+        manifest["contractVersion"] = 3
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestURL, options: .atomic)
+
+        let migrated = try await store.records(namespace: namespace)
+
+        XCTAssertEqual(migrated.single?.id, completed.id)
+        XCTAssertEqual(migrated.single?.effectiveArtifactKind, .singleOriginalAsset)
+        let migratedLocalURL = await store.fileURL(for: migrated.single!)
+        XCTAssertNotNil(migratedLocalURL)
+        let persisted = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any]
+        )
+        XCTAssertEqual(persisted["contractVersion"] as? Int, 4)
+    }
+
     func testLiveStylesResourceTransferDiagnostic() async throws {
         let profileID = "03139ac0-7820-4e10-9f9e-73f177327398"
         let context = ContentRequestContext(
             profileID: profileID,
             profileDisplayName: "192.168.18.228",
             serverIdentity: "server_d25920669ac94839b6ee9a7054d4dc00",
-            userID: "py_543d36db186e4ddca6210e5eee51adb0",
+            userID: "py_48e39b93790f4057995840a18f4302a3",
             authorizationVersion: 1,
-            baseURL: "http://192.168.18.228:3000",
+            baseURL: "http://192.168.18.228:8000",
             acceptsInsecureTLS: false
         )
         let cookieStore = KeychainCookiePayloadStore()
         XCTAssertNotNil(try cookieStore.load(profileID: profileID), "The live device session cookie must be available")
         let transfer = SharedManagedDownloadTransfer(cookieStore: cookieStore)
         let resource = BookResource(
-            id: "imp_2dfdb3d04f8b7238152bec2373f57213b5681dc2",
-            bookID: "imp_8a0849cd61b719a802a30f1d655a0e4bc05ecf3b",
-            sourceNodeID: "imp_0e42263b2877d99f6ae9387edf572c2d8f777d7e",
-            title: "Styles",
+            id: "py_db7f936c9cda4a5a865892029c18d1ff",
+            bookID: "py_75b1eb8b3f5c4a0386a7f06ffc956563",
+            sourceNodeID: "py_c380d324fe7d4aa8ae579d6f6051fd86",
+            title: "EPUB acceptance fixture",
             format: "EPUB",
             sizeLabel: nil,
             progress: nil,
@@ -59,14 +139,16 @@ final class DownloadStoreTests: XCTestCase {
         let record = try await store.enqueue(
             namespace: context.namespaceKey,
             book: BookCard(
-                id: "imp_8a0849cd61b719a802a30f1d655a0e4bc05ecf3b",
-                title: "Styles",
-                author: "Agatha Christie",
+                id: resource.bookID,
+                title: resource.title,
+                author: nil,
                 cover: nil,
                 progress: nil
             ),
             resource: resource,
             assetID: bootstrap.assetID,
+            sourceFormat: bootstrap.sourceFormat,
+            mimeType: bootstrap.mimeType,
             readerType: bootstrap.readerType,
             expectedBytes: bootstrap.expectedBytes
         )
@@ -80,6 +162,87 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(receipt.receivedBytes, actualBytes)
         let completed = try await store.publish(record: record, destination: destination, receipt: receipt)
         XCTAssertTrue(completed.isVerifiedOfflineCopy)
+    }
+
+    func testLiveAzw3TransferPreservesOriginalBytesAndParses() async throws {
+        let context = ContentRequestContext(
+            profileID: "03139ac0-7820-4e10-9f9e-73f177327398",
+            profileDisplayName: "192.168.18.228",
+            serverIdentity: "server_d25920669ac94839b6ee9a7054d4dc00",
+            userID: "py_48e39b93790f4057995840a18f4302a3",
+            authorizationVersion: 1,
+            baseURL: "http://192.168.18.228:8000",
+            acceptsInsecureTLS: false
+        )
+        let cookieStore = KeychainCookiePayloadStore()
+        XCTAssertNotNil(try cookieStore.load(profileID: context.profileID))
+        let gateway = IosCompositionKt.createIosDownloadsGateway(
+            cookieStore: cookieStore,
+            profileId: context.profileID,
+            displayName: context.profileDisplayName,
+            baseUrl: context.baseURL,
+            serverIdentity: context.serverIdentity,
+            acceptsInsecureTls: context.acceptsInsecureTLS
+        )
+        let sharedContext = PublicKt.createDownloadRequestContext(
+            profileId: context.profileID,
+            displayName: context.profileDisplayName,
+            baseUrl: context.baseURL,
+            serverIdentity: context.serverIdentity,
+            acceptsInsecureTls: context.acceptsInsecureTLS,
+            userId: context.userID,
+            authorizationVersion: context.authorizationVersion
+        )
+        if let failure = try await gateway.load(
+            context: sharedContext,
+            resourceId: "py_35ecd0b1eb7b4e90ad34f38fdbff4465"
+        ) as? ErmaoShared.DownloadBootstrapResultFailure {
+            XCTFail("bootstrap \(failure.error.code): \(failure.error.diagnosticMessage ?? "no diagnostic")")
+            return
+        }
+        let transfer = SharedManagedDownloadTransfer(cookieStore: cookieStore)
+        let resource = BookResource(
+            id: "py_35ecd0b1eb7b4e90ad34f38fdbff4465",
+            bookID: "py_a0469b0ed7a74bb382372f69d8895b54",
+            sourceNodeID: "live-source-node",
+            title: "Reader Sample 03",
+            format: "AZW3",
+            sizeLabel: nil,
+            progress: nil,
+            isReadable: true,
+            isSelected: true
+        )
+        let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let record = try await store.enqueue(
+            namespace: context.namespaceKey,
+            book: BookCard(id: resource.bookID, title: resource.title, author: nil, cover: nil, progress: nil),
+            resource: resource,
+            assetID: bootstrap.assetID,
+            sourceFormat: bootstrap.sourceFormat,
+            mimeType: bootstrap.mimeType,
+            readerType: bootstrap.readerType,
+            expectedBytes: bootstrap.expectedBytes
+        )
+        let destination = try await store.destination(for: record)
+        XCTAssertEqual(record.format, "AZW3")
+        XCTAssertEqual(record.mimeType, "application/vnd.amazon.ebook")
+        XCTAssertEqual(destination.finalFileURL.pathExtension, "azw3")
+        let receipt = try await transfer.download(
+            ManagedDownloadRequest(context: context, record: record, destination: destination)
+        ) { _ in }
+        let bytes = try Data(contentsOf: destination.partialFileURL)
+        XCTAssertEqual(Int64(bytes.count), receipt.expectedBytes)
+        XCTAssertEqual(
+            SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
+            "528c43db8b2df3190dbf42f96fe6be68391d9239a186fb77d0670dda832863dc"
+        )
+        let book = try IosMobiBook.open(fileURL: destination.partialFileURL)
+        let info = try await book.info()
+        await book.close()
+        XCTAssertGreaterThan(info.readingOrderCount, 0)
     }
 
     func testPublishRequiresCompleteVerifiedPartialFile() async throws {
@@ -207,6 +370,92 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(records.count, 1)
     }
 
+    func testExactKindleFamilySourceFormatPreservesExtensionAndMime() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let resource = BookResource(
+            id: "resource", bookID: "book", sourceNodeID: "source-node-kindle",
+            title: "Resource", format: "AZW3", sizeLabel: "4 bytes",
+            progress: nil, isReadable: true, isSelected: true
+        )
+        let book = BookCard(id: "book", title: "Book", author: nil, cover: nil, progress: nil)
+        let exact = try await store.enqueue(
+            namespace: namespace,
+            book: book,
+            resource: resource,
+            assetID: "asset",
+            sourceFormat: "AZW3",
+            mimeType: "application/vnd.amazon.ebook",
+            readerType: .reflowable,
+            expectedBytes: 4
+        )
+        let destination = try await store.destination(for: exact)
+
+        XCTAssertEqual(exact.format, "AZW3")
+        XCTAssertEqual(exact.mimeType, "application/vnd.amazon.ebook")
+        XCTAssertEqual(destination.finalFileURL.lastPathComponent, "asset.azw3")
+        let persisted = try await store.records(namespace: namespace)
+        XCTAssertEqual(persisted.map(\.id), [exact.id])
+    }
+
+    func testLegacyGeneralizedKindleRecordAndArtifactAreDeletedOnCatalogLoad() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let encodedNamespace = Data(namespace.utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+        let namespaceDirectory = root.appendingPathComponent(encodedNamespace, isDirectory: true)
+        let contentDirectory = namespaceDirectory.appendingPathComponent("content/legacy", isDirectory: true)
+        try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
+        let legacyURL = contentDirectory.appendingPathComponent("asset.kindle")
+        try Data([1, 2, 3, 4]).write(to: legacyURL)
+        let now = Date()
+        let legacy = ManagedDownloadRecord(
+            id: "legacy-record",
+            namespace: namespace,
+            bookID: "book",
+            bookTitle: "Book",
+            bookAuthor: nil,
+            resourceID: "resource",
+            resourceTitle: "Resource",
+            assetID: "asset",
+            format: "KINDLE",
+            mimeType: nil,
+            readerType: .reflowable,
+            state: .completed,
+            verification: .verified,
+            expectedBytes: 4,
+            artifactKind: .singleOriginalAsset,
+            receivedBytes: 4,
+            localRelativePath: "content/legacy/asset.kindle",
+            stableErrorCode: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: now,
+            lastOpenedAt: nil
+        )
+        struct LegacyManifest: Encodable {
+            let contractVersion: Int
+            let records: [ManagedDownloadRecord]
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(LegacyManifest(contractVersion: 4, records: [legacy])).write(
+            to: namespaceDirectory.appendingPathComponent("manifest.json"),
+            options: .atomic
+        )
+        let store = ManagedDownloadStore(rootDirectory: root)
+
+        let records = try await store.records(namespace: namespace)
+        XCTAssertTrue(records.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+        let persisted = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: namespaceDirectory.appendingPathComponent("manifest.json"))
+        ) as? [String: Any]
+        XCTAssertEqual((persisted?["records"] as? [Any])?.count, 0)
+    }
+
     func testChangedAssetIdentityReplacesResourceRecord() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         let original = try await makeRecord(store: store)
@@ -261,16 +510,17 @@ final class DownloadStoreTests: XCTestCase {
     }
 
     func testDownloadLocalizationKeepsStorageAndImplicitVersionKeys() throws {
-        let catalog = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("ErmaoLibrary/Resources/Localizable.xcstrings")
-        let json = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(contentsOf: catalog)) as? [String: Any]
-        )
-        let strings = try XCTUnwrap(json["strings"] as? [String: Any])
-        XCTAssertNotNil(strings["downloads.storage.used"])
-        XCTAssertNotNil(strings["downloads.version.implicit"])
+        for locale in ["en", "zh-Hans"] {
+            let localizationPath = try XCTUnwrap(
+                Bundle.main.path(forResource: locale, ofType: "lproj")
+            )
+            let bundle = try XCTUnwrap(Bundle(path: localizationPath))
+            for key in ["downloads.storage.used", "downloads.version.implicit"] {
+                let localized = bundle.localizedString(forKey: key, value: nil, table: nil)
+                XCTAssertNotEqual(localized, key, "Missing \(key) in \(locale)")
+                XCTAssertFalse(localized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
     }
 
     func testCatalogWithoutAssetIdentityIsDiscarded() async throws {
@@ -305,6 +555,25 @@ final class DownloadStoreTests: XCTestCase {
             records: [completed],
             recordID: completed.id
         )?.id, completed.id)
+    }
+
+    func testNativeReaderPolicyRequiresExactMobiFamilyFormatAndAcceptsAllComicArchives() {
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeReader(
+            readerType: .reflowable,
+            format: "KINDLE"
+        ))
+        for format in ["MOBI", "AZW", "AZW3", "PRC"] {
+            XCTAssertTrue(
+                ManagedReaderAccessPolicy.supportsNativeReader(readerType: .reflowable, format: format),
+                "Expected exact native reflowable support for \(format)"
+            )
+        }
+        for format in ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"] {
+            XCTAssertTrue(
+                ManagedReaderAccessPolicy.supportsNativeReader(readerType: .comic, format: format),
+                "Expected native comic support for \(format)"
+            )
+        }
     }
 
     private func waitUntil(

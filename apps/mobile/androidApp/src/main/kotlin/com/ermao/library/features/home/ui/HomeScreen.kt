@@ -28,13 +28,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.R
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContinueReadingCard
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
 import com.ermao.library.features.content.ui.BookCover
 import com.ermao.library.features.content.ui.BookGridItem
+import com.ermao.library.features.content.ui.compactCoverGridColumnCount
+import com.ermao.library.features.content.ui.compactCoverGridItemWidth
 import com.ermao.library.features.home.application.HomeUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -44,7 +45,6 @@ import com.ermao.library.ui.components.WarmPageLoadingState
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageSectionHeader
-import com.ermao.library.ui.components.WarmPageStaleStatus
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
@@ -102,13 +102,6 @@ fun HomeScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(theme.components.page.sectionGap),
                     ) {
-                        if (state.freshness == ContentFreshness.Stale) {
-                            item {
-                                WarmPageStaleStatus(
-                                    message = stringResource(R.string.content_stale_banner),
-                                )
-                            }
-                        }
                         content.continueReading?.let { continueReading ->
                             item {
                                 ContinueReadingTask(
@@ -329,12 +322,16 @@ private fun HomeShelf(
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         WarmPageSectionHeader(title = title)
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val columns = homeShelfColumnCount(
+            val columns = compactCoverGridColumnCount(
                 compactColumns = theme.components.grid.compactColumns,
+                largeTextColumns = theme.components.grid.largeTextColumns,
                 fontScale = LocalDensity.current.fontScale,
             )
-            val totalGap = theme.components.grid.horizontalGap * (columns - 1)
-            val itemWidth = (maxWidth - totalGap) / columns
+            val itemWidth = compactCoverGridItemWidth(
+                availableWidth = maxWidth,
+                horizontalGap = theme.components.grid.horizontalGap,
+                columns = columns,
+            )
             LazyRow(
                 modifier = Modifier.testTag(listTag),
                 horizontalArrangement = Arrangement.spacedBy(theme.components.grid.horizontalGap),
@@ -353,8 +350,3 @@ private fun HomeShelf(
         }
     }
 }
-
-internal fun homeShelfColumnCount(compactColumns: Int, fontScale: Float): Int =
-    if (fontScale >= HOME_SHELF_LARGE_TEXT_SCALE) minOf(2, compactColumns) else compactColumns
-
-private const val HOME_SHELF_LARGE_TEXT_SCALE = 1.3f

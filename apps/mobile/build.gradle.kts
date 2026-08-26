@@ -3,6 +3,7 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputDirectory
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
@@ -320,6 +321,54 @@ abstract class VerifyGeneratedDesignTokens : DefaultTask() {
     }
 }
 
+abstract class VerifyMobileOfflineContract : DefaultTask() {
+    @get:Internal
+    abstract val repositoryRoot: DirectoryProperty
+
+    @TaskAction
+    fun verify() {
+        val forbidden = listOf(
+            "Offline" + "Entitlement",
+            "offline" + "-grace",
+            "OfflineFilter" + "Availability",
+            "ContentSource" + ".Cache",
+            "LibrarySnapshot" + "PayloadStore",
+            "library-offline-" + "cached-results",
+            "library-stale-" + "refresh",
+        )
+        val searchableExtensions = setOf(
+            "kt", "kts", "swift", "md", "json", "xml", "xcstrings", "pbxproj", "yml", "yaml",
+        )
+        val root = repositoryRoot.get().asFile
+        val violations = root.walkTopDown()
+            .onEnter { directory ->
+                directory.name !in setOf(".git", ".gradle", "build", "DerivedData", "node_modules")
+            }
+            .filter(File::isFile)
+            .flatMap { file ->
+                val relative = file.relativeTo(root).invariantSeparatorsPath
+                val pathHits = forbidden.filter(relative::contains).map { token -> "$relative (path: $token)" }
+                val contentHits = if (file.extension in searchableExtensions) {
+                    file.useLines { lines ->
+                        lines.flatMapIndexed { index, line ->
+                            forbidden.asSequence()
+                                .filter(line::contains)
+                                .map { token -> "$relative:${index + 1} ($token)" }
+                        }.toList()
+                    }
+                } else {
+                    emptyList()
+                }
+                (pathHits + contentHits).asSequence()
+            }
+            .sorted()
+            .toList()
+        check(violations.isEmpty()) {
+            "Removed Mobile session/page-cache contract reappeared:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
 val generateDesignTokens by tasks.registering(GenerateDesignTokens::class) {
     group = "design"
     description = "Generates platform-neutral Kotlin and Swift token constants."
@@ -332,4 +381,10 @@ tasks.register<VerifyGeneratedDesignTokens>("verifyDesignTokens") {
     description = "Validates the exact Phase 4 token contract and deterministic generated outputs."
     dependsOn(generateDesignTokens)
     generatedDirectory.set(layout.buildDirectory.dir("generated/design-tokens"))
+}
+
+tasks.register<VerifyMobileOfflineContract>("verifyMobileOfflineContract") {
+    group = "verification"
+    description = "Rejects removed Mobile entitlement, GET-page cache, stale, and download-filter contracts."
+    repositoryRoot.set(layout.projectDirectory.dir("../.."))
 }

@@ -146,6 +146,7 @@ internal fun QueueStatus.copy(): AdministrativeCopy = when (this) {
     QueueStatus.Completed -> AdministrativeCopy.Completed
     QueueStatus.Failed -> AdministrativeCopy.Failed
     QueueStatus.Cancelled -> AdministrativeCopy.Cancelled
+    QueueStatus.Unknown -> AdministrativeCopy.Unknown
 }
 
 @Composable

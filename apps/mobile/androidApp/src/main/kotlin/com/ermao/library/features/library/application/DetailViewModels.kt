@@ -11,9 +11,7 @@ import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.model.ChapterReadingState
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.LibraryScope
-import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toCard
 import com.ermao.library.features.content.model.toFacetKind
 import com.ermao.library.features.content.model.toUiContent
@@ -62,7 +60,6 @@ data class FacetUiState(
     val isLoadingMore: Boolean = false,
     val errorCode: String? = null,
     val paginationErrorCode: String? = null,
-    val freshness: ContentFreshness = ContentFreshness.Fresh,
 ) {
 }
 
@@ -86,7 +83,7 @@ class FacetViewModel(
         if (current.isLoadingMore || (!reset && (current.isLoading || current.page >= current.totalPages))) return
         val nextPage = if (reset) 1 else current.page + 1
         mutableUiState.update {
-            if (reset) it.copy(isLoading = true, errorCode = null)
+            if (reset) it.copy(books = emptyList(), isLoading = true, errorCode = null)
             else it.copy(isLoadingMore = true, paginationErrorCode = null)
         }
         viewModelScope.launch {
@@ -107,7 +104,6 @@ class FacetViewModel(
                                 isLoadingMore = false,
                                 errorCode = null,
                                 paginationErrorCode = null,
-                                freshness = result.freshness(),
                             )
                         }
                     }
@@ -115,8 +111,7 @@ class FacetViewModel(
                         if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
                         if (result.error.kind == AppErrorKind.Forbidden || result.error.kind == AppErrorKind.NotFoundOrUnavailable) {
                             it.copy(books = emptyList(), isLoading = false, isLoadingMore = false, errorCode = "CONTENT_NOT_ACCESSIBLE")
-                        } else if (reset && it.books.isEmpty()) it.copy(isLoading = false, errorCode = result.error.code)
-                        else if (reset) it.copy(isLoading = false, freshness = ContentFreshness.Stale)
+                        } else if (reset) it.copy(books = emptyList(), isLoading = false, errorCode = result.error.code)
                         else it.copy(isLoadingMore = false, paginationErrorCode = result.error.code)
                     }
                 }
@@ -124,8 +119,7 @@ class FacetViewModel(
                 throw cancelled
             } catch (_: Exception) {
                 mutableUiState.update {
-                    if (reset && it.books.isEmpty()) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED")
-                    else if (reset) it.copy(isLoading = false, freshness = ContentFreshness.Stale)
+                    if (reset) it.copy(books = emptyList(), isLoading = false, errorCode = "CONTENT_LOAD_FAILED")
                     else it.copy(isLoadingMore = false, paginationErrorCode = "CONTENT_LOAD_FAILED")
                 }
             }

@@ -101,7 +101,6 @@ private fun AdministrativeSettingsRoute.group(): ManagementGroup = when (this) {
     is AdministrativeSettingsRoute.CategoryGovernance,
     AdministrativeSettingsRoute.MetadataProviders,
     is AdministrativeSettingsRoute.MetadataProviderEdit,
-    is AdministrativeSettingsRoute.MetadataPipeline,
     -> ManagementGroup.Library
     is AdministrativeSettingsRoute.EmailKindle,
     AdministrativeSettingsRoute.KindleQueue,
@@ -146,7 +145,6 @@ private fun AdministrativeSettingsRoute.title(): AdministrativeCopy = when (this
     AdministrativeSettingsRoute.MetadataProviders,
     is AdministrativeSettingsRoute.MetadataProviderEdit,
     -> AdministrativeCopy.MetadataProviders
-    is AdministrativeSettingsRoute.MetadataPipeline -> AdministrativeCopy.MetadataPipeline
     AdministrativeSettingsRoute.Opds -> AdministrativeCopy.Opds
     AdministrativeSettingsRoute.Backups -> AdministrativeCopy.DataAndBackups
     AdministrativeSettingsRoute.DetailOrder -> AdministrativeCopy.WorkDetailOrder
@@ -166,7 +164,7 @@ private fun AdministrativeSettingsRoute.icon(): ImageVector = when (this) {
     AdministrativeSettingsRoute.RecognitionPolicy -> Icons.Outlined.Tune
     AdministrativeSettingsRoute.LibraryOperations, is AdministrativeSettingsRoute.CategoryGovernance,
     -> Icons.AutoMirrored.Outlined.MergeType
-    AdministrativeSettingsRoute.MetadataProviders, is AdministrativeSettingsRoute.MetadataProviderEdit, is AdministrativeSettingsRoute.MetadataPipeline -> Icons.Outlined.Storage
+    AdministrativeSettingsRoute.MetadataProviders, is AdministrativeSettingsRoute.MetadataProviderEdit -> Icons.Outlined.Storage
     AdministrativeSettingsRoute.Users, is AdministrativeSettingsRoute.UserEdit, is AdministrativeSettingsRoute.UserAccess -> Icons.Outlined.ManageAccounts
     is AdministrativeSettingsRoute.EmailKindle -> Icons.Outlined.Email
     AdministrativeSettingsRoute.KindleQueue -> Icons.AutoMirrored.Outlined.Send

@@ -5,7 +5,7 @@
 > 决策日期：2026-08-12
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
-> v1.0.0 修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。本阶段删除离线宽限、entitlement 到期与进入离线模式的高保真分支；已验证会话恢复到普通 Shell，明确鉴权失效才显示 Reauthenticate。
+> v1.0.0 会话契约：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。已验证会话恢复到普通 Shell；暂时网络失败保留 Shell，明确鉴权失效才显示 Reauthenticate。本阶段不定义第二套 Shell、剩余天数或客户端授权期限。
 
 ## 1. 目的与替换范围
 
@@ -35,7 +35,7 @@ App 启动且没有有效登录会话
 → 删除成功后清空三个输入框并停留当前页
 ```
 
-当前交付八张 iOS `390 × 844` App Light PNG 与两张 Android `412 × 915` App Light PNG。Setup、Reauthenticate 与账户停用继续使用不与本决策冲突的 v1 资产；离线宽限和 entitlement 到期资产不再属于 v1.0.0 实现基线。
+当前交付八张 iOS `390 × 844` App Light PNG 与两张 Android `412 × 915` App Light PNG。Setup、Reauthenticate 与账户停用继续使用现行 v1 资产；会话恢复只进入普通 App Shell。
 
 ## 2. 共同视觉与交互约束
 
@@ -249,6 +249,6 @@ iOS 与 Android 共享任务和内容，但系统栏、Sheet、Alert、图标、
 - 可达性、兼容性、setup status 与不安全 SSL 只在点击登录后检查或提示；
 - 页面完全移除网格、添加/编辑模式、名称输入、持久连接状态、证书验证行与 TLS 设置；
 - 普通 401 保持字段级错误和反枚举语义；
-- Setup、Reauthenticate 和账户停用契约保持兼容；v1.0.0 不包含离线宽限或 entitlement 到期分支；
+- Setup、Reauthenticate 和账户停用契约保持兼容；v1.0.0 只有普通 App Shell 与鉴权 Gate；
 - iOS 与 Android 分别使用原生系统组件，不将一张平台无关稿作为共同像素基准；
 - 当前交付仍需在实现中完成 `zh-CN`/`en-US`、Dynamic Type、VoiceOver/TalkBack、App Dark、Reduced Motion/Transparency 与物理真机验收。

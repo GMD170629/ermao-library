@@ -3,6 +3,8 @@ package com.ermao.library.shared.modules.reader
 import com.ermao.library.shared.modules.reader.application.ReaderProgressPushResult
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncCoordinator
 import com.ermao.library.shared.modules.reader.application.ReaderProgressSyncStateStore
+import com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
+import com.ermao.library.shared.modules.reader.domain.toMutation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -38,6 +40,15 @@ class ReaderProgressSyncTest {
         assertEquals(listOf("durable", "network"), events)
         assertEquals(1, store.state.confirmedRevision)
         assertNull(store.state.pending)
+
+        coordinator.beginSession(null)
+        assertNull(
+            coordinator.observeRemoteProgress(
+                snapshot(ReflowablePublicationLocation(remoteEnvelope().asEngineLocator()), 1),
+                currentClientId = "android-client",
+                currentProgress = store.value,
+            ),
+        )
     }
 
     @Test
@@ -272,6 +283,72 @@ class ReaderProgressSyncTest {
 
         assertEquals(listOf(1L to 0L, 2L to 5L), uploaded)
         assertNull(store.state.pending)
+    }
+
+    @Test
+    fun startupRebaseReplacesTheStaleMutationBeforeUpload() = runBlocking {
+        val uploaded = mutableListOf<Long>()
+        var mutationCounter = 0
+        val local = progress(3, movedEnvelope())
+        val stale = local.toMutation(
+            baseRevision = 4,
+            mutationId = "00000000-0000-4000-8000-000000000001",
+        )
+        val store = FakeStore().also {
+            it.value = local
+            it.state = ReaderProgressDurableState(confirmedRevision = 4, pending = stale)
+        }
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { upload ->
+                uploaded += upload.mutation.baseRevision
+                ReaderProgressPushResult.Accepted(snapshot(upload.mutation.locator, 6))
+            },
+            scope = CoroutineScope(coroutineContext),
+            createMutationId = { "00000000-0000-4000-8000-${(++mutationCounter + 1).toString().padStart(12, '0')}" },
+        )
+
+        coordinator.applyStartupDecision(
+            target(),
+            PendingVsServerDecision.UseLocalPending(local, stale, rebaseRevision = 5),
+        )
+        coordinator.awaitIdle()
+
+        assertEquals(listOf(5L), uploaded)
+        assertEquals(6, store.state.confirmedRevision)
+        assertNull(store.state.pending)
+    }
+
+    @Test
+    fun startupRetirementCannotDeleteANewerPendingMutation() = runBlocking {
+        val oldMutation = progress(1).toMutation(
+            baseRevision = 4,
+            mutationId = "00000000-0000-4000-8000-000000000001",
+        )
+        val replacement = progress(2, movedEnvelope()).toMutation(
+            baseRevision = 4,
+            mutationId = "00000000-0000-4000-8000-000000000002",
+        )
+        val store = FakeStore().also {
+            it.value = progress(2, movedEnvelope())
+            it.state = ReaderProgressDurableState(confirmedRevision = 4, pending = replacement)
+        }
+        val coordinator = ReaderProgressSyncCoordinator(
+            store,
+            server = { error("Network must not run while retiring startup state") },
+            scope = CoroutineScope(coroutineContext),
+        )
+
+        coordinator.applyStartupDecision(
+            target(),
+            PendingVsServerDecision.UseServer(
+                snapshot(ReflowablePublicationLocation(remoteEnvelope().asEngineLocator()), 5),
+                discardPendingMutationId = oldMutation.mutationId,
+            ),
+        )
+
+        assertEquals(replacement.mutationId, store.state.pending?.mutationId)
+        assertEquals(5, store.state.pending?.baseRevision)
     }
 
     private fun target() = ReaderProgressSyncTarget(

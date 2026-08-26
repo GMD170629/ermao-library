@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-15
-- Supersedes: Reader-opening and stale-fingerprint rules in ADR 0010; startup-conflict rule in `docs/mobile-reader-architecture.md`
+- Scope: Authoritative Reader-opening eligibility and startup-conflict handling
 
 ## Context
 
@@ -20,10 +20,12 @@ content access remains mandatory when bytes are not already local: remote comics
 require their manifest and page API; remote PDF requires usable Range metadata or a
 complete-file URL; reflowable content requires a file URL.
 
-A completed local artifact is selected only by server/user namespace and volume.
+A completed local artifact is selected only by server/user/authorization namespace and
+`bookId + resourceId + assetId`.
 The native parser is authoritative for whether it can be read:
 
-- EPUB uses Bootstrap navigation when available, cached navigation when offline,
+- EPUB uses Bootstrap navigation when available, locally retained navigation when the
+  network request is unavailable,
   and fills gaps from the publication TOC.
 - A local CBZ/ZIP is security-checked and indexed from its actual entries. Remote
   comics use only the Bootstrap page API and never synthesize a local archive.
@@ -49,7 +51,7 @@ refreshes Bootstrap metadata and may fall back to a full-file download.
 - Server metadata can evolve without taking a readable local book away from its user.
 - A Bootstrap failure prevents remote-only reading but not an already downloaded
   publication.
-- Navigation caches are scoped by server identity, user, and volume; they are hints,
+- Navigation caches are scoped by server identity, user, Book, and ReadableResource; they are hints,
   never a substitute for parser safety checks.
 - Download completion may still verify transfer integrity before publication. That
   transfer check is distinct from later Reader-entry eligibility.

@@ -9,6 +9,7 @@ import { cn } from '../../../components/ui/cn';
 import { useToast } from '../../../components/ui/feedback';
 import type { BookView } from '../../../types/book';
 import { I18nText, useI18n } from '@/i18n/provider';
+import { LibraryTagInput } from '../../library/public';
 import {
   BookMetadataSaveError,
   saveBookMetadata,
@@ -21,7 +22,7 @@ type BookForm = Readonly<{
   description: string;
   seriesName: string;
   seriesIndex: string;
-  tags: string;
+  tags: string[];
 }>;
 
 function formForBook(book: BookView): BookForm {
@@ -31,19 +32,8 @@ function formForBook(book: BookView): BookForm {
     description: book.description,
     seriesName: book.seriesName ?? '',
     seriesIndex: book.seriesIndex === null ? '' : String(book.seriesIndex),
-    tags: book.tags.join(', ')
+    tags: [...book.tags]
   };
-}
-
-function parseTags(value: string): string[] {
-  const seen = new Set<string>();
-  return value.split(/[,，\n]/).flatMap((rawTag) => {
-    const tag = rawTag.trim();
-    const key = tag.toLocaleLowerCase();
-    if (!tag || seen.has(key)) return [];
-    seen.add(key);
-    return [tag];
-  });
 }
 
 const inputClassName = 'mt-2 w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 outline-none transition focus:border-orange-300 focus:ring-4 focus:ring-orange-100/70';
@@ -99,7 +89,7 @@ export function BookMetadataEditor({
         description: form.description.trim(),
         seriesName: form.seriesName.trim() || null,
         seriesIndex: parsedSeriesIndex,
-        tags: parseTags(form.tags),
+        tags: form.tags,
         cover: coverChange
       });
       onSaved(nextBook);
@@ -134,7 +124,17 @@ export function BookMetadataEditor({
             <label className="text-sm text-stone-600"><I18nText>作者</I18nText><input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} className={inputClassName} /></label>
             <label className="text-sm text-stone-600"><I18nText>系列名</I18nText><input value={form.seriesName} onChange={(event) => setForm({ ...form, seriesName: event.target.value })} className={inputClassName} /></label>
             <label className="text-sm text-stone-600"><I18nText>系列序号</I18nText><input value={form.seriesIndex} onChange={(event) => setForm({ ...form, seriesIndex: event.target.value })} inputMode="decimal" className={inputClassName} /></label>
-            <label className="text-sm text-stone-600 md:col-span-2"><I18nText>标签</I18nText><input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} className={inputClassName} placeholder={t('使用逗号分隔多个标签')} /></label>
+            <div className="text-sm text-stone-600 md:col-span-2">
+              <I18nText>标签</I18nText>
+              <LibraryTagInput
+                values={form.tags}
+                onValuesChange={(tags) => setForm({ ...form, tags })}
+                placeholder="输入或选择标签"
+                ariaLabel="图书标签"
+                className="mt-2"
+                disabled={saving}
+              />
+            </div>
             <label className="text-sm text-stone-600 md:col-span-2"><I18nText>简介</I18nText><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} rows={5} className={inputClassName} /></label>
           </div>
           <div className="mt-6 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">

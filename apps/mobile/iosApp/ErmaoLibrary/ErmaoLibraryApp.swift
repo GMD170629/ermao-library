@@ -10,7 +10,7 @@ struct ErmaoLibraryApp: App {
     @StateObject private var downloadCenter: DownloadCenterStore
     private let contentClient: any ContentClient
     private let shelfClient: any ShelfClient
-    private let contentCache: LibraryCacheStore
+    private let coverCache: AuthenticatedCoverCache
     private let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     private let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     private let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
@@ -31,7 +31,7 @@ struct ErmaoLibraryApp: App {
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()
             : AppCompositionRoot.makeRuntimeClient(cookieStore: cookieStore)
-        let contentCache = LibraryCacheStore()
+        let coverCache = AuthenticatedCoverCache()
         let downloadTransfer: any ManagedDownloadTransferring = usesContentFixture
             ? UnavailableManagedDownloadTransfer()
             : SharedManagedDownloadTransfer(cookieStore: cookieStore)
@@ -53,7 +53,7 @@ struct ErmaoLibraryApp: App {
         settingsClientOverride = usesContentFixture
             ? ContentUITestFixture.makeSettingsClient()
             : nil
-        self.contentCache = contentCache
+        self.coverCache = coverCache
         _downloadCenter = StateObject(
             wrappedValue: DownloadCenterStore(
                 repository: managedDownloads,
@@ -64,7 +64,7 @@ struct ErmaoLibraryApp: App {
             wrappedValue: SessionStore(
                 runtime: runtime,
                 privateContentCache: CompositePrivateContentCache(
-                    libraryCache: contentCache,
+                    coverCache: coverCache,
                     downloads: managedDownloads,
                     reader: usesContentFixture ? nil : readerPrivateContentCache
                 )
@@ -78,7 +78,7 @@ struct ErmaoLibraryApp: App {
                 store: sessionStore,
                 contentClient: contentClient,
                 shelfClient: shelfClient,
-                contentCache: contentCache,
+                coverCache: coverCache,
                 downloads: downloadCenter,
                 settingsRepository: settingsRepository,
                 administrativeSettingsRepository: administrativeSettingsRepository,

@@ -97,3 +97,45 @@ def test_fb2_adapter_rejects_active_xml_and_unindexed_resources(
     source = _source(path)
     with pytest.raises(PublicationResourceNotFoundError):
         adapter.read_resource(source, "../secret")
+
+
+def test_fb2_adapter_repairs_legacy_l_href_bound_as_xlink(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-link-prefix.fb2"
+    path.write_text(
+        """<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+ <description><title-info><book-title>Legacy links</book-title></title-info></description>
+ <body><section id="start"><title><p>Start</p></title>
+ <p><a l:href="#start">Return to start</a></p></section></body>
+</FictionBook>""",
+        encoding="utf-8",
+    )
+    adapter = Fb2PublicationAdapter(tmp_path)
+    source = _source(path)
+
+    publication = adapter.open(source)
+    markup = adapter.read_resource(
+        source, publication.reading_order[0].href
+    ).content.decode()
+
+    assert publication.title == "Legacy links"
+    assert 'href="section-0001.xhtml#fb2-node-' in markup
+
+
+def test_fb2_adapter_still_rejects_unbound_non_link_prefix(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "unbound-prefix.fb2"
+    path.write_text(
+        """<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"
+ xmlns:xlink="http://www.w3.org/1999/xlink">
+ <body><section><p bad:value="1">Unsafe</p></section></body>
+</FictionBook>""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublicationCorruptError):
+        Fb2PublicationAdapter(tmp_path).open(_source(path))

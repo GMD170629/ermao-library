@@ -86,8 +86,32 @@ class ReaderProgressSyncCoordinator(
         baselineRevision = serverRevision
     }
 
+    /** Applies the single deterministic startup resolution before the Reader session opens. */
+    suspend fun applyStartupDecision(
+        target: ReaderProgressSyncTarget,
+        decision: PendingVsServerDecision,
+    ) {
+        when (decision) {
+            is PendingVsServerDecision.UseServer -> decision.discardPendingMutationId?.let { mutationId ->
+                val state = stateStore.loadSyncState()
+                discardStartupPending(
+                    mutationId,
+                    maxOf(decision.snapshot?.revision ?: 0, state.confirmedRevision),
+                )
+            }
+            is PendingVsServerDecision.UseLocalPending -> {
+                val rebaseRevision = decision.rebaseRevision
+                if (rebaseRevision == null) {
+                    retryPending(target)
+                } else {
+                    continueStartupWithLocal(target, decision.progress, rebaseRevision)
+                }
+            }
+        }
+    }
+
     fun beginSession(snapshot: ReaderProgressSnapshotV4?) {
-        baselineRevision = snapshot?.revision ?: 0
+        baselineRevision = maxOf(baselineRevision, snapshot?.revision ?: 0)
         remoteNotice = null
         _remoteProgressNotices.value = null
     }
@@ -166,7 +190,10 @@ class ReaderProgressSyncCoordinator(
                 } catch (_: Throwable) {
                     ReaderProgressPushResult.RetryableFailure("NETWORK_UNAVAILABLE")
                 }) {
-                    is ReaderProgressPushResult.Accepted -> stateStore.acknowledge(next.mutationId, result.snapshot)
+                    is ReaderProgressPushResult.Accepted -> {
+                        baselineRevision = maxOf(baselineRevision, result.snapshot.revision)
+                        stateStore.acknowledge(next.mutationId, result.snapshot)
+                    }
                     is ReaderProgressPushResult.Conflict -> {
                         stateStore.discardPendingAfterConflict(next.mutationId, result.current.revision)
                         observeRemoteProgress(result.current, next.clientId, stateStore.load(next.resourceId))

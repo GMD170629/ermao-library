@@ -32,7 +32,7 @@ fun isSupportedNativeReflowable(readerType: String, format: String): Boolean =
 
 fun isSupportedNativeDownloadReader(readerType: String, format: String): Boolean =
     isSupportedNativeReflowable(readerType, format) ||
-        (readerType.equals("comic", ignoreCase = true) && format.trim().uppercase() in setOf("CBZ", "ZIP")) ||
+        (readerType.equals("comic", ignoreCase = true) && format.trim().uppercase() in SUPPORTED_COMIC_FORMATS) ||
         (readerType.equals("pdf", ignoreCase = true) && format.trim().equals("PDF", ignoreCase = true))
 
 fun isSupportedNativeReaderEntry(readerType: String, format: String): Boolean =
@@ -40,4 +40,5 @@ fun isSupportedNativeReaderEntry(readerType: String, format: String): Boolean =
         readerType.equals("comic", ignoreCase = true) ||
         readerType.equals("pdf", ignoreCase = true)
 
-private val SUPPORTED_REFLOWABLE_FORMATS = setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT")
+private val SUPPORTED_REFLOWABLE_FORMATS = setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT", "FB2")
+private val SUPPORTED_COMIC_FORMATS = setOf("CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR")

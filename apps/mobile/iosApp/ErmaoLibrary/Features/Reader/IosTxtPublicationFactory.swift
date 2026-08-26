@@ -12,7 +12,7 @@ struct IosTxtPublicationFactory: Sendable {
     func open(_ managed: IosManagedPublication) throws -> Publication {
         let data = try Data(contentsOf: managed.fileURL, options: [.mappedIfSafe])
         guard data.count <= 64 * 1_024 * 1_024,
-              let decoded = Self.decode(data), !decoded.contains("\0")
+              let decoded = IosStrictTxtDecoder.decode(data)
         else { throw IosTxtPublicationError.invalidEncoding }
 
         // Chapter boundaries, hrefs, block IDs, escaping and CSS are owned by KMP.
@@ -58,18 +58,27 @@ struct IosTxtPublicationFactory: Sendable {
         )
     }
 
-    private static func decode(_ data: Data) -> String? {
+}
+
+enum IosStrictTxtDecoder {
+    static func decode(_ data: Data) -> String? {
+        let decoded: String?
         if data.starts(with: [0xEF, 0xBB, 0xBF]) {
-            return String(data: data.dropFirst(3), encoding: .utf8)
+            decoded = String(data: data.dropFirst(3), encoding: .utf8)
+        } else if data.starts(with: [0xFF, 0xFE]) {
+            decoded = String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        } else if data.starts(with: [0xFE, 0xFF]) {
+            decoded = String(data: data.dropFirst(2), encoding: .utf16BigEndian)
+        } else {
+            decoded = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
         }
-        if data.starts(with: [0xFF, 0xFE]) {
-            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        guard var decoded else { return nil }
+        while decoded.last == "\0" {
+            decoded.removeLast()
         }
-        if data.starts(with: [0xFE, 0xFF]) {
-            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
-        }
-        return String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
+        guard !decoded.isEmpty, !decoded.contains("\0") else { return nil }
+        return decoded
     }
 }
 

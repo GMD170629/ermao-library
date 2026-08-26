@@ -3,7 +3,7 @@ import test from 'node:test';
 import exactRequest from '../../../../packages/reader-contracts/fixtures/exact-reflowable-request.json';
 import { parsePublicationLocation } from '@shuku/reader-core';
 import { MemoryReaderStorage } from './memory-storage';
-import { ReaderProgressConflictError, exactProgressKey } from './model';
+import { READER_PROGRESS_DEBOUNCE_MS, ReaderProgressConflictError, exactProgressKey } from './model';
 import { ReaderProgressSyncCoordinator } from './sync-coordinator';
 
 const locator = parsePublicationLocation(exactRequest.locator);
@@ -47,6 +47,44 @@ test('atomically persists the latest exact locator before uploading the canonica
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], { ...exactRequest, clientId: (sent[0] as { clientId: string }).clientId, mutationId: (sent[0] as { mutationId: string }).mutationId, capturedAtEpochMillis: 99 });
   assert.equal((await storage.listPendingProgress('user-1')).length, 0);
+  const clientId = await storage.getClientId();
+  coordinator.beginSession('resource-1', clientId, {
+    schemaVersion: 4, clientId: 'older-client', revision: 17, locator, displayPercent: 41, receivedAtEpochMillis: 90
+  }, locator);
+  assert.equal(coordinator.getLatestServerSnapshot('resource-1')?.revision, 18);
+});
+
+test('uses the 500 ms contract and collapses a burst into the durable latest slot', async () => {
+  assert.equal(READER_PROGRESS_DEBOUNCE_MS, 500);
+  const storage = new MemoryReaderStorage();
+  const sent: unknown[] = [];
+  const coordinator = new ReaderProgressSyncCoordinator(storage, async (upload) => {
+    sent.push(upload.request);
+    return {
+      schemaVersion: 4,
+      clientId: upload.request.clientId,
+      revision: 18,
+      locator: upload.request.locator,
+      displayPercent: 43,
+      receivedAtEpochMillis: 100
+    };
+  }, { debounceMs: 5, now: () => 99 });
+  coordinator.activateUser('user-1');
+
+  const first = coordinator.enqueue(input);
+  const latest = coordinator.enqueue({ ...input, displayPercent: 43 });
+  await Promise.all([first, latest]);
+  await coordinator.flushNow();
+
+  assert.equal(sent.length, 1);
+  const clientId = await storage.getClientId();
+  assert.equal((await storage.getExactProgress({
+    serverIdentity: input.serverIdentity,
+    userId: input.userId,
+    clientId,
+    bookId: input.bookId,
+    resourceId: input.resourceId
+  }))?.displayPercent, 43);
 });
 
 test('keeps network failures durable but drops a rejected mutation and raises a session notice', async () => {

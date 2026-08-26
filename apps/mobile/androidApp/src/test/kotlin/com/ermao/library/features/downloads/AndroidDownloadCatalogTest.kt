@@ -7,10 +7,38 @@ import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 class AndroidDownloadCatalogTest {
+    @Test
+    fun catalogV3CompletedSingleFileMigratesLosslesslyToV4() = runTest {
+        val root = Files.createTempDirectory("download-catalog-v3-migration-test").toFile()
+        val namespace = AndroidDownloadNamespace("server", "user", 3)
+        try {
+            val directory = root.resolve(sha256("server|user|3")).apply { mkdirs() }
+            val artifact = directory.resolve("artifacts/legacy.bin").apply {
+                parentFile?.mkdirs()
+                writeBytes(byteArrayOf(1, 2, 3, 4))
+            }
+            directory.resolve("catalog.json").writeText(
+                """{"schemaVersion":3,"records":[{"taskId":"legacy-task","namespace":{"serverIdentity":"server","userId":"user","authorizationVersion":3},"bookId":"book","bookTitle":"Book","author":"Author","coverUrl":"/api/books/book/cover","resourceId":"resource","resourceTitle":"Resource","format":"EPUB","readerType":"reflowable","assetId":"asset","sourceApiPath":"/api/assets/asset","sourceMimeType":"application/epub+zip","expectedBytes":4,"transferredBytes":4,"status":"Completed","localReference":"artifacts/legacy.bin","verified":true,"createdAtEpochMillis":1,"updatedAtEpochMillis":2}]}""",
+            )
+
+            val records = AndroidDownloadCatalog(root).records(namespace)
+
+            assertEquals(1, records.size)
+            assertEquals("asset", records.single().assetId)
+            assertEquals("SingleOriginalAsset", records.single().artifactKind)
+            assertTrue(artifact.isFile)
+            assertTrue(directory.resolve("catalog.json").readText().contains("\"schemaVersion\":4"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun newerTaskReplacesOlderTaskForSameAsset() = runTest {
         val root = Files.createTempDirectory("download-catalog-version-test").toFile()
@@ -50,11 +78,34 @@ class AndroidDownloadCatalogTest {
         }
     }
 
+    @Test
+    fun legacyGenericKindleRecordAndArtifactsAreRemovedOnLoad() = runTest {
+        val root = Files.createTempDirectory("download-catalog-kindle-cleanup-test").toFile()
+        val namespace = AndroidDownloadNamespace("server", "user", 3)
+        try {
+            val namespaceKey = sha256("server|user|3")
+            val localReference = "$namespaceKey/artifacts/legacy.kindle"
+            val artifact = root.resolve(localReference).apply {
+                parentFile?.mkdirs()
+                writeBytes(byteArrayOf(1, 2, 3, 4))
+            }
+            val catalog = AndroidDownloadCatalog(root)
+            catalog.upsert(record("legacy-kindle", localReference, 2, format = "KINDLE"))
+
+            assertEquals(emptyList(), AndroidDownloadCatalog(root).records(namespace))
+            assertFalse(artifact.exists())
+            assertFalse(root.resolve(namespaceKey).resolve("catalog.json").readText().contains("KINDLE"))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun record(
         taskId: String,
         localReference: String,
         updatedAt: Long,
         assetId: String = "asset-$taskId",
+        format: String = "EPUB",
     ) =
         AndroidDownloadRecord(
             taskId = taskId,
@@ -65,7 +116,7 @@ class AndroidDownloadCatalogTest {
             coverUrl = "/api/books/book/cover",
             resourceId = "resource",
             resourceTitle = "Resource",
-            format = "EPUB",
+            format = format,
             readerType = "reflowable",
             assetId = assetId,
             sourceApiPath = "/api/resources/resource/asset",

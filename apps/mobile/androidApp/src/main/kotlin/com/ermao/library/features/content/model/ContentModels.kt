@@ -19,9 +19,8 @@ enum class ReadingFilter { Unread, Reading, Finished }
 @Serializable
 data class WorksFilters(
     val reading: ReadingFilter? = null,
-    val downloadedOnly: Boolean = false,
 ) {
-    val count: Int get() = (if (reading == null) 0 else 1) + if (downloadedOnly) 1 else 0
+    val count: Int get() = if (reading == null) 0 else 1
 }
 
 @Immutable
@@ -60,9 +59,6 @@ data class HomeContent(
     val recentReading: List<BookCard>,
     val recentAdded: List<BookCard>,
 )
-
-@Serializable
-enum class ContentFreshness { Fresh, Stale }
 
 @Immutable
 @Serializable

@@ -31,9 +31,9 @@ class KtorReaderBootstrapGatewayTest {
 
         assertEquals("resource-1", content.target.resourceId)
         assertEquals("book-1", content.target.bookId)
-        assertEquals("/api/assets/asset-1", content.publication.apiPath)
-        assertEquals(1_234, content.publication.expectedSizeBytes)
-        assertEquals("asset-1", content.publication.assetId)
+        assertEquals("/api/assets/asset-1", content.downloadableOriginal?.apiPath)
+        assertEquals(1_234, content.downloadableOriginal?.expectedSizeBytes)
+        assertEquals("asset-1", content.remoteAccess.assetId)
         assertEquals(18, content.remoteSnapshot?.revision)
         assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
         assertEquals(ReaderEnginePlatform.Ios, content.remoteSnapshot?.locator?.platform)
@@ -67,7 +67,7 @@ class KtorReaderBootstrapGatewayTest {
         val content = assertIs<Content>(gateway(mismatch).load(request())).value
 
         assertNull(content.remoteSnapshot)
-        assertEquals("/api/assets/asset-1", content.publication.apiPath)
+        assertEquals("/api/assets/asset-1", content.downloadableOriginal?.apiPath)
     }
 
     @Test
@@ -94,8 +94,8 @@ class KtorReaderBootstrapGatewayTest {
             val content = assertIs<Content>(gateway(response).load(request())).value
 
             assertEquals(readerFormat, content.target.sourceFormat)
-            assertEquals(wireFormat, content.publication.sourceFormat.wireValue)
-            assertEquals(mimeType, content.publication.mimeType)
+            assertEquals(wireFormat, content.remoteAccess.sourceFormat.wireValue)
+            assertEquals(mimeType, content.downloadableOriginal?.mimeType)
         }
     }
 
@@ -124,16 +124,35 @@ class KtorReaderBootstrapGatewayTest {
         val comicContent = assertIs<Content>(gateway(comic).load(request())).value
         assertEquals(ReaderFormat.Comic, comicContent.target.sourceFormat)
         assertEquals("pages/0", comicContent.comicPages.single().resourceHref)
-        assertEquals("/api/assets/asset-1", comicContent.publication.apiPath)
+        assertEquals("/api/assets/asset-1", comicContent.downloadableOriginal?.apiPath)
+    }
+
+    @Test
+    fun imageDirectoryUsesOnlineManifestWithoutPretendingFirstPageIsPublication() = runBlocking {
+        val imageDirectory = VALID_BOOTSTRAP
+            .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"comic\"")
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"image_dir\"")
+            .replace("\"format\":\"epub\"", "\"format\":\"image_dir\"")
+            .replace("application/epub+zip", "image/png")
+            .replace("\"units\":[]", COMIC_UNITS)
+            .replace(REFLOWABLE_PUBLICATION, IMAGE_DIRECTORY_PUBLICATION)
+
+        val content = assertIs<Content>(gateway(imageDirectory).load(request())).value
+
+        assertEquals("image_dir", content.remoteAccess.sourceFormat.wireValue)
+        assertEquals(ReaderFormat.Comic, content.target.sourceFormat)
+        assertNull(content.remoteAccess.assetId)
+        assertNull(content.downloadableOriginal)
     }
 
     @Test
     fun rejectsUnsupportedAndMismatchedAssets() = runBlocking {
-        val unsupported = VALID_BOOTSTRAP.replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\"")
-        assertEquals(
-            "READER_BOOTSTRAP_UNSUPPORTED",
-            assertIs<Failure>(gateway(unsupported).load(request())).failureCode,
-        )
+        val fb2 = VALID_BOOTSTRAP
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\"")
+            .replace("\"format\":\"epub\"", "\"format\":\"fb2\"")
+            .replace("application/epub+zip", "application/x-fictionbook+xml")
+        val fb2Content = assertIs<Content>(gateway(fb2).load(request())).value
+        assertEquals("fb2", fb2Content.remoteAccess.sourceFormat.wireValue)
 
         val mismatched = VALID_BOOTSTRAP.replace(
             "\"mimeType\":\"application/epub+zip\"",
@@ -147,6 +166,11 @@ class KtorReaderBootstrapGatewayTest {
 
     private fun gateway(body: String) = KtorReaderBootstrapGateway(
         createClient = { profile ->
+            val comicManifest = if (body.contains("\"sourceFormat\":\"image_dir\"")) {
+                IMAGE_DIRECTORY_MANIFEST
+            } else {
+                COMIC_MANIFEST
+            }
             val engine = MockEngine {
                 when (it.url.encodedPath) {
                     "/api/reader/v4/resources/resource-1/bootstrap" -> respond(
@@ -155,7 +179,7 @@ class KtorReaderBootstrapGatewayTest {
                         headersOf(HttpHeaders.ContentType, "application/json"),
                     )
                     "/api/reader/v4/resources/resource-1/comic/manifest" -> respond(
-                        "{\"ok\":true,\"data\":$COMIC_MANIFEST}",
+                        "{\"ok\":true,\"data\":$comicManifest}",
                         HttpStatusCode.OK,
                         headersOf(HttpHeaders.ContentType, "application/json"),
                     )
@@ -178,15 +202,17 @@ class KtorReaderBootstrapGatewayTest {
         const val PDF_UNITS = """"units":[{"id":"pdf-page-1","index":0,"title":"Page 1","href":"page-1","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageNumber":1}}]"""
         const val COMIC_UNITS = """"units":[{"id":"comic-page-1","index":0,"title":"Page 1","href":"pages/0","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageIndex":0}}]"""
         const val COMIC_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"cbz","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/jpeg","width":1200,"height":1800,"sizeBytes":1234}]}"""
+        const val IMAGE_DIRECTORY_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"image_dir","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/png","width":1200,"height":1800,"sizeBytes":1234}]}"""
         const val REFLOWABLE_PUBLICATION = """"publication":{"kind":"reflowable","manifestUrl":"/api/reader/v4/resources/resource-1/publication/manifest.json","positionsUrl":"/api/reader/v4/resources/resource-1/publication/positions.json"}"""
         const val COMIC_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource-1/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":1234}}"""
+        const val IMAGE_DIRECTORY_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"]}"""
         val VALID_BOOTSTRAP = """
             {
               "schemaVersion":4,"userId":"user-1","readerType":"reflowable","sourceFormat":"epub",
               "book":{"id":"book-1","title":"Book","author":"Author","coverUrl":"/api/books/book-1/cover"},
               "resource":{"id":"resource-1","bookId":"book-1","sourceNodeId":"node-1","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"epub","readerType":"reflowable","pageCount":null,"chapterCount":1,"durationMs":null,"trackCount":null,"progress":0.0,"resourceCompleted":false,"lastReadAt":null},
               "availableResources":[],
-              "assets":[{"id":"asset-1","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":1234,"durationMs":null,"discNumber":null,"trackNumber":null,"sortOrder":0,"url":"/api/assets/asset-1","codec":null}],
+              "assets":[{"id":"asset-1","title":"Resource","resourceId":"resource-1","sourceNodeId":"node-1","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":1234,"durationMs":null,"discNumber":null,"trackNumber":null,"sortOrder":0,"url":"/api/assets/asset-1","codec":null}],
               "units":[],"resourceUrl":"/api/resources/resource-1","capabilities":{},$REFLOWABLE_PUBLICATION,
               "progressSnapshot":{"schemaVersion":4,"clientId":"ios-client","revision":18,"locator":{"kind":"reflowable","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"EPUB/chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#chapter-title"},"text":{"highlight":"Chapter"}}}},"displayPercent":80.0,"receivedAtEpochMillis":2222}
             }

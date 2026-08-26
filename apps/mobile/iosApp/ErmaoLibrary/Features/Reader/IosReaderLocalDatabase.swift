@@ -87,6 +87,10 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @u
         try await worker.recordTerminalFailure(mutationID: mutationId, code: failureCode)
     }
 
+    func close() async {
+        await worker.close()
+    }
+
     /// Purges all exact progress and pending-sync rows owned by one account.
     /// The DB intentionally omits authorizationVersion from owner keys, so a
     /// reauthentication does not strand the account's local position.
@@ -299,6 +303,13 @@ private actor IosReaderLocalDatabaseWorker {
 
     deinit {
         if let database { sqlite3_close(database) }
+    }
+
+    func close() {
+        guard let database else { return }
+        sqlite3_close(database)
+        self.database = nil
+        initialized = false
     }
 
     func load(resourceID: String) throws -> SendableOptionalReaderProgress {

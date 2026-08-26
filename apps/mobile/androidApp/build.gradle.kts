@@ -58,6 +58,11 @@ android {
         assets.directories.add(
             rootProject.layout.projectDirectory.dir("../../test-data/library/pdf").asFile.absolutePath,
         )
+        // Original ZIP/RAR5 comic corpus. Instrumentation opens these exact files through
+        // archive-core; they are not converted or unpacked into generated test fixtures.
+        assets.directories.add(
+            rootProject.layout.projectDirectory.dir("../../books/comics").asFile.absolutePath,
+        )
     }
 
     packaging {
@@ -107,6 +112,7 @@ tasks.named("preBuild") {
 dependencies {
     implementation(project(":shared"))
     implementation(project(":mobiCore"))
+    implementation(project(":archiveCore"))
     implementation(project(":pdfiumNative"))
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)

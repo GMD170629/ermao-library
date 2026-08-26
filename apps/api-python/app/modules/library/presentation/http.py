@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.library import (
+    apply_recognized_metadata,
     browse_book_contents,
     bulk_find_replace,
     bulk_find_replace_preview,
@@ -89,6 +91,13 @@ from app.modules.library.application.management_commands import (
     LibraryOperationAuthorizationError,
     LibraryOperationNotFoundError,
 )
+from app.modules.library.application.recognized_metadata import (
+    ApplyRecognizedMetadataCommand,
+    InvalidRecognizedMetadataError,
+    RecognizedMetadataAuthorizationError,
+    RecognizedMetadataCandidate,
+    RecognizedMetadataTargetNotFoundError,
+)
 from app.modules.library.application.resource_commands import (
     BookNotFoundError,
     InvalidResourceChangeError,
@@ -111,11 +120,17 @@ from app.modules.library.application.source_node_commands import (
     MAX_SOURCE_NODE_COVER_BYTES,
     SourceNodeMetadataChanges,
 )
+from app.modules.library.application.source_node_metadata_recognition import (
+    MetadataProviderSearchError,
+)
 from app.modules.library.presentation.filter_mappers import (
     filter_options_payload,
     filter_schema_payload,
 )
 from app.modules.library.presentation.schemas import (
+    ApplyRecognizedMetadataPayload,
+    ApplyRecognizedMetadataRequest,
+    ApplyRecognizedMetadataResponse,
     AssetDeletedResponse,
     AssetsPayload,
     AssetsResponse,
@@ -198,6 +213,7 @@ from app.modules.library.presentation.views import (
 from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
+LOGGER = logging.getLogger(__name__)
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 
@@ -269,6 +285,10 @@ def _source_node_updated_response(value: object) -> SourceNodeMetadataUpdatedRes
 
 def _source_node_search_response(value: object) -> SourceNodeMetadataSearchResponse:
     return cast(SourceNodeMetadataSearchResponse, value)
+
+
+def _recognized_metadata_response(value: object) -> ApplyRecognizedMetadataResponse:
+    return cast(ApplyRecognizedMetadataResponse, value)
 
 
 def _book_content_entry(value: object) -> BookContentEntryView:
@@ -1280,12 +1300,20 @@ def search_book_source_node_metadata(
             provider_id=payload.provider_id,
             query=payload.query,
         )
-    except (LookupError, ValueError) as exc:
+    except MetadataProviderSearchError:
+        LOGGER.warning(
+            "metadata_search provider=%s source_node_id=%s stage=provider "
+            "outcome=unavailable book_id=%s",
+            payload.provider_id,
+            source_node_id,
+            book_id,
+            exc_info=True,
+        )
         return _source_node_search_response(
             fail(
-                str(exc) or "元数据识别失败",
-                status_code=400,
-                code="METADATA_SEARCH_FAILED",
+                "元数据来源暂时不可用，请稍后重试",
+                status_code=502,
+                code="METADATA_PROVIDER_UNAVAILABLE",
             )
         )
     if result is None:
@@ -1303,12 +1331,117 @@ def search_book_source_node_metadata(
                     id=candidate.id,
                     source=candidate.source,
                     title=candidate.title,
+                    author=candidate.author,
                     description=candidate.description,
+                    tags=list(candidate.tags),
+                    seriesName=candidate.series_name,
+                    seriesIndex=candidate.series_index,
+                    publisher=candidate.publisher,
+                    publishedAt=candidate.published_at,
+                    language=candidate.language,
+                    isbn=candidate.isbn,
+                    identifier=candidate.identifier,
+                    narrator=candidate.narrator,
+                    abridged=candidate.abridged,
+                    resourceIndex=candidate.resource_index,
                     coverUrl=candidate.cover_url,
                     confidence=candidate.confidence,
                 )
                 for candidate in result.candidates
             ],
+        )
+    )
+
+
+@router.post(
+    "/books/{book_id}/metadata/apply",
+    response_model=ApplyRecognizedMetadataResponse,
+)
+def apply_book_recognized_metadata(
+    book_id: str,
+    payload: ApplyRecognizedMetadataRequest,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> ApplyRecognizedMetadataResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _recognized_metadata_response(auth_error)
+    candidate = payload.candidate
+    try:
+        result = apply_recognized_metadata(
+            db,
+            settings,
+        ).execute(
+            ApplyRecognizedMetadataCommand(
+                actor=_actor(db, user),
+                book_id=book_id,
+                scope=payload.scope,
+                resource_id=payload.resource_id,
+                candidate=RecognizedMetadataCandidate(
+                    id=candidate.id,
+                    source=candidate.source,
+                    title=candidate.title,
+                    author=candidate.author,
+                    description=candidate.description,
+                    tags=tuple(candidate.tags),
+                    series_name=candidate.series_name,
+                    series_index=candidate.series_index,
+                    publisher=candidate.publisher,
+                    published_at=candidate.published_at,
+                    language=candidate.language,
+                    isbn=candidate.isbn,
+                    identifier=candidate.identifier,
+                    narrator=candidate.narrator,
+                    abridged=candidate.abridged,
+                    resource_index=candidate.resource_index,
+                    cover_url=candidate.cover_url,
+                ),
+                fields=tuple(payload.fields),
+                now=datetime.now(UTC),
+            )
+        )
+    except RecognizedMetadataAuthorizationError:
+        return _recognized_metadata_response(
+            fail(
+                "需要系统管理权限",
+                status_code=403,
+                code="SYSTEM_MANAGER_REQUIRED",
+            )
+        )
+    except RecognizedMetadataTargetNotFoundError:
+        return _recognized_metadata_response(
+            fail(
+                "元数据目标不存在",
+                status_code=404,
+                code="METADATA_TARGET_NOT_FOUND",
+            )
+        )
+    except InvalidRecognizedMetadataError:
+        return _recognized_metadata_response(
+            fail(
+                "所选元数据字段无效",
+                status_code=422,
+                code="INVALID_METADATA_APPLY",
+            )
+        )
+    LOGGER.info(
+        "metadata_apply provider=%s target_scope=%s resource_id=%s "
+        "stage=complete outcome=success book_id=%s applied_count=%s "
+        "skipped_count=%s cover_status=%s",
+        candidate.source,
+        payload.scope.value,
+        payload.resource_id,
+        book_id,
+        len(result.applied_fields),
+        len(result.skipped_fields),
+        result.cover_status,
+    )
+    return ApplyRecognizedMetadataResponse(
+        data=ApplyRecognizedMetadataPayload(
+            appliedFields=list(result.applied_fields),
+            skippedFields=list(result.skipped_fields),
+            coverStatus=result.cover_status,
         )
     )
 

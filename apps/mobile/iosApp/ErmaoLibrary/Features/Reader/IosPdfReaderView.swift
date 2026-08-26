@@ -47,6 +47,8 @@ struct IosPdfReaderView: View {
                 )
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("reader.pdf.screen")
         .statusBarHidden(!session.controlsVisible)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .task {
@@ -147,10 +149,12 @@ struct IosPdfReaderView: View {
             HStack {
                 Button(action: close) { Image(systemName: "chevron.backward").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.close"))
+                    .accessibilityIdentifier("reader.close")
                 Text(session.displayTitle).font(.headline).lineLimit(1).frame(maxWidth: .infinity)
                 Button { showsTableOfContents = true } label: {
                     Image(systemName: "list.bullet").frame(width: 44, height: 44)
                 }.accessibilityLabel(Text("reader.toc"))
+                    .accessibilityIdentifier("reader.toc")
                 Button { showsSettings = true } label: { Image(systemName: "gearshape").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.settings"))
                 Button { session.zoomOut() } label: { Image(systemName: "minus.magnifyingglass").frame(width: 44, height: 44) }
@@ -167,6 +171,7 @@ struct IosPdfReaderView: View {
                     Button { Task { await session.goPrevious() } } label: {
                         Image(systemName: "chevron.backward").frame(width: 44, height: 44)
                     }.accessibilityLabel(Text("reader.previous"))
+                        .accessibilityIdentifier("reader.previous")
                     Slider(
                         value: $sliderPage,
                         in: 0 ... Double(max(0, session.canonicalPageCount - 1)),
@@ -177,9 +182,11 @@ struct IosPdfReaderView: View {
                     }
                     .accessibilityLabel(Text("reader.progress"))
                     .accessibilityValue(Text(session.pageLabel))
+                    .accessibilityIdentifier("reader.progress")
                     Button { Task { await session.goNext() } } label: {
                         Image(systemName: "chevron.forward").frame(width: 44, height: 44)
                     }.accessibilityLabel(Text("reader.next"))
+                        .accessibilityIdentifier("reader.next")
                 }
                 Text(session.pageLabel).font(.caption.monospacedDigit())
             }

@@ -1,25 +1,33 @@
 'use client';
 
 import { CheckCircle2, Search, Sparkles, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { cn } from '../../components/ui/cn';
 import { Select } from '../../components/ui/select';
+import { useToast } from '../../components/ui/feedback';
 import type { ReadableResourceView, BookView } from '../../types/book';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { completeMetadataApply } from './application/metadata-apply-completion';
 import {
+  applyRecognizedMetadata,
   fetchMetadataProviders,
-  searchSourceNodeMetadata,
-  updateResource,
-  updateSourceNodeMetadata
+  searchSourceNodeMetadata
 } from './api/client';
 import type { SourceNodeMetadataCandidate } from './model/book-contents';
+import {
+  candidateMetadataValue,
+  currentMetadataValue,
+  defaultRecognizedMetadataFields,
+  hasMetadataValue,
+  recognizedMetadataFields,
+  type MetadataTargetScope,
+  type RecognizedMetadataField
+} from './model/recognized-metadata';
 
 type MetadataSource = string;
-type MetadataField = 'title' | 'description';
 type MetadataCandidate = SourceNodeMetadataCandidate;
 
 type MetadataLookupModalProps = {
@@ -31,53 +39,13 @@ type MetadataLookupModalProps = {
   onApplied: () => void | Promise<void>;
 };
 
-const fieldLabels: Record<MetadataField, string> = {
-  title: '标题',
-  description: '简介'
-};
-
-const fields: MetadataField[] = ['title', 'description'];
-
-function valueLabel(value: unknown) {
-  if (Array.isArray(value)) return value.join(', ');
-  if (value === null || value === undefined || value === '') return '未填写';
-  return String(value);
-}
-
-function normalized(value: unknown) {
-  return valueLabel(value).toLowerCase().replace(/[\s_\-.()[\]（）【】《》:：,，]+/g, '');
-}
-
-function candidateValue(candidate: MetadataCandidate | null, field: MetadataField) {
-  if (!candidate) return null;
-  return candidate[field];
-}
-
-function currentValueForField(book: BookView, field: MetadataField, targetResource?: ReadableResourceView) {
-  if (field === 'title') return targetResource?.title ?? book.title;
-  return targetResource?.description || book.description || null;
-}
-
-function hasCandidateValue(value: unknown) {
-  if (Array.isArray(value)) return value.length > 0;
-  return value !== null && value !== undefined && value !== '';
-}
-
-function defaultFields(book: BookView, candidate: MetadataCandidate | null, availableFields: MetadataField[], targetResource?: ReadableResourceView) {
-  if (!candidate) return [];
-  return availableFields.filter((field) => {
-    const next = candidateValue(candidate, field);
-    if (!hasCandidateValue(next)) return false;
-    return normalized(next) !== normalized(currentValueForField(book, field, targetResource));
-  });
-}
-
 function initialSource(providers: ReadonlyArray<{ id: string; enabled: boolean }>): MetadataSource {
   return providers.find((provider) => provider.enabled)?.id ?? '';
 }
 
 export function MetadataLookupModal({ book, currentResourceId, fixedScope = null, open, onClose, onApplied }: MetadataLookupModalProps) {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { formatDate, t: i18nAttribute } = useAttributeI18n();
+  const feedback = useToast();
   const targetResource = useMemo(() => book.resources.find((resource) => resource.id === currentResourceId)
     ?? book.resources.find((resource) => resource.id === book.continueResourceId)
     ?? book.resources[0] ?? null, [book.continueResourceId, book.resources, currentResourceId]);
@@ -85,14 +53,17 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   const [query, setQuery] = useState(book.title);
   const [candidates, setCandidates] = useState<MetadataCandidate[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [selectedFields, setSelectedFields] = useState<MetadataField[]>([]);
-  const selectedTargetResource = fixedScope === 'resource' ? targetResource : undefined;
-  const lookupResource = selectedTargetResource ?? targetResource;
+  const [selectedFields, setSelectedFields] = useState<RecognizedMetadataField[]>([]);
+  const scope: MetadataTargetScope = fixedScope === 'resource' ? 'resource' : 'book';
+  const definitions = useMemo(() => recognizedMetadataFields(scope), [scope]);
+  const selectedTargetResource = scope === 'resource' ? targetResource : null;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<Awaited<ReturnType<typeof fetchMetadataProviders>>['providers']>([]);
   const [enabledProviderIds, setEnabledProviderIds] = useState<string[]>([]);
+  const searchControllerRef = useRef<AbortController | null>(null);
+  const applyControllerRef = useRef<AbortController | null>(null);
 
   const selected = useMemo(() => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null, [candidates, selectedId]);
   const options = useMemo(() => providers.map((provider) => ({
@@ -120,9 +91,13 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
         setEnabledProviderIds(nextEnabledProviderIds);
         setSource(initialSource(nextProviders));
       })
-      .catch((reason) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '读取元数据插件失败'); });
-    return () => controller.abort();
-  }, [book, lookupResource, open]);
+      .catch((reason) => { if (!controller.signal.aborted) setError(i18nAttribute(reason instanceof Error ? reason.message : '读取元数据插件失败')); });
+    return () => {
+      controller.abort();
+      searchControllerRef.current?.abort();
+      applyControllerRef.current?.abort();
+    };
+  }, [book, currentResourceId, i18nAttribute, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -130,62 +105,81 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
   }, [book.id, currentResourceId, fixedScope, open]);
 
   useEffect(() => {
-    setSelectedFields(defaultFields(book, selected, fields, selectedTargetResource));
-  }, [book, selected, selectedTargetResource]);
+    setSelectedFields(defaultRecognizedMetadataFields(book, selectedTargetResource, selected, definitions));
+  }, [book, definitions, selected, selectedTargetResource]);
 
   async function searchCandidates() {
+    searchControllerRef.current?.abort();
+    const controller = new AbortController();
+    searchControllerRef.current = controller;
     setBusy(true);
     setError('');
     setMessage('');
     try {
       const sourceNodeId = fixedScope === 'resource' ? targetResource?.sourceNodeId : book.sourceNodeId;
       if (!sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim());
+      const result = await searchSourceNodeMetadata(book.id, sourceNodeId, source, query.trim(), controller.signal);
+      if (controller.signal.aborted) return;
       const nextCandidates = result.candidates;
       setCandidates(nextCandidates);
       setSelectedId(nextCandidates[0]?.id ?? '');
-      setMessage(nextCandidates.length ? `找到 ${nextCandidates.length} 条候选` : result.message ?? '没有找到候选');
+      setMessage(nextCandidates.length
+        ? i18nAttribute('找到 {value0} 条候选', { value0: nextCandidates.length })
+        : i18nAttribute('没有找到候选'));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '元数据查询失败');
+      if (controller.signal.aborted) return;
+      setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据查询失败'));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
 
   async function applySelected() {
     if (!selected) return;
+    applyControllerRef.current?.abort();
+    const controller = new AbortController();
+    applyControllerRef.current = controller;
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const title = selectedFields.includes('title') ? selected.title?.trim() : undefined;
-      const description = selectedFields.includes('description') ? selected.description?.trim() || null : undefined;
-      if (fixedScope === 'resource') {
-        if (!targetResource) throw new Error('元数据目标资源不存在');
-        await updateResource(book.id, targetResource.id, { ...(title ? { title } : {}), ...(description !== undefined ? { description } : {}) });
-      } else {
-        if (!book.sourceNodeId) throw new Error('元数据目标缺少 sourceNodeId');
-        await updateSourceNodeMetadata(book.id, book.sourceNodeId, {
-          title: title || book.title,
-          description: description !== undefined ? description : book.description || null
-        });
+      if (scope === 'resource' && !targetResource) throw new Error('元数据目标资源不存在');
+      const result = await applyRecognizedMetadata(book.id, {
+        scope,
+        resourceId: scope === 'resource' ? targetResource?.id ?? null : null,
+        candidate: selected,
+        fields: selectedFields
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.coverStatus === 'failed' && result.appliedFields.length === 0) {
+        setError(i18nAttribute('封面更新失败，请稍后重试'));
+        return;
       }
-      setMessage(i18nAttribute('已应用所选字段'));
+      if (result.coverStatus === 'failed') feedback.info(i18nAttribute('其他字段已应用，封面更新失败'));
+      else feedback.success(i18nAttribute('已应用所选字段'));
       await completeMetadataApply({ close: onClose, refresh: onApplied });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '元数据应用失败');
+      if (controller.signal.aborted) return;
+      setError(i18nAttribute(reason instanceof Error ? reason.message : '元数据应用失败'));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   }
 
-  function toggleField(field: MetadataField, checked: boolean) {
+  function toggleField(field: RecognizedMetadataField, checked: boolean) {
     setSelectedFields((current) => checked ? [...new Set([...current, field])] : current.filter((item) => item !== field));
   }
 
-  function renderFieldValue(value: unknown, kind: 'current' | 'candidate') {
-    if (!hasCandidateValue(value) && kind === 'candidate') return i18nAttribute('候选未提供该字段');
-    return valueLabel(value);
+  function renderFieldValue(value: unknown, kind: 'current' | 'candidate', field: RecognizedMetadataField) {
+    if (!hasMetadataValue(value) && kind === 'candidate') return i18nAttribute('候选未提供该字段');
+    if (!hasMetadataValue(value)) return i18nAttribute('未填写');
+    if (typeof value === 'boolean') return i18nAttribute(value ? '是' : '否');
+    if (Array.isArray(value)) return value.join(', ');
+    if (field === 'resource.publishedAt' && (typeof value === 'string' || typeof value === 'number')) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) return formatDate(date);
+    }
+    return String(value);
   }
 
   if (!open) return null;
@@ -238,7 +232,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
                       <div className="line-clamp-2 font-medium text-slate-900">{candidate.title || i18nAttribute("未命名候选")}</div>
                       <Badge tone={candidate.confidence >= 0.8 ? 'green' : 'blue'}>{Math.round(candidate.confidence * 100)}%</Badge>
                     </div>
-                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{candidate.source}</div>
+                    <div className="mt-1 line-clamp-1 text-xs text-slate-500">{[candidate.author, candidate.source].filter(Boolean).join(' · ')}</div>
                     {candidate.description ? <div className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{candidate.description}</div> : null}
                   </div>
                 </div>
@@ -255,30 +249,39 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
               <div><I18nText>候选值</I18nText></div>
             </div>
             <div className="divide-y divide-slate-100">
-              {fields.map((field) => {
-                const currentValue = currentValueForField(book, field, selectedTargetResource);
-                const nextValue = candidateValue(selected, field);
-                const available = hasCandidateValue(nextValue);
-                return (
-                  <label key={field} title={!available ? i18nAttribute('候选未提供该字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
-                    <input
-                      type="checkbox"
-                      disabled={!available}
-                      checked={selectedFields.includes(field)}
-                      onChange={(event) => toggleField(field, event.target.checked)}
-                      className="mt-1 h-4 w-4 accent-blue-600"
-                    />
-                    <div className="font-medium">{fieldLabels[field]}</div>
-                    <div className="col-span-2 min-w-0 break-words pl-7 text-slate-500 md:col-auto md:pl-0">
-                      <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>当前值</I18nText></span>
-                      {renderFieldValue(currentValue, 'current')}
-                    </div>
-                    <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
-                      <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
-                      {renderFieldValue(nextValue, 'candidate')}
-                    </div>
-                  </label>
-                );
+              {(['book', 'resource'] as const).map((group) => {
+                const groupDefinitions = definitions.filter((definition) => definition.group === group);
+                if (groupDefinitions.length === 0) return null;
+                return <div key={group} className="divide-y divide-slate-100">
+                  <div className="bg-slate-50/70 px-3 py-2 text-xs font-semibold text-slate-600">
+                    {i18nAttribute(group === 'book' ? '整书信息' : '当前资源信息')}
+                  </div>
+                  {groupDefinitions.map(({ field, label }) => {
+                    const currentValue = currentMetadataValue(book, selectedTargetResource, field);
+                    const nextValue = candidateMetadataValue(selected, field);
+                    const available = hasMetadataValue(nextValue);
+                    return (
+                      <label key={field} title={!available ? i18nAttribute('候选未提供该字段') : undefined} className={cn('grid grid-cols-[28px_minmax(0,1fr)] gap-2 px-3 py-3 text-sm md:grid-cols-[44px_90px_minmax(0,1fr)_minmax(0,1fr)]', !available && 'text-slate-400')}>
+                        <input
+                          type="checkbox"
+                          disabled={!available}
+                          checked={selectedFields.includes(field)}
+                          onChange={(event) => toggleField(field, event.target.checked)}
+                          className="mt-1 h-4 w-4 accent-blue-600"
+                        />
+                        <div className="font-medium">{i18nAttribute(label)}</div>
+                        <div className="col-span-2 min-w-0 break-words pl-7 text-slate-500 md:col-auto md:pl-0">
+                          <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>当前值</I18nText></span>
+                          {field.endsWith('.cover') && hasMetadataValue(currentValue) ? i18nAttribute('已设置封面') : renderFieldValue(currentValue, 'current', field)}
+                        </div>
+                        <div className="col-span-2 min-w-0 break-words pl-7 text-slate-900 md:col-auto md:pl-0">
+                          <span className="mb-1 block text-xs text-slate-400 md:hidden"><I18nText>候选值</I18nText></span>
+                          {field.endsWith('.cover') && available ? i18nAttribute('可更新封面') : renderFieldValue(nextValue, 'candidate', field)}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>;
               })}
             </div>
           </div>
@@ -286,7 +289,7 @@ export function MetadataLookupModal({ book, currentResourceId, fixedScope = null
 
         <div className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:justify-end">
           <Button variant="secondary" onClick={onClose}><I18nText>取消</I18nText></Button>
-          <Button disabled={busy || !selected || selectedFields.length === 0 || (fixedScope === 'resource' && !targetResource)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
+          <Button disabled={busy || !selected || selectedFields.length === 0 || (scope === 'resource' && !targetResource)} icon={CheckCircle2} onClick={() => void applySelected()}><I18nText>应用所选字段</I18nText></Button>
         </div>
       </div>
     </div>

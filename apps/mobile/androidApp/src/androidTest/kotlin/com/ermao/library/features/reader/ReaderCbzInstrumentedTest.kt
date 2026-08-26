@@ -69,7 +69,7 @@ class ReaderCbzInstrumentedTest {
             scenario.onActivity { activity -> assertTrue(checkNotNull(activity.controllerForTesting).goNext()) }
             waitUntil(scenario, "CBZ second page") {
                 (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.let { location ->
-                    location.pageIndex == 1 && location.resourceHref == "images/page-002.png"
+                    location.pageIndex == 1 && location.resourceHref == "pages/1"
                 } == true
             }
             runBlocking { scenarioActivity(scenario).controllerForTesting?.flush() }
@@ -77,12 +77,12 @@ class ReaderCbzInstrumentedTest {
 
         val persisted = runBlocking { progressStore.load(sourceId) }
         assertEquals(1, (persisted?.location as? ComicReaderLocation)?.pageIndex)
-        assertEquals("images/page-002.png", (persisted?.location as? ComicReaderLocation)?.resourceHref)
+        assertEquals("pages/1", (persisted?.location as? ComicReaderLocation)?.resourceHref)
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             waitUntil(scenario, "restored CBZ second page") {
                 (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.let { location ->
-                    location.pageIndex == 1 && location.resourceHref == "images/page-002.png"
+                    location.pageIndex == 1 && location.resourceHref == "pages/1"
                 } == true
             }
         }

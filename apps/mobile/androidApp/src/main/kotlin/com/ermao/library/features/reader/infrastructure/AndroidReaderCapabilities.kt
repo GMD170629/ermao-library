@@ -15,7 +15,12 @@ internal object AndroidReaderCapabilities {
                 ReaderSourceFormat.Azw3,
                 ReaderSourceFormat.Prc,
                 ReaderSourceFormat.Txt,
+                ReaderSourceFormat.Fb2,
                 ReaderSourceFormat.Cbz,
+                ReaderSourceFormat.Zip,
+                ReaderSourceFormat.Cbr,
+                ReaderSourceFormat.Rar,
+                ReaderSourceFormat.ImageDir,
                 ReaderSourceFormat.Pdf,
             )
             ReaderEngineCapability(

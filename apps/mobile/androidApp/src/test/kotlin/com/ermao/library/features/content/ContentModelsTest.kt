@@ -32,10 +32,9 @@ class ContentModelsTest {
     fun filterCountIncludesOnlySupportedPhaseSevenOptions() {
         val filters = WorksFilters(
             reading = ReadingFilter.Reading,
-            downloadedOnly = true,
         )
 
-        assertEquals(2, filters.count)
+        assertEquals(1, filters.count)
     }
 
     @Test

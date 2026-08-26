@@ -478,7 +478,8 @@ export function LibraryPage() {
     const bounds = anchor.getBoundingClientRect();
     setBookActionRequest({
       target: { id: book.id, title: book.title, status: book.statusValue },
-      position: { x: bounds.right, y: bounds.bottom + 6 },
+      position: { x: bounds.left + bounds.width / 2, y: bounds.bottom + 6 },
+      horizontalAlign: 'center',
       anchor
     });
   }

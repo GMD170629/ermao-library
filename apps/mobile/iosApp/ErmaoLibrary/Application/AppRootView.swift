@@ -5,7 +5,7 @@ struct AppRootView: View {
     @ObservedObject var store: SessionStore
     let contentClient: any ContentClient
     let shelfClient: any ShelfClient
-    let contentCache: LibraryCacheStore
+    let coverCache: AuthenticatedCoverCache
     @ObservedObject var downloads: DownloadCenterStore
     let settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
@@ -18,7 +18,7 @@ struct AppRootView: View {
         store: SessionStore,
         contentClient: any ContentClient = ContentCompositionRoot.makeClient(),
         shelfClient: any ShelfClient = ShelfCompositionRoot.makeClient(),
-        contentCache: LibraryCacheStore = LibraryCacheStore(),
+        coverCache: AuthenticatedCoverCache = AuthenticatedCoverCache(),
         downloads: DownloadCenterStore = DownloadCenterStore(),
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)? = nil,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)? = nil,
@@ -29,7 +29,7 @@ struct AppRootView: View {
         self.store = store
         self.contentClient = contentClient
         self.shelfClient = shelfClient
-        self.contentCache = contentCache
+        self.coverCache = coverCache
         self.downloads = downloads
         self.settingsRepository = settingsRepository
         self.administrativeSettingsRepository = administrativeSettingsRepository
@@ -119,7 +119,7 @@ struct AppRootView: View {
                         store: store,
                 contentClient: contentClient,
                 shelfClient: shelfClient,
-                        cache: contentCache,
+                        cache: coverCache,
                         downloads: downloads,
                         settingsRepository: settingsRepository,
                         administrativeSettingsRepository: administrativeSettingsRepository,
@@ -134,7 +134,7 @@ struct AppRootView: View {
                         downloads: downloads,
                         contentClient: contentClient,
                         shelfClient: shelfClient,
-                        cache: contentCache,
+                        cache: coverCache,
                         workManagementRepository: workManagementRepository,
                         readerComposition: readerComposition
                     )
@@ -160,7 +160,7 @@ private struct AuthenticatedShellHost: View {
     @ObservedObject var store: SessionStore
     let contentClient: any ContentClient
     let shelfClient: any ShelfClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     @ObservedObject var downloads: DownloadCenterStore
     let administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?
     let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
@@ -173,7 +173,7 @@ private struct AuthenticatedShellHost: View {
         store: SessionStore,
         contentClient: any ContentClient,
         shelfClient: any ShelfClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         downloads: DownloadCenterStore,
         settingsRepository: (any ErmaoShared.PersonalSettingsRepository)?,
         administrativeSettingsRepository: (any ErmaoShared.AdministrativeSettingsRepository)?,

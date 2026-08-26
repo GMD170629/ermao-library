@@ -11,19 +11,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ermao.library.features.content.model.WorksFilters
-import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.ui.theme.WarmPageTheme
 import java.util.Locale
 import org.junit.Assert.assertEquals
@@ -62,7 +58,6 @@ class LibraryFilterSheetTest {
                         filters = WorksFilters(),
                         copy = copy,
                         onChange = {},
-                        offlineAvailability = OfflineFilterAvailability.Available,
                         onClear = {},
                         onApply = {},
                         onDismiss = {},
@@ -98,7 +93,6 @@ class LibraryFilterSheetTest {
                             filters = WorksFilters(),
                             copy = englishFilterSheetCopy(),
                             onChange = {},
-                            offlineAvailability = OfflineFilterAvailability.Available,
                             onClear = {},
                             onApply = {},
                             onDismiss = {},
@@ -115,9 +109,7 @@ class LibraryFilterSheetTest {
             .getUnclippedBoundsInRoot()
             .top
 
-        compose.onNodeWithTag("library-filter-downloaded")
-            .performScrollTo()
-            .assertIsDisplayed()
+        compose.onNodeWithText("Downloaded").assertDoesNotExist()
 
         compose.onNodeWithTag("library-filter-title").assertIsDisplayed()
         val scrolledApplyTop = compose.onNodeWithTag("library-filter-apply")
@@ -129,8 +121,6 @@ class LibraryFilterSheetTest {
             initialApplyTop,
             scrolledApplyTop,
         )
-        compose.onAllNodes(hasClickAction(), useUnmergedTree = true)
-            .assertCountEquals(10)
     }
 
     @Test
@@ -153,7 +143,6 @@ class LibraryFilterSheetTest {
                             filters = WorksFilters(),
                             copy = englishFilterSheetCopy(),
                             onChange = {},
-                            offlineAvailability = OfflineFilterAvailability.Available,
                             onClear = {},
                             onApply = {},
                             onDismiss = {},
@@ -164,13 +153,9 @@ class LibraryFilterSheetTest {
             }
         }
 
-        compose.onNodeWithTag("library-filter-downloaded")
-            .performScrollTo()
-            .assertIsDisplayed()
+        compose.onNodeWithText("Finished").assertIsDisplayed()
         compose.onNodeWithTag("library-filter-apply")
             .assertIsDisplayed()
-        compose.onAllNodes(hasClickAction(), useUnmergedTree = true)
-            .assertCountEquals(10)
     }
 }
 
@@ -183,7 +168,5 @@ private fun englishFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFilterShee
     unread = "Unread",
     reading = "Reading",
     finished = "Finished",
-    offlineHeading = "Downloaded",
-    downloaded = "Downloaded",
     applyAction = "Apply",
 )

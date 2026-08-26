@@ -31,7 +31,8 @@ struct IosReflowableReaderView: View {
             }
         }
         .animation(.easeInOut(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18), value: session.controlsVisible)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("reader.reflow.screen")
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .statusBarHidden(!session.controlsVisible)
         .task {
@@ -160,7 +161,15 @@ struct IosReflowableReaderView: View {
             .foregroundStyle(palette.foreground)
         default:
             if let navigator = session.navigator {
-                ReadiumNavigatorHost(navigator: navigator).ignoresSafeArea()
+                GeometryReader { geometry in
+                    ReadiumNavigatorHost(navigator: navigator)
+                        .ignoresSafeArea()
+                        .simultaneousGesture(
+                            SpatialTapGesture().onEnded { value in
+                                session.handleTap(at: value.location, width: geometry.size.width)
+                            }
+                        )
+                }
             }
         }
     }
@@ -172,6 +181,7 @@ struct IosReflowableReaderView: View {
                     Image(systemName: "chevron.backward").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(Text("reader.close"))
+                .accessibilityIdentifier("reader.close")
 
                 VStack(spacing: 2) {
                     Text(session.chapterTitle ?? session.displayTitle)
@@ -201,6 +211,7 @@ struct IosReflowableReaderView: View {
                         Image(systemName: "backward.end").frame(width: 44, height: 44)
                     }
                     .accessibilityLabel(Text("reader.previous.chapter"))
+                    .accessibilityIdentifier("reader.previous")
 
                     Slider(value: $sliderValue, in: 0 ... 1) { editing in
                         sliderIsEditing = editing
@@ -208,11 +219,13 @@ struct IosReflowableReaderView: View {
                     }
                     .tint(palette.accent)
                     .accessibilityLabel(Text("reader.progress"))
+                    .accessibilityIdentifier("reader.progress")
 
                     Button { Task { await session.goNext() } } label: {
                         Image(systemName: "forward.end").frame(width: 44, height: 44)
                     }
                     .accessibilityLabel(Text("reader.next.chapter"))
+                    .accessibilityIdentifier("reader.next")
                 }
 
                 HStack {
@@ -225,6 +238,7 @@ struct IosReflowableReaderView: View {
 
                 HStack(spacing: 0) {
                     ReaderControlButton(title: "reader.toc", systemImage: "list.bullet") { activePanel = .contents }
+                        .accessibilityIdentifier("reader.toc")
                     ReaderControlButton(title: "reader.notes", systemImage: "bookmark") { activePanel = .notes }
                     ReaderControlButton(title: "reader.appearance", systemImage: "textformat.size") { activePanel = .appearance }
                     ReaderControlButton(title: "reader.settings", systemImage: "gearshape") { activePanel = .settings }

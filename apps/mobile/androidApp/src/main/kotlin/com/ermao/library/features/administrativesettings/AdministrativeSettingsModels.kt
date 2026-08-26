@@ -72,9 +72,6 @@ sealed interface AdministrativeSettingsRoute : NavKey {
     data class MetadataProviderEdit(val providerId: String) : AdministrativeSettingsRoute
 
     @Serializable
-    data class MetadataPipeline(val mediaKind: MediaKind = MediaKind.Ebook) : AdministrativeSettingsRoute
-
-    @Serializable
     data object Opds : AdministrativeSettingsRoute
 
     @Serializable
@@ -233,7 +230,7 @@ data class KindleTask(
     val createdAtLabel: String,
 )
 
-enum class QueueStatus { Queued, Running, Completed, Failed, Cancelled }
+enum class QueueStatus { Queued, Running, Completed, Failed, Cancelled, Unknown }
 
 data class UsersSnapshot(
     val users: List<AdministrativeUser>,
@@ -324,6 +321,11 @@ data class ImportTask(
     val id: String,
     val fileName: String,
     val sourcePath: String,
+    val libraryName: String? = null,
+    val resourceTitle: String? = null,
+    val sourceName: String? = null,
+    val sourceRelativePath: String? = null,
+    val bookTitle: String? = null,
     val createdAtLabel: String,
     val status: QueueStatus,
     val progress: Float? = null,
@@ -332,8 +334,11 @@ data class ImportTask(
 
 data class ImportTaskDetailSnapshot(
     val task: ImportTask,
-    val requestedTitle: String?,
-    val requestedAuthor: String?,
+    val libraryName: String?,
+    val resourceTitle: String?,
+    val sourceName: String?,
+    val sourceRelativePath: String?,
+    val bookTitle: String?,
     val processedAssetCount: Int,
     val assetCount: Int,
     val attempts: Int,
@@ -463,7 +468,6 @@ data class CategoryEntry(
 
 data class MetadataProvidersSnapshot(
     val providers: List<MetadataProvider>,
-    val pipelineSummary: String,
 ) : AdministrativePageSnapshot
 
 data class MetadataProvider(
@@ -501,16 +505,6 @@ sealed interface ProviderFieldValue {
     data class TextList(val value: List<String>) : ProviderFieldValue
     data object Empty : ProviderFieldValue
 }
-
-data class MetadataPipelineSnapshot(
-    val steps: List<MetadataPipelineStep>,
-) : AdministrativePageSnapshot
-
-data class MetadataPipelineStep(
-    val id: String,
-    val label: String,
-    val enabled: Boolean,
-)
 
 data class OpdsSnapshot(
     val enabled: Boolean,
@@ -550,10 +544,6 @@ data class HealthSnapshot(
     val healthyCount: Int,
     val totalCount: Int,
     val checks: List<HealthCheck>,
-    val importQueueRestarting: Boolean,
-    val queueOperationId: String? = null,
-    val queueOperationStatus: String? = null,
-    val queueOperationMessageCode: String? = null,
 ) : AdministrativePageSnapshot
 
 data class HealthCheck(
@@ -643,7 +633,6 @@ enum class AdministrativeOperation {
     SaveMetadataProviders,
     SaveMetadataProvider,
     TestMetadataProvider,
-    SaveMetadataPipeline,
     SaveOpds,
     CreateBackup,
     DownloadBackup,
@@ -651,7 +640,6 @@ enum class AdministrativeOperation {
     DeleteBackup,
     SaveDetailOrder,
     RunHealthCheck,
-    RestartImportQueue,
     SaveLogCapacity,
     ExportLogs,
     ClearInformationalLogs,

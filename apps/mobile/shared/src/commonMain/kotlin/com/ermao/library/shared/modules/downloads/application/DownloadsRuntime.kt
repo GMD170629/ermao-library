@@ -6,15 +6,11 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadTask
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 import com.ermao.library.shared.modules.downloads.domain.DownloadedBook
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
-import com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision
-import com.ermao.library.shared.modules.downloads.domain.ReaderAccessPolicy
-import com.ermao.library.shared.modules.downloads.domain.ReaderAccessRequest
 import com.ermao.library.shared.modules.downloads.domain.completedDownloadsByBook
 import com.ermao.library.shared.modules.downloads.domain.transition
 
 class DownloadsRuntime(
     private val catalog: DownloadCatalogRepository,
-    private val readerAccessPolicy: ReaderAccessPolicy = ReaderAccessPolicy(),
 ) {
     suspend fun downloadedBooks(
         namespace: DownloadNamespace,
@@ -45,9 +41,6 @@ class DownloadsRuntime(
     suspend fun removeArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
         catalog.deleteArtifact(namespace, identity)
     }
-
-    suspend fun readerAccess(request: ReaderAccessRequest): ReaderAccessDecision =
-        readerAccessPolicy.decide(request, catalog.listArtifacts(request.namespace))
 
     suspend fun artifact(
         namespace: DownloadNamespace,

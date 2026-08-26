@@ -3,18 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi.responses import Response
 from pydantic import Field, model_validator
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.system_events import SystemEvent
-from app.modules.library.domain.layout import LibraryOrganizationMode
+from app.modules.library.public import LibraryOrganizationMode
 
 SystemSettingValue = str | int | float | bool | list[str] | None
-
-
-class BackupArchiveResponse(Response):
-    media_type = "application/zip"
 
 
 class FrontendResources(HttpContractModel):
@@ -62,20 +57,6 @@ class UpdateSystemSettingsRequest(HttpContractModel):
         }
 
 
-class OpdsSystemSettingsPayload(HttpContractModel):
-    enabled: bool
-    configured: bool
-    public_base_url: str | None = Field(alias="publicBaseUrl")
-    catalog_url: str | None = Field(alias="catalogUrl")
-
-
-class UpdateOpdsSystemSettingsRequest(HttpContractModel):
-    enabled: bool
-    public_base_url: str | None = Field(
-        default=None, alias="publicBaseUrl", max_length=2048
-    )
-
-
 class LibraryScanSystemSettingsPayload(HttpContractModel):
     watch_enabled: bool = Field(alias="watchEnabled")
     interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
@@ -84,49 +65,6 @@ class LibraryScanSystemSettingsPayload(HttpContractModel):
 class UpdateLibraryScanSystemSettingsRequest(HttpContractModel):
     watch_enabled: bool = Field(alias="watchEnabled")
     interval_minutes: int = Field(alias="intervalMinutes", ge=5, le=1440)
-
-
-class Backup(HttpContractModel):
-    id: str
-    kind: str | None = None
-    name: str
-    filename: str | None = None
-    size_bytes: int = Field(alias="sizeBytes")
-    created_at: datetime = Field(alias="createdAt")
-    counts: dict[str, int] | None = None
-
-
-class BackupsPayload(HttpContractModel):
-    backups: list[Backup]
-
-
-class BackupPayload(HttpContractModel):
-    backup: Backup
-
-
-class BackupRestorePayload(HttpContractModel):
-    id: str
-    restored: Literal[True]
-    restored_at: datetime = Field(alias="restoredAt")
-    counts: dict[str, int] | None
-    restored_counts: dict[str, int] = Field(alias="restoredCounts")
-    actual_counts: dict[str, int] = Field(alias="actualCounts")
-
-
-class BackupRestoreRequest(HttpContractModel):
-    """Compatibility contract for the confirmation body already sent by Web."""
-
-    confirm: bool | None = None
-    confirm_text: str | None = Field(
-        default=None,
-        alias="confirmText",
-        max_length=32,
-    )
-
-
-class BackupDeletePayload(HttpContractModel):
-    deleted: bool
-    id: str
 
 
 class SystemStatusCheck(HttpContractModel):
@@ -225,12 +163,7 @@ class ManagementOverviewPayload(HttpContractModel):
 
 AppConfigResponse = SuccessEnvelope[AppConfigPayload]
 SystemSettingsResponse = SuccessEnvelope[SystemSettingsPayload]
-OpdsSystemSettingsResponse = SuccessEnvelope[OpdsSystemSettingsPayload]
 LibraryScanSystemSettingsResponse = SuccessEnvelope[LibraryScanSystemSettingsPayload]
-BackupsResponse = SuccessEnvelope[BackupsPayload]
-BackupResponse = SuccessEnvelope[BackupPayload]
-BackupRestoreResponse = SuccessEnvelope[BackupRestorePayload]
-BackupDeleteResponse = SuccessEnvelope[BackupDeletePayload]
 DashboardSystemStatusResponse = SuccessEnvelope[DashboardSystemStatusPayload]
 ManagementEventsResponse = SuccessEnvelope[ManagementEventsPayload]
 ClearedEventsResponse = SuccessEnvelope[ClearedEventsPayload]

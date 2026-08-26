@@ -66,8 +66,8 @@ test('uses only canonical auditable bulk operation endpoints', async () => {
     await updateBulkBookMetadata({
       ids: ['book-1', 'book-2'],
       fields: { author: '新作者' },
-      addTags: [],
-      removeTags: []
+      addTags: ['历史'],
+      removeTags: ['历史']
     });
     await applyBulkBookFindReplace({
       ids: ['book-1'],
@@ -85,6 +85,12 @@ test('uses only canonical auditable bulk operation endpoints', async () => {
       '/api/library/operations/books/find-replace',
       '/api/library/operations/books/reading-status'
     ]);
+    assert.deepEqual(requests[0]?.body, {
+      ids: ['book-1', 'book-2'],
+      fields: { author: '新作者' },
+      addTags: ['历史'],
+      removeTags: ['历史']
+    });
     assert.equal(requests.some((request) => request.url.includes('/api/books/bulk')), false);
   } finally {
     globalThis.fetch = originalFetch;

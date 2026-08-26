@@ -3,7 +3,6 @@ package com.ermao.library.shared.modules.library
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class ContentModelsTest {
     @Test
@@ -18,13 +17,6 @@ class ContentModelsTest {
         )
 
         assertEquals(first.fingerprint(), second.fingerprint())
-    }
-
-    @Test
-    fun downloadedOnlyParticipatesInTheQueryIdentity() {
-        val query = BooksQuery()
-
-        assertTrue(query.fingerprint() != query.copy(filters = LibraryFilters(downloadedOnly = true)).fingerprint())
     }
 
     @Test

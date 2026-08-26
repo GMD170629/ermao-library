@@ -180,11 +180,6 @@ sealed interface AdministrativeCommand {
         override val ownerRoute = AdministrativeSettingsRoute.MetadataProviderEdit(providerId)
     }
 
-    data class SaveMetadataPipeline(val mediaKind: MediaKind, val steps: List<MetadataPipelineStep>) : AdministrativeCommand {
-        override val operation = AdministrativeOperation.SaveMetadataPipeline
-        override val ownerRoute = AdministrativeSettingsRoute.MetadataPipeline(mediaKind)
-    }
-
     data class SaveOpds(val enabled: Boolean, val publicBaseUrl: String) : AdministrativeCommand {
         override val operation = AdministrativeOperation.SaveOpds
         override val ownerRoute = AdministrativeSettingsRoute.Opds
@@ -217,11 +212,6 @@ sealed interface AdministrativeCommand {
 
     data object RunHealthCheck : AdministrativeCommand {
         override val operation = AdministrativeOperation.RunHealthCheck
-        override val ownerRoute = AdministrativeSettingsRoute.Health()
-    }
-
-    data object RestartImportQueue : AdministrativeCommand {
-        override val operation = AdministrativeOperation.RestartImportQueue
         override val ownerRoute = AdministrativeSettingsRoute.Health()
     }
 
@@ -331,7 +321,6 @@ internal fun AdministrativeSettingsRoute.requiredCapability(): AdministrativeCap
     -> AdministrativeCapability.ManageOrganization
     AdministrativeSettingsRoute.MetadataProviders,
     is AdministrativeSettingsRoute.MetadataProviderEdit,
-    is AdministrativeSettingsRoute.MetadataPipeline,
     -> AdministrativeCapability.ManageMetadata
     AdministrativeSettingsRoute.Opds -> AdministrativeCapability.ManageOpds
     AdministrativeSettingsRoute.Backups -> AdministrativeCapability.ManageBackups
@@ -379,7 +368,6 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     is AdministrativeCommand.SaveMetadataProviders,
     is AdministrativeCommand.SaveMetadataProvider,
     is AdministrativeCommand.TestMetadataProvider,
-    is AdministrativeCommand.SaveMetadataPipeline,
     -> AdministrativeCapability.ManageMetadata
     is AdministrativeCommand.SaveOpds -> AdministrativeCapability.ManageOpds
     AdministrativeCommand.CreateBackup,
@@ -389,7 +377,6 @@ internal fun AdministrativeCommand.requiredCapability(): AdministrativeCapabilit
     -> AdministrativeCapability.ManageBackups
     is AdministrativeCommand.SaveDetailOrder,
     AdministrativeCommand.RunHealthCheck,
-    AdministrativeCommand.RestartImportQueue,
     -> AdministrativeCapability.ManageSystem
     is AdministrativeCommand.SaveLogCapacity,
     is AdministrativeCommand.ExportLogs,

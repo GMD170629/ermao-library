@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 APP_ROOT = Path(__file__).parents[1] / "app"
 API_ROOT = APP_ROOT.parent
 CAPABILITIES = (
     "auth",
+    "backup",
     "download",
     "imports",
     "kindle",
@@ -14,10 +16,103 @@ CAPABILITIES = (
     "media",
     "metadata",
     "organize",
+    "opds",
+    "publications",
     "reader",
     "shelf",
     "system",
 )
+
+
+# Exact pre-P1-03/P1-04 debt.  Each capability migration removes its entries;
+# the generic collectors below make newly introduced dependency edges fail.
+_CROSS_CAPABILITY_PRIVATE_IMPORT_DEBT: set[tuple[str, str]] = set()
+
+_APPLICATION_FRAMEWORK_IMPORT_DEBT: set[tuple[str, str]] = set()
+
+_BOOTSTRAP_BEHAVIOR_DEBT = {
+    "bootstrap/auth.py": set(),
+    "bootstrap/system.py": set(),
+    "bootstrap/opds.py": set(),
+}
+
+_PRESENTATION_DATABASE_CALL_DEBT = Counter({})
+
+
+def _imported_modules(path: Path) -> tuple[str, ...]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+    return tuple(imported)
+
+
+def test_cross_capability_imports_use_public_or_contract_surfaces() -> None:
+    violations: set[tuple[str, str]] = set()
+    modules_root = APP_ROOT / "modules"
+    for capability_root in modules_root.iterdir():
+        if not capability_root.is_dir():
+            continue
+        capability = capability_root.name
+        for path in capability_root.rglob("*.py"):
+            for imported in _imported_modules(path):
+                parts = imported.split(".")
+                if (
+                    len(parts) >= 4
+                    and parts[:2] == ["app", "modules"]
+                    and parts[2] != capability
+                    and parts[3] != "public"
+                ):
+                    violations.add((path.relative_to(APP_ROOT).as_posix(), imported))
+    assert violations == _CROSS_CAPABILITY_PRIVATE_IMPORT_DEBT
+
+
+def test_application_modules_do_not_import_frameworks_or_orm() -> None:
+    violations: set[tuple[str, str]] = set()
+    for path in (APP_ROOT / "modules").glob("*/application/**/*.py"):
+        for imported in _imported_modules(path):
+            if imported.startswith(("fastapi", "sqlalchemy")):
+                violations.add((path.relative_to(APP_ROOT).as_posix(), imported))
+    assert violations == _APPLICATION_FRAMEWORK_IMPORT_DEBT
+
+
+def test_target_bootstraps_only_define_composition_symbols() -> None:
+    for relative_path, expected_debt in _BOOTSTRAP_BEHAVIOR_DEBT.items():
+        path = APP_ROOT / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        actual = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and not node.name.startswith(("build_", "create_", "register_", "start_"))
+        }
+        assert actual == expected_debt, relative_path
+
+
+def test_target_presentations_do_not_execute_database_operations() -> None:
+    actual: Counter[tuple[str, str]] = Counter()
+    targets = (
+        "modules/auth/presentation/users.py",
+        "modules/library/presentation/views.py",
+        "modules/system/presentation/http.py",
+    )
+    database_methods = {"execute", "get", "scalar", "scalars", "commit", "rollback"}
+    for relative_path in targets:
+        path = APP_ROOT / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "db"
+                and node.func.attr in database_methods
+            ):
+                actual[(relative_path, f"db.{node.func.attr}")] += 1
+    assert actual == _PRESENTATION_DATABASE_CALL_DEBT
 
 
 def test_capability_public_modules_do_not_import_infrastructure() -> None:
@@ -26,6 +121,15 @@ def test_capability_public_modules_do_not_import_infrastructure() -> None:
             encoding="utf-8"
         )
         assert ".infrastructure" not in source, capability
+
+
+def test_capability_public_modules_do_not_import_presentation() -> None:
+    for capability in CAPABILITIES:
+        public_module = APP_ROOT / "modules" / capability / "public.py"
+        if not public_module.exists():
+            continue
+        source = public_module.read_text(encoding="utf-8")
+        assert ".presentation" not in source, capability
 
 
 def test_library_application_contracts_do_not_import_infrastructure() -> None:
@@ -727,6 +831,7 @@ def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
     ):
         source = (APP_ROOT / relative_path).read_text(encoding="utf-8")
         assert "app.models" in source, relative_path
+
 
 _LEGACY_IDENTITY_NAMES = frozenset(
     {

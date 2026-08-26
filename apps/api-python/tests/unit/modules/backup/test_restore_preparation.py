@@ -4,13 +4,13 @@ from datetime import datetime
 
 import pytest
 
+from app.modules.backup.infrastructure.archive import BACKUP_TABLES
 from app.modules.backup.infrastructure.persistence import (
     TABLE_MODELS,
     prepare_table_records,
     table_dependency_order,
     validate_restore_relationships,
 )
-from app.services.backup_service import BACKUP_TABLES
 
 
 def test_prepare_table_records_filters_unknown_fields_and_converts_timestamps() -> None:

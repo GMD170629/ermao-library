@@ -11,43 +11,93 @@ enum class ReaderFormat(val wireValue: String) {
 }
 
 /** Concrete resource format. The server may expose a codec-specific audio format. */
+private val READER_AUDIO_MIME_TYPES = setOf(
+    "audio/aac",
+    "audio/ac3",
+    "audio/aiff",
+    "audio/amr",
+    "audio/basic",
+    "audio/eac3",
+    "audio/flac",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/vnd.dts",
+    "audio/vnd.rn-realaudio",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-matroska",
+    "audio/x-ms-wma",
+    "audio/x-adx",
+    "audio/x-ape",
+    "audio/x-aptx",
+    "audio/x-aptxhd",
+    "audio/x-caf",
+    "audio/x-dff",
+    "audio/x-dsf",
+    "audio/x-g722",
+    "audio/x-g726",
+    "audio/x-gsm",
+    "audio/x-lbc",
+    "audio/x-mlp",
+    "audio/x-mpc",
+    "audio/x-oma",
+    "audio/x-qcp",
+    "audio/x-shn",
+    "audio/x-sph",
+    "audio/x-tak",
+    "audio/x-thd",
+    "audio/x-tta",
+    "audio/x-voc",
+    "audio/x-wv",
+    "audio/x-xma",
+)
+
 enum class ReaderSourceFormat(
     val wireValue: String,
     val readerFormat: ReaderFormat,
     val fileKind: String,
     val allowedMimeTypes: Set<String>,
 ) {
-    Epub("epub", ReaderFormat.Epub, "EPUB", setOf("application/epub+zip", "application/octet-stream")),
-    Mobi("mobi", ReaderFormat.Mobi, "MOBI", setOf("application/x-mobipocket-ebook", "application/octet-stream")),
-    Azw("azw", ReaderFormat.Mobi, "AZW", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook", "application/octet-stream")),
-    Azw3("azw3", ReaderFormat.Mobi, "AZW3", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook", "application/octet-stream")),
-    Prc("prc", ReaderFormat.Mobi, "PRC", setOf("application/x-mobipocket-ebook", "application/octet-stream")),
-    Txt("txt", ReaderFormat.Text, "TXT", setOf("text/plain", "application/octet-stream")),
-    Cbz("cbz", ReaderFormat.Comic, "CBZ", setOf("application/vnd.comicbook+zip", "application/x-cbz", "application/zip", "application/octet-stream")),
-    Zip("zip", ReaderFormat.Comic, "ZIP", setOf("application/zip", "application/octet-stream")),
-    Cbr("cbr", ReaderFormat.Comic, "CBR", setOf("application/vnd.comicbook-rar", "application/x-cbr", "application/vnd.rar", "application/octet-stream")),
-    Rar("rar", ReaderFormat.Comic, "RAR", setOf("application/vnd.rar", "application/vnd.comicbook-rar", "application/octet-stream")),
-    Pdf("pdf", ReaderFormat.Pdf, "PDF", setOf("application/pdf", "application/octet-stream")),
-    Audio("audio", ReaderFormat.Audio, "AUDIO", setOf("audio/mpeg", "audio/mp4", "audio/ogg", "audio/flac", "audio/wav", "application/octet-stream")),
-    Audiobook("audiobook", ReaderFormat.Audio, "AUDIO", setOf("audio/mpeg", "audio/mp4", "audio/ogg", "audio/flac", "audio/wav", "application/octet-stream")),
-    M4b("m4b", ReaderFormat.Audio, "AUDIO", setOf("audio/mp4", "audio/x-m4b", "application/octet-stream")),
-    M4a("m4a", ReaderFormat.Audio, "AUDIO", setOf("audio/mp4", "audio/x-m4a", "application/octet-stream")),
-    Mp3("mp3", ReaderFormat.Audio, "AUDIO", setOf("audio/mpeg", "audio/mp3", "application/octet-stream")),
-    Flac("flac", ReaderFormat.Audio, "AUDIO", setOf("audio/flac", "application/octet-stream")),
-    Ogg("ogg", ReaderFormat.Audio, "AUDIO", setOf("audio/ogg", "application/ogg", "application/octet-stream")),
-    Opus("opus", ReaderFormat.Audio, "AUDIO", setOf("audio/opus", "application/octet-stream")),
-    Wav("wav", ReaderFormat.Audio, "AUDIO", setOf("audio/wav", "audio/x-wav", "application/octet-stream")),
+    Epub("epub", ReaderFormat.Epub, "EPUB", setOf("application/epub+zip")),
+    Mobi("mobi", ReaderFormat.Mobi, "MOBI", setOf("application/x-mobipocket-ebook")),
+    Azw("azw", ReaderFormat.Mobi, "AZW", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook")),
+    Azw3("azw3", ReaderFormat.Mobi, "AZW3", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook")),
+    Prc("prc", ReaderFormat.Mobi, "PRC", setOf("application/x-mobipocket-ebook")),
+    Txt("txt", ReaderFormat.Text, "TXT", setOf("text/plain")),
+    Fb2("fb2", ReaderFormat.Epub, "FB2", setOf("application/x-fictionbook+xml")),
+    Cbz("cbz", ReaderFormat.Comic, "CBZ", setOf("application/vnd.comicbook+zip", "application/x-cbz", "application/zip")),
+    Zip("zip", ReaderFormat.Comic, "ZIP", setOf("application/zip")),
+    Cbr("cbr", ReaderFormat.Comic, "CBR", setOf("application/vnd.comicbook-rar", "application/x-cbr", "application/vnd.rar")),
+    Rar("rar", ReaderFormat.Comic, "RAR", setOf("application/vnd.rar", "application/vnd.comicbook-rar")),
+    ImageDir("image_dir", ReaderFormat.Comic, "IMAGE_DIR", setOf("image/jpeg", "image/png", "image/gif", "image/webp")),
+    Pdf("pdf", ReaderFormat.Pdf, "PDF", setOf("application/pdf")),
+    Audio("audio", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Audiobook("audiobook", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    AudiobookDir("audiobook_dir", ReaderFormat.Audio, "AUDIOBOOK_DIR", READER_AUDIO_MIME_TYPES),
+    M4b("m4b", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    M4a("m4a", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Mp3("mp3", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Flac("flac", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Ogg("ogg", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Opus("opus", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Wav("wav", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
     ;
 
     fun acceptsMimeType(value: String): Boolean {
         val normalized = value.trim().lowercase().substringBefore(';')
-        return normalized in allowedMimeTypes || readerFormat == ReaderFormat.Audio && normalized.startsWith("audio/")
+        return normalized in allowedMimeTypes
     }
 
     val isComic: Boolean
         get() = readerFormat == ReaderFormat.Comic
 
     companion object {
+        /**
+         * The backend derives these values from its supported audio extension table. Keep this
+         * finite: accepting every wildcard audio response would allow a server-side MIME typo to
+         * cross the download/reader boundary.
+         */
         fun fromWireValue(value: String?): ReaderSourceFormat? = entries.firstOrNull {
             it.wireValue == value?.trim()?.lowercase()
         }
@@ -129,7 +179,7 @@ data class RemoteComicReaderSource(
     override val resourceId: String,
     override val displayTitle: String,
     override val bookId: String,
-    override val assetId: String,
+    override val assetId: String?,
     val namespace: ReaderSyncNamespace,
     override val sourceFormat: ReaderSourceFormat,
     val manifestApiPath: String,
@@ -139,9 +189,11 @@ data class RemoteComicReaderSource(
     override val format: ReaderFormat = ReaderFormat.Comic
 
     init {
-        require(resourceId.isNotBlank() && bookId.isNotBlank() && assetId.isNotBlank())
+        require(resourceId.isNotBlank() && bookId.isNotBlank())
         require(displayTitle.isNotBlank())
         require(sourceFormat.isComic)
+        require(sourceFormat == ReaderSourceFormat.ImageDir || !assetId.isNullOrBlank())
+        require(sourceFormat != ReaderSourceFormat.ImageDir || assetId == null)
         require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
         require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
         require(pages.isNotEmpty())

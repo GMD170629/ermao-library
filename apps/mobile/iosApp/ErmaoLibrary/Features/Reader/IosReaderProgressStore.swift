@@ -123,6 +123,45 @@ final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderProgressSyncing
     }
 }
 
+/// Persists exact Reader positions without creating any remote synchronization
+/// work. Download Center uses this store so a verified original remains fully
+/// usable when the server is unreachable.
+final class IosLocalOnlyReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
+    private let database: IosReaderLocalDatabase
+
+    init(database: IosReaderLocalDatabase) {
+        self.database = database
+    }
+
+    func load(resourceId: String) async throws -> ErmaoShared.ReaderProgress? {
+        try await database.load(resourceId: resourceId)
+    }
+
+    func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
+        try await database.load(sourceId: sourceId)
+    }
+
+    func save(progress: ErmaoShared.ReaderProgress) async throws {
+        try await database.save(progress: progress)
+    }
+
+    func delete(resourceId: String) async throws {
+        try await database.delete(resourceId: resourceId)
+    }
+
+    func delete(sourceId: String) async throws {
+        try await database.delete(sourceId: sourceId)
+    }
+
+    func awaitPendingUpload() async throws {}
+
+    func retryPendingUpload() async throws {}
+
+    func syncState() async throws -> ErmaoShared.ReaderProgressDurableState {
+        try await database.loadSyncState()
+    }
+}
+
 final class IosReaderDeviceIdentity: ErmaoShared.ReaderDeviceIdentity {
     private let defaults: UserDefaults
     private let key: String

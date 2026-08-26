@@ -9,6 +9,8 @@
 
 > v1.0.0 线框修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发断网冷启动仍是普通 Shell；首页、书库、Facet、详情分别显示局部失败；Download Center 与 Reader 保持正常信息架构，不提供独立离线导航、授权期限或服务器 GET 缓存结果。
 
+> ADR 0020 身份修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份、Fixture、下载层级和路由表达。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`；“作品”若作为用户可见集合称谓保留，不代表可持久化的 Work 身份。Book Detail 的目录、资源和管理动作范围以 Web Work Detail 当前实现与权限过滤为准。
+
 ## 1. 文档目的
 
 本文件不定义最终品牌视觉、颜色、字体、圆角、阴影或动效风格。它固定低保真阶段必须保持稳定的产品结构：
@@ -48,7 +50,7 @@
 7. mini player；
 8. Tab bar 或沉浸层关闭方式。
 
-线框中使用真实产品字段名，例如 `work.title`、`volume.format`、`download.progress`，不编造演示书名、用户数据或未存在的功能。
+线框中使用真实产品字段名，例如 `book.title`、`resource.readerType`、`asset.mediaType`、`download.progress`，不编造演示书名、用户数据或未存在的功能。
 
 ### 2.3 线框状态最小集合
 
@@ -58,7 +60,7 @@
 - loading；
 - empty（适用时）；
 - recoverable error；
-- offline/stale；
+- 当前区域网络错误与分页行内重试；
 - permission/content unavailable（适用时）；
 - success/active；
 - large text；
@@ -74,7 +76,7 @@ Reader、下载和服务器锚点还必须覆盖 conflict、interrupted 与 resu
 | A02 | 首页 | `tab.home` | 日常续读的最高频起点 |
 | A03 | 书库 | `tab.library` | 搜索、筛选、系列和作者的唯一发现入口 |
 | A04 | 书架 | `tab.shelves` | 个人组织与静态/智能/合集语义的承载页 |
-| A05 | 作品详情 | `work.detail` | 媒介、卷册、阅读状态、下载和开始/继续动作的决策中心 |
+| A05 | Book Detail | `book.detail` | 图书、可读资源、阅读状态、下载和开始/继续动作的决策中心；行为遵循 Web Work Detail |
 | A06 | Reader | `reader.session` | EPUB/漫画/PDF 的沉浸消费与进度同步中心 |
 | A07 | Now Playing | `audio.now-playing` | 后台音频、章节、系统媒体和跨 Tab 持续播放中心 |
 | A08 | 下载中心 | `downloads.center` | 本地完成工件、空间与下载失败恢复的可见中心 |
@@ -171,17 +173,17 @@ flowchart LR
 规则：
 
 - 普通冷启动不自动弹 Reader；A02 的继续卡承担恢复入口。
-- CTA 目标唯一才直达；多媒介、多卷、bootstrap/fingerprint 失效进入 A05。
+- CTA 目标唯一才以 `resourceId` 直达；存在多个可读资源、bootstrap 不完整或最近 `resourceId` 已失效时进入 A05。
 - A06 返回先完成本地事务，再执行一次有界上传；网络失败不建立持久重试队列。
 - 首页重新获得焦点时只更新受影响的继续/最近阅读区块，不重载整页。
-- 同一 volume 的重复点击复用正在存在的 Reader session。
+- 同一 `resourceId` 的重复点击复用正在存在的 Reader session。
 
 失败恢复：
 
 - bootstrap 网络失败且已有 completed 本地工件：从下载 manifest 打开本地 Reader，不读取服务器页面快照。
 - bootstrap 网络失败且无副本：回 A05，显示可恢复错误。
 - 本地进度写失败：阻断离开 Reader，提供重试或明确放弃本次本地变更。
-- fingerprint 冲突：进入 F08，不写入旧位置。
+- Publication fingerprint 变化只更新诊断信息，不创建新进度槽或阻止同一 `bookId + resourceId` 的精确位置恢复；精确 locator 无法验证时进入 F08 的可恢复分支。
 
 ## 7. F03：发现、筛选并开始阅读
 
@@ -194,15 +196,15 @@ flowchart LR
     Search --> Detail["A05 作品详情"]
     Filter --> Detail
     Facet --> Detail
-    Detail --> Media["选择媒介与 volume"]
-    Media --> Reader["A06 Reader"]
-    Media --> Playing["A07 Now Playing"]
+    Detail --> Resource["选择 ReadableResource"]
+    Resource --> Reader["A06 Reader"]
+    Resource --> Playing["A07 Now Playing"]
 ```
 
 ### 7.1 全部 scope
 
-- 原生搜索进入 canonical `library.search(works)`。
-- Filter Sheet 只影响 works；草稿在“应用”后生效。
+- 原生搜索进入 canonical `library.search(books)`。
+- Filter Sheet 只影响 books；草稿在“应用”后生效。
 - 排序和 Grid/List 使用 Menu，点击立即生效。
 - active filters 在结果区上方以可移除条件摘要呈现，不把完整筛选器常驻页面。
 - 结果使用服务端分页；滚动位置按 scope 保存。
@@ -211,13 +213,13 @@ flowchart LR
 
 - 使用同一 A03 外壳切换 scope。
 - 搜索只查当前 grouping kind，不复用作品筛选。
-- grouping 点击进入 `works.facet(kind, id)`。
+- grouping 点击进入 `books.facet(kind, id)`。
 - 返回恢复 grouping query 和 scroll anchor。
 
 ### 7.3 作品决策
 
-- A05 默认选中最近使用媒介，否则选择服务端稳定排序第一项。
-- 主 CTA 对应当前选中 volume；横向多卷封面轨道中的每一项都可选择，并由主 CTA 明确打开当前卷。
+- A05 有合法最近记录时选中其 `resourceId`，否则按服务端稳定顺序选择第一个 `ReadableResource`。
+- 主 CTA 对应当前选中资源；资源列表中的每一项都可选择，并由主 CTA 明确打开当前 `resourceId`。不得重建 Version 或 Volume 选择器。
 - EBOOK/COMIC/PDF 进入 A06；AUDIOBOOK 进入 A07。
 - 下载、加入书架和阅读状态不能竞争主 CTA 的视觉等级。
 
@@ -244,7 +246,7 @@ flowchart LR
 - 创建新静态书架在同一 Sheet 内推进，保存后返回并自动选中。
 - 保存后留在 A05，Snackbar 提供“查看书架”；不强制切 Tab。
 - 从静态书架移除作品直接执行并提供撤销，不弹 Dialog。
-- 合集始终遵守 `collection → shelf → work`。
+- 合集始终遵守 `collection → shelf → book`。
 
 ## 9. F05：有声书持续播放
 
@@ -288,10 +290,10 @@ flowchart TD
 ### 10.1 下载
 
 - A05 的下载动作是次级明确动作，不与开始/继续 CTA 合并。
-- 开始/继续阅读或收听直接进入在线 Reader/播放器；匹配当前 fingerprint 的 completed 本地工件可优先使用，但缺失绝不转成下载流程。
-- 下载始终是独立次级动作，完成后停留当前上下文并标记离线可用，不擅自跳转 Reader。
+- 开始/继续阅读或收听直接进入在线 Reader/播放器；同一 namespace 且 `bookId/resourceId/assetId` 归属完整、已校验完成的本地工件可优先使用，但缺失绝不转成下载流程。Fingerprint 仅作诊断。
+- 下载始终是独立次级动作，完成后停留当前上下文并标记本地工件可用，不擅自跳转 Reader。
 - 入队后停留 A05，并提供“查看下载”。
-- A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `作品（书名） → directory version → volume`，Version identity/name 来自 Reader v4 bootstrap，格式和媒介种类来自 Volume，不得按扩展名重建目录归属。可在本页直接搜索本地已下载书名、作者和卷名。搜索不请求服务器书库，也不将普通缓存视为下载完成。
+- A08 显示进行中、已完成、失败三个稳定分组；已完成目录固定为 `Book → ReadableResource → ResourceAsset`，三层分别使用 `bookId / resourceId / assetId`，格式与媒体类型来自服务端 Resource/Asset 合同，不得按扩展名重建归属。可在本页直接搜索本地已下载书名、资源名和 Asset 显示名。搜索不请求服务器书库，也不将普通缓存视为下载完成。目录型 Resource 没有单一可下载原始工件时保持不可下载，客户端不得合成 ZIP、EPUB 或其他派生出版物。
 - 普通失败行内重试；空间不足引导管理下载。
 - 移除本地副本使用 Dialog，并明确不会删除服务器作品。
 
@@ -341,13 +343,13 @@ flowchart LR
 
 | 触发 | 当前页面 | 呈现 | 安全出口 |
 |---|---|---|---|
-| `CONTENT_FINGERPRINT_MISMATCH` | A06 | 阻塞 Dialog | 重新加载新版本；退出 Reader |
-| 作品/volume 404 | A05/A06 | “内容不存在或当前不可访问” | 返回；所属 Tab 根 |
+| Publication fingerprint 变化 | A06 | 非阻断“内容已更新”状态；不丢弃同一 Book/Resource 进度 | 精确 locator 可验证时正常恢复；失败时尝试附近位置、打开章节或保留本地位置 |
+| Book/ReadableResource 404 | A05/A06 | “内容不存在或当前不可访问” | 返回；所属 Tab 根 |
 | `authzVersion` 改变 | 任意私有页 | 遮蔽旧 UI，刷新权限 | 仍合法则恢复；否则统一 404 |
 | 下载授权失效 | A08 | 锁定并移出可读分组 | 重新认证；移除本地副本 |
 | 本地进度持久化失败 | A06 | 阻断离开 | 重试；明确放弃本次本地变更 |
 | 书签同步失败 | A06 | 内联“待同步/失败” | 重试；继续本地阅读 |
-| 服务器不可用 | 在线页面 | Banner/inline | 重试；进入已下载内容 |
+| 服务器不可用 | 当前网络区域 | 区域内错误或分页行内重试 | 重试；Download Center 仍可发现 completed 本地工件 |
 
 禁止提供“强制覆盖服务器进度”或通过错误文案泄露资源是否真实存在。
 
@@ -365,7 +367,7 @@ flowchart LR
 | 搜索 | 当前 scope、输入、结果、清除、无结果、错误；返回恢复 scope |
 | Facet 作品列表 | 系列/作者身份、作品列表、分页、返回 grouping context |
 | 书架/合集详情 | 身份、规则/成员摘要、作品或书架内容、overflow、空状态 |
-| 下载详情 | 任务阶段、文件/volume、已传输、速度/剩余时间、失败原因、恢复动作 |
+| 下载详情 | 任务阶段、Book/ReadableResource/ResourceAsset 身份、已传输、速度/剩余时间、失败原因、恢复动作 |
 
 ## 14. A01：服务器入口与中心 Wireframe 规格
 
@@ -426,8 +428,8 @@ switch-failed
 | 区域 | 内容 |
 |---|---|
 | Navigation | 大标题“首页”；不放搜索；可显示当前服务器的轻量连接状态入口 |
-| Global status | 仅在 stale、待同步或当前请求失败时出现局部状态；正常时不占空间 |
-| Continue card | 封面、`work.title`、媒介/volume、当前位置或章节、百分比、上次时间、明确“继续阅读/继续收听”CTA |
+| Global status | 仅在待同步或当前请求失败时出现局部状态；正常时不占空间 |
+| Continue card | 封面、`book.title`、`ReadableResource` 摘要、资源内位置或章节、百分比、上次时间、明确“继续阅读/继续收听”CTA |
 | Recent reading | 标题、查看全部、横向作品列表；卡片展示封面、标题、进度 |
 | Recent added | 标题、查看全部、横向作品列表；卡片展示封面、标题、媒介摘要 |
 | Mini player | 有播放会话时固定在 Tab bar 上方 |
@@ -438,7 +440,7 @@ switch-failed
 - Continue CTA：目标唯一时直达 A06/A07。
 - Continue 封面/标题：进入 A05。
 - 最近内容卡：进入 A05。
-- 查看全部：进入 `works.collection`，返回恢复首页 scroll。
+- 查看全部：进入 `books.collection`，返回恢复首页 scroll。
 - 下拉刷新：只刷新三个 dashboard 请求；各区独立完成。
 
 ### 15.4 空与错误
@@ -458,7 +460,7 @@ switch-failed
 
 ### 16.1 锚点状态
 
-主锚点使用 `scope=works`、有两个 active filters、Grid 模式和可继续分页的状态。
+主锚点使用 `scope=books`、有两个 active filters、Grid 模式和可继续分页的状态。
 
 ### 16.2 Compact 内容顺序
 
@@ -466,18 +468,18 @@ switch-failed
 |---|---|
 | Navigation | 标题“书库”；原生搜索入口；右侧 overflow 仅放视图/排序 |
 | Scope control | `全部 / 系列 / 作者` 三段，始终在搜索与结果之间保持稳定位置 |
-| Context row | works scope 显示结果数、Filter 入口、active filter 摘要；series/authors 显示 grouping 结果数 |
-| Results | works 为响应式 Grid/List；series/authors 为清晰可扫描的 grouping list |
+| Context row | books scope 显示结果数、Filter 入口、active filter 摘要；series/authors 显示 grouping 结果数 |
+| Results | books 为响应式 Grid/List；series/authors 为清晰可扫描的 grouping list |
 | Pagination | 触底加载；局部 loading/重试；不使用页码器 |
 | Mini player | 有播放时位于 Tab 上方 |
 | Tab bar | 书库选中 |
 
-### 16.3 Works 结果卡
+### 16.3 Books 结果卡
 
 至少展示：
 
 - 封面；
-- `work.title`；
+- `book.title`；
 - 作者或系列的一个主要上下文；
 - 可选媒介标识；
 - 阅读进度只在有意义时显示。
@@ -488,7 +490,7 @@ switch-failed
 
 - 搜索进入 `library.search(currentScope)`。
 - scope 各自保存 query、scroll、loading。
-- Filter Sheet 只在 works scope 可用。
+- Filter Sheet 只在 books scope 可用。
 - active filter 可单独移除；“清除全部”只在 Filter Sheet 中完成。
 - 排序/视图 Menu 点击立即生效。
 - grouping 点击进入 facet；作品点击进入 A05。
@@ -498,7 +500,7 @@ switch-failed
 - Loading：首屏骨架与 scope control 保持可见。
 - Empty library：说明当前授权范围没有作品，不显示管理入口。
 - Empty filter/search：保留条件并提供清除。
-- Offline：只展示最后缓存结果，明确不能保证完整；已下载内容有明确标记。
+- Network error：首次或刷新失败只替换结果区，不恢复旧 GET 页面；下一页失败保留本次请求已加载结果并提供行内重试。
 - Permission refresh：遮蔽旧结果，重新验证后恢复或清空。
 
 ### 16.6 Expanded
@@ -546,32 +548,31 @@ switch-failed
 - 选择合集后右侧展示成员书架；再选择书架时在右侧内部 Stack 推进。
 - 不使用拖放作为唯一整理方式。
 
-## 18. A05：作品详情 Wireframe 规格
+## 18. A05：Book Detail Wireframe 规格
 
 ### 18.1 锚点状态
 
-主锚点使用“作品具有多个目录版本与多个 volume、存在阅读进度、当前选中 EPUB 卷册”的状态。简介、目录版本、卷册和当前卷册元数据采用连续详情流；当前卷册的真实格式与媒介正常显示，不因静态锚点或客户端尚未完成播放器而渲染禁用占位。
+主锚点使用“Book 具有多个 `ReadableResource`、存在阅读进度、当前选中 EPUB 资源”的状态。简介、内容浏览器、资源详情和当前资源元数据采用连续详情流；资源的真实 `readerType`、格式和媒体类型正常显示，不因静态锚点或客户端尚未完成播放器而渲染禁用占位。不得出现 Version 层、Volume 轨道或旧身份 Fixture。
 
 ### 18.2 Compact 内容顺序
 
 | 区域 | 内容 |
 |---|---|
 | Navigation | 系统返回、页面标题可折叠、overflow Menu |
-| Identity header | 封面、`work.title`、作者、系列/出版状态；封面不是唯一点击目标 |
+| Identity header | 封面、`book.title`、作者、系列/出版状态；封面不是唯一点击目标 |
 | Status summary | 当前阅读状态、总进度和最近位置；作者、系列保留为可进入共享 Facet 的触摸入口 |
-| Primary CTA | 固定对应当前媒介/volume 的“开始/继续阅读”或“开始/继续收听” |
+| Primary CTA | 固定对应当前 `ReadableResource` 的“开始/继续阅读”或“开始/继续收听” |
 | Secondary actions | `下载 / 阅读状态 / 加入 / 更多`；“加入”打开书架选择器，不在此行放编辑动作 |
 | Description | 有简介时在同一滚动流中显示清理后的纯文本正文，居中向下/向上箭头负责展开与收起；简介为空时整个区域隐藏 |
-| Version control | 左侧固定显示“版本”，右侧显示服务器返回的真实目录版本名称；单版本仍显示唯一选项。格式与电子书/漫画/有声书种类在当前卷册信息中显示，不作为版本选项 |
 | Content browser | 多资源显示真实来源目录、面包屑、文件夹、可读资源、分页、网格/列表切换和 Web 相同的六种排序 |
 | Resource detail | 单资源直接显示；按 `readerType` 展示章节及已读状态、漫画/PDF 页面预览或音轨信息，并显示导入与错误状态 |
 | Mini player | 非 Reader 且有音频会话时显示 |
-| Tab bar | Work Detail 仍在 AuthenticatedShell 中，正常显示四项目的地导航；仅 Reader 隐藏 |
+| Tab bar | Book Detail 仍在 AuthenticatedShell 中，正常显示四项目的地导航；仅 Reader 隐藏 |
 
 ### 18.3 动作层级
 
 1. 开始/继续；
-2. 选择 volume；
+2. 选择 `ReadableResource`；
 3. 离线下载；
 4. 加入书架；
 5. 阅读状态；
@@ -581,36 +582,36 @@ switch-failed
 
 ### 18.4 交互
 
-- 切媒介只更新当前详情状态。
-- 只有一个可读资源时直接显示该资源详情；多个资源先显示内容目录，选择资源后进入同页资源详情，返回恢复原目录、排序、布局、分页和滚动上下文。
-- 目录动作、资源动作和管理入口以 Web 当前实现与权限过滤为准；触摸、VoiceOver/TalkBack、键盘和开关控制必须提供等价能力。
+- 选择 `resourceId` 只更新当前 Book Detail 状态，不创建新的详情页或 Version 层。
+- 只有一个 `ReadableResource` 时直接显示该资源详情；多个资源先显示内容目录，选择资源后进入同页资源详情，返回恢复原目录、排序、布局、分页和滚动上下文。
+- 目录动作、资源动作和管理入口的对象范围以 Web 当前实现为准，并对每个动作应用相同权限过滤；不得把 `bookDetailManagement` 当作“全部显示”或“全部关闭”的替代判断。触摸、VoiceOver/TalkBack、键盘和开关控制必须提供等价能力。
 - 目录分页失败只显示行内重试，不清除已加载内容；资源详情分页采用同样的保留策略。
 - 作者/系列进入共享 facet，并保留详情为返回来源。
 - 详情中的下载使用独立图标状态：未下载为云朵、进行中为带暂停符号的环形控件、完成为勾选圆圈；再次点击进行中控件提供暂停与取消。阅读进度不得复用该位置或形态。
 - 加入书架打开 picker Sheet。
-- 快捷动作行保留独立离线下载、阅读状态和书架入口；管理动作及其对象范围按 Web 当前实现和权限过滤呈现。
-- 卷册元数据严格来自当前 `volumeId`：格式、语言、出版日期、页数、元数据信息来源和文件路径六行保持稳定；缺失值显示 `—`。页数仅使用服务端返回的真实 `pageCount`，EPUB/MOBI/TXT 等无页数时不得推算或伪造。元数据来源使用服务端返回的卷册级稳定显示名；文件路径使用当前授权详情合同返回的卷册文件显示路径，不拼接客户端本地路径。被动元数据行不显示导航箭头。
+- 快捷动作行保留独立离线下载、阅读状态和书架入口；管理动作按 Web 当前实现定义的 Book、目录节点或 `ReadableResource` 对象范围及权限过滤呈现。
+- 资源元数据严格来自当前 `resourceId` 及其授权 Resource/Asset 合同：格式、语言、出版日期、页数、元数据信息来源和原始文件显示路径保持稳定；缺失值显示 `—`。页数仅使用服务端返回的真实 `pageCount`，EPUB/MOBI/TXT 等无页数时不得推算或伪造。元数据来源使用服务端返回的稳定显示名；文件路径不得拼接客户端本地路径。被动元数据行不显示导航箭头。
 
 ### 18.5 状态
 
-- Loading：先显示身份骨架，再加载媒介与卷册。
-- 无可读 volume：解释内容当前不可打开；不显示失效 CTA。
+- Loading：先显示 Book 身份骨架，再加载目录与 `ReadableResource`。
+- 无可读资源：解释内容当前不可打开；不显示失效 CTA。
 - 某媒介加载失败：只影响该媒介，其他媒介可用。
 - 404/权限：统一内容不可访问页。
-- Offline：只允许打开已下载 volume；在线 volume 标明不可用，不提供伪重试。
-- Fingerprint changed：选中 volume 标记内容已更新，进入 Reader 前重新 bootstrap。
+- Network unavailable：同一 namespace 下、`bookId/resourceId/assetId` 归属完整且已验证完成的本地 `ResourceAsset` 仍可打开；远程请求在当前区域显示网络错误。
+- Publication changed：只把 fingerprint 作为诊断信息；进入 Reader 时仍按同一 `bookId + resourceId` 恢复，精确 locator 验证失败才提供附近位置、打开章节或保留本地位置。
 
 ### 18.6 Expanded
 
-- 左侧固定身份/封面/主 CTA，右侧媒介与 volume 内容。
-- 主 CTA 与当前 volume 选择始终在同一视觉上下文。
+- 左侧固定 Book 身份/封面/主 CTA，右侧内容目录与 `ReadableResource` 详情。
+- 主 CTA 与当前 `resourceId` 选择始终在同一视觉上下文。
 - 从书库 split view 进入时可在右侧显示，不强制全屏。
 
 ## 19. A06：Reader Wireframe 规格
 
 ### 19.1 锚点状态
 
-主锚点使用 controls visible 状态；另交付 controls hidden、TOC/书签 Sheet、设置 Sheet、offline、sync pending、fingerprint conflict。
+主锚点使用 controls visible 状态；另交付 controls hidden、TOC/书签 Sheet、设置 Sheet、network unavailable、sync pending、remote-progress notice 和 exact-restoration failure。
 
 ### 19.2 通用层级
 
@@ -620,7 +621,7 @@ switch-failed
 | Top controls | 可见返回、简化标题/章节、当前书签动作、更多 |
 | Interaction plane | 触摸区、水平/垂直导航、缩放；不能遮挡系统返回 |
 | Bottom controls | 进度 scrubber、位置/页码、目录/书签、阅读设置 |
-| Sync status | 只在待同步、失败、离线、内容变化时出现；正常时不常驻 |
+| Sync status | 只在待同步、失败、网络不可用、内容变化时出现；正常时不常驻 |
 
 Tab bar 与 mini player 在 Reader 中隐藏。
 
@@ -675,12 +676,12 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 | 区域 | 内容 |
 |---|---|
 | Top | 折叠按钮、当前服务器/播放目标的必要上下文、更多 |
-| Artwork | 当前作品封面；不承担唯一返回动作 |
-| Identity | `work.title`、volume/track、当前章节 |
-| Timeline | 已播放/总时长、可访问 scrubber、缓冲/离线状态 |
+| Artwork | 当前 Book 封面；不承担唯一返回动作 |
+| Identity | `book.title`、ReadableResource/Asset、当前资源内章节或轨道 |
+| Timeline | 已播放/总时长、可访问 scrubber、缓冲/网络状态 |
 | Primary controls | 上一章节/轨、后退、播放暂停、前进、下一章节/轨 |
-| Secondary controls | 倍速、章节/队列、睡眠定时、查看作品 |
-| Playback status | loading、buffering、offline、sync pending、error |
+| Secondary controls | 倍速、章节/队列、睡眠定时、查看图书 |
+| Playback status | loading、buffering、network unavailable、sync pending、error |
 
 ### 20.3 行为
 
@@ -688,8 +689,8 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 - 倍速 Menu 显示当前值；自定义倍速不在 P0。
 - 章节/队列 Sheet 选章后保持打开。
 - 睡眠定时 Sheet 在同一层完成所有选择。
-- 查看作品先折叠，再在当前 Stack 打开 A05。
-- 切 volume 替换播放队列，不增加页面历史。
+- 查看图书先折叠，再在当前 Stack 打开 A05。
+- 切换音频 `ReadableResource` 替换播放队列；资源内切换 `ResourceAsset` 或 locator 只更新播放状态，不增加页面历史。
 - 系统媒体动作立即更新 A07、mini player 和本地进度。
 
 ### 20.4 Mini player 规格
@@ -722,15 +723,15 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 | Navigation | 返回“我的”、标题“下载”、本地已下载搜索、选择/管理动作 |
 | Global status | 下载任务与待同步数量；不显示离线模式、宽限或剩余天数 |
 | Storage summary | 已用空间、可释放空间、下载设置入口 |
-| Active section | 任务标题、volume/格式、进度、已传输/总量、状态、暂停/继续 |
-| Completed section | 按“作品 → directory version → volume”展开的已下载内容；作品层显示书名/作者/总大小，Version 层显示目录版本名与卷数，Volume 层显示卷名/格式/媒介/大小/可本地打开；搜索命中书名、作者或卷名 |
+| Active section | 任务标题、Book/ReadableResource/ResourceAsset、格式、进度、已传输/总量、状态、暂停/继续 |
+| Completed section | 按 `Book → ReadableResource → ResourceAsset` 展开的已下载内容；Book 层显示书名/作者/总大小，Resource 层显示资源名、`readerType` 与 Asset 数，Asset 层显示服务端显示名、格式/媒体类型、大小与是否可本地打开；搜索命中书名、资源名或 Asset 显示名 |
 | Failed section | 稳定错误摘要、重试；不弹逐项 Dialog |
 | Mini player | 有播放会话时显示 |
 
 ### 21.3 交互
 
-- 点击已完成 volume 直接进入 A06/A07，不重新进入作品详情；返回回 A08。进入前仍校验 namespace、当前 fingerprint、本地文件及完整的 Work/Version/Volume 归属；缺少 v4 目录 identity 的本地 manifest 不迁移、不展示，也不伪造服务端归属。
-- 搜索仅过滤当前 `serverIdentity + userId + authzVersion` 命名空间中、与记录 fingerprint 一致且已验证完成的本地工件；空查询恢复完整按作品列表。
+- 点击已完成 `ResourceAsset` 直接用其 `resourceId`（音频需要时附带 `assetId`）进入 A06/A07，不重新进入 Book Detail；返回回 A08。进入前仍校验 `serverIdentity + userId + authzVersion` namespace、本地文件及完整的 `bookId/resourceId/assetId` 归属；fingerprint 仅作诊断，旧 Work/Version/Volume/File manifest 一律清理、不迁移、不展示，也不伪造服务端归属。
+- 搜索仅过滤当前 `serverIdentity + userId + authzVersion` 命名空间中、身份归属完整且已验证完成的本地工件；空查询恢复完整按作品列表。
 - 作品封面是非阻塞增强：首帧先显示缓存封面或统一 fallback，再通过当前 namespace 的 authenticated cover adapter 渐进替换；封面缺失/失败不得阻塞目录、搜索、下载完成或 Reader 跳转，也不得把 cover cache 计为 completed publication。
 - 点击失败任务进入 `downloads.detail` 或行内展开稳定原因。
 - overflow 提供暂停、继续、重试、移除本地副本。
@@ -770,9 +771,9 @@ permission-revoked
 
 | 组件 | 出现位置 | 约束 |
 |---|---|---|
-| Work card | A02、A03、A04 | 同一内容模型；可因上下文调整辅助信息，但标题/封面/进入详情语义一致 |
+| Book card | A02、A03、A04 | 同一 Book 内容模型；可因上下文调整辅助信息，但标题/封面/进入详情语义一致 |
 | Progress | A02、A05、A06、A07 | 同一用户进度；百分比、页码、时间不混用错误格式 |
-| Version/volume identity | A05、A06、A07、A08 | `work → directory version → volume` 层级一致；格式和媒介种类属于 volume |
+| Book/Resource/Asset identity | A05、A06、A07、A08 | 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`；Reader、进度、书签和阅读状态 owner 为 `resourceId`，媒体传输目标为 `assetId` |
 | Downloaded badge | A03、A05、A08 | 只表示 completed 本地工件，不表示普通缓存命中 |
 | Sync status | A02、A06、A07、A08 | `synced / pending / failed / conflict` 语义一致 |
 | Server identity | A01、登录/重认证、我的 | 名称与域名一致；不暴露 Cookie 或内部路径 |
@@ -866,8 +867,8 @@ permission-revoked
 ### 27.3 状态与数据
 
 - 真实 API 字段映射到正确页面层级。
-- loading、empty、error、permission、success、conflict、stale 不重复呈现。
-- `VerifiedSessionRecord`、authzVersion、fingerprint、音频/书签持久队列和 download 状态均有明确落点；Reader v4 progress 明确为本地精确保存加内存单飞上传。
+- loading、empty、error、permission、success、conflict 不重复呈现。
+- `VerifiedSessionRecord`、authzVersion、诊断 fingerprint、音频/书签持久队列和 download 状态均有明确落点；Reader v4 progress 明确归属 `bookId + resourceId`，本地精确保存后单飞上传。
 - 404 文案不泄露权限或资源存在性。
 
 ### 27.4 原生交互

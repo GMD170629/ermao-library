@@ -10,14 +10,6 @@ import org.junit.Test
 
 class DownloadReaderEntryPolicyTest {
     @Test
-    fun missingEpubOpensServerReaderImmediately() {
-        assertEquals(
-            DownloadReaderEntryAction.OpenServerReader,
-            downloadReaderEntryAction("reflowable", "EPUB", null) { false },
-        )
-    }
-
-    @Test
     fun verifiedEpubOpensCurrentLocalArtifact() {
         assertEquals(
             DownloadReaderEntryAction.OpenLocalArtifact,
@@ -26,36 +18,41 @@ class DownloadReaderEntryPolicyTest {
     }
 
     @Test
-    fun missingLocalFileFallsBackToServerReader() {
-        assertEquals(
-            DownloadReaderEntryAction.OpenServerReader,
-            downloadReaderEntryAction("reflowable", "EPUB", completedRecord()) { false },
-        )
-    }
-
-    @Test
-    fun mobiFamilyUsesTheNativeDownloadAndReaderFlow() {
-        listOf("MOBI", "AZW", "AZW3", "PRC").forEach { format ->
+    fun everySupportedReflowableWithoutALocalArtifactOpensTheServerReader() {
+        listOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT", "FB2").forEach { format ->
             assertEquals(
                 DownloadReaderEntryAction.OpenServerReader,
                 downloadReaderEntryAction("reflowable", format, null) { false },
+                format,
+            )
+            assertEquals(
+                DownloadReaderEntryAction.OpenServerReader,
+                downloadReaderEntryAction("reflowable", format, completedRecord(format)) { false },
+                "invalid local $format",
             )
         }
     }
 
     @Test
-    fun txtUsesNativeReaderWhileUnsupportedReflowableFormatsStayOnStreamingValidation() {
-        assertEquals(
-            DownloadReaderEntryAction.OpenServerReader,
-            downloadReaderEntryAction("reflowable", "TXT", null) { false },
-        )
+    fun everySupportedComicWithoutALocalArtifactOpensTheServerReader() {
+        listOf("CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR").forEach { format ->
+            assertEquals(
+                DownloadReaderEntryAction.OpenServerReader,
+                downloadReaderEntryAction("comic", format, null) { false },
+                format,
+            )
+        }
+    }
+
+    @Test
+    fun legacyGenericKindleFormatIsNotAdvertisedAsReadable() {
         assertEquals(
             DownloadReaderEntryAction.ValidateUnsupportedAccess,
-            downloadReaderEntryAction("reflowable", "FB2", null) { false },
+            downloadReaderEntryAction("reflowable", "KINDLE", null) { false },
         )
     }
 
-    private fun completedRecord() = AndroidDownloadRecord(
+    private fun completedRecord(format: String = "EPUB") = AndroidDownloadRecord(
         taskId = "task",
         namespace = AndroidDownloadNamespace("server", "user", 2),
         bookId = "book",
@@ -64,7 +61,7 @@ class DownloadReaderEntryPolicyTest {
         coverUrl = "/api/books/book/cover",
         resourceId = "resource",
         resourceTitle = "Resource",
-        format = "EPUB",
+        format = format,
         readerType = "reflowable",
         assetId = "asset",
         sourceApiPath = "/api/resources/resource/asset",

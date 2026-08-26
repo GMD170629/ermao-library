@@ -1,6 +1,17 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 
 type ApiRouteOverride = (route: Route, url: URL) => Promise<boolean>;
+
+async function expectMenuHorizontallyAlignedToAnchor(page: Page, anchor: Locator, menu: Locator) {
+  await expect.poll(async () => {
+    const [anchorBounds, menuBounds] = await Promise.all([anchor.boundingBox(), menu.boundingBox()]);
+    if (!anchorBounds || !menuBounds) return null;
+    const viewportWidth = await page.evaluate(() => window.innerWidth);
+    const idealLeft = anchorBounds.x + anchorBounds.width / 2 - menuBounds.width / 2;
+    const expectedLeft = Math.max(12, Math.min(idealLeft, viewportWidth - menuBounds.width - 12));
+    return Math.round(menuBounds.x - expectedLeft);
+  }).toBe(0);
+}
 
 async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
   await page.route('**/api/**', async (route) => {
@@ -55,6 +66,23 @@ async function mockWebAppApi(page: Page, override?: ApiRouteOverride) {
               ]
             }],
             maxConditions: 30
+          }
+        }
+      });
+      return;
+    }
+    if (pathname.endsWith('/api/library/filter-options')) {
+      const source = url.searchParams.get('source') ?? 'tags';
+      const query = url.searchParams.get('query') ?? '';
+      await route.fulfill({
+        json: {
+          ok: true,
+          data: {
+            source,
+            query,
+            options: source === 'tags' ? [{ value: '历史', label: '历史', count: 4 }] : [],
+            hasMore: false,
+            indexReady: true
           }
         }
       });
@@ -190,11 +218,11 @@ test('book detail resource covers support selection, keyboard-accessible context
     title: '右键菜单测试图书',
     author: '测试作者',
     description: '',
-    tags: [],
+    tags: ['奇幻', '青春文学', '长篇小说'],
     coverUrl: '',
     coverStatus: 'MISSING',
     gradient: 'from-orange-100 to-stone-200',
-    seriesName: null,
+    seriesName: '龙族',
     seriesIndex: null,
     publicationStatus: 'UNKNOWN',
     trackingStatus: 'NOT_TRACKING',
@@ -211,8 +239,38 @@ test('book detail resource covers support selection, keyboard-accessible context
     resources
   };
   let resourcePatchBody: Record<string, unknown> | null = null;
+  let bookTagUpdateBody: Record<string, unknown> | null = null;
+  let currentTags = [...book.tags];
+  const tagOptionQueries: string[] = [];
   await page.unroute('**/api/**');
   await mockWebAppApi(page, async (route, url) => {
+    if (url.pathname.endsWith('/api/library/filter-options')) {
+      const query = url.searchParams.get('query') ?? '';
+      tagOptionQueries.push(query);
+      await route.fulfill({ json: { ok: true, data: {
+        source: 'tags',
+        query,
+        options: [{ value: '历史', label: '历史', count: 4 }],
+        hasMore: false,
+        indexReady: true
+      } } });
+      return true;
+    }
+    if (url.pathname.endsWith('/api/library/operations/books/metadata')) {
+      bookTagUpdateBody = route.request().postDataJSON() as Record<string, unknown>;
+      const addTags = Array.isArray(bookTagUpdateBody.addTags)
+        ? bookTagUpdateBody.addTags.filter((value): value is string => typeof value === 'string')
+        : [];
+      const removeTags = Array.isArray(bookTagUpdateBody.removeTags)
+        ? bookTagUpdateBody.removeTags.filter((value): value is string => typeof value === 'string')
+        : [];
+      currentTags = currentTags.filter((tag) => !removeTags.includes(tag));
+      for (const tag of addTags) {
+        if (!currentTags.includes(tag)) currentTags.push(tag);
+      }
+      await route.fulfill({ json: { ok: true, data: { updated: 1, changedValues: 3 } } });
+      return true;
+    }
     if (!url.pathname.includes('/api/books/context-book')) return false;
     if (route.request().method() === 'PATCH' && url.pathname.endsWith('/resources/context-resource-1')) {
       resourcePatchBody = route.request().postDataJSON() as Record<string, unknown>;
@@ -251,18 +309,59 @@ test('book detail resource covers support selection, keyboard-accessible context
       } } });
       return true;
     }
-    await route.fulfill({ json: { ok: true, data: book } });
+    await route.fulfill({ json: { ok: true, data: { ...book, tags: currentTags } } });
     return true;
   });
 
   await page.goto('/books/context-book?resourceId=context-resource-1&returnTo=%2Flibrary%3Fstatus%3DREADING%26sort%3Dtitle');
+  const seriesLink = page.getByRole('link', { name: '查看系列“龙族”中的图书' });
+  await expect(seriesLink).toHaveAttribute('href', '/library?seriesName=%E9%BE%99%E6%97%8F');
+  const tagLink = page.getByRole('link', { name: '查看标签“奇幻”下的图书' });
+  const tagHref = await tagLink.getAttribute('href');
+  expect(JSON.parse(new URL(tagHref ?? '', 'https://example.test').searchParams.get('filters') ?? '')).toEqual({
+    combinator: 'ALL',
+    conditions: [{ field: 'tag', operator: 'equals', value: '奇幻' }]
+  });
   const topBookActions = page.getByRole('button', { name: '管理图书 右键菜单测试图书', exact: true });
   await topBookActions.click();
   const topBookMenu = page.getByRole('menu', { name: '管理图书' });
   await expect(topBookMenu.getByRole('menuitem')).toHaveCount(6);
   await expect(topBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await expectMenuHorizontallyAlignedToAnchor(page, topBookActions, topBookMenu);
+  await topBookMenu.getByRole('menuitem', { name: '编辑', exact: true }).click();
+  const bookEditor = page.getByRole('dialog', { name: '编辑图书元数据' });
+  const tagInput = bookEditor.getByRole('combobox', { name: '图书标签' });
+  await expect(tagInput).toHaveAttribute('aria-expanded', 'false');
+  await tagInput.focus();
+  await expect(tagInput).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Escape');
-  await expect(topBookActions).toBeFocused();
+  await expect(tagInput).toBeFocused();
+  await expect(tagInput).toHaveAttribute('aria-expanded', 'false');
+  await tagInput.fill('历史');
+  const historyOption = page.getByRole('option', { name: '历史 · 4' });
+  await expect(historyOption).toBeVisible();
+  const completedTagQueryCount = tagOptionQueries.length;
+  await historyOption.click();
+  await tagInput.fill('新品');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  expect(tagOptionQueries).toHaveLength(completedTagQueryCount);
+  await bookEditor.getByRole('button', { name: '移除标签“青春文学”' }).click();
+  await bookEditor.getByRole('button', { name: '保存信息' }).click();
+  await expect(bookEditor).toBeHidden();
+  expect(bookTagUpdateBody).toEqual({
+    ids: ['context-book'],
+    fields: {},
+    addTags: ['历史', '新品'],
+    removeTags: ['青春文学']
+  });
+  await topBookActions.click();
+  await page.getByRole('menu', { name: '管理图书' }).getByRole('menuitem', { name: '编辑', exact: true }).click();
+  const reopenedBookEditor = page.getByRole('dialog', { name: '编辑图书元数据' });
+  await expect(reopenedBookEditor.getByRole('button', { name: '移除标签“历史”' })).toBeVisible();
+  await expect(reopenedBookEditor.getByRole('button', { name: '移除标签“新品”' })).toBeVisible();
+  await expect(reopenedBookEditor.getByRole('button', { name: '移除标签“青春文学”' })).toHaveCount(0);
+  await reopenedBookEditor.getByRole('button', { name: '关闭编辑' }).click();
   await page.getByRole('button', { name: '返回图书内容', exact: true }).click();
   const sourcePath = page.getByRole('navigation', { name: '来源目录路径' });
   await expect(sourcePath).toBeVisible();
@@ -1338,11 +1437,20 @@ test('desktop book list opens details from both the cover and title', async ({ p
   await managedBookActions.click();
   const managedBookMenu = page.getByRole('menu', { name: '管理图书' });
   await expect(managedBookMenu.getByRole('menuitem')).toHaveText(['编辑', '重新生成图片', '设为已读', '识别', '重新扫描文件', '删除']);
+  await expectMenuHorizontallyAlignedToAnchor(page, managedBookActions, managedBookMenu);
   await page.keyboard.press('Escape');
   await expect(managedBookActions).toBeFocused();
   await managedBookRow.getByRole('checkbox').check();
   await page.getByRole('button', { name: '批量操作', exact: true }).click();
   const batchDialog = page.getByRole('dialog', { name: '批量更新元数据' });
+  const addTagInput = batchDialog.getByRole('combobox', { name: '批量添加标签' });
+  const removeTagInput = batchDialog.getByRole('combobox', { name: '批量删除标签' });
+  await addTagInput.fill('历史');
+  await page.getByRole('option', { name: '历史 · 4' }).click();
+  await removeTagInput.fill('历史');
+  await page.keyboard.press('Enter');
+  await expect(batchDialog.getByText('同一标签同时添加和删除时，以添加为准：')).toBeVisible();
+  await expect(batchDialog.getByRole('button', { name: '移除标签“历史”' })).toHaveCount(2);
   await expect(batchDialog.getByRole('button', { name: '删除', exact: true })).toHaveCount(1);
   await expect(batchDialog.getByRole('button', { name: '合并', exact: true })).toHaveCount(0);
   await batchDialog.getByRole('button', { name: '关闭批量操作' }).click();

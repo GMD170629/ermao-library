@@ -20,7 +20,7 @@ on:
       - 'apps/api-python/tests/test_route_coverage.py'
       - 'apps/api-python/tests/test_sqlite_database.py'
       - 'docs/adr/0006-native-mobile-kmp-boundaries.md'
-      - 'docs/adr/0007-mobile-server-auth-lifecycle.md'
+      - 'docs/adr/0015-mobile-v1-verified-session-without-offline-mode.md'
       - 'docs/testing/mobile-stage-0-acceptance.md'
       - 'docs/testing/mobile-stage-1-acceptance.md'
       - '.github/workflows/mobile.yml'
@@ -46,7 +46,7 @@ on:
       - 'apps/api-python/tests/test_route_coverage.py'
       - 'apps/api-python/tests/test_sqlite_database.py'
       - 'docs/adr/0006-native-mobile-kmp-boundaries.md'
-      - 'docs/adr/0007-mobile-server-auth-lifecycle.md'
+      - 'docs/adr/0015-mobile-v1-verified-session-without-offline-mode.md'
       - 'docs/testing/mobile-stage-0-acceptance.md'
       - 'docs/testing/mobile-stage-1-acceptance.md'
       - '.github/workflows/mobile.yml'
@@ -168,6 +168,7 @@ jobs:
       - name: Test, lint, and assemble
         run: |
           ./gradlew --stacktrace \
+            verifyMobileOfflineContract \
             verifyDesignTokens \
             :shared:testAndroidHostTest \
             :androidApp:testDebugUnitTest \

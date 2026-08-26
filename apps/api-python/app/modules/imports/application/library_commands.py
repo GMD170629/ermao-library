@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from app.modules.library.domain.layout import LibraryOrganizationMode
+from app.modules.library.public import LibraryOrganizationMode
 from app.modules.system.public import PreparedSystemEvent
 
 

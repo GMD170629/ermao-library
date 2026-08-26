@@ -72,7 +72,6 @@
     <string name="content_loading_title">Loading</string>
     <string name="content_error_title">Couldn’t load this content</string>
     <string name="content_error_message">Check your connection and try again. Your current context has been kept.</string>
-    <string name="content_stale_banner">Showing saved results while the library refreshes.</string>
     <string name="home_loading_message">Loading your reading activity.</string>
     <string name="home_continue_title">Continue reading</string>
     <string name="home_view_detail_action">Continue Reading</string>
@@ -139,8 +138,6 @@
     <string name="library_filter_title">Filter works</string>
     <string name="library_filter_draft_description">Changes take effect after you apply them.</string>
     <string name="library_filter_reading">Reading status</string>
-    <string name="library_filter_offline">Downloaded</string>
-    <string name="library_filter_downloaded">Downloaded</string>
     <string name="library_permission_revalidating_title">Checking access</string>
     <string name="library_permission_revalidating_message">Private results are hidden while access is checked again.</string>
     <string name="reading_unread">Unread</string>
@@ -451,11 +448,12 @@
     <string name="reader_contents_empty">This book does not provide a table of contents.</string>
     <string name="reader_restore_warning">The exact saved location was unavailable. Reading started from the closest safe location.</string>
     <string name="reader_error_title">Couldn’t open this book</string>
-    <string name="reader_error_unsupported">This file is not a supported EPUB publication.</string>
-    <string name="reader_error_corrupt">The EPUB file is damaged or incomplete.</string>
-    <string name="reader_error_drm">This DRM-protected EPUB cannot be opened.</string>
-    <string name="reader_error_parse">The EPUB structure could not be read.</string>
-    <string name="reader_error_missing">The local EPUB file is unavailable or changed.</string>
+    <string name="reader_error_unsupported">This publication format is not supported by the Reader.</string>
+    <string name="reader_error_corrupt">The original book file is damaged or incomplete.</string>
+    <string name="reader_error_drm">This protected book cannot be opened.</string>
+    <string name="reader_error_parse">The book structure could not be read.</string>
+    <string name="reader_error_missing">The original or downloaded book file is unavailable or changed.</string>
+    <string name="reader_error_network">The book is not downloaded and the server is unavailable. Check the connection and try again.</string>
     <string name="reader_error_memory">This publication is too large to open safely on this device.</string>
     <string name="reader_error_location">The saved reading location could not be restored.</string>
     <string name="reader_error_generic">The Reader engine could not open this publication.</string>
@@ -498,13 +496,6 @@
         <item quantity="one">%1$d resource · %2$s</item>
         <item quantity="other">%1$d resources · %2$s</item>
     </plurals>
-    <string name="download_checking_local">Checking the current downloaded copy…</string>
-    <string name="download_preparing_task">Creating download task…</string>
-    <string name="download_progress_detail">%1$s of %2$s · %3$d%%</string>
-    <string name="download_first_open_explanation">The first open downloads this book once. Future opens go directly to reading.</string>
-    <string name="download_preparation_failed">This book could not be prepared for reading.</string>
-    <string name="download_opening_reader">Download complete. Opening Reader…</string>
-    <string name="download_cancel_and_return">Cancel and return</string>
     <string name="downloads_task_context">%1$s · %2$s</string>
     <string name="downloads_unavailable_title">Download unavailable</string>
     <string name="downloads_unavailable_message">This downloaded book is missing, incomplete, or no longer available to this account.</string>
@@ -521,6 +512,12 @@
     <string name="work_chapter_read">Read</string>
     <string name="work_chapter_unread">Unread</string>
     <string name="reader_error_comic_open">The downloaded comic could not be opened. It may be damaged, encrypted, or use an unsupported archive format.</string>
+    <string name="reader_error_comic_encrypted">This comic archive is encrypted and cannot be opened.</string>
+    <string name="reader_error_comic_part_missing">A required volume of this multi-part comic archive is missing.</string>
+    <string name="reader_error_comic_format">This comic is not a supported ZIP, RAR, or RAR5 archive.</string>
+    <string name="reader_error_comic_corrupt">This comic archive is damaged or incomplete.</string>
+    <string name="reader_error_comic_page_decode">A comic page could not be decoded.</string>
+    <string name="reader_error_comic_memory">This comic expands beyond the safe device memory limit.</string>
     <string name="reader_retry_open">Download again and open</string>
     <string name="reader_read_online">Read online</string>
     <string name="reader_delete_download">Delete download</string>
@@ -568,9 +565,8 @@
     </plurals>
     <string name="work_contents_grid">Grid</string>
     <string name="work_contents_list">List</string>
-    <string name="work_contents_root">Contents</string>
-    <string name="work_contents_folder">Folder</string>
     <string name="work_contents_file">File</string>
+    <string name="work_contents_source_directory">Source directory %1$d</string>
     <string name="work_contents_loading">Loading the source directory…</string>
     <string name="work_contents_error_title">Couldn’t load book contents</string>
     <string name="work_contents_error_message">The source directory couldn’t be loaded (%1$s).</string>

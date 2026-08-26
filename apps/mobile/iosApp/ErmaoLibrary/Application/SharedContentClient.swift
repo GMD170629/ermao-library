@@ -39,22 +39,14 @@ actor SharedContentClient: ContentClient {
     }
 
     func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage {
-        try await fetchBooksResult(context: context, query: query).value
-    }
-
-    func fetchBooksResult(context: ContentRequestContext, query: BooksQuery) async throws -> ContentFetch<BookPage> {
         let result = try await repository.loadBooks(context: sharedContext(context), query: sharedBooksQuery(query))
-        let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.BookSummary>> = try contentFetch(result)
-        return ContentFetch(
-            value: BookPage(
-                books: try mapBooks(payload.value.items),
-                page: Int(payload.value.page),
-                pageSize: Int(payload.value.pageSize),
-                total: Int(payload.value.total),
-                totalPages: Int(payload.value.totalPages)
-            ),
-            provenance: payload.provenance,
-            isStale: payload.isStale
+        let payload: ErmaoShared.LibraryPage<ErmaoShared.BookSummary> = try contentValue(result)
+        return BookPage(
+            books: try mapBooks(payload.items),
+            page: Int(payload.page),
+            pageSize: Int(payload.pageSize),
+            total: Int(payload.total),
+            totalPages: Int(payload.totalPages)
         )
     }
 
@@ -65,54 +57,38 @@ actor SharedContentClient: ContentClient {
     }
 
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {
-        try await fetchGroupingsResult(context: context, query: query).value
-    }
-
-    func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage> {
         let result = try await repository.loadGroupings(context: sharedContext(context), query: sharedGroupingQuery(query))
-        let payload: ContentFetch<ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary>> = try contentFetch(result)
-        return ContentFetch(
-            value: GroupingPage(
-                groups: try payload.value.items.map { rawValue in
-                    guard let group = rawValue as? ErmaoShared.GroupingSummary else {
-                        throw ContentClientError.invalidResponse
-                    }
-                    return LibraryGrouping(
-                        id: group.id,
-                        kind: query.kind,
-                        name: group.name,
-                        bookCount: Int(group.bookCount),
-                        representativeBooks: group.representativeBooks.map(mapBook)
-                    )
-                },
-                page: Int(payload.value.page),
-                pageSize: Int(payload.value.pageSize),
-                total: Int(payload.value.total),
-                totalPages: Int(payload.value.totalPages)
-            ),
-            provenance: payload.provenance,
-            isStale: payload.isStale
+        let payload: ErmaoShared.LibraryPage<ErmaoShared.GroupingSummary> = try contentValue(result)
+        return GroupingPage(
+            groups: try payload.items.map { rawValue in
+                guard let group = rawValue as? ErmaoShared.GroupingSummary else {
+                    throw ContentClientError.invalidResponse
+                }
+                return LibraryGrouping(
+                    id: group.id,
+                    kind: query.kind,
+                    name: group.name,
+                    bookCount: Int(group.bookCount),
+                    representativeBooks: group.representativeBooks.map(mapBook)
+                )
+            },
+            page: Int(payload.page),
+            pageSize: Int(payload.pageSize),
+            total: Int(payload.total),
+            totalPages: Int(payload.totalPages)
         )
     }
 
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage {
-        try await fetchFacetResult(context: context, query: query).value
-    }
-
-    func fetchFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage> {
         let result = try await repository.loadFacet(context: sharedContext(context), query: sharedFacetQuery(query))
-        let payload: ContentFetch<ErmaoShared.FacetPage> = try contentFetch(result)
-        return ContentFetch(
-            value: FacetPage(
-                facet: mapFacet(payload.value.facet),
-                books: try mapBooks(payload.value.books.items),
-                page: Int(payload.value.books.page),
-                pageSize: Int(payload.value.books.pageSize),
-                total: Int(payload.value.books.total),
-                totalPages: Int(payload.value.books.totalPages)
-            ),
-            provenance: payload.provenance,
-            isStale: payload.isStale
+        let payload: ErmaoShared.FacetPage = try contentValue(result)
+        return FacetPage(
+            facet: mapFacet(payload.facet),
+            books: try mapBooks(payload.books.items),
+            page: Int(payload.books.page),
+            pageSize: Int(payload.books.pageSize),
+            total: Int(payload.books.total),
+            totalPages: Int(payload.books.totalPages)
         )
     }
 
@@ -364,12 +340,6 @@ actor SharedContentClient: ContentClient {
         if let failure = result as? ErmaoShared.ContentResultFailure { throw mapError(failure.error) }
         guard let content = result as? ErmaoShared.ContentResultContent<AnyObject>, let value = content.value as? Value else { throw ContentClientError.invalidResponse }
         return value
-    }
-
-    private func contentFetch<Value: Sendable>(_ result: any ErmaoShared.ContentResult) throws -> ContentFetch<Value> {
-        if let failure = result as? ErmaoShared.ContentResultFailure { throw mapError(failure.error) }
-        guard let content = result as? ErmaoShared.ContentResultContent<AnyObject>, let value = content.value as? Value else { throw ContentClientError.invalidResponse }
-        return ContentFetch(value: value, provenance: .network, isStale: false)
     }
 
     private func mapError(_ error: ErmaoShared.AppError) -> ContentClientError {

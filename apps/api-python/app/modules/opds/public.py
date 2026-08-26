@@ -45,14 +45,6 @@ from app.modules.opds.domain.errors import (
     OpdsProgressionLocked,
     OpdsPublicationNotFound,
 )
-from app.modules.opds.presentation.http import OpdsHttpDependencies, create_opds_router
-from app.modules.opds.presentation.schemas import (
-    OpdsAuthenticationDocument,
-    OpdsAuthenticationFlow,
-    OpdsAuthenticationLabels,
-    OpdsProgressionDevice,
-    OpdsProgressionDocument,
-)
 
 __all__ = [
     "OPDS_ACQUISITION_REL",
@@ -64,9 +56,6 @@ __all__ = [
     "PSE_STREAM_REL",
     "BasicCredentialsDto",
     "OpdsActorDto",
-    "OpdsAuthenticationDocument",
-    "OpdsAuthenticationFlow",
-    "OpdsAuthenticationLabels",
     "OpdsAuthenticationRequestDto",
     "OpdsAuthenticationRequired",
     "OpdsAuthenticator",
@@ -75,12 +64,9 @@ __all__ = [
     "OpdsCatalogQueryDto",
     "OpdsEntryDto",
     "OpdsFeedDto",
-    "OpdsHttpDependencies",
     "OpdsLinkDto",
     "OpdsProgressionDateConflict",
-    "OpdsProgressionDevice",
     "OpdsProgressionDeviceDto",
-    "OpdsProgressionDocument",
     "OpdsProgressionDocumentDto",
     "OpdsProgressionIncorrectUser",
     "OpdsProgressionInvalidPayload",
@@ -93,7 +79,6 @@ __all__ = [
     "OpdsSettingsSnapshot",
     "PsePageRequestDto",
     "PseStreamDto",
-    "create_opds_router",
     "normalize_opds_public_base_url",
     "normalize_pse_max_width",
     "resolve_opds_settings",

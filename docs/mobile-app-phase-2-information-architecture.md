@@ -7,9 +7,9 @@
 > 下游规范：[`mobile-app-phase-3-user-flows-and-wireframes.md`](mobile-app-phase-3-user-flows-and-wireframes.md)
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
-> v1.0.0 修订（2026-08-15）：[`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 取代本文所有 `offline-grace`、30 天 entitlement、Offline Shell、手动进入离线模式和 GET 页面缓存回退条款。首发只有正常 App Shell 与鉴权 Gate；完成下载仍通过 Download Center 和正常 Reader 打开。
+> v1.0.0 会话契约（2026-08-26）：[`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 是会话恢复与 GET 失败的唯一真源。首发只有正常 App Shell 与鉴权 Gate，不定义客户端宽限期、第二套 Shell、手动网络模式或 GET 页面缓存回退；完成下载仍通过 Download Center 和正常 Reader 打开。
 
-> Work Detail 统一修订（2026-08-26）：所有入口共享同一详情状态并保留来源上下文。单个可读资源显示资源详情；多个资源显示与 Web 相同的来源目录、面包屑、文件夹、分页、视图模式和排序。管理入口与权限过滤直接跟随 Web 当前实现，不由 App 单独定义。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份、路由和深链。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`；所有入口共享同一 `book.detail` 状态并保留来源上下文。单个可读资源显示资源详情；多个资源显示与 Web 相同的来源目录、面包屑、文件夹、分页、视图模式和排序。详情动作及其对象范围直接跟随 Web Work Detail 当前实现与权限过滤，不由 App 单独定义，也不把 `bookDetailManagement` 解释为全局开关。
 
 ## 1. 文档目的与优先级
 
@@ -24,11 +24,12 @@
 
 优先级从高到低：
 
-1. 第一阶段功能基线决定功能、真实 API、权限和阶段范围；
-2. 本文件决定页面归属、层级、跳转和原生表现形态；
-3. 后续视觉规范决定布局、样式、组件和动效；
-4. 全局开发规范决定系统容器、可主题化原生控件、App 自有业务视觉和许可业务动效的实现与验收边界；
-5. Web 菜单、响应式布局和旧移动端遗留实现不构成 App 设计依据。
+1. 明确取代阶段文档的 Accepted ADR 决定当前身份、API、权限与破坏性切换边界；
+2. 第一阶段功能基线决定未被 ADR 取代的功能、真实 API、权限和阶段范围；
+3. 本文件决定页面归属、层级、跳转和原生表现形态；
+4. 后续视觉规范决定布局、样式、组件和动效；
+5. 全局开发规范决定系统容器、可主题化原生控件、App 自有业务视觉和许可业务动效的实现与验收边界；
+6. Web 菜单、响应式布局和旧移动端遗留实现不构成 App 设计依据。
 
 若本文件需要的能力不被第一阶段真实 API 支持，必须先补契约或明确降级，不能仅凭页面设计开始实现。
 
@@ -79,14 +80,14 @@ flowchart TD
     Shell --> Shelves["书架 Stack"]
     Shell --> Me["我的 Stack"]
 
-    Home --> Work["Shared Work Detail"]
-    Library --> Work
-    Shelves --> Work
+    Home --> Book["Shared Book Detail"]
+    Library --> Book
+    Shelves --> Book
     Me --> Downloads["Download Center"]
-    Downloads --> Work
+    Downloads --> Book
 
-    Work --> Reader["Full-screen Reader"]
-    Work --> Playing["Now Playing"]
+    Book --> Reader["Full-screen Reader"]
+    Book --> Playing["Now Playing"]
     Downloads --> Reader
     Shell --> Mini["Persistent Mini Player"]
     Mini --> Playing
@@ -96,7 +97,7 @@ flowchart TD
 
 - 四个 Tab 各自保存 Stack、查询、筛选、滚动和选择状态；切换 Tab 不重置。
 - 再次点击当前 Tab：有栈深度时 pop-to-root；已在根页时滚到顶部；不隐式刷新。
-- `work.detail`、`reader.session`、`audio.now-playing` 只有一份页面定义。
+- `book.detail`、`reader.session`、`audio.now-playing` 只有一份页面定义。
 - 页面实例身份为 `routeKey + entityId`；重复打开相同实例时复用、聚焦或刷新，不重复叠栈。
 - Sheet、Menu、Dialog 不进入页面历史，也不能成为 deep link 的直接落点。
 - compact 使用底部 Tab；expanded 保留相同四个目的地，自适应为 navigation rail/sidebar 与列表—详情 split view。
@@ -121,13 +122,13 @@ L1 AuthenticatedShell
 │   ├── continue-reading                               [Section]
 │   ├── recent-reading                                 [Section]
 │   ├── recent-added                                   [Section]
-│   └── works.collection(kind)                         [P0 Page]
+│   └── books.collection(kind)                         [P0 Page]
 │       kind = recent-reading | recent-added
 │
 ├── tab.library                                        [P0 Tab Root]
-│   ├── scope = works | series | authors               [Segmented State]
+│   ├── scope = books | series | authors               [Segmented State]
 │   ├── library.search(scope, query)                   [P0 Page]
-│   ├── works.facet(kind, facetId)                     [P0 Page]
+│   ├── books.facet(kind, facetId)                     [P0 Page]
 │   │   kind = series | author
 │   └── library.advanced-rules                         [P1 Full-screen]
 │
@@ -150,10 +151,10 @@ L1 AuthenticatedShell
     └── kindle.tasks                                   [P1 Page]
 
 L2–L4 Shared Content and Immersive Routes
-├── work.detail(workId, mediaKind?, volumeId?)         [P0 Shared Page]
-├── reader.session(volumeId, location?)                [P0 Full-screen]
+├── book.detail(bookId, resourceId?)                   [P0 Shared Page]
+├── reader.session(resourceId, location?)              [P0 Full-screen]
 │   renderer = reflowable | comic | pdf
-└── audio.now-playing(volumeId)                        [P0 Full-screen Cover]
+└── audio.now-playing(resourceId, assetId?, location?) [P0 Full-screen Cover]
 
 O1 Contextual Presentation
 ├── Sheet
@@ -203,9 +204,9 @@ session-expired
 `tab.home` 只承担日常续读，不扩张为第二个书库：
 
 - 继续阅读：最多一个最优 resume 主卡；封面/标题进详情，主 CTA 按第 7.2 节直达内容。
-- 最近阅读：横向内容区；“查看全部”进入 `works.collection(recent-reading)`。
-- 最近入库：横向内容区；“查看全部”进入 `works.collection(recent-added)`。
-- 三个区块分别拥有 loading、empty、error、stale 状态；一个失败不阻塞其他区块。
+- 最近阅读：横向内容区；“查看全部”进入 `books.collection(recent-reading)`。
+- 最近入库：横向内容区；“查看全部”进入 `books.collection(recent-added)`。
+- 三个区块分别拥有 loading、empty、error、success 状态；一个失败不阻塞其他区块。
 - 首页不提供独立搜索状态；以后增加搜索按钮时只能切换到书库并打开 canonical `library.search`。
 
 ### 5.3 L1：书库
@@ -214,7 +215,7 @@ session-expired
 
 | Scope | 内容 | 搜索 | 筛选 |
 |---|---|---|---|
-| `works` | 当前用户可见作品 Grid/List | 搜索作品 | 基础 Filter Sheet；排序/视图 Menu |
+| `books` | 当前用户可见图书 Grid/List | 搜索图书 | 基础 Filter Sheet；排序/视图 Menu |
 | `series` | 系列聚合列表 | 搜索系列 | 不复用作品筛选 |
 | `authors` | 作者聚合列表 | 搜索作者 | 不复用作品筛选 |
 
@@ -223,8 +224,8 @@ session-expired
 - 三个 scope 分别保存 query、scroll position 和加载状态。
 - 切换 scope 不重置另外两个 scope。
 - `library.search(scope, query)` 是一个共享搜索页面模型，不为三个 scope 建副本。
-- 系列/作者点击进入 `works.facet(kind, facetId)`；route 使用稳定 ID，名称只用于显示。
-- `works.facet` 返回时恢复聚合列表的 query 和滚动。
+- 系列/作者点击进入 `books.facet(kind, facetId)`；route 使用稳定 ID，名称只用于显示。
+- `books.facet` 返回时恢复聚合列表的 query 和滚动。
 - P1 高级规则编辑使用独立全屏页，不压入基础 Filter Sheet。
 
 ### 5.4 L1：书架
@@ -236,7 +237,7 @@ session-expired
 
 规则：
 
-- `COLLECTION → shelf → work` 是固定层级；合集不能直接显示作品。
+- `COLLECTION → shelf → book` 是固定层级；合集不能直接显示图书。
 - 静态书架允许加入、移除作品。
 - 智能书架 P0 只展示规则摘要和计算结果；不能手工增删作品。
 - 创建/编辑静态书架和合集使用 Sheet。
@@ -262,8 +263,8 @@ Web 管理只在 `canManageSystem` 或 `isAdmin` 时显示，使用系统浏览�
 
 | Route | 层级 | 规则 |
 |---|---|---|
-| `work.detail` | L2/L3 | 从哪个 Stack 进入就回哪个来源；媒介和 volume 切换只更新 route state |
-| `reader.session` | L4 | 隐藏 Tab 与 mini player；切卷、TOC、页码/位置使用 replace/update，不堆返回历史 |
+| `book.detail` | L2/L3 | 从哪个 Stack 进入就回哪个来源；选择 `resourceId`、目录位置、排序、视图、分页和滚动只更新当前详情状态，不创建 Version 层或重复详情页 |
+| `reader.session` | L4 | 隐藏 Tab 与 mini player；资源内 TOC、页码/位置使用 replace/update，不堆返回历史 |
 | `audio.now-playing` | L4 Cover | 播放状态独立于页面；关闭后回到精确来源并保留 mini player |
 | `downloads.detail` | L2/L3 | 展示一个持久下载任务的状态、错误和恢复动作；不使用临时 Sheet 代替 |
 
@@ -316,41 +317,41 @@ lastValidatedAt
 ```mermaid
 flowchart LR
     Home["首页"] -->|"主 CTA，目标唯一"| Reader["Reader / Now Playing"]
-    Home -->|"封面/标题或目标不唯一"| Work["作品详情"]
+    Home -->|"封面/标题或目标不唯一"| Book["Book Detail"]
     Library["书库"] --> Facet["系列/作者作品列表"]
-    Library --> Work
-    Facet --> Work
+    Library --> Book
+    Facet --> Book
     Shelves["书架"] --> Collection["合集"]
     Collection --> Shelf["书架详情"]
     Shelves --> Shelf
-    Shelf --> Work
-    Work --> Reader
-    Work -->|"查看下载"| Downloads["我的 / 下载中心"]
+    Shelf --> Book
+    Book --> Reader
+    Book -->|"查看下载"| Downloads["我的 / 下载中心"]
     Downloads --> Reader
     Mini["Mini Player"] --> Playing["Now Playing"]
 ```
 
 ### 7.2 首页继续阅读
 
-- 唯一电子书、漫画或 PDF volume：打开 `reader.session`。
-- 唯一音频 volume：打开 `audio.now-playing`。
-- 多媒介、多卷、不完整 bootstrap、失效 fingerprint 或无法唯一决定目标：进入 `work.detail`，预选最近媒介/volume。
-- 封面和标题永远进入 `work.detail`；只有明确标注的“继续阅读/继续收听”CTA 直达内容。
+- 唯一且可验证的电子书、漫画或 PDF `ReadableResource`：用 `resourceId` 打开 `reader.session`。
+- 唯一且可验证的音频 `ReadableResource`：用 `resourceId` 打开 `audio.now-playing`；需要精确媒体目标时附带 `assetId`。
+- 多个资源、不完整 bootstrap、失效的最近 `resourceId` 或无法唯一决定目标：进入 `book.detail(bookId, resourceId?)`，仅在存在合法最近记录时预选 `resourceId`。
+- 封面和标题永远进入 `book.detail`；只有明确标注的“继续阅读/继续收听”CTA 直达内容。
 
-### 7.3 作品、作者和系列
+### 7.3 图书、作者和系列
 
-- 任意作品卡进入共享 `work.detail`，携带 origin context。
-- 从作品详情点击作者/系列时，在当前 Stack 压入共享 `works.facet`；返回仍回详情，不强制切换 Tab。
-- 单个可读资源自动选中并显示资源详情，但不自动进入 Reader；多个资源显示服务端真实内容目录，不使用客户端推断的卷册轨道。
+- 任意图书卡进入共享 `book.detail(bookId)`，携带 origin context。
+- 从 Book Detail 点击作者/系列时，在当前 Stack 压入共享 `books.facet`；返回仍回详情，不强制切换 Tab。
+- 单个 `ReadableResource` 自动选中并显示资源详情，但不自动进入 Reader；多个资源显示服务端真实内容目录，不使用客户端推断的 Version 或 Volume 轨道。
 - 内容目录保留真实来源节点、面包屑、文件夹、可读资源、分页、网格/列表切换以及 Web 相同的六种排序；进入深层目录和返回后恢复目录上下文。
 - 资源详情按 `readerType` 显示章节及已读状态、漫画/PDF 页面预览或音轨信息，并覆盖加载、空、导入中、导入失败和分页错误状态。
-- 有效 resume 使用最近 volume；无 resume 使用当前媒介第一个可读 volume。
+- 有效 resume 使用最近 `resourceId`；无 resume 时仅按服务端稳定顺序选择第一个可读资源。章节、页码和音轨是资源内 locator，不升级为 route identity。
 
 ### 7.4 下载
 
-- 作品详情发起下载后停留原页，并显示排队/进行/完成状态。
+- Book Detail 发起下载后停留原页，并显示排队/进行/完成状态。
 - “查看下载”切换到 `tab.me → downloads.center`；不把原 Tab 加入返回历史。
-- 通知打开完成任务时进入对应 `work.detail`；失败任务进入 `downloads.detail`。
+- 通知打开完成任务时进入对应 `book.detail(bookId, resourceId)`；失败任务进入 `downloads.detail`。
 - 下载中心打开已下载内容时呈现 Reader；关闭 Reader 回下载中心。
 - “离线下载”和“导出原文件”是不同意图；P1 导出使用系统 Share Sheet。
 
@@ -361,8 +362,8 @@ flowchart LR
 - 只有本地持久化失败时才阻断退出，并给出重试或明确放弃本次本地变更的选择。
 - mini player 常驻四 Tab 上方；点击打开 Now Playing。
 - Now Playing 返回或下滑只折叠，不暂停播放。
-- “查看作品”先折叠 Now Playing，再在当前 Stack 复用或压入 `work.detail`。
-- 切换音频 volume 替换当前队列，不增加页面历史。
+- “查看图书”先折叠 Now Playing，再在当前 Stack 复用或压入 `book.detail`。
+- 切换音频 `ReadableResource` 替换当前队列；资源内切换 `ResourceAsset` 或 locator 只更新播放状态，不增加页面历史。
 
 ## 8. 多服务器与切换
 
@@ -400,9 +401,9 @@ App 只接受：
 ```text
 home
 library(scope?, query?, filters?)
-work(workId, mediaKind?, volumeId?)
-reader(volumeId, location?)
-audio(volumeId, chapterId?, trackIndex?)
+book(bookId, resourceId?)
+reader(resourceId, location?)
+audio(resourceId, assetId?, location?)
 shelf(shelfId)
 downloads(downloadId?)
 ```
@@ -423,10 +424,10 @@ downloads(downloadId?)
 
 - ID、枚举、位置和 filters 必须边界验证；显示名称不作为 route identity。
 - 禁止在 deep link 中携带 Cookie、token、密码、任意文件路径或 callback URL。
-- Work/Reader/Audio 冷启动默认以 Library 根为 underlay。
+- Book/Reader/Audio 冷启动默认以 Library 根为 underlay。
 - App 已运行时 deep link 以全局 intent 呈现；关闭后回原现场。
 - `/listen` 只可映射成 `audio` intent，不建立页面。
-- Reader v1/v2、edition、OPDS、external-source、notes 和 Web 管理路径一律拒绝并进入安全错误页。
+- 旧 `work(workId, ...)`、`versionId`、`volumeId`、`fileId`、`chapterId`，以及 Reader v1/v2、edition、OPDS、external-source、notes 和 Web 管理路径一律拒绝并进入安全错误页；不得按值复用、猜测或映射到新身份。
 
 ### 9.2 恢复规则
 
@@ -492,7 +493,7 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 
 | Sheet | 内容与提交规则 |
 |---|---|
-| `library.filter` | 仅 works scope；草稿模式；应用提交；清除全部重置；取消丢弃草稿 |
+| `library.filter` | 仅 books scope；草稿模式；应用提交；清除全部重置；取消丢弃草稿 |
 | `reading-status` | 阅读状态单选；成功后 Snackbar 提供撤销 |
 | `shelf-picker` | 多选静态书架；智能书架/合集显示不可选原因；统一保存 |
 | `shelf-create-edit` | 创建/编辑静态书架或合集；键盘/动态字体不足时升全高 |
@@ -510,7 +511,7 @@ Deep link 优先于已保存 route；普通冷启动无 deep link 时进入首�
 |---|---|
 | `library-sort` | 当前项带选中状态；点击立即生效 |
 | `library-view` | Grid/List 单选；点击立即生效 |
-| `work-overflow` | 阅读状态、加入书架、离线下载；编辑与设置封面仅在授权且移动契约可用时出现，否则提供明确的 Web 管理入口；P1 Kindle/导出入口 |
+| `book-overflow` | 阅读状态、加入书架、离线下载；目录、资源和图书管理动作严格复用 Web Work Detail 当前对象范围与权限过滤，未授权动作不渲染；P1 Kindle/导出入口 |
 | `shelf-overflow` | 编辑、删除入口；删除必须转 Dialog |
 | `download-overflow` | 暂停、继续、重试、移除本地副本入口 |
 | `audio-speed` | 有限倍速预设；自定义倍速以后使用 Sheet |
@@ -574,18 +575,18 @@ P2 和 Web-only 能力在阶段提升前不进入页面树。
 ```text
 TabId = home | library | shelves | me
 
-LibraryScope = works | series | authors
+LibraryScope = books | series | authors
 
 AppRoute =
   server | auth | home | library | shelf | account |
-  downloads | work | reader | audio
+  downloads | book | reader | audio
 
 NavigationIntent =
   home |
   library(scope?, query?, filters?) |
-  work(workId, mediaKind?, volumeId?) |
-  reader(volumeId, location?) |
-  audio(volumeId, chapterId?, trackIndex?) |
+  book(bookId, resourceId?) |
+  reader(resourceId, location?) |
+  audio(resourceId, assetId?, location?) |
   shelf(shelfId) |
   downloads(downloadId?)
 
@@ -597,12 +598,10 @@ TlsMode =
   systemTrust |
   insecureSkipAllValidation
 
-OfflineEntitlement =
-  serverIdentity + userId + lastValidatedAt +
-  expiresAt + status
-
-OfflineEntitlementStatus =
-  valid | expired | revoked-locally
+VerifiedSessionRecord =
+  profileId + serverIdentity + userId +
+  authorizationSnapshot + authorizationVersion +
+  lastValidatedAt
 ```
 
 `tlsMode` 是网络层内部持久化边界，不是用户可见设置。页面和登录表单不得显示其名称、当前值或 Switch。若实现仍使用 `insecureSkipAllValidation`，必须使用完整、显式的内部名称，禁止缩写为 `allowTls`、`trustServer` 等会掩盖风险的布尔值。
@@ -630,7 +629,7 @@ OfflineEntitlementStatus =
 - 四个 Tab 独立保存 Stack、筛选、搜索和滚动。
 - 重按 Tab 的 pop-to-root/scroll-to-top 行为符合规范。
 - compact 底栏与 expanded rail/split view 信息架构等价。
-- Work、Reader、Now Playing 和 Facet 没有来源专用重复页面。
+- Book Detail、Reader、Now Playing 和 Facet 没有来源专用重复页面。
 - Android/iOS 返回行为、modal 关闭顺序和来源恢复一致。
 - 普通冷启动回首页；OS 短时恢复 Reader；deep link 优先于保存的 route。
 
@@ -654,14 +653,14 @@ OfflineEntitlementStatus =
 - Reader 返回等待本地事务但不等待网络。
 - mini player、Now Playing、锁屏音频和跨 Tab 播放不被导航销毁。
 - 下载中心是持久页面，下载错误、暂停、恢复和空间状态不依赖临时 Sheet。
-- 内容 fingerprint 冲突阻止旧进度写入。
+- Publication fingerprint 仅作诊断；同一 `bookId + resourceId` 的进度不得因 Asset、解析器或 fingerprint 变化而创建新槽、拒绝写入或阻止恢复。
 - 离线下载和原文件导出使用不同动作与文案。
 
 ### 15.4 覆盖层与状态
 
 - 同时最多一个 App modal；无 Sheet 套 Sheet。
 - Menu/Sheet/Dialog 选择符合注册表。
-- loading、empty、error、permission、success、conflict、stale 各有且只有一个主要呈现层。
+- loading、empty、error、permission、success、conflict 各有且只有一个主要呈现层。
 - 表单 422 贴近字段；普通成功使用 Snackbar/播报；可恢复错误保留输入。
 - 动态字体、VoiceOver/TalkBack、reduced motion、`zh-CN`、`en-US` 均完成验收。
 - P1 未交付前无占位入口；排除和 Web-only 能力没有 App route。

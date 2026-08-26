@@ -30,6 +30,19 @@ export function bookDetailHref(
   return `/books/${encodeURIComponent(bookId)}${suffix}`;
 }
 
+export function librarySeriesHref(seriesName: string): string {
+  const query = new URLSearchParams({ seriesName: seriesName.trim() });
+  return `/library?${query}`;
+}
+
+export function libraryTagHref(tag: string): string {
+  const filters = JSON.stringify({
+    combinator: 'ALL',
+    conditions: [{ field: 'tag', operator: 'equals', value: tag.trim() }]
+  });
+  return `/library?${new URLSearchParams({ filters })}`;
+}
+
 export function resourcePageFromQuery(value: unknown): number {
   if (typeof value !== 'string') return 1;
   const parsed = Number.parseInt(value, 10);

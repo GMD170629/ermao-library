@@ -29,9 +29,6 @@
         <activity
             android:name=".features.reader.presentation.ReaderActivity"
             android:exported="false" />
-        <activity
-            android:name=".features.downloads.presentation.DownloadPreparationActivity"
-            android:exported="false" />
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
             android:enabled="false"

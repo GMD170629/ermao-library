@@ -9,6 +9,13 @@ final class ReaderSecurityTests: XCTestCase {
         #endif
     }
 
+    func testTxtDecoderAllowsTrailingNulPaddingButRejectsEmbeddedNul() throws {
+        let padded = Data("有效正文".data(using: .utf8)!) + Data(repeating: 0, count: 160)
+
+        XCTAssertEqual(IosStrictTxtDecoder.decode(padded), "有效正文")
+        XCTAssertNil(IosStrictTxtDecoder.decode(Data([0x41, 0x00, 0x42])))
+    }
+
     func testLocatorProjectionMatchesV2GoldenSemantics() throws {
         let markup = #"""
         <?xml version="1.0" encoding="utf-8"?>

@@ -8,9 +8,6 @@ import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.library.domain.Resource
 import java.time.Instant
 
-fun ContentResult.Content<*>.freshness(): ContentFreshness =
-    if (isStale) ContentFreshness.Stale else ContentFreshness.Fresh
-
 fun BookSummary.toCard(): BookCard = BookCard(
     id = id,
     title = title,

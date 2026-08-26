@@ -4,11 +4,11 @@
 
 ## 1. 目的与约束优先级
 
-本文件固化方向 A“暖白书页”按画布尺寸 1:1 输出的高保真页面锚点，供后续锚点、状态变体和原生实现校准；1:1 只描述画布与构图，不要求系统组件逐像素复制。当前已覆盖 Compact 的 Home、Library、Work Detail、Shelves、Me、Downloads，以及沉浸层 Reader Paper 与 Audio Now Playing。服务器登录与管理已由 Phase 6 v3 的任务闭环接管，不再以本阶段旧版 Server Center 单页或 Phase 6 v2 网格稿为准。
+本文件固化方向 A“暖白书页”按画布尺寸 1:1 输出的高保真页面锚点，供后续锚点、状态变体和原生实现校准；1:1 只描述画布与构图，不要求系统组件逐像素复制。当前已覆盖 Compact 的 Home、Library、Book Detail、Shelves、Me、Downloads，以及沉浸层 Reader Paper 与 Audio Now Playing。服务器登录与管理已由 Phase 6 v3 的任务闭环接管，不再以本阶段旧版 Server Center 单页或 Phase 6 v2 网格稿为准。
 
 约束优先级固定为：
 
-1. Phase 1 决定功能、API、数据与权限事实；
+1. Phase 1 以及明确取代它的 Accepted ADR 决定功能、API、数据与权限事实；Mobile 当前身份以 ADR 0020 为准；
 2. Phase 2 决定页面归属、导航、返回和覆盖层；
 3. Phase 3 决定任务流、内容顺序和动作优先级；
 4. Phase 4 决定令牌、排版、Cover、Progress、图标与动效；
@@ -19,7 +19,7 @@
 
 ## 2. 共同画布
 
-- 画布：除 Work Detail 概念组外使用 `390 × 844`，不含设备外框和演示板；Work Detail 当前概念组保留带设备框的评审稿，真实平台验收截图仍按设备原生画布归档；
+- 画布：除 Book Detail 概念组外使用 `390 × 844`，不含设备外框和演示板；Book Detail 当前概念组保留带设备框的评审稿，真实平台验收截图仍按设备原生画布归档；
 - 外观：Shell 页面使用 `App Light`，Reader 使用 `Paper`，Audio 使用方向 A 的暖铜沉浸外观；
 - 内容：八页复用同一用户、服务器和作品身份；出现媒体内容时继续复用同一封面、作者、阅读位置和进度；
 - 视觉：暖白 Canvas、黑色正文、克制珊瑚红、2:3 Cover、系统无衬线与原生图标；
@@ -56,13 +56,13 @@
 - 只有存在阅读进度的作品显示 Progress；
 - 四项 Tab 顺序固定，书库使用 filled 选中图标与 Accent。
 
-## 5. Work Detail
+## 5. Book Detail
 
-Work Detail 的产品和内容结构不再由 App 专属基准图定义。唯一行为来源是当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx` 和 `resource-detail-view.tsx`；本节仅约束原生视觉适配。
+Book Detail 的产品和内容结构不再由 App 专属基准图定义。唯一行为来源是当前 Web Work Detail 的 `book-detail-page.tsx`、`book-content-browser.tsx` 和 `resource-detail-view.tsx`；身份只使用 ADR 0020 的 Book/ReadableResource/ResourceAsset，本节仅约束原生视觉适配。
 
 冻结项：
 
-- 使用系统返回与折叠标题语义，不自绘 Web 式 Header，也不在顶部显示 overflow；Work Detail 正常显示 AuthenticatedShell 四项导航，只有 Reader 隐藏；
+- 使用系统返回与折叠标题语义，不自绘 Web 式 Header，也不在顶部显示 overflow；Book Detail 正常显示 AuthenticatedShell 四项导航，只有 Reader 隐藏；
 - 只显示一张当前作品 Cover，不显示封面轮播、圆点或虚构的备用封面；Cover 与作品名组成第一视觉层，作者、系列和阅读状态依次降级；
 - Cover 全局使用透明展示框，不为真实封面或 Fallback 补充背景色；详情身份区按“标题、作者 / 系列 / 当前媒介、填充背景标签、阅读状态”组织，作者与系列不再拆成独立行；
 - 主 CTA 下方快捷动作固定为“下载 / 阅读状态 / 加入 / 更多”；`加入` 使用书架语义图标并打开 `shelf-picker`，`更多` 展开图书控制菜单。详情页右上角不显示三点或管理入口；
@@ -140,10 +140,10 @@ Work Detail 的产品和内容结构不再由 App 专属基准图定义。唯一
 冻结项：
 
 - 使用从“我的”压入的系统导航语义，标题“下载”，右侧为选择/管理动作；
-- 导航区同时提供本地已下载搜索；搜索范围只包含当前私有命名空间中的 completed 工件，并按“作品（书名） → directory version → volume”聚合展示，不能退化为服务器书库搜索；Version 行使用 Reader v4 的真实目录 identity/name，格式与媒介种类来自 Volume；
+- 导航区同时提供本地已下载搜索；搜索范围只包含当前私有命名空间中的 completed 工件，并按 `Book → ReadableResource → ResourceAsset` 聚合展示，三层使用 `bookId / resourceId / assetId`，不能退化为服务器书库搜索；格式与媒体类型来自服务端 Resource/Asset 合同；
 - 正常锚点同时展示存储占用、一个进行中、两个已完成和一个失败任务，不使用临时 Sheet 代替持久页面；
-- determinate 下载进度为 4pt，并同时显示百分比或传输量；从开始/继续阅读触发的单卷任务在 completed 工件落盘后自动进入 Reader，独立下载动作不自动跳转；已完成 volume 可从下载中心直达 Reader；
-- 作品层封面先使用缓存或统一 fallback，占位尺寸始终稳定，再异步过渡到 authenticated cover；封面失败不折叠 Work/Version/Volume 层级，不出现跳高，也不影响本地搜索和打开；
+- determinate 下载进度为 4pt，并同时显示百分比或传输量；只有独立下载动作创建任务且完成后不自动跳转；同一 namespace 下身份归属完整且已验证完成的 ResourceAsset 可从下载中心以其 `resourceId` 直达 Reader/Now Playing，fingerprint 仅作诊断；
+- Book 层封面先使用缓存或统一 fallback，占位尺寸始终稳定，再异步过渡到 authenticated cover；封面失败不折叠 Book/ReadableResource/ResourceAsset 层级，不出现跳高，也不影响本地搜索和打开；
 - 下载失败使用稳定摘要和行内“重试”，不弹逐项 Dialog；移除离线副本等破坏性动作仍按 Phase 2 进入确认 Dialog；
 - 页面属于 MeStack，保留四项 Tab 且“我的”为选中项；当前正常锚点不显示 offline/401 宽限 Banner 或 mini player。
 
@@ -167,11 +167,11 @@ Work Detail 的产品和内容结构不再由 App 专属基准图定义。唯一
 
 ## 12. 本轮验收结论
 
-- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；Work Detail 使用 v6 并列 Light/Dark 评审板，其他主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
+- 本阶段主锚点使用同一用户、服务器、内容身份与视觉语言；Book Detail 使用 v6 并列 Light/Dark 评审板，其他主锚点为 `390 × 844` PNG；服务器入口资产由 Phase 6 单独管理，包含 iOS `390 × 844` 与 Android `412 × 915` 画布；
 - Home 没有第二套搜索，Library 是唯一发现入口；
 - Library 活动筛选已去除大面积胶囊背景；
 - Home 与 Library 在标准 `390pt` Compact 宽度下均保持一行三本的信息密度；
-- Work Detail 的主次动作、媒介切换、Volume 层级和返回来源可辨认；
+- Book Detail 的主次动作、ReadableResource 选择和返回来源可辨认，且不出现 Version/Volume 层级；
 - Reader 的正文/控制层、Paper/系统字体和沉浸导航边界可辨认；
 - Audio 的折叠、播放、时间轴与次级动作没有被自定义视觉吞没；
 - Shelves 的合集、静态书架与智能书架可通过层级和三封面组图区分；
@@ -179,7 +179,7 @@ Work Detail 的产品和内容结构不再由 App 专属基准图定义。唯一
 - Downloads 的存储、进行中、已完成和失败状态同时可扫描，失败恢复保持行内；
 - 服务器入口已改为默认登录表单、原生切换 Sheet、当前 profile 删除，以及仅在点击登录时出现的连接、兼容性和 SSL 风险提示；
 - 页面没有新增 Web-only、P1 占位或 Phase 1 排除能力；
-- Home、Library、Work Detail、Shelves、Me 与 Downloads 的 App 自有内容区按严格视觉回归验收；Reader 与 Audio 的业务内容区同样严格验收；服务器入口按 Phase 6 v3 独立验收；Navigation、Tab、Slider、播放控件和 overflow 按平台独立验收，不要求跨平台同形；
+- Home、Library、Book Detail、Shelves、Me 与 Downloads 的 App 自有内容区按严格视觉回归验收；Reader 与 Audio 的业务内容区同样严格验收；服务器入口按 Phase 6 v3 独立验收；Navigation、Tab、Slider、播放控件和 overflow 按平台独立验收，不要求跨平台同形；
 - 当前锚点不代表 App Dark、Expanded、Dynamic Type 或异常状态已经验收，这些仍按 Phase 3–4 的矩阵单独制作。
 
 服务器登录、切换与删除、按需连接与 TLS 风险、Setup 和 Reauthenticate 的高保真闭环见 [`mobile-app-phase-6-server-auth-high-fidelity.md`](mobile-app-phase-6-server-auth-high-fidelity.md)。

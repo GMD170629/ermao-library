@@ -42,6 +42,11 @@ enum ManagedDownloadVerification: String, Codable, Hashable, Sendable {
     case invalid
 }
 
+enum ManagedDownloadArtifactKind: String, Codable, Hashable, Sendable {
+    case singleOriginalAsset
+    case originalPageSet
+}
+
 /// iOS-owned manifest identity. One record is one Book/Resource/Asset copy.
 struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     let id: String
@@ -52,11 +57,13 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     let resourceID: String
     let resourceTitle: String
     let assetID: String
-    let format: String
+    var format: String
+    var mimeType: String?
     let readerType: ManagedDownloadReaderType
     var state: ManagedDownloadState
     var verification: ManagedDownloadVerification
     var expectedBytes: Int64?
+    var artifactKind: ManagedDownloadArtifactKind?
     var receivedBytes: Int64
     var localRelativePath: String?
     var stableErrorCode: String?
@@ -73,6 +80,8 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     var isVerifiedOfflineCopy: Bool {
         state == .completed && verification == .verified && localRelativePath != nil
     }
+
+    var effectiveArtifactKind: ManagedDownloadArtifactKind { artifactKind ?? .singleOriginalAsset }
 }
 
 struct ManagedDownloadResourceGroup: Identifiable, Equatable, Sendable {
@@ -124,8 +133,11 @@ struct ManagedDownloadBootstrap: Sendable {
     let bookID: String
     let resourceID: String
     let assetID: String
+    let sourceFormat: String
+    let mimeType: String
     let readerType: ManagedDownloadReaderType
     let expectedBytes: Int64?
+    let artifactKind: ManagedDownloadArtifactKind
 }
 
 struct ManagedDownloadDestination: Sendable {
@@ -197,8 +209,8 @@ enum ManagedReaderAccessPolicy {
     static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
         let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return switch readerType {
-        case .reflowable: ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT"].contains(normalized)
-        case .comic: ["CBZ", "ZIP"].contains(normalized)
+        case .reflowable: ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"].contains(normalized)
+        case .comic: ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"].contains(normalized)
         case .pdf: normalized == "PDF"
         case .audio: false
         }

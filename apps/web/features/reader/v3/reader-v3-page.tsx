@@ -18,8 +18,6 @@ import {
   publicationLocationFromDomain,
   syncStateKey,
   v4LocationToDomain,
-  type ExactProgressRecord,
-  type PendingProgressMutation,
   type ReaderProgressSnapshot,
   type RemoteProgressNotice
 } from '../../../lib/reader';
@@ -75,14 +73,6 @@ type PageAction =
   | { type: 'preferences'; preferences: ReaderPreferences };
 
 const initialPageState: PageState = { requestId: 0, status: 'loading', bootstrap: null, preferences: null, error: '' };
-
-type StartupConflictState = {
-  bootstrap: ReaderBootstrap;
-  preferences: ReaderPreferences;
-  localExact: ExactProgressRecord;
-  pending: PendingProgressMutation;
-  server: ReaderProgressSnapshot;
-};
 
 function pageReducer(state: PageState, action: PageAction): PageState {
   if (action.type !== 'load' && 'requestId' in action && action.requestId !== state.requestId) return state;
@@ -262,7 +252,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number; percent: number } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{ loadedBytes: number; totalBytes: number | null; percent: number | null } | null>(null);
   const [storageError, setStorageError] = useState('');
-  const [startupConflict, setStartupConflict] = useState<StartupConflictState | null>(null);
   const [remoteNotice, setRemoteNotice] = useState<RemoteProgressNotice | null>(null);
   const [externalNavigation, setExternalNavigation] = useState<{ id: number; location: ReaderLocation } | null>(null);
   const [systemDark, setSystemDark] = useState(false);
@@ -270,7 +259,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const requestSequenceRef = useRef(0);
   const pendingLocationWriteRef = useRef<Promise<unknown>>(Promise.resolve());
   const currentExactRef = useRef<import('@shuku/reader-core').PublicationLocation | null>(null);
-  const startupCloudRef = useRef<{ pendingKey: string; snapshot: ReaderProgressSnapshot } | null>(null);
+  const startupRemoteAcceptanceRef = useRef<{ pendingKey: string; snapshot: ReaderProgressSnapshot } | null>(null);
   const remoteJumpRef = useRef<ReaderProgressSnapshot | null>(null);
   const acceptedRemoteExactRef = useRef<import('@shuku/reader-core').PublicationLocation | null>(null);
   const runtime = getReaderRuntime();
@@ -315,7 +304,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     setIndexProgress(null);
     setDownloadProgress(null);
     setStorageError('');
-    setStartupConflict(null);
+    startupRemoteAcceptanceRef.current = null;
     setRemoteNotice(null);
     dispatch({ type: 'load', requestId });
 
@@ -381,13 +370,15 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
       const pendingDecision = decidePendingVsServer({
         localExact,
         pending,
-        serverSnapshot: bootstrap.serverProgressSnapshot
+        serverSnapshot: bootstrap.serverProgressSnapshot,
+        bookId: bootstrap.book.id,
+        resourceId: bootstrap.resource.id
       });
-      if (pendingDecision.kind === 'server' && pendingDecision.discardPending && pending) {
-        await runtime.storage.deletePendingProgress(pending.key, pending.mutationId);
+      if (pendingDecision.kind === 'server' && pendingDecision.discardPendingMutationId && pending) {
+        await runtime.storage.deletePendingProgress(pending.key, pendingDecision.discardPendingMutationId);
       }
       const startupResume = resolveStartupResume({
-        localExact,
+        localExact: pendingDecision.kind === 'server' && pendingDecision.discardPendingMutationId ? null : localExact,
         serverSnapshot: bootstrap.serverProgressSnapshot,
         context: bootstrap.readerType === 'reflowable' ? {
           readerKind: 'reflowable',
@@ -397,7 +388,9 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         },
         serverLocation: bootstrap.initialLocation,
         serverPercent: bootstrap.progressPercent,
-        hasDirectTarget
+        hasDirectTarget,
+        bookId: bootstrap.book.id,
+        resourceId: bootstrap.resource.id
       });
       const pendingResume = pendingDecision.kind === 'local-pending' ? pendingDecision.localExact : null;
       if (pendingResume && !hasDirectTarget) {
@@ -415,22 +408,39 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
           resourceId: bootstrap.resource.id,
           capturedAtEpochMillis: pendingResume.capturedAtEpochMillis
         });
+      } else if (startupResume.source === 'local-exact') {
+        bootstrap = {
+          ...bootstrap,
+          initialLocation: startupResume.location,
+          progressPercent: startupResume.percent
+        };
+        emitReaderDebug('info', '启动时自动恢复较新的本机精确阅读位置', {
+          resourceId: bootstrap.resource.id,
+          capturedAtEpochMillis: startupResume.localExact?.capturedAtEpochMillis
+        });
+      }
+      if (pendingDecision.kind === 'local-pending' && pendingDecision.rebaseRevision !== null) {
+        await runtime.progress.continueStartupWithLocal(
+          pendingDecision.pending,
+          pendingDecision.rebaseRevision
+        );
+      } else if (
+        pendingDecision.kind === 'server'
+        && pendingDecision.discardPendingMutationId
+        && pending
+        && pendingDecision.snapshot
+        && startupResume.source === 'server'
+      ) {
+        startupRemoteAcceptanceRef.current = {
+          pendingKey: pending.key,
+          snapshot: pendingDecision.snapshot
+        };
       }
       const preferences = readDeviceReaderPreferences(
         bootstrap.userId,
         bootstrap.serverPreferences.settings
       );
       if (controller.signal.aborted) return;
-      if (pendingDecision.kind === 'requires-choice') {
-        setStartupConflict({
-          bootstrap,
-          preferences,
-          localExact: pendingDecision.localExact,
-          pending: pendingDecision.pending,
-          server: pendingDecision.server
-        });
-        return;
-      }
       activateReaderUser(bootstrap.userId);
       emitReaderDebug('info', 'Reader v4 启动完成', {
         resourceId: bootstrap.resource.id,
@@ -454,53 +464,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     });
 
     return () => controller.abort();
-  }, [requestedHref, requestedPage, retry, runtime.storage, translate, resourceId]);
-
-  const chooseStartupLocal = useCallback(async () => {
-    const conflict = startupConflict;
-    if (!conflict) return;
-    const sourceFormat = conflict.bootstrap.readerType === 'reflowable'
-      ? requireReflowableSourceFormat(conflict.bootstrap) : null;
-    const location = v4LocationToDomain(
-      conflict.localExact.locator,
-      conflict.bootstrap.resource.id,
-      sourceFormat
-    );
-    await runtime.progress.continueStartupWithLocal(conflict.pending, conflict.server.revision);
-    activateReaderUser(conflict.bootstrap.userId);
-    setStartupConflict(null);
-    dispatch({
-      type: 'ready',
-      requestId: state.requestId,
-      bootstrap: {
-        ...conflict.bootstrap,
-        initialLocation: location,
-        progressPercent: conflict.localExact.displayPercent ?? conflict.bootstrap.progressPercent
-      },
-      preferences: conflict.preferences
-    });
-  }, [runtime.progress, startupConflict, state.requestId]);
-
-  const chooseStartupCloud = useCallback(async () => {
-    const conflict = startupConflict;
-    if (!conflict) return;
-    await runtime.storage.deletePendingProgress(conflict.pending.key, conflict.pending.mutationId);
-    startupCloudRef.current = { pendingKey: conflict.pending.key, snapshot: conflict.server };
-    activateReaderUser(conflict.bootstrap.userId);
-    setStartupConflict(null);
-    dispatch({
-      type: 'ready',
-      requestId: state.requestId,
-      bootstrap: conflict.bootstrap,
-      preferences: conflict.preferences
-    });
-  }, [runtime.storage, startupConflict, state.requestId]);
-
-  const cancelStartupConflict = useCallback(() => {
-    const conflict = startupConflict;
-    if (!conflict) return;
-    router.push(`/books/${conflict.bootstrap.book.id}?resourceId=${encodeURIComponent(conflict.bootstrap.resource.id)}`);
-  }, [router, startupConflict]);
+  }, [requestedHref, requestedPage, retry, runtime.progress, runtime.storage, translate, resourceId]);
 
   const savePreferences = useCallback((preferences: ReaderPreferences) => {
     const bootstrap = state.bootstrap;
@@ -596,17 +560,17 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     }
     const previousExact = currentExactRef.current;
     currentExactRef.current = exactLocation;
-    const startupCloud = startupCloudRef.current;
-    if (startupCloud && comparePublicationLocations(startupCloud.snapshot.locator, exactLocation).precision === 'exact') {
-      startupCloudRef.current = null;
-      acceptedRemoteExactRef.current = startupCloud.snapshot.locator;
+    const startupRemoteAcceptance = startupRemoteAcceptanceRef.current;
+    if (startupRemoteAcceptance && comparePublicationLocations(startupRemoteAcceptance.snapshot.locator, exactLocation).precision === 'exact') {
+      startupRemoteAcceptanceRef.current = null;
+      acceptedRemoteExactRef.current = startupRemoteAcceptance.snapshot.locator;
       pendingLocationWriteRef.current = runtime.progress.acceptVerifiedRemote({
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         bookId: bootstrap.book.id,
         resourceId: bootstrap.resource.id,
-        pendingKey: startupCloud.pendingKey,
-        snapshot: startupCloud.snapshot
+        pendingKey: startupRemoteAcceptance.pendingKey,
+        snapshot: startupRemoteAcceptance.snapshot
       });
       return;
     }
@@ -691,22 +655,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     window.addEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
     return () => window.removeEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
   }, [runtime.progress]);
-
-  if (startupConflict) {
-    return (
-      <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-5" role="presentation">
-        <div className="w-full max-w-md rounded-2xl bg-white p-5 text-[#2D2926] shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="reader-startup-conflict-title">
-          <h1 id="reader-startup-conflict-title" className="text-lg font-semibold"><I18nText>选择阅读位置</I18nText></h1>
-          <p className="mt-2 text-sm leading-6 text-[#6F6963]"><I18nText>本机有尚未同步的阅读位置，同时云端进度已更新。请选择本次从哪里继续。</I18nText></p>
-          <div className="mt-5 grid gap-2">
-            <button type="button" className="min-h-11 rounded-xl bg-[#2D2926] px-4 text-sm font-medium text-white" onClick={() => void chooseStartupLocal()}><I18nText>继续本机位置</I18nText></button>
-            <button type="button" className="min-h-11 rounded-xl border border-[#D8D1CA] px-4 text-sm font-medium" onClick={() => void chooseStartupCloud()}><I18nText>使用云端位置</I18nText></button>
-            <button type="button" className="min-h-11 rounded-xl px-4 text-sm text-[#6F6963]" onClick={cancelStartupConflict}><I18nText>取消</I18nText></button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (state.status === 'error') {
     return (

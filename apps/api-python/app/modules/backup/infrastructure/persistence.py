@@ -22,7 +22,6 @@ from sqlalchemy import (
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Mapper, Session
-from sqlalchemy.sql.dml import Delete, Insert
 
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.core.time import TimestampMilliseconds
@@ -58,6 +57,7 @@ from app.models import (
     ReaderResourceProgress,
     Shelf,
     ShelfBook,
+    ShelfCollectionMembership,
     Source,
     SystemSetting,
     User,
@@ -67,9 +67,10 @@ from app.models import (
 from app.models.common import db_timestamp
 from app.modules.backup.application.restore import (
     BackupRecordValidationError,
+    MaintenanceStateChange,
     PreparedRestorePlan,
+    RestoreTableBatch,
 )
-from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 
 def _legacy_column_to_attr(model: type[Base]) -> dict[str, str]:
@@ -377,7 +378,7 @@ def prepare_restore_plan(
     records_by_table: dict[str, tuple[dict[str, object], ...]],
     maintenance_setting_key: str | None = None,
 ) -> PreparedRestorePlan:
-    """Construct all typed SQL and chunks before the writer slot is acquired."""
+    """Build an ORM-free immutable plan before the writer slot is acquired."""
 
     insertion_by_table = {
         table_name: export_key for export_key, table_name in insertion_order
@@ -385,48 +386,29 @@ def prepare_restore_plan(
     insertion_tables = table_dependency_order(insertion_by_table)
     delete_tables = tuple(reversed(table_dependency_order(delete_order)))
 
-    statements: list[Any] = []
-    for table_name in delete_tables:
-        model = TABLE_MODELS.get(table_name)
-        if model is not None:
-            statements.append(delete(model))
-
     restored_counts: dict[str, int] = {}
+    batches: list[RestoreTableBatch] = []
     for table_name in insertion_tables:
         export_key = insertion_by_table[table_name]
-        model = TABLE_MODELS.get(table_name)
         records = _row_dependency_order(
             table_name, records_by_table.get(table_name, ())
         )
         restored_counts[export_key] = len(records)
-        if model is None:
-            continue
-        for keys, group in _record_groups(records):
-            for chunk in sqlite_parameter_chunks(
-                group,
-                parameters_per_row=max(1, len(keys)),
-            ):
-                if model is User:
-                    statement = sqlite_insert(User).values(list(chunk))
-                    update_values = {
-                        column.key: getattr(statement.excluded, column.key)
-                        for column in User.__table__.columns
-                        if not column.primary_key and column.name in keys
-                    }
-                    statements.append(
-                        statement.on_conflict_do_update(
-                            index_elements=[User.id],
-                            set_=update_values,
-                        )
-                    )
-                else:
-                    statements.append(insert(model).values(list(chunk)))
-    if maintenance_setting_key is not None:
-        statements.append(
-            delete(SystemSetting).where(SystemSetting.key == maintenance_setting_key)
+        batches.append(
+            RestoreTableBatch(
+                export_key=export_key,
+                table_name=table_name,
+                records=records,
+            )
         )
     restored_counts["libraryFiles"] = 0
-    return PreparedRestorePlan(tuple(statements), restored_counts)
+    return PreparedRestorePlan(
+        kind="database",
+        restored_counts=restored_counts,
+        delete_order=delete_tables,
+        batches=tuple(batches),
+        maintenance_setting_key=maintenance_setting_key,
+    )
 
 
 def prepare_maintenance_state_plan(
@@ -434,33 +416,90 @@ def prepare_maintenance_state_plan(
     setting_key: str,
     setting_value: str | None,
 ) -> PreparedRestorePlan:
-    if setting_value is None:
-        statement: Delete | Insert = delete(SystemSetting).where(
-            SystemSetting.key == setting_key
-        )
-    else:
-        timestamp = db_timestamp()
-        statement = (
-            sqlite_insert(SystemSetting)
-            .values(key=setting_key, value=setting_value, updated_at=timestamp)
-            .on_conflict_do_update(
-                index_elements=[SystemSetting.key],
-                set_={
-                    SystemSetting.value: setting_value,
-                    SystemSetting.updated_at: timestamp,
-                },
-            )
-        )
-    return PreparedRestorePlan((statement,), {})
+    return PreparedRestorePlan(
+        kind="maintenance",
+        restored_counts={},
+        maintenance_change=MaintenanceStateChange(
+            setting_key=setting_key,
+            setting_value=setting_value,
+            changed_at=db_timestamp(),
+        ),
+    )
 
 
 class SqlAlchemyBackupRestoreWriter:
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        table_models: dict[str, type[Base]] | None = None,
+    ) -> None:
         self._db = db
+        self._table_models = table_models or TABLE_MODELS
 
     def apply(self, plan: PreparedRestorePlan) -> None:
-        for statement in plan.statements:
-            self._db.execute(statement)
+        if plan.kind == "maintenance":
+            self._apply_maintenance(plan)
+            return
+        for table_name in plan.delete_order:
+            model = self._table_models.get(table_name)
+            if model is not None:
+                self._db.execute(delete(model))
+        for batch in plan.batches:
+            model = self._table_models.get(batch.table_name)
+            if model is None:
+                continue
+            for keys, group in _record_groups(batch.records):
+                for chunk in sqlite_parameter_chunks(
+                    group,
+                    parameters_per_row=max(1, len(keys)),
+                ):
+                    if model is User:
+                        statement = sqlite_insert(User).values(list(chunk))
+                        update_values = {
+                            column.key: getattr(statement.excluded, column.key)
+                            for column in User.__table__.columns
+                            if not column.primary_key and column.name in keys
+                        }
+                        self._db.execute(
+                            statement.on_conflict_do_update(
+                                index_elements=[User.id],
+                                set_=update_values,
+                            )
+                        )
+                    else:
+                        self._db.execute(insert(model).values(list(chunk)))
+        if plan.maintenance_setting_key is not None:
+            self._db.execute(
+                delete(SystemSetting).where(
+                    SystemSetting.key == plan.maintenance_setting_key
+                )
+            )
+
+    def _apply_maintenance(self, plan: PreparedRestorePlan) -> None:
+        change = plan.maintenance_change
+        if change is None:
+            raise BackupRecordValidationError("BACKUP_MAINTENANCE_PLAN_INVALID")
+        if change.setting_value is None:
+            self._db.execute(
+                delete(SystemSetting).where(SystemSetting.key == change.setting_key)
+            )
+            return
+        statement = (
+            sqlite_insert(SystemSetting)
+            .values(
+                key=change.setting_key,
+                value=change.setting_value,
+                updated_at=change.changed_at,
+            )
+            .on_conflict_do_update(
+                index_elements=[SystemSetting.key],
+                set_={
+                    SystemSetting.value: change.setting_value,
+                    SystemSetting.updated_at: change.changed_at,
+                },
+            )
+        )
+        self._db.execute(statement)
 
 
 def insert_records(db: Session, table: str, records: list[dict[str, Any]]) -> int:

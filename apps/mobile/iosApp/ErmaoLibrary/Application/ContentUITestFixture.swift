@@ -254,12 +254,13 @@ private struct FixtureContentClient: ContentClient {
             parentID: "fixture-root",
             title: "Winter Cycle",
             kind: "FOLDER",
-            hasChildren: true
+            hasChildren: true,
+            representativeResourceID: "resource-2"
         )
         let volumeOne = fixtureContentEntry(
             id: "resource-node-1",
             parentID: "fixture-root",
-            title: "The Left Hand of Darkness I",
+            title: "The Left Hand of Darkness I.cbz",
             kind: "FILE",
             hasChildren: false,
             resourceID: "resource-1"
@@ -284,7 +285,7 @@ private struct FixtureContentClient: ContentClient {
         let entries = isNested ? [volumeTwo, volumeThree] : [winter, volumeOne]
         return BookContentsPage(
             bookID: bookID,
-            currentSourceNodeID: isNested ? winter.sourceNodeID : nil,
+            currentSourceNodeID: isNested ? winter.sourceNodeID : root.sourceNodeID,
             currentResourceID: nil,
             currentNode: isNested ? winter : root,
             currentResourceIDs: entries.compactMap(\.resourceID),
@@ -360,7 +361,8 @@ private struct FixtureContentClient: ContentClient {
         title: String,
         kind: String,
         hasChildren: Bool,
-        resourceID: String? = nil
+        resourceID: String? = nil,
+        representativeResourceID: String? = nil
     ) -> BookContentEntry {
         BookContentEntry(
             sourceNodeID: id,
@@ -373,7 +375,7 @@ private struct FixtureContentClient: ContentClient {
             sizeBytes: nil,
             hasChildren: hasChildren,
             resourceID: resourceID,
-            representativeResourceID: resourceID,
+            representativeResourceID: representativeResourceID ?? resourceID,
             cover: nil
         )
     }

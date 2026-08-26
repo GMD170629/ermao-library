@@ -92,12 +92,14 @@ export class ReaderProgressSyncCoordinator {
   }
 
   beginSession(resourceId: string, clientId: string, snapshot: ReaderProgressSnapshot | null, current: PublicationLocation | null) {
-    if (snapshot) this.latest.set(resourceId, snapshot);
+    const known = this.latest.get(resourceId) ?? null;
+    const baseline = known && (!snapshot || known.revision > snapshot.revision) ? known : snapshot;
+    if (baseline) this.latest.set(resourceId, baseline);
     this.sessions.set(resourceId, {
-      revision: snapshot?.revision ?? 0,
+      revision: baseline?.revision ?? 0,
       clientId,
       current,
-      etag: snapshot ? `"reader-progress-${snapshot.revision}"` : '"reader-progress-0"',
+      etag: baseline ? `"reader-progress-${baseline.revision}"` : '"reader-progress-0"',
       notice: null
     });
     this.emitNotice(resourceId, null);

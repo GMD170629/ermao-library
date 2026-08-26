@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models.library import Library
+from app.modules.library.infrastructure.publication_source import (
+    SqlAlchemyPublicationSourceRepository,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -19,13 +22,13 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
 )
+from app.modules.media.infrastructure.resource_repository import (
+    SqlAlchemyMediaResourceRepository,
+)
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import PublicationCorruptError
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
-)
-from app.modules.publications.infrastructure.source_repository import (
-    SqlAlchemyPublicationSourceRepository,
 )
 from app.modules.reader.application.dto import ReaderAccessScope
 from app.modules.reader.infrastructure.resource_repository import (
@@ -38,9 +41,9 @@ _SOURCE_REPOSITORY = (
     _API_ROOT
     / "app"
     / "modules"
-    / "publications"
+    / "library"
     / "infrastructure"
-    / "source_repository.py"
+    / "publication_source.py"
 )
 _AUDIOBOOK_SUPPORT_TEST = _API_ROOT / "tests" / "test_audiobook_support.py"
 _ADMIN_PUBLICATION = PublicationAccessScope(
@@ -87,7 +90,7 @@ def _seed_catalog(
     resource_id: str,
     title: str,
     fmt: str,
-    assets: tuple[tuple[str, str, str, str, int], ...],
+    assets: tuple[tuple[str, str, str, str | None, int], ...],
 ) -> LibraryReadableResource:
     """Create a complete Book -> Resource -> Asset graph for repository tests."""
 
@@ -253,6 +256,99 @@ def test_reader_resolves_book_and_source_through_resource_graph(
     assert source.asset_id == f"asset-{suffix}"
     assert source.path == str(source_path)
     assert source.source_format == fmt.lower()
+
+
+@pytest.mark.parametrize(
+    ("fmt", "role", "stored_mime", "path_name", "expected_mime"),
+    [
+        ("EPUB", "PRIMARY", None, "book.epub", "application/epub+zip"),
+        (
+            "AZW3",
+            "PRIMARY",
+            "application/octet-stream",
+            "book.azw3",
+            "application/vnd.amazon.ebook",
+        ),
+        ("CBR", "PRIMARY", None, "book.cbr", "application/vnd.comicbook-rar"),
+        ("IMAGE_DIR", "PAGE", None, "page-001.png", "image/png"),
+    ],
+)
+def test_reader_and_media_resolve_the_same_canonical_asset_mime(
+    db_session: Session,
+    tmp_path: Path,
+    fmt: str,
+    role: str,
+    stored_mime: str | None,
+    path_name: str,
+    expected_mime: str,
+) -> None:
+    source_path = tmp_path / path_name
+    source_path.write_bytes(b"original")
+    suffix = fmt.lower()
+    resource = _seed_catalog(
+        db_session,
+        book_id=f"book-mime-{suffix}",
+        resource_id=f"resource-mime-{suffix}",
+        title=f"{fmt} MIME",
+        fmt=fmt,
+        assets=((f"asset-mime-{suffix}", str(source_path), role, stored_mime, 0),),
+    )
+
+    reader_asset = SqlAlchemyReaderResourceRepository(db_session).list_assets(
+        resource.id
+    )[0]
+    media_asset = SqlAlchemyMediaResourceRepository(db_session).get_asset(
+        f"asset-mime-{suffix}"
+    )
+
+    assert reader_asset.mime_type == expected_mime
+    assert media_asset is not None
+    assert media_asset.mime_type == expected_mime
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format", "expected_mime"),
+    [
+        ("book.mobi", "MOBI", "application/x-mobipocket-ebook"),
+        ("book.azw", "AZW", "application/vnd.amazon.ebook"),
+        ("book.azw3", "AZW3", "application/vnd.amazon.ebook"),
+        ("book.prc", "PRC", "application/x-mobipocket-ebook"),
+    ],
+)
+def test_kindle_catalog_family_preserves_exact_reader_source_format(
+    db_session: Session,
+    tmp_path: Path,
+    filename: str,
+    expected_format: str,
+    expected_mime: str,
+) -> None:
+    source_path = tmp_path / filename
+    source_path.write_bytes(b"original")
+    resource = _seed_catalog(
+        db_session,
+        book_id=f"book-{expected_format.lower()}",
+        resource_id=f"resource-{expected_format.lower()}",
+        title=expected_format,
+        fmt="KINDLE",
+        assets=(
+            (f"asset-{expected_format.lower()}", str(source_path), "PRIMARY", None, 0),
+        ),
+    )
+
+    repository = SqlAlchemyReaderResourceRepository(db_session)
+    context = repository.get_context(resource.id)
+    assets = repository.list_assets(resource.id)
+    publication_source = SqlAlchemyPublicationSourceRepository(db_session).find_source(
+        resource_id=resource.id,
+        access_scope=_ADMIN_PUBLICATION,
+    )
+
+    assert context is not None
+    assert context.resource.format == "KINDLE"
+    assert context.resource.source_format == expected_format
+    assert assets[0].mime_type == expected_mime
+    assert publication_source is not None
+    assert publication_source.source_format == expected_format.lower()
 
 
 def test_audiobook_lists_every_track_in_natural_path_order(

@@ -12,6 +12,10 @@ import com.ermao.library.shared.modules.downloads.application.CompletedTransfer
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrap
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrapGateway
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrapResult
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSink
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSinkSession
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleMemberSinkRequest
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadByteSink
 import com.ermao.library.shared.modules.downloads.application.DownloadByteSinkSession
 import com.ermao.library.shared.modules.downloads.application.DownloadProgressObserver
@@ -22,6 +26,8 @@ import com.ermao.library.shared.modules.downloads.application.DownloadTransferRe
 import com.ermao.library.shared.modules.downloads.application.DownloadTransferResult
 import com.ermao.library.shared.modules.downloads.application.DownloadsGateway
 import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
+import com.ermao.library.shared.modules.downloads.domain.DownloadArtifactKind
+import com.ermao.library.shared.modules.downloads.domain.DownloadBundleMember
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
@@ -84,6 +90,16 @@ class KtorDownloadsGateway(
         request: DownloadTransferRequest,
         sink: DownloadByteSink,
         progressObserver: DownloadProgressObserver?,
+    ): DownloadTransferResult = when (request.descriptor.artifactKind) {
+        DownloadArtifactKind.SingleOriginalAsset -> transferSingle(context, request, sink, progressObserver)
+        DownloadArtifactKind.OriginalPageSet -> transferPageSet(context, request, sink, progressObserver)
+    }
+
+    private suspend fun transferSingle(
+        context: DownloadRequestContext,
+        request: DownloadTransferRequest,
+        sink: DownloadByteSink,
+        progressObserver: DownloadProgressObserver?,
     ): DownloadTransferResult {
         var session: DownloadByteSinkSession? = null
         return try {
@@ -105,6 +121,8 @@ class KtorDownloadsGateway(
                     statusCode = response.status.value,
                     contentLength = response.headers[HttpHeaders.ContentLength],
                     contentRange = response.headers[HttpHeaders.ContentRange],
+                    contentType = response.headers[HttpHeaders.ContentType],
+                    expectedMimeType = source.mimeType,
                     expectedTotalBytes = source.totalBytes,
                     resumeFromBytes = request.resumeFromBytes,
                 ) ?: run {
@@ -169,6 +187,134 @@ class KtorDownloadsGateway(
         }
     }
 
+    private suspend fun transferPageSet(
+        context: DownloadRequestContext,
+        request: DownloadTransferRequest,
+        sink: DownloadByteSink,
+        progressObserver: DownloadProgressObserver?,
+    ): DownloadTransferResult {
+        val bundleSink = sink as? DownloadBundleByteSink
+            ?: return transferFailure("DOWNLOAD_BUNDLE_SINK_REQUIRED")
+        val descriptor = request.descriptor
+        var bundle: DownloadBundleByteSinkSession? = null
+        return try {
+            bundle = bundleSink.beginBundle(
+                DownloadBundleSinkRequest(
+                    namespace = context.namespace,
+                    taskId = request.taskId,
+                    resourceId = descriptor.identity.resourceId,
+                    artifactId = descriptor.identity.assetId,
+                    artifactKind = descriptor.artifactKind,
+                    memberCount = descriptor.bundleMembers.size,
+                    expectedTotalBytes = descriptor.totalBytes,
+                ),
+            )
+            var transferred = 0L
+            for (member in descriptor.bundleMembers) {
+                transferBundleMember(
+                    member = member,
+                    bundle = bundle,
+                    transferredBeforeMember = transferred,
+                    totalBytes = descriptor.totalBytes,
+                    progressObserver = progressObserver,
+                )
+                transferred += member.source.totalBytes
+            }
+            require(transferred == descriptor.totalBytes) { "Bundle byte count is inconsistent" }
+            val localReference = bundle.commit()
+            require(localReference.isNotBlank()) { "Bundle sink returned an empty local reference" }
+            DownloadTransferResult.Success(
+                CompletedTransfer(
+                    localReference = localReference,
+                    verifiedBytes = transferred,
+                    etag = null,
+                    lastModified = null,
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) { bundle?.abortSafely() }
+            throw cancelled
+        } catch (timeout: HttpRequestTimeoutException) {
+            bundle?.abortSafely()
+            DownloadTransferResult.Failure(AppError(AppErrorKind.Timeout, "DOWNLOAD_TIMEOUT", timeout.message))
+        } catch (storage: PlatformStorageException) {
+            bundle?.abortSafely()
+            DownloadTransferResult.Failure(AppError(AppErrorKind.StorageFailure, "DOWNLOAD_STORAGE_FAILURE", storage.message))
+        } catch (protocol: DownloadProtocolException) {
+            bundle?.abortSafely()
+            DownloadTransferResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_RESPONSE_INVALID", protocol.message))
+        } catch (error: Throwable) {
+            bundle?.abortSafely()
+            DownloadTransferResult.Failure(mapTransportError(error))
+        }
+    }
+
+    private suspend fun transferBundleMember(
+        member: DownloadBundleMember,
+        bundle: DownloadBundleByteSinkSession,
+        transferredBeforeMember: Long,
+        totalBytes: Long,
+        progressObserver: DownloadProgressObserver?,
+    ) {
+        var memberSession: DownloadByteSinkSession? = null
+        try {
+            apiClient.authenticatedHttpClient().prepareGet(
+                apiClient.resolveAuthenticatedApiPath(member.source.apiPath),
+            ).execute { response ->
+                if (response.status.value in REDIRECT_STATUS_CODES) {
+                    response.bodyAsText()
+                    throw DownloadProtocolException("Page asset redirected")
+                }
+                val contract = validateResponse(
+                    statusCode = response.status.value,
+                    contentLength = response.headers[HttpHeaders.ContentLength],
+                    contentRange = response.headers[HttpHeaders.ContentRange],
+                    contentType = response.headers[HttpHeaders.ContentType],
+                    expectedMimeType = member.source.mimeType,
+                    expectedTotalBytes = member.source.totalBytes,
+                    resumeFromBytes = 0,
+                ) ?: run {
+                    response.bodyAsChannel().cancel(null)
+                    throw DownloadProtocolException("Page asset response is inconsistent")
+                }
+                memberSession = bundle.beginMember(
+                    DownloadBundleMemberSinkRequest(
+                        assetId = member.assetId,
+                        sequenceIndex = member.sequenceIndex,
+                        mimeType = member.source.mimeType,
+                        expectedBytes = member.source.totalBytes,
+                    ),
+                )
+                val activeMemberSession = checkNotNull(memberSession)
+                val channel = response.bodyAsChannel()
+                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+                var received = 0L
+                while (true) {
+                    val read = channel.readAvailable(buffer, 0, buffer.size)
+                    if (read < 0) break
+                    if (read == 0) continue
+                    received += read
+                    if (received > contract.contentLength) {
+                        throw DownloadProtocolException("Page asset exceeded Content-Length")
+                    }
+                    activeMemberSession.write(buffer.copyOf(read))
+                    progressObserver?.onProgress(transferredBeforeMember + received, totalBytes)
+                }
+                if (received != contract.contentLength) {
+                    throw DownloadProtocolException("Page asset ended before Content-Length")
+                }
+                activeMemberSession.commit(member.source.totalBytes)
+            }
+        } catch (error: Throwable) {
+            memberSession?.abortSafely()
+            throw error
+        }
+    }
+
+    private suspend fun DownloadBundleByteSinkSession.abortSafely() {
+        withContext(NonCancellable) { runCatching { abort() } }
+    }
+
     private suspend fun DownloadByteSinkSession.abortSafely() {
         withContext(NonCancellable) { runCatching { abort() } }
     }
@@ -179,10 +325,14 @@ class KtorDownloadsGateway(
         statusCode: Int,
         contentLength: String?,
         contentRange: String?,
+        contentType: String?,
+        expectedMimeType: String,
         expectedTotalBytes: Long,
         resumeFromBytes: Long,
     ): ResponseContract? {
         val declaredLength = contentLength?.toLongOrNull()?.takeIf { it > 0 } ?: return null
+        val normalizedContentType = contentType?.substringBefore(';')?.trim()?.lowercase() ?: return null
+        if (normalizedContentType != expectedMimeType.lowercase()) return null
         if (resumeFromBytes == 0L) {
             return ResponseContract(declaredLength).takeIf {
                 statusCode == 200 && declaredLength == expectedTotalBytes && contentRange == null
@@ -265,15 +415,42 @@ class KtorDownloadsGateway(
         require(sourceSize > 0)
         require(
             sourceMime in allowedMimeTypes(readerType) ||
-                (sourceMime == GENERIC_BINARY_MIME && isSupportedOriginalFormat(readerType, resourceFormat)) ||
                 (resourceFormat == "image_dir" && sourceMime in IMAGE_MIME_TYPES),
         ) { "Bootstrap asset MIME type is inconsistent" }
+        val pageMembers = if (resourceFormat == "image_dir") {
+            assetObjects.filter { it.requiredString("role").equals("PAGE", ignoreCase = true) }
+                .mapIndexed { expectedIndex, asset ->
+                    require(asset.requiredString("resourceId") == expectedResourceId) {
+                        "IMAGE_DIR page belongs to another resource"
+                    }
+                    require(asset.requiredNonNegativeInt("sortOrder") == expectedIndex) {
+                        "IMAGE_DIR page sequence is not canonical"
+                    }
+                    asset.requiredString("title")
+                    val pageMime = asset.requiredString("mimeType").lowercase().substringBefore(';')
+                    require(pageMime in IMAGE_MIME_TYPES) { "IMAGE_DIR page MIME type is invalid" }
+                    DownloadBundleMember(
+                        assetId = asset.requiredString("id"),
+                        sequenceIndex = expectedIndex,
+                        source = DownloadSource(
+                            apiPath = asset.requiredString("url").also {
+                                require(it.isSafeMediaApiPath()) { "IMAGE_DIR page URL is invalid" }
+                            },
+                            mimeType = pageMime,
+                            totalBytes = asset.requiredLong("sizeBytes"),
+                        ),
+                    )
+                }
+                .also { require(it.isNotEmpty()) { "IMAGE_DIR has no original PAGE assets" } }
+        } else {
+            emptyList()
+        }
         return DownloadDescriptor(
             identity = DownloadIdentity(
                 namespace = context.namespace,
                 bookId = book.requiredString("id"),
                 resourceId = expectedResourceId,
-                assetId = primaryAsset.requiredString("id"),
+                assetId = if (pageMembers.isEmpty()) primaryAsset.requiredString("id") else "page-set:$expectedResourceId",
             ),
             bookTitle = book.requiredString("title"),
             bookAuthor = book.optionalString("author"),
@@ -288,7 +465,13 @@ class KtorDownloadsGateway(
             ),
             resourceIndex = resource.optionalDouble("resourceIndex"),
             resourceSortOrder = resource.requiredNonNegativeInt("sortOrder"),
-            isDownloadable = comicArtifact != null || readerType != DownloadReaderType.Comic,
+            isDownloadable = true,
+            artifactKind = if (pageMembers.isEmpty()) {
+                DownloadArtifactKind.SingleOriginalAsset
+            } else {
+                DownloadArtifactKind.OriginalPageSet
+            },
+            members = pageMembers,
         )
     }
 
@@ -336,20 +519,9 @@ class KtorDownloadsGateway(
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
-        const val GENERIC_BINARY_MIME = "application/octet-stream"
         val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }
 }
-
-private fun isSupportedOriginalFormat(readerType: DownloadReaderType, resourceFormat: String): Boolean =
-    when (readerType) {
-        DownloadReaderType.Reflowable -> resourceFormat in setOf("epub", "mobi", "azw", "azw3", "prc", "txt")
-        DownloadReaderType.Pdf -> resourceFormat == "pdf"
-        DownloadReaderType.Comic -> resourceFormat in setOf("cbz", "cbr", "zip", "rar")
-        DownloadReaderType.Audio -> resourceFormat in setOf(
-            "aac", "ac3", "aiff", "amr", "flac", "m4a", "mp3", "ogg", "opus", "wav", "webm", "wma",
-        )
-    }
 
 private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when (readerType) {
     DownloadReaderType.Reflowable -> setOf(
@@ -359,7 +531,7 @@ private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when
         "application/x-fictionbook+xml",
         "text/plain",
     )
-    DownloadReaderType.Pdf -> setOf("application/pdf", "application/octet-stream")
+    DownloadReaderType.Pdf -> setOf("application/pdf")
     DownloadReaderType.Comic -> setOf(
         "application/vnd.comicbook+zip",
         "application/x-cbz",
@@ -367,7 +539,6 @@ private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when
         "application/vnd.comicbook-rar",
         "application/x-cbr",
         "application/vnd.rar",
-        "application/octet-stream",
     )
     DownloadReaderType.Audio -> setOf(
         "audio/aac", "audio/ac3", "audio/aiff", "audio/amr", "audio/basic",

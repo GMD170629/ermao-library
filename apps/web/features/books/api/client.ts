@@ -9,6 +9,7 @@ import type {
 } from '../model/resource-detail';
 import type { BookContentEntry, BookContentsPage, BookContentSort, SourceNodeMetadataCandidate } from '../model/book-contents';
 import { bookContentSortQuery } from '../model/book-contents';
+import type { MetadataTargetScope, RecognizedMetadataField } from '../model/recognized-metadata';
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -335,11 +336,12 @@ export async function continueSourceNode(sourceNodeId: string): Promise<void> {
   await apiJson(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, { method: 'POST' });
 }
 
-export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
+export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ providerId, query })
+    body: JSON.stringify({ providerId, query }),
+    signal
   }));
   const candidates = (Array.isArray(data.candidates) ? data.candidates : []).flatMap((value) => {
     const item = record(value);
@@ -349,12 +351,64 @@ export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: str
       id,
       source: stringValue(item.source, providerId),
       title: nullableString(item.title),
+      author: nullableString(item.author),
       description: nullableString(item.description),
+      tags: Array.isArray(item.tags) ? item.tags.filter((tag): tag is string => typeof tag === 'string' && Boolean(tag.trim())) : [],
+      seriesName: nullableString(item.seriesName),
+      seriesIndex: nullableNumber(item.seriesIndex),
+      publisher: nullableString(item.publisher),
+      publishedAt: nullableString(item.publishedAt),
+      language: nullableString(item.language),
+      isbn: nullableString(item.isbn),
+      identifier: nullableString(item.identifier),
+      narrator: nullableString(item.narrator),
+      abridged: typeof item.abridged === 'boolean' ? item.abridged : null,
+      resourceIndex: nullableNumber(item.resourceIndex),
       coverUrl: nullableString(item.coverUrl),
       confidence: finiteNumber(item.confidence)
     } satisfies SourceNodeMetadataCandidate];
   });
   return { message: nullableString(data.message), candidates };
+}
+
+const recognizedMetadataFieldValues = new Set<RecognizedMetadataField>([
+  'book.title', 'book.author', 'book.description', 'book.seriesName', 'book.seriesIndex', 'book.tags', 'book.cover',
+  'resource.title', 'resource.description', 'resource.publisher', 'resource.publishedAt', 'resource.language',
+  'resource.isbn', 'resource.identifier', 'resource.narrator', 'resource.abridged', 'resource.resourceIndex', 'resource.cover'
+]);
+
+export async function applyRecognizedMetadata(
+  bookId: string,
+  input: Readonly<{
+    scope: MetadataTargetScope;
+    resourceId: string | null;
+    candidate: SourceNodeMetadataCandidate;
+    fields: readonly RecognizedMetadataField[];
+  }>,
+  signal?: AbortSignal
+): Promise<Readonly<{
+  appliedFields: RecognizedMetadataField[];
+  skippedFields: RecognizedMetadataField[];
+  coverStatus: 'notSelected' | 'applied' | 'failed';
+}>> {
+  const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/metadata/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal
+  }));
+  const fields = (value: unknown): RecognizedMetadataField[] => (Array.isArray(value) ? value : []).filter(
+    (field): field is RecognizedMetadataField => typeof field === 'string' && recognizedMetadataFieldValues.has(field as RecognizedMetadataField)
+  );
+  const coverStatus = data.coverStatus;
+  if (coverStatus !== 'notSelected' && coverStatus !== 'applied' && coverStatus !== 'failed') {
+    throw new Error('元数据应用响应格式不正确');
+  }
+  return {
+    appliedFields: fields(data.appliedFields),
+    skippedFields: fields(data.skippedFields),
+    coverStatus
+  };
 }
 
 export type MetadataProviderOption = Readonly<{

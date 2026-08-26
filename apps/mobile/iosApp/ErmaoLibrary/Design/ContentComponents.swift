@@ -1,17 +1,22 @@
 import SwiftUI
 import UIKit
 
+enum BookCoverLayout {
+    static let horizontalCardWidth: CGFloat = 104
+    static let aspectRatio: CGFloat = 2 / 3
+    static let horizontalCardHeight = horizontalCardWidth / aspectRatio
+}
+
 struct BookCoverView: View {
     let reference: CoverReference?
     let title: String
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     var cornerRadius: CGFloat = CGFloat(GeneratedDesignTokens.Radii.coverCompact)
 
     @Environment(\.appTheme) private var theme
     @State private var image: UIImage?
-    @State private var cacheIssue: ContentCacheIssue?
     @State private var coverLoadIssue: ContentClientError?
 
     var body: some View {
@@ -28,7 +33,7 @@ struct BookCoverView: View {
                     .accessibilityHidden(true)
             }
         }
-        .aspectRatio(2 / 3, contentMode: .fit)
+        .aspectRatio(BookCoverLayout.aspectRatio, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: theme.textPrimary.opacity(0.10), radius: 4, x: 0, y: 2)
         .accessibilityLabel(Text(title))
@@ -36,16 +41,13 @@ struct BookCoverView: View {
             guard let reference else { return }
             let key = "cover|\(reference.path)"
             do {
-                if let cached = try await cache.load(
-                    Data.self,
-                    namespace: context.namespaceKey,
-                    key: key
-                ), let decoded = UIImage(data: cached) {
+                if let cached = try await cache.load(namespace: context.namespaceKey, key: key),
+                   let decoded = UIImage(data: cached) {
                     image = decoded
                     return
                 }
             } catch {
-                cacheIssue = .readFailed
+                image = nil
             }
             let data: Data
             do {
@@ -59,8 +61,7 @@ struct BookCoverView: View {
             }
             guard !Task.isCancelled, let decoded = UIImage(data: data) else { return }
             image = decoded
-            do { try await cache.save(data, namespace: context.namespaceKey, key: key) }
-            catch { cacheIssue = .writeFailed }
+            try? await cache.save(data, namespace: context.namespaceKey, key: key)
         }
     }
 }
@@ -90,7 +91,7 @@ struct WorkGrid: View {
     let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let columns: Int
     let onSelect: (String) -> Void
     var onAppearWork: ((String) -> Void)?
@@ -155,7 +156,7 @@ struct WorkList: View {
     let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let onSelect: (String) -> Void
     var onAppearWork: ((String) -> Void)?
 
@@ -269,25 +270,5 @@ struct PaginationStatusView: View {
             }
         }
         .padding(.vertical, .space2)
-    }
-}
-
-struct ContentOfflineNotice: View {
-    let retry: () -> Void
-
-    @Environment(\.appTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: .space1) {
-            Image(systemName: "wifi.slash")
-                .accessibilityHidden(true)
-            Text("content.cached.notice")
-                .appTextStyle(.caption)
-            Spacer()
-            Button("common.retry", action: retry)
-                .appTextStyle(.label)
-        }
-        .foregroundStyle(theme.textSecondary)
-        .frame(minHeight: .iosMinimumTouchTarget)
     }
 }

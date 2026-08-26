@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
+from app.bootstrap.library import book_view, get_book
 from app.bootstrap.organize import organize_job_queries, organize_runs
 from app.contracts.http_errors import ErrorResponses
 from app.core.config import Settings, get_settings
 from app.core.time import timestamp_ms_to_iso
 from app.db.session import get_db
-from app.modules.library.public import book_view, get_book
 from app.modules.organize.application.dto import OrganizeJobListItem
 from app.modules.organize.presentation.schemas import (
     DeletedOrganizeJobPayload,

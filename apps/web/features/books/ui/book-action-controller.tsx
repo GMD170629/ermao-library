@@ -2,7 +2,11 @@
 
 import { BookCheck, BookX, Edit3, RefreshCw, ScanSearch, Sparkles, Trash2, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
-import { ContextActionMenu, type ContextMenuPosition } from '../../../components/ui/context-action-menu';
+import {
+  ContextActionMenu,
+  type ContextActionMenuHorizontalAlign,
+  type ContextMenuPosition
+} from '../../../components/ui/context-action-menu';
 import { useToast } from '../../../components/ui/feedback';
 import type { BookView } from '../../../types/book';
 import { useI18n } from '@/i18n/provider';
@@ -31,6 +35,7 @@ export type BookActionTarget = Readonly<{
 export type BookActionMenuRequest = Readonly<{
   target: BookActionTarget;
   position: ContextMenuPosition;
+  horizontalAlign?: ContextActionMenuHorizontalAlign;
   anchor: HTMLElement | null;
   book?: BookView;
 }>;
@@ -151,6 +156,8 @@ export function BookActionController({
       ariaLabel={t('管理图书')}
       title={request.target.title}
       items={menuItems}
+      width="compact"
+      horizontalAlign={request.horizontalAlign}
       returnFocusTo={request.anchor}
       onClose={onRequestClose}
       onSelect={(action) => { void invoke(action); }}

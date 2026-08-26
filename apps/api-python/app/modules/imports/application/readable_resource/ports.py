@@ -20,10 +20,9 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
     source_format_for_filename,
 )
-from app.modules.library.domain.readable_resource_states import AssetRole
-from app.modules.library.domain.source_nodes import SourceNodePhysicalKind
 from app.modules.library.public import (
     AdapterIdentity,
+    AssetRole,
     BookResourceRepositoryPort,
     InterpretationRecord,
     LibraryConfigPort,
@@ -31,6 +30,7 @@ from app.modules.library.public import (
     ObservedSourceEntry,
     ReadableResourceRecord,
     ResourceNavigationUnitInput,
+    SourceNodePhysicalKind,
     SourceNodeRecord,
     SourceNodeRepositoryPort,
 )
@@ -211,6 +211,16 @@ class LibraryImportTaskQueuePort(Protocol):
         role: AssetRole,
     ) -> LibraryImportTaskRecord | None:
         """Create or requeue FAILED task; return None when already SUCCEEDED."""
+
+    def requeue_asset_for_adapter_upgrade(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        role: AssetRole,
+    ) -> LibraryImportTaskRecord:
+        """Requeue the asset after its owning adapter contract changes."""
 
     def next_queued(self) -> LibraryImportTaskRecord | None: ...
 

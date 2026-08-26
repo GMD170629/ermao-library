@@ -69,6 +69,74 @@ test('debounces changed non-blank input for exactly 250 ms', () => {
   assert.deepEqual(queries, ['林']);
 });
 
+test('can explicitly load the default option page for an empty query', () => {
+  const timer = fakeScheduler();
+  const queries: string[] = [];
+  const controller = new FilterOptionSearchController(
+    'tags',
+    (_source, query) => {
+      queries.push(query);
+      return Promise.resolve({ ...optionPage(query, '科幻'), source: 'tags' });
+    },
+    () => undefined,
+    timer.schedule
+  );
+
+  controller.search('');
+  timer.advance(FILTER_OPTION_DEBOUNCE_MS);
+  assert.deepEqual(queries, ['']);
+});
+
+test('reuses a completed query without returning to loading state', async () => {
+  const timer = fakeScheduler();
+  const queries: string[] = [];
+  const states: FilterOptionSearchState[] = [];
+  const controller = new FilterOptionSearchController(
+    'tags',
+    (_source, query) => {
+      queries.push(query);
+      return Promise.resolve({ ...optionPage(query, '科幻'), source: 'tags' });
+    },
+    (state) => states.push(state),
+    timer.schedule
+  );
+
+  controller.search('');
+  timer.advance(FILTER_OPTION_DEBOUNCE_MS);
+  await Promise.resolve();
+  assert.equal(states.at(-1)?.kind, 'ready');
+
+  controller.search('');
+  assert.deepEqual(queries, ['']);
+  assert.equal(states.at(-1)?.kind, 'ready');
+  assert.equal(states.filter((state) => state.kind === 'loading').length, 1);
+});
+
+test('reset cancels an active query and restores cached default suggestions', async () => {
+  const timer = fakeScheduler();
+  const states: FilterOptionSearchState[] = [];
+  const pending = deferred<LibraryFilterOptionPage>();
+  const controller = new FilterOptionSearchController(
+    'tags',
+    (_source, query) => query
+      ? pending.promise
+      : Promise.resolve({ ...optionPage(query, '科幻'), source: 'tags' }),
+    (state) => states.push(state),
+    timer.schedule
+  );
+
+  controller.search('');
+  timer.advance(FILTER_OPTION_DEBOUNCE_MS);
+  await Promise.resolve();
+  controller.search('历史');
+  timer.advance(FILTER_OPTION_DEBOUNCE_MS);
+  assert.equal(states.at(-1)?.kind, 'loading');
+
+  controller.reset();
+  assert.equal(states.at(-1)?.kind, 'ready');
+  assert.deepEqual(states.at(-1)?.options.map((option) => option.value), ['科幻']);
+});
+
 test('aborts the previous request and ignores its stale response', async () => {
   const timer = fakeScheduler();
   const first = deferred<LibraryFilterOptionPage>();

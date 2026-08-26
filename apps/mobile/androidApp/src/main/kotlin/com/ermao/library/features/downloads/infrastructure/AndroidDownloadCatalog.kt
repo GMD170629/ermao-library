@@ -77,12 +77,23 @@ class AndroidDownloadCatalog(
         val file = catalogFile(namespace)
         if (!file.isFile) return@withContext CatalogPayload()
         try {
-            json.decodeFromString<CatalogPayload>(file.readText()).also { payload ->
-                require(payload.schemaVersion == CATALOG_SCHEMA_VERSION)
-                require(payload.records.all { it.namespace == namespace })
-                require(payload.records.map(AndroidDownloadRecord::taskId).distinct().size == payload.records.size)
-                require(payload.records.map(::catalogKey).distinct().size == payload.records.size)
+            val decoded = json.decodeFromString<CatalogPayload>(file.readText())
+            require(decoded.schemaVersion in setOf(LEGACY_SINGLE_ASSET_SCHEMA_VERSION, CATALOG_SCHEMA_VERSION))
+            val payload = if (decoded.schemaVersion == LEGACY_SINGLE_ASSET_SCHEMA_VERSION) {
+                decoded.copy(schemaVersion = CATALOG_SCHEMA_VERSION)
+            } else {
+                decoded
             }
+            require(payload.records.all { it.namespace == namespace })
+            require(payload.records.map(AndroidDownloadRecord::taskId).distinct().size == payload.records.size)
+            require(payload.records.map(::catalogKey).distinct().size == payload.records.size)
+            val legacyKindle = payload.records.filter { it.format.equals(LEGACY_GENERIC_KINDLE_FORMAT, true) }
+            val cleaned = payload.copy(records = payload.records - legacyKindle.toSet())
+            legacyKindle.forEach { removeLegacyKindleArtifacts(it) }
+            if (decoded.schemaVersion != cleaned.schemaVersion || cleaned.records.size != payload.records.size) {
+                writePayloadFile(namespace, cleaned)
+            }
+            cleaned
         } catch (error: SerializationException) {
             resetInvalidCatalog(namespace, error)
         } catch (error: IllegalArgumentException) {
@@ -101,7 +112,34 @@ class AndroidDownloadCatalog(
         return CatalogPayload()
     }
 
+    private fun removeLegacyKindleArtifacts(record: AndroidDownloadRecord) {
+        record.localReference?.let(::resolveManagedReference)?.deleteManagedArtifact()
+        val namespaceKey = sha256(
+            "${record.namespace.serverIdentity}|${record.namespace.userId}|${record.namespace.authorizationVersion}",
+        )
+        val artifactKey = sha256("${record.resourceId}:${record.assetId}")
+        val taskKey = sha256(record.taskId).take(16)
+        val artifacts = File(rootDirectory, "$namespaceKey/artifacts")
+        listOf(
+            File(artifacts, "$artifactKey.bin"),
+            File(artifacts, "$artifactKey.part"),
+            File(artifacts, "$artifactKey-$taskKey.bundle"),
+            File(artifacts, ".$artifactKey-$taskKey.bundle.part"),
+        ).forEach(File::deleteManagedArtifact)
+    }
+
+    private fun resolveManagedReference(reference: String): File? {
+        if (reference.isBlank() || reference.startsWith('/') || reference.contains('\\')) return null
+        val root = rootDirectory.canonicalFile
+        val candidate = File(root, reference).canonicalFile
+        return candidate.takeIf { it.path.startsWith(root.path + File.separator) }
+    }
+
     private suspend fun writePayload(namespace: AndroidDownloadNamespace, payload: CatalogPayload) = withContext(Dispatchers.IO) {
+        writePayloadFile(namespace, payload)
+    }
+
+    private fun writePayloadFile(namespace: AndroidDownloadNamespace, payload: CatalogPayload) {
         val destination = catalogFile(namespace)
         destination.parentFile?.mkdirs()
         val temporary = File(destination.parentFile, "${destination.name}.tmp")
@@ -140,11 +178,19 @@ class AndroidDownloadCatalog(
 
     private companion object {
         /**
-         * Catalog v3 is the first catalog written by the Book/Resource/Asset
-         * mobile contract. A v2 payload is deliberately discarded rather than
-         * mapped because its pre-v3 ownership is not recoverable.
+         * Catalog v4 adds completed Resource bundles. V3 already has stable
+         * Book/Resource/Asset ownership, so its completed single-file records
+         * migrate losslessly through the new record defaults.
          */
-        const val CATALOG_SCHEMA_VERSION = 3
+        const val LEGACY_SINGLE_ASSET_SCHEMA_VERSION = 3
+        const val CATALOG_SCHEMA_VERSION = 4
+        const val LEGACY_GENERIC_KINDLE_FORMAT = "KINDLE"
+    }
+}
+
+private fun File.deleteManagedArtifact() {
+    if (exists() && !deleteRecursively()) {
+        throw AndroidDownloadStorageException("Unable to delete legacy managed download")
     }
 }
 

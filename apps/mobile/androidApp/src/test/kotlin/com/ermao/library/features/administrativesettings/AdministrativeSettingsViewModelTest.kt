@@ -176,6 +176,5 @@ class AdministrativeSettingsViewModelTest {
         healthyCount = 0,
         totalCount = 0,
         checks = emptyList(),
-        importQueueRestarting = false,
     )
 }

@@ -29,6 +29,7 @@ import { useToast } from '../../components/ui/feedback';
 import { Select, type SelectOption } from '../../components/ui/select';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import { LibraryTagInput } from './ui/library-tag-input';
 import {
   canUseLibraryBatchAction,
   type LibraryBatchAction
@@ -44,6 +45,7 @@ import {
   type BulkFindReplaceInput,
   type BulkFindReplacePreview
 } from './api/bulk-operations';
+import { tagValuesOverlap } from './model/tag-values';
 
 export type { LibraryBatchAction } from './model/library-batch-action';
 
@@ -61,10 +63,6 @@ const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: str
 
 const inputClass = 'h-11 w-full rounded-xl border border-black/[0.1] bg-white px-3.5 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
 const textareaClass = 'min-h-24 w-full resize-y rounded-xl border border-black/[0.1] bg-white px-3.5 py-3 text-sm text-[#312D2A] outline-none transition placeholder:text-[#AAA49E] focus:border-[#E8A18D] focus:ring-4 focus:ring-[#FFE9E2]';
-
-function splitValues(value: string) {
-  return value.split(/[,，;；\n]/).map((item) => item.trim()).filter(Boolean);
-}
 
 function valueLabel(value: string | string[]) {
   return Array.isArray(value) ? value.join('、') : value || '（空）';
@@ -166,8 +164,8 @@ export function LibraryBatchDialog({
   const [seriesEnabled, setSeriesEnabled] = useState(false);
   const [author, setAuthor] = useState('');
   const [seriesName, setSeriesName] = useState('');
-  const [addTags, setAddTags] = useState('');
-  const [removeTags, setRemoveTags] = useState('');
+  const [addTags, setAddTags] = useState<string[]>([]);
+  const [removeTags, setRemoveTags] = useState<string[]>([]);
   const [findField, setFindField] = useState<BulkFindReplaceInput['field']>('title');
   const [findText, setFindText] = useState('');
   const [replacement, setReplacement] = useState('');
@@ -193,7 +191,8 @@ export function LibraryBatchDialog({
   const deleteConfirmationPhrase = i18nAttribute('永久删除');
   const findReplaceSignature = useMemo(() => JSON.stringify({ selectedIds, findField, findText, replacement, regex, caseSensitive, startNumber }), [caseSensitive, findField, findText, regex, replacement, selectedIds, startNumber]);
   const previewCurrent = preview !== null && previewSignature === findReplaceSignature;
-  const metadataReady = authorEnabled || seriesEnabled || splitValues(addTags).length > 0 || splitValues(removeTags).length > 0;
+  const overlappingTags = useMemo(() => tagValuesOverlap(addTags, removeTags), [addTags, removeTags]);
+  const metadataReady = authorEnabled || seriesEnabled || addTags.length > 0 || removeTags.length > 0;
   const findFieldOptions: SelectOption[] = [
     { value: 'title', label: '书名', group: '图书元数据' },
     { value: 'author', label: '作者', group: '图书元数据' },
@@ -245,7 +244,7 @@ export function LibraryBatchDialog({
     const fields: Record<string, string> = {};
     if (authorEnabled) fields.author = author;
     if (seriesEnabled) fields.seriesName = seriesName;
-    const result = await updateBulkBookMetadata({ ids: selectedIds, fields, addTags: splitValues(addTags), removeTags: splitValues(removeTags) });
+    const result = await updateBulkBookMetadata({ ids: selectedIds, fields, addTags, removeTags });
     return `已更新 ${result.updated} 本图书的元数据`;
   }
 
@@ -392,13 +391,19 @@ export function LibraryBatchDialog({
                 </FieldToggle>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>添加标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>逗号或换行分隔；已有标签不会重复。</I18nText></span>
-                  <textarea value={addTags} onChange={(event) => setAddTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder={i18nAttribute("科幻, 待读\n2026 精选")} />
-                </label>
-                <label className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>删除标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>按完整标签名匹配，不区分大小写。</I18nText></span>
-                  <textarea value={removeTags} onChange={(event) => setRemoveTags(event.target.value)} className={cn(textareaClass, 'mt-3')} placeholder={i18nAttribute("待整理, 临时")} />
-                </label>
+                <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>添加标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>输入新标签，或从全书库已有标签中选择。</I18nText></span>
+                  <LibraryTagInput values={addTags} onValuesChange={setAddTags} placeholder="输入或选择要添加的标签" ariaLabel="批量添加标签" className="mt-3" disabled={saving} />
+                </div>
+                <div className="rounded-2xl border border-black/[0.07] bg-white/60 p-4 text-sm font-semibold text-[#34302D]"><I18nText>删除标签</I18nText><span className="mt-1 block text-xs font-normal leading-5 text-[#8A837C]"><I18nText>输入完整标签名，或从全书库已有标签中选择。</I18nText></span>
+                  <LibraryTagInput values={removeTags} onValuesChange={setRemoveTags} placeholder="输入或选择要删除的标签" ariaLabel="批量删除标签" className="mt-3" disabled={saving} />
+                </div>
               </div>
+              {overlappingTags.length > 0 ? (
+                <p className="rounded-xl border border-[#F2B7A6] bg-[#FFF0EA] px-4 py-3 text-xs leading-5 text-[#8A4B38]">
+                  <I18nText>同一标签同时添加和删除时，以添加为准：</I18nText>{' '}
+                  <span data-i18n-skip="" className="font-semibold">{overlappingTags.join('、')}</span>
+                </p>
+              ) : null}
               <p className="rounded-xl bg-[#F6F3EF] px-4 py-3 text-xs leading-5 text-[#777069]"><I18nText>未勾选的字段会保持原值；勾选后留空可清除出版社或系列，作者留空会统一设为“未知作者”。</I18nText></p>
             </div>
           ) : null}

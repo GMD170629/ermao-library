@@ -113,25 +113,6 @@ fun WarmPagePermissionGate(
 }
 
 @Composable
-fun WarmPageStaleStatus(message: String, modifier: Modifier = Modifier) {
-    val theme = WarmPageThemeValues
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = theme.spacing.half),
-        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CircularProgressIndicator(
-            color = theme.colors.brandAccent,
-            strokeWidth = theme.metrics.coverProgressHeight,
-            modifier = Modifier.size(theme.spacing.two),
-        )
-        Text(text = message, style = theme.typography.callout, color = theme.colors.textSecondary)
-    }
-}
-
-@Composable
 fun WarmPagePaginationError(
     message: String,
     retryLabel: String,

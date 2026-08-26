@@ -49,6 +49,8 @@ struct IosComicReaderView: View {
                 )
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("reader.comic.screen")
         .statusBarHidden(!session.controlsVisible)
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .task {
@@ -137,9 +139,11 @@ struct IosComicReaderView: View {
             HStack {
                 Button(action: close) { Image(systemName: "chevron.backward").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.close"))
+                    .accessibilityIdentifier("reader.close")
                 Text(session.displayTitle).font(.headline).lineLimit(1).frame(maxWidth: .infinity)
                 Button { showsPages = true } label: { Image(systemName: "square.grid.2x2").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.toc"))
+                    .accessibilityIdentifier("reader.toc")
                 Button { showsSettings = true } label: { Image(systemName: "gearshape").frame(width: 44, height: 44) }
                     .accessibilityLabel(Text("reader.settings"))
             }
@@ -150,6 +154,7 @@ struct IosComicReaderView: View {
                     Button { Task { await session.goPrevious() } } label: {
                         Image(systemName: "chevron.backward").frame(width: 44, height: 44)
                     }.accessibilityLabel(Text("reader.previous"))
+                        .accessibilityIdentifier("reader.previous")
                     Slider(
                         value: $sliderPage,
                         in: 0 ... Double(max(0, session.pageCount - 1)),
@@ -160,9 +165,11 @@ struct IosComicReaderView: View {
                     }
                     .accessibilityLabel(Text("reader.progress"))
                     .accessibilityValue(Text(session.pageLabel))
+                    .accessibilityIdentifier("reader.progress")
                     Button { Task { await session.goNext() } } label: {
                         Image(systemName: "chevron.forward").frame(width: 44, height: 44)
                     }.accessibilityLabel(Text("reader.next"))
+                        .accessibilityIdentifier("reader.next")
                 }
                 Text(session.pageLabel).font(.caption.monospacedDigit())
             }

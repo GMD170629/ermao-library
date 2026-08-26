@@ -355,19 +355,6 @@
       ]
     },
     {
-      "id": "library-offline-cached-zh-CN-light",
-      "actualFile": "library-offline-cached-zh-CN-light.png",
-      "reference": "docs/assets/mobile-app-hifi-v1/library-offline-cached-results-app-light-v1.png",
-      "referenceSha256": "45fe9b77ff2e94dc2ed225ab752631a20674ec6f0d45cd6fbd6eba2d989df729",
-      "ownershipProfile": "library-shell",
-      "anchors": [
-        {"id": "offline-banner", "ownership": "C", "presentationCount": 1, "tone": "neutral"},
-        {"id": "cached-results", "ownership": "C", "remainsVisible": true},
-        {"id": "downloaded-status", "ownership": "C", "truthful": true},
-        {"id": "duplicate-feedback", "ownership": "C", "maximumCount": 0}
-      ]
-    },
-    {
       "id": "library-pagination-error-zh-CN-light",
       "actualFile": "library-pagination-error-zh-CN-light.png",
       "reference": "docs/assets/mobile-app-hifi-v1/library-pagination-error-app-light-v1.png",
@@ -391,19 +378,6 @@
         {"id": "disabled-controls", "ownership": "B", "roles": ["search", "scope", "overflow", "filter"]},
         {"id": "permission-gate", "ownership": "C", "presentationCount": 1},
         {"id": "manual-action", "ownership": "C", "maximumCount": 0}
-      ]
-    },
-    {
-      "id": "library-stale-refresh-zh-CN-light",
-      "actualFile": "library-stale-refresh-zh-CN-light.png",
-      "reference": "docs/assets/mobile-app-hifi-v1/library-stale-refresh-app-light-v1.png",
-      "referenceSha256": "f638b80c0aaeb25e2866fadd9212ecd632bb913159cbbd19bf3d5aedbdea2f81",
-      "ownershipProfile": "library-shell",
-      "anchors": [
-        {"id": "stale-results", "ownership": "C", "remainsVisible": true},
-        {"id": "refresh-status", "ownership": "C", "presentation": "compactInline", "presentationCount": 1},
-        {"id": "blocking-overlay", "ownership": "C", "maximumCount": 0},
-        {"id": "spinner", "ownership": "B", "tone": "brandAccent"}
       ]
     }
   ]

@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Edit
@@ -119,6 +120,8 @@ import com.ermao.library.features.content.ui.CoverProgress
 import com.ermao.library.features.content.ui.CoverRole
 import com.ermao.library.features.content.ui.ReadingProgressTrack
 import com.ermao.library.features.content.ui.BookCover
+import com.ermao.library.features.content.ui.compactCoverGridColumnCount
+import com.ermao.library.features.content.ui.compactCoverGridItemWidth
 import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -673,6 +676,8 @@ private fun WorkDetailBody(
             item {
                 WorkContentBrowser(
                     page = state.contents,
+                    bookTitle = content.book.title,
+                    bookCoverUrl = content.book.coverUrl,
                     resources = content.resources,
                     sort = state.contentsSort,
                     loading = state.isSurfaceLoading,
@@ -1279,9 +1284,81 @@ internal fun plainWorkDescription(rawValue: String?): String = rawValue
     ?.trim()
     .orEmpty()
 
+internal enum class WorkContentItemKind { SourceDirectory, ReadableResource }
+
+internal data class WorkContentItemPresentation(
+    val entry: BookContentEntry,
+    val kind: WorkContentItemKind,
+    val resource: ResourceContent?,
+    val coverUrl: String,
+    val title: String,
+    val position: Int,
+    val indexLabel: String,
+)
+
+internal data class WorkContentBreadcrumbPresentation(
+    val title: String,
+    val sourceNodeId: String?,
+)
+
+internal fun workContentItemPresentations(
+    page: BookContentsPage,
+    resources: List<ResourceContent>,
+    bookCoverUrl: String,
+): List<WorkContentItemPresentation> {
+    val entries = buildList {
+        addAll(page.entries.filter { it.isSourceFolder || it.isDirectResource })
+        if (page.currentNode.isDirectResource && none { it.sourceNodeId == page.currentNode.sourceNodeId }) {
+            add(0, page.currentNode)
+        }
+    }
+    val resourcesById = resources.associateBy(ResourceContent::id)
+    val directories = entries.filter(BookContentEntry::isSourceFolder)
+    val directResources = entries.filter(BookContentEntry::isDirectResource)
+
+    return directories.mapIndexed { position, entry ->
+        val representative = entry.representativeResourceId?.let(resourcesById::get)
+        WorkContentItemPresentation(
+            entry = entry,
+            kind = WorkContentItemKind.SourceDirectory,
+            resource = representative,
+            coverUrl = listOfNotNull(entry.coverUrl, representative?.coverUrl, bookCoverUrl)
+                .firstOrNull(String::isNotBlank)
+                .orEmpty(),
+            title = entry.title,
+            position = position,
+            indexLabel = (position + 1).toString().padStart(2, '0'),
+        )
+    } + directResources.mapIndexed { position, entry ->
+        val resource = entry.resourceId?.let(resourcesById::get)
+        WorkContentItemPresentation(
+            entry = entry,
+            kind = WorkContentItemKind.ReadableResource,
+            resource = resource,
+            coverUrl = listOfNotNull(resource?.coverUrl, entry.coverUrl)
+                .firstOrNull(String::isNotBlank)
+                .orEmpty(),
+            title = resource?.title ?: entry.title,
+            position = position,
+            indexLabel = resource?.displayIndex(position) ?: (position + 1).toString().padStart(2, '0'),
+        )
+    }
+}
+
+internal fun workContentBreadcrumbs(
+    bookTitle: String,
+    page: BookContentsPage,
+): List<WorkContentBreadcrumbPresentation> = listOf(
+    WorkContentBreadcrumbPresentation(title = bookTitle, sourceNodeId = null),
+) + page.breadcrumbs.map { breadcrumb ->
+    WorkContentBreadcrumbPresentation(title = breadcrumb.title, sourceNodeId = breadcrumb.sourceNodeId)
+}
+
 @Composable
 private fun WorkContentBrowser(
     page: BookContentsPage?,
+    bookTitle: String,
+    bookCoverUrl: String,
     resources: List<ResourceContent>,
     sort: BookContentSort,
     loading: Boolean,
@@ -1297,7 +1374,7 @@ private fun WorkContentBrowser(
     val theme = WarmPageThemeValues
     var sortMenuExpanded by remember { mutableStateOf(false) }
     var gridLayout by rememberSaveable(page?.bookId) { mutableStateOf(true) }
-    val resourceById = resources.associateBy(ResourceContent::id)
+    val items = page?.let { workContentItemPresentations(it, resources, bookCoverUrl) }.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -1333,11 +1410,19 @@ private fun WorkContentBrowser(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { onOpenSourceNode(null) }) { Text(stringResource(R.string.work_contents_root)) }
-                contents.breadcrumbs.forEach { crumb ->
-                    Text("/", color = theme.colors.textSecondary)
-                    TextButton(onClick = { onOpenSourceNode(crumb.sourceNodeId) }) {
-                        Text(crumb.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                workContentBreadcrumbs(bookTitle, contents).forEachIndexed { index, breadcrumb ->
+                    if (index > 0) Text("/", color = theme.colors.textSecondary)
+                    TextButton(
+                        onClick = { onOpenSourceNode(breadcrumb.sourceNodeId) },
+                        modifier = Modifier.testTag(
+                            if (breadcrumb.sourceNodeId == null) {
+                                "work-contents-breadcrumb-root"
+                            } else {
+                                "work-contents-breadcrumb-${breadcrumb.sourceNodeId}"
+                            },
+                        ),
+                    ) {
+                        Text(breadcrumb.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -1355,34 +1440,64 @@ private fun WorkContentBrowser(
                 onRetry = onRetry,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
             )
-            page?.entries.isNullOrEmpty() -> WarmPageEmptyState(
+            items.isEmpty() -> WarmPageEmptyState(
                 title = stringResource(R.string.work_contents_empty_title),
                 message = stringResource(R.string.work_contents_empty_message),
             )
-            gridLayout -> page.entries.chunked(2).forEach { rowEntries ->
-                Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
-                    rowEntries.forEach { entry ->
-                        WorkContentEntryCard(
-                            entry = entry,
-                            resource = entry.resourceId?.let(resourceById::get),
-                            repository = repository,
-                            context = context,
-                            grid = true,
-                            onOpen = { entry.resourceId?.let(onSelectResource) ?: onOpenSourceNode(entry.sourceNodeId) },
-                            modifier = Modifier.weight(1f),
-                        )
+            gridLayout -> BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val columns = compactCoverGridColumnCount(
+                    compactColumns = theme.components.grid.compactColumns,
+                    largeTextColumns = theme.components.grid.largeTextColumns,
+                    fontScale = LocalDensity.current.fontScale,
+                )
+                val horizontalGap = theme.components.grid.horizontalGap
+                val itemWidth = compactCoverGridItemWidth(
+                    availableWidth = maxWidth,
+                    horizontalGap = horizontalGap,
+                    columns = columns,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(theme.components.grid.verticalGap)) {
+                    items.chunked(columns).forEach { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(horizontalGap),
+                        ) {
+                            rowItems.forEach { item ->
+                                WorkContentEntryCard(
+                                    item = item,
+                                    repository = repository,
+                                    context = context,
+                                    grid = true,
+                                    onOpen = {
+                                        if (item.kind == WorkContentItemKind.SourceDirectory) {
+                                            onOpenSourceNode(item.entry.sourceNodeId)
+                                        } else {
+                                            (item.resource?.id ?: item.entry.resourceId)?.let(onSelectResource)
+                                        }
+                                    },
+                                    modifier = Modifier.width(itemWidth),
+                                )
+                            }
+                            repeat(columns - rowItems.size) {
+                                Spacer(Modifier.width(itemWidth))
+                            }
+                        }
                     }
-                    if (rowEntries.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-            else -> page.entries.forEach { entry ->
+            else -> items.forEach { item ->
                 WorkContentEntryCard(
-                    entry = entry,
-                    resource = entry.resourceId?.let(resourceById::get),
+                    item = item,
                     repository = repository,
                     context = context,
                     grid = false,
-                    onOpen = { entry.resourceId?.let(onSelectResource) ?: onOpenSourceNode(entry.sourceNodeId) },
+                    onOpen = {
+                        if (item.kind == WorkContentItemKind.SourceDirectory) {
+                            onOpenSourceNode(item.entry.sourceNodeId)
+                        } else {
+                            (item.resource?.id ?: item.entry.resourceId)?.let(onSelectResource)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -1395,8 +1510,7 @@ private fun WorkContentBrowser(
 
 @Composable
 private fun WorkContentEntryCard(
-    entry: BookContentEntry,
-    resource: ResourceContent?,
+    item: WorkContentItemPresentation,
     repository: ContentRepository,
     context: ContentRequestContext,
     grid: Boolean,
@@ -1406,42 +1520,83 @@ private fun WorkContentEntryCard(
     val theme = WarmPageThemeValues
     Surface(
         onClick = onOpen,
-        modifier = modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
+        modifier = modifier
+            .heightIn(min = theme.components.controls.minimumTouchTarget)
+            .testTag(
+                if (item.kind == WorkContentItemKind.SourceDirectory) {
+                    "work-contents-folder-${item.entry.sourceNodeId}"
+                } else {
+                    "work-resource-${item.resource?.id ?: item.entry.resourceId ?: item.entry.sourceNodeId}"
+                },
+            ),
         shape = RoundedCornerShape(theme.radii.task),
-        color = theme.colors.surface,
+        color = Color.Transparent,
     ) {
         if (grid) {
-            Column(Modifier.padding(theme.spacing.one), verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-                val coverUrl = entry.coverUrl.orEmpty()
-                if (coverUrl.isNotBlank()) {
+            Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
+                Box {
                     ContentCover(
-                        contentId = entry.resourceId ?: entry.sourceNodeId,
-                        title = entry.title,
-                        coverUrl = coverUrl,
+                        contentId = if (item.kind == WorkContentItemKind.SourceDirectory) {
+                            item.entry.sourceNodeId
+                        } else {
+                            item.resource?.id ?: item.entry.sourceNodeId
+                        },
+                        title = item.title,
+                        coverUrl = item.coverUrl,
                         repository = repository,
                         context = context,
                         role = CoverRole.Compact,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                } else {
+                    if (item.kind == WorkContentItemKind.ReadableResource) {
+                        item.resource?.progressPercent?.takeIf { it > 0 }?.let { progress ->
+                            CoverProgress(
+                                progressPercent = progress,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            )
+                        }
+                    }
                     Box(
-                        Modifier.fillMaxWidth().aspectRatio(2f / 3f).background(theme.colors.canvas),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(theme.spacing.one)
+                            .size(theme.spacing.four)
+                            .background(theme.colors.textPrimary.copy(alpha = 0.62f), CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            if (entry.isSourceFolder) Icons.Outlined.Source else Icons.Outlined.Layers,
-                            contentDescription = null,
-                            tint = theme.colors.textSecondary,
+                        Text(
+                            text = item.indexLabel,
+                            color = theme.colors.canvas,
+                            style = theme.typography.caption,
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
-                Text(entry.title, style = theme.typography.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    resource?.format?.uppercase(Locale.ROOT)
-                        ?: stringResource(if (entry.isSourceFolder) R.string.work_contents_folder else R.string.work_contents_file),
-                    style = theme.typography.caption,
-                    color = theme.colors.textSecondary,
-                )
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        item.title,
+                        modifier = Modifier.weight(1f),
+                        style = theme.typography.body,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (item.kind == WorkContentItemKind.SourceDirectory) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = theme.colors.textSecondary,
+                            modifier = Modifier.size(theme.spacing.two),
+                        )
+                    }
+                }
+                if (item.kind == WorkContentItemKind.ReadableResource) {
+                    Text(
+                        item.resource?.format?.uppercase(Locale.ROOT)
+                            ?: stringResource(R.string.work_contents_file),
+                        style = theme.typography.caption,
+                        color = theme.colors.textSecondary,
+                    )
+                }
             }
         } else {
             Row(
@@ -1449,22 +1604,46 @@ private fun WorkContentEntryCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
             ) {
-                Icon(
-                    if (entry.isSourceFolder) Icons.Outlined.Source else Icons.Outlined.Layers,
-                    contentDescription = null,
-                    tint = theme.colors.textSecondary,
+                ContentCover(
+                    contentId = if (item.kind == WorkContentItemKind.SourceDirectory) {
+                        item.entry.sourceNodeId
+                    } else {
+                        item.resource?.id ?: item.entry.sourceNodeId
+                    },
+                    title = item.title,
+                    coverUrl = item.coverUrl,
+                    repository = repository,
+                    context = context,
+                    role = CoverRole.Compact,
+                    modifier = Modifier.width(theme.spacing.five),
                 )
                 Column(Modifier.weight(1f)) {
-                    Text(entry.title, style = theme.typography.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(item.title, style = theme.typography.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        resource?.format?.uppercase(Locale.ROOT)
-                            ?: stringResource(if (entry.isSourceFolder) R.string.work_contents_folder else R.string.work_contents_file),
+                        if (item.kind == WorkContentItemKind.SourceDirectory) {
+                            stringResource(R.string.work_contents_source_directory, item.position + 1)
+                        } else {
+                            item.resource?.format?.uppercase(Locale.ROOT)
+                                ?: stringResource(R.string.work_contents_file)
+                        },
                         style = theme.typography.caption,
                         color = theme.colors.textSecondary,
                     )
                 }
-                entry.sizeBytes?.let {
+                if (item.kind == WorkContentItemKind.ReadableResource) {
+                    item.resource?.progressPercent?.takeIf { it > 0 }?.let {
+                        Text("$it%", style = theme.typography.caption, color = theme.colors.textSecondary)
+                    }
+                }
+                item.entry.sizeBytes?.let {
                     Text(formatWorkContentSize(it), style = theme.typography.caption, color = theme.colors.textSecondary)
+                }
+                if (item.kind == WorkContentItemKind.SourceDirectory) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        tint = theme.colors.textSecondary,
+                    )
                 }
             }
         }
@@ -1544,12 +1723,38 @@ private fun WorkResourceDetail(
                 message = stringResource(R.string.work_resource_detail_empty_message),
             )
             resource.readerType.equals("comic", true) || resource.readerType.equals("pdf", true) -> {
-                page.units.chunked(2).forEach { rowUnits ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
-                        rowUnits.forEach { unit ->
-                            WorkPagePreview(unit, repository, context, Modifier.weight(1f), onOpenResource)
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val columns = compactCoverGridColumnCount(
+                        compactColumns = theme.components.grid.compactColumns,
+                        largeTextColumns = theme.components.grid.largeTextColumns,
+                        fontScale = LocalDensity.current.fontScale,
+                    )
+                    val horizontalGap = theme.components.grid.horizontalGap
+                    val itemWidth = compactCoverGridItemWidth(
+                        availableWidth = maxWidth,
+                        horizontalGap = horizontalGap,
+                        columns = columns,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(theme.components.grid.verticalGap)) {
+                        page.units.chunked(columns).forEach { rowUnits ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(horizontalGap),
+                            ) {
+                                rowUnits.forEach { unit ->
+                                    WorkPagePreview(
+                                        unit,
+                                        repository,
+                                        context,
+                                        Modifier.width(itemWidth),
+                                        onOpenResource,
+                                    )
+                                }
+                                repeat(columns - rowUnits.size) {
+                                    Spacer(Modifier.width(itemWidth))
+                                }
+                            }
                         }
-                        if (rowUnits.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
             }
@@ -1721,12 +1926,17 @@ private fun WorkResourceRail(
     }
     Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val itemWidth = workDetailVolumeRailItemWidth(
-                availableWidth = maxWidth,
-                gap = theme.spacing.oneAndHalf,
+            val columns = compactCoverGridColumnCount(
+                compactColumns = theme.components.grid.compactColumns,
+                largeTextColumns = theme.components.grid.largeTextColumns,
                 fontScale = LocalDensity.current.fontScale,
             )
-            LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf)) {
+            val itemWidth = compactCoverGridItemWidth(
+                availableWidth = maxWidth,
+                horizontalGap = theme.components.grid.horizontalGap,
+                columns = columns,
+            )
+            LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(theme.components.grid.horizontalGap)) {
                 itemsIndexed(resources, key = { _, resource -> resource.id }) { position, resource ->
                     ResourceCoverItem(
                         resource = resource,
@@ -1766,16 +1976,6 @@ private fun WorkResourceRail(
             }
         }
     }
-}
-
-internal fun workDetailVolumeRailItemWidth(
-    availableWidth: Dp,
-    gap: Dp,
-    fontScale: Float,
-): Dp = if (fontScale >= 1.3f) {
-    ((availableWidth - gap) / 2.25f).coerceAtLeast(0.dp)
-} else {
-    ((availableWidth - gap * 2) / 3.2f).coerceAtLeast(0.dp)
 }
 
 @Composable

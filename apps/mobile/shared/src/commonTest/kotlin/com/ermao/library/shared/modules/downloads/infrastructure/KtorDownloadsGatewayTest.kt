@@ -4,10 +4,15 @@ import com.ermao.library.shared.core.network.ApiClient
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrapResult
 import com.ermao.library.shared.modules.downloads.application.DownloadByteSink
 import com.ermao.library.shared.modules.downloads.application.DownloadByteSinkSession
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSink
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSinkSession
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleMemberSinkRequest
+import com.ermao.library.shared.modules.downloads.application.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadRequestContext
 import com.ermao.library.shared.modules.downloads.application.DownloadSinkRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadTransferRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadTransferResult
+import com.ermao.library.shared.modules.downloads.domain.DownloadArtifactKind
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
@@ -17,6 +22,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.http.HttpHeaders
@@ -68,7 +74,7 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
-    fun bootstrapAcceptsGenericBinaryMimeForValidatedOriginalFormat() = runBlocking {
+    fun bootstrapRejectsGenericBinaryMimeEvenForKnownOriginalFormat() = runBlocking {
         val gateway = gateway {
             respond(
                 BOOTSTRAP.replace("application/epub+zip", "application/octet-stream"),
@@ -77,11 +83,7 @@ class KtorDownloadsGatewayTest {
             )
         }
 
-        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
-            .bootstrap.descriptor
-
-        assertEquals("epub", descriptor.format)
-        assertEquals("application/octet-stream", descriptor.source.mimeType)
+        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "resource"))
         Unit
     }
 
@@ -118,11 +120,12 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
-    fun imageDirectoryIsOnlineOnlyAndNeverAdvertisesAnArchiveDownload() = runBlocking {
+    fun imageDirectoryBuildsAnOriginalPageSetWithoutAdvertisingAnArchive() = runBlocking {
         val imageDirectory = COMIC_BOOTSTRAP
             .replace("\"sourceFormat\":\"cbz\"", "\"sourceFormat\":\"image_dir\"")
             .replace("\"format\":\"cbz\"", "\"format\":\"image_dir\"")
             .replace("application/vnd.comicbook+zip", "image/png")
+            .replace("\"role\":\"PRIMARY\"", "\"role\":\"PAGE\"")
             .replace(
                 "\"imageVariants\":[\"original\",\"data-saver\"],\"downloadArtifact\":{\"url\":\"/api/reader/v4/resources/resource/comic/archive\",\"sourceFormat\":\"image_dir\",\"mimeType\":\"image/png\",\"sizeBytes\":12}",
                 "\"imageVariants\":[\"original\",\"data-saver\"]",
@@ -134,9 +137,67 @@ class KtorDownloadsGatewayTest {
         val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
             .bootstrap.descriptor
 
-        assertFalse(descriptor.isDownloadable)
+        assertTrue(descriptor.isDownloadable)
         assertEquals("image_dir", descriptor.format)
         assertEquals("image/png", descriptor.source.mimeType)
+        assertEquals(DownloadArtifactKind.OriginalPageSet, descriptor.artifactKind)
+        assertEquals(listOf("asset"), descriptor.bundleMembers.map { it.assetId })
+        Unit
+    }
+
+    @Test
+    fun imageDirectoryTransfersEveryOriginalPageBeforeAtomicallyCommittingBundle() = runBlocking {
+        val firstAsset = """{"id":"page-a","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PAGE","mimeType":"image/png","sizeBytes":3,"sortOrder":0,"url":"/api/assets/page-a"}"""
+        val secondAsset = """{"id":"page-b","title":"Page 2","resourceId":"resource","sourceNodeId":"node","role":"PAGE","mimeType":"image/jpeg","sizeBytes":4,"sortOrder":1,"url":"/api/assets/page-b"}"""
+        val originalAsset = """{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}"""
+        val imageDirectory = COMIC_BOOTSTRAP
+            .replace("\"sourceFormat\":\"cbz\"", "\"sourceFormat\":\"image_dir\"")
+            .replace("\"format\":\"cbz\"", "\"format\":\"image_dir\"")
+            .replace(originalAsset, "$firstAsset,$secondAsset")
+            .replace(
+                "\"imageVariants\":[\"original\",\"data-saver\"],\"downloadArtifact\":{\"url\":\"/api/reader/v4/resources/resource/comic/archive\",\"sourceFormat\":\"image_dir\",\"mimeType\":\"application/vnd.comicbook+zip\",\"sizeBytes\":12}",
+                "\"imageVariants\":[\"original\",\"data-saver\"]",
+            )
+        val gateway = gateway { request ->
+            when (request.url.encodedPath) {
+                "/base/api/reader/v4/resources/resource/bootstrap" -> respond(
+                    imageDirectory,
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType, "application/json"),
+                )
+                "/base/api/assets/page-a" -> respond(
+                    "abc",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType to listOf("image/png"), HttpHeaders.ContentLength to listOf("3")),
+                )
+                "/base/api/assets/page-b" -> respond(
+                    "defg",
+                    HttpStatusCode.OK,
+                    headersOf(HttpHeaders.ContentType to listOf("image/jpeg"), HttpHeaders.ContentLength to listOf("4")),
+                )
+                else -> respondError(HttpStatusCode.NotFound)
+            }
+        }
+        val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource"))
+            .bootstrap.descriptor
+        val sink = RecordingBundleSink()
+        val progress = mutableListOf<Long>()
+
+        val result = gateway.transfer(
+            context,
+            DownloadTransferRequest("page-set-task", descriptor),
+            sink,
+        ) { transferred, _ -> progress += transferred }
+
+        val completed = assertIs<DownloadTransferResult.Success>(result).transfer
+        assertEquals("local://page-set", completed.localReference)
+        assertEquals(7, completed.verifiedBytes)
+        assertEquals(listOf("page-a", "page-b"), sink.members.map { it.first.assetId })
+        assertContentEquals("abc".encodeToByteArray(), sink.members[0].second)
+        assertContentEquals("defg".encodeToByteArray(), sink.members[1].second)
+        assertEquals(listOf(3L, 7L), progress)
+        assertEquals(1, sink.commitCount)
+        assertEquals(0, sink.abortCount)
         Unit
     }
 
@@ -194,6 +255,7 @@ class KtorDownloadsGatewayTest {
                     "cdef",
                     HttpStatusCode.PartialContent,
                     headersOf(
+                        HttpHeaders.ContentType to listOf("application/epub+zip"),
                         HttpHeaders.ContentLength to listOf("4"),
                         HttpHeaders.ContentRange to listOf("bytes 2-5/6"),
                     ),
@@ -291,6 +353,57 @@ class KtorDownloadsGatewayTest {
 
         override suspend fun abort() {
             abortCount += 1
+        }
+    }
+
+    private class RecordingBundleSink : DownloadByteSink, DownloadBundleByteSink {
+        val members = mutableListOf<Pair<DownloadBundleMemberSinkRequest, ByteArray>>()
+        var commitCount = 0
+        var abortCount = 0
+
+        override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession =
+            error("A page-set transfer must begin a bundle")
+
+        override suspend fun beginBundle(request: DownloadBundleSinkRequest): DownloadBundleByteSinkSession {
+            assertEquals(DownloadArtifactKind.OriginalPageSet, request.artifactKind)
+            assertEquals(2, request.memberCount)
+            assertEquals(7, request.expectedTotalBytes)
+            return BundleSession()
+        }
+
+        private inner class BundleSession : DownloadBundleByteSinkSession {
+            override suspend fun beginMember(request: DownloadBundleMemberSinkRequest): DownloadByteSinkSession =
+                MemberSession(request)
+
+            override suspend fun commit(): String {
+                require(members.size == 2) { "Bundle committed before every page was verified" }
+                commitCount += 1
+                return "local://page-set"
+            }
+
+            override suspend fun abort() {
+                abortCount += 1
+            }
+        }
+
+        private inner class MemberSession(
+            private val request: DownloadBundleMemberSinkRequest,
+        ) : DownloadByteSinkSession {
+            private var bytes = byteArrayOf()
+
+            override suspend fun write(bytes: ByteArray) {
+                this.bytes += bytes
+            }
+
+            override suspend fun commit(expectedTotalBytes: Long): String {
+                require(bytes.size.toLong() == expectedTotalBytes)
+                members += request to bytes
+                return "member://${request.assetId}"
+            }
+
+            override suspend fun abort() {
+                abortCount += 1
+            }
         }
     }
 

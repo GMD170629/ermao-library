@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -41,10 +42,12 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     source_path = test_settings.resolved_storage_root / relative_path
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(
-        """<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+        """<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"
+        xmlns:xlink="http://www.w3.org/1999/xlink">
         <description><title-info><book-title>直接读取 FB2</book-title><lang>zh-CN</lang>
         </title-info></description><body><section><title><p>第一部</p></title>
-        <section><title><p>第一章</p></title><p>正文内容</p></section>
+        <section id="chapter"><title><p>第一章</p></title><p>正文内容</p>
+        <p><a l:href="#chapter">返回本章</a></p></section>
         </section></body></FictionBook>""",
         encoding="utf-8",
     )
@@ -164,3 +167,27 @@ def test_fb2_publication_manifest_and_resources_use_direct_adapter(
     assert resource_response.status_code == 200
     assert "正文内容" in resource_response.text
     assert 'data-shuku-security-profile="web-v2"' in resource_response.text
+    progress_response = client.put(
+        f"/api/reader/v4/resources/{resource.id}/progress",
+        json={
+            "schemaVersion": 4,
+            "clientId": "fb2-publication-contract",
+            "mutationId": str(uuid4()),
+            "baseRevision": 0,
+            "capturedAtEpochMillis": 1_787_725_000_000,
+            "locator": {
+                "kind": "reflowable",
+                "engineLocator": {
+                    "engine": "readium",
+                    "platform": "ios",
+                    "version": "readium-swift:3.8.0",
+                    "payload": {
+                        "href": "fb2/section-0001.xhtml",
+                        "type": "application/xhtml+xml",
+                        "locations": {"cssSelector": "#fb2-node-000001"},
+                    },
+                },
+            },
+        },
+    )
+    assert progress_response.status_code == 200

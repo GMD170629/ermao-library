@@ -336,7 +336,11 @@ class DefaultMobileRuntime(
 
     private suspend fun restoreSavedProfile(profile: ServerProfile): RuntimeOperationResult {
         val record = verifiedSessionRepository.load(profile.id)
-        if (record == null || !record.belongsToProfile(profile.id)) {
+        if (
+            record == null ||
+            !record.belongsToProfile(profile.id) ||
+            record.serverIdentity != profile.serverIdentity
+        ) {
             if (record != null) {
                 verifiedSessionRepository.removeSession(profile.id)
                 cookieVault.clear(profile.id)
@@ -353,6 +357,15 @@ class DefaultMobileRuntime(
             )
             is ServerProbeResult.Compatible -> {
                 val currentProfile = persistCurrentServerIdentity(profile, probe.serverIdentity)
+                if (probe.serverIdentity != record.serverIdentity) {
+                    verifiedSessionRepository.removeSession(profile.id)
+                    cookieVault.clear(profile.id)
+                    transition(AppSession.SignedOut(currentProfile))
+                    return success(
+                        "SERVER_IDENTITY_CHANGED",
+                        NavigationDirective.HidePrivateShell,
+                    )
+                }
                 when (val resolution = preflightGate(currentProfile)) {
                     is GateResolution.Failed -> success(
                         "SESSION_RESTORED_VALIDATION_DEFERRED",

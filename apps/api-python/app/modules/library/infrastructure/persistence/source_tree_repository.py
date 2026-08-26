@@ -478,6 +478,22 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         self._session.flush()
         return self._to_resource(row)
 
+    def refresh_resource_adapter(
+        self,
+        *,
+        resource_id: str,
+        adapter: AdapterIdentity,
+    ) -> ReadableResourceRecord:
+        row = self._session.get(LibraryReadableResource, resource_id)
+        if row is None:
+            raise LookupError(resource_id)
+        row.adapter_id = adapter.adapter_id
+        row.adapter_version = adapter.adapter_version
+        row.format = adapter.format_label
+        row.import_state = ResourceImportState.PENDING.value
+        self._session.flush()
+        return self._to_resource(row)
+
     def set_enablement(
         self,
         resource_id: str,

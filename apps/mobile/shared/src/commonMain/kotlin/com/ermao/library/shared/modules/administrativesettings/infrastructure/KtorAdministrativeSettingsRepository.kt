@@ -193,7 +193,7 @@ internal class KtorAdministrativeSettingsRepository(
         unavailable<Int>("IMPORT_TASK_CLEAR_UNAVAILABLE")
 
     override suspend fun clearImportQueue(context: AdministrativeSettingsContext) =
-        unavailable<QueueOperation>("IMPORT_QUEUE_CLEAR_UNAVAILABLE")
+        unavailable<Int>("IMPORT_QUEUE_CLEAR_UNAVAILABLE")
 
     override suspend fun rescanImportFolders(context: AdministrativeSettingsContext) =
         unavailable<ImportRescanRequest>("IMPORT_RESCAN_UNAVAILABLE")
@@ -337,10 +337,26 @@ internal class KtorAdministrativeSettingsRepository(
     }
 
     override suspend fun deleteCategory(context: AdministrativeSettingsContext, categoryId: String) =
-        idCall(context, ApiMethod.Delete, "/api/library/facets", categoryId, transform = JsonElement::toCategoryOperation)
+        idCall(context, ApiMethod.Delete, "/api/library/facets", categoryId, transform = { it.toCategoryOperation(expectedDeletedId = categoryId) })
 
     override suspend fun loadMetadataProviders(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/metadata/providers", transform = JsonElement::toMetadataProviders)
+
+    override suspend fun updateMetadataProviderOrder(
+        context: AdministrativeSettingsContext,
+        items: List<MetadataProviderOrderItem>,
+    ): AdministrativeSettingsResult<MetadataProviders> {
+        if (items.isEmpty() || items.any { it.providerId.isBlank() } || items.map(MetadataProviderOrderItem::providerId).distinct().size != items.size) {
+            return invalid("INVALID_PROVIDER_ORDER", "items")
+        }
+        return call(
+            context,
+            ApiMethod.Put,
+            "/api/metadata/provider-order",
+            body = items.toProviderOrderRequest(),
+            transform = JsonElement::toMetadataProviders,
+        )
+    }
 
     override suspend fun loadMetadataProvider(context: AdministrativeSettingsContext, providerId: String) =
         idCall(context, ApiMethod.Get, "/api/metadata/providers", providerId, transform = JsonElement::toMetadataProviderPayload)
@@ -350,7 +366,6 @@ internal class KtorAdministrativeSettingsRepository(
         providerId: String,
         update: MetadataProviderUpdate,
     ): AdministrativeSettingsResult<MetadataProvider> {
-        if (update.priority < 0) return invalid("INVALID_PROVIDER_PRIORITY", "priority")
         return idCall(
             context,
             ApiMethod.Patch,
@@ -363,23 +378,6 @@ internal class KtorAdministrativeSettingsRepository(
 
     override suspend fun testMetadataProvider(context: AdministrativeSettingsContext, providerId: String) =
         idCall(context, ApiMethod.Post, "/api/metadata/providers", providerId, "/test", JsonElement::toProviderTestResult)
-
-    override suspend fun updateMetadataPipeline(
-        context: AdministrativeSettingsContext,
-        mediaKind: MediaKind,
-        entries: List<MetadataPipelineEntry>,
-    ): AdministrativeSettingsResult<MetadataProviders> {
-        if (entries.map(MetadataPipelineEntry::providerId).any(String::isBlank) || entries.distinctBy(MetadataPipelineEntry::providerId).size != entries.size) {
-            return invalid("INVALID_PROVIDER_PIPELINE", "entries")
-        }
-        return call(
-            context,
-            ApiMethod.Put,
-            "/api/metadata/provider-pipelines/${mediaKind.wireValue.encodeURLPathPart()}",
-            body = entries.toPipelineRequest(),
-            transform = JsonElement::toMetadataProviders,
-        )
-    }
 
     override suspend fun loadOpdsSettings(context: AdministrativeSettingsContext) =
         call(context, ApiMethod.Get, "/api/system-settings/opds", transform = JsonElement::toOpdsSettings)
@@ -467,12 +465,6 @@ internal class KtorAdministrativeSettingsRepository(
 
     override suspend fun loadHealthRun(context: AdministrativeSettingsContext, runId: String) =
         idCall(context, ApiMethod.Get, "/api/system/health/runs", runId, transform = JsonElement::toHealthRun)
-
-    override suspend fun restartImportQueue(context: AdministrativeSettingsContext) =
-        call(context, ApiMethod.Post, "/api/system/queues/import/restart", transform = JsonElement::toQueueOperationPayload)
-
-    override suspend fun loadQueueOperation(context: AdministrativeSettingsContext, operationId: String) =
-        idCall(context, ApiMethod.Get, "/api/system/queue-operations", operationId, transform = JsonElement::toQueueOperationPayload)
 
     override suspend fun listManagementEvents(
         context: AdministrativeSettingsContext,

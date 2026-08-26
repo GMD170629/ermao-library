@@ -28,6 +28,10 @@ function scheduleTimeout(callback: () => void, delayMs: number): () => void {
 
 export class FilterOptionSearchController {
   private state: FilterOptionSearchState = { kind: 'idle', options: [] };
+  private readonly completedSearches = new Map<
+    string,
+    Extract<FilterOptionSearchState, { kind: 'ready' }>
+  >();
   private requestSequence = 0;
   private cancelTimer: (() => void) | null = null;
   private requestController: AbortController | null = null;
@@ -40,10 +44,23 @@ export class FilterOptionSearchController {
   ) {}
 
   inputChanged(input: string): void {
+    this.scheduleSearch(input, false);
+  }
+
+  search(input: string): void {
+    this.scheduleSearch(input, true);
+  }
+
+  private scheduleSearch(input: string, includeEmptyQuery: boolean): void {
     this.cancel();
     const query = input.trim();
-    if (!query) {
+    if (!query && !includeEmptyQuery) {
       this.publish({ kind: 'idle', options: [] });
+      return;
+    }
+    const completed = this.completedSearches.get(query);
+    if (completed) {
+      this.publish(completed);
       return;
     }
 
@@ -61,11 +78,13 @@ export class FilterOptionSearchController {
             this.publish({ kind: 'indexing', options: [] });
             return;
           }
-          this.publish({
+          const completedState = {
             kind: 'ready',
             options: page.options,
             hasMore: page.hasMore
-          });
+          } as const;
+          this.completedSearches.set(query, completedState);
+          this.publish(completedState);
         })
         .catch((reason: unknown) => {
           if (sequence !== this.requestSequence) return;
@@ -82,6 +101,18 @@ export class FilterOptionSearchController {
     this.cancelTimer = null;
     this.requestController?.abort();
     this.requestController = null;
+  }
+
+  reset(query = ''): void {
+    this.cancel();
+    const completed = this.completedSearches.get(query.trim());
+    if (completed) {
+      this.publish(completed);
+      return;
+    }
+    if (this.state.kind === 'loading') {
+      this.publish({ kind: 'idle', options: this.state.options });
+    }
   }
 
   dispose(): void {

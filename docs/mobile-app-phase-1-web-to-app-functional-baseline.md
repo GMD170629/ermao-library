@@ -8,7 +8,7 @@
 
 > v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
 
-> Work Detail 统一修订（2026-08-26）：详情显示和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 为唯一产品事实。单个可读资源直接显示资源详情但不自动进入 Reader；多个资源显示真实来源目录。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。本修订覆盖本文中所有旧的卷册轨道、隐藏目录和下载后阅读描述。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。单个可读资源直接显示资源详情但不自动进入 Reader；多个资源显示真实来源目录。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。本修订覆盖本文中所有旧的卷册轨道、隐藏目录和下载后阅读描述。
 
 ## 1. 基线目的
 
@@ -53,7 +53,7 @@ P0 必须形成以下连续闭环：
 → 初始化或登录
 → 获取用户与授权上下文
 → 首页 / 书库 / 书架发现内容
-→ 作品详情选择媒介与卷册
+→ Book Detail 选择 ReadableResource
 → 阅读或播放
 → 本地可靠记录进度
 → 联网同步并恢复继续阅读
@@ -71,7 +71,7 @@ P0 必须形成以下连续闭环：
 
 - 搜索使用系统搜索栏或独立 Search Stack，不单列底部 Tab。
 - 系列、作者是“书库”的二级发现维度，不单列底部 Tab。
-- 作品详情通过导航栈进入。
+- Book Detail 通过导航栈进入。
 - 电子书、漫画、PDF 阅读器使用独立全屏阅读栈，不占底部 Tab。
 - 音频使用跨 Tab 持续存在的 mini player，并进入全屏 Now Playing。
 - 筛选、排序、新建/编辑书架、阅读设置与内容动作使用适合平台的 Sheet、Menu 或确认对话框。
@@ -84,7 +84,7 @@ P0 必须形成以下连续闭环：
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| 服务器连接 | Web 默认同源；`GET /api/health`、`GET /api/app-config` | App 新增 `noServer / checking / reachable / incompatible / unavailable`；当前没有完整 App 兼容握手 | P0 | 首次启动先添加服务器地址并检测；必须支持部署 base path；网络不可达不等于登出。`app-config` 不能被当作原生商店版本协议 |
+| 服务器连接 | Web 默认同源；`GET /api/health`、`GET /api/mobile/compatibility` | App 使用 `noServer / checking / reachable / incompatible / unavailable`；兼容握手固定 protocol v3、Reader schema v4、Library schema v1 与 `bookResourceAsset=true` | P0 | 首次启动先添加服务器地址并检测；必须支持部署 base path；网络不可达不等于登出。进入 Shell 前必须验证 ADR 0020 的 protocol、schema 与 capability，不得以 `app-config` 代替 |
 | 初始化 | `/setup`；`GET /api/auth/setup/status`、`POST /api/auth/setup` | 仅服务未初始化时；已初始化返回冲突 | P0 | 与登录互斥的初始化流程；只创建首位管理员。服务器/NAS 目录配置不放进手机初始化 |
 | 登录与会话 | `/login`；`POST /api/auth/login`、`GET /api/auth/me`、`POST /api/auth/logout` | Cookie 会话；登录失败、账户停用、setup required、会话失效、服务不可用 | P0 | 原生表单与持久 Cookie Jar；启动和前台恢复统一请求 `me`；`401` 进入重新认证，离线/超时保留现有本地会话状态 |
 | 首页 | `/`；`GET /api/dashboard/continue-reading`、`recent-reading`、`recent-books` | 各分区按当前资源范围过滤并可部分失败 | P0 | “继续阅读”主卡、最近阅读、最近入库；下拉刷新；每个分区独立 skeleton、空、错误和重试，不因单个请求失败阻塞整页 |
@@ -102,7 +102,7 @@ P0 必须形成以下连续闭环：
 | 静态书架 | `/shelves`；书架 CRUD API | 按 `ownerUserId` 隔离；用户手动管理作品 | P0 | “书架”Tab；详情 Stack；创建/编辑 Sheet；明确选择模式加入作品；禁止依赖右键和桌面拖放 |
 | 智能书架 | `/shelves`；书架 CRUD 与过滤规则 | 规则计算；可能出现不支持规则 | P0 浏览，P1 编辑 | P0 展示规则摘要和计算结果，不能允许手工增删作品；不支持规则必须显式提示 |
 | 书架集合 | `/shelves`；书架 CRUD | `COLLECTION` 只能包含书架，不能直接放作品；非空集合删除冲突 | P0 浏览，P1 复杂整理 | 集合 → 书架 → 作品的层级导航；删除使用系统确认并呈现 `409` 原因 |
-| 图书详情 | `/books/[bookId]`；Book、Resource、Asset、reading units API | Resource 是可独立打开的阅读资源；Asset 是 Resource 使用的真实常规文件；部分章节或资源可失败 | P0 | 折叠头部、可横向滚动并分页加载的 Resource 轨道、随选中 Resource 更新的格式/媒介与元数据、稳定的开始/继续主 CTA；管理动作不混入主信息层级 |
+| 图书详情 | `/books/[bookId]`；Book、Resource、Asset、reading units API | Resource 是可独立打开的阅读资源；Asset 是 Resource 使用的真实常规文件；部分目录节点、章节或资源可失败 | P0 | 折叠头部；单资源直接显示资源详情，多资源显示与 Web 相同的来源目录、面包屑、文件夹、分页、视图模式和六种排序；稳定的开始/继续主 CTA；管理动作按 Web 当前对象范围和权限过滤进入 Menu/Sheet，不混入主信息层级 |
 | 阅读状态 | 作品详情；Reader v4 `PUT .../reading-status` | `UNREAD / READING / FINISHED`；用户级状态 | P0 | 详情动作 Sheet；开始阅读可推进到 READING；标记完成提供可撤销反馈 |
 | 批量加入个人书架 | Web 书库选择模式 | 普通用户可操作自己的书架 | P1 | 原生明确“选择”模式和底部操作栏；不复刻 Ctrl/Cmd 多选、右键菜单 |
 
@@ -159,7 +159,7 @@ session-expired
 
 - 匹配的 `VerifiedSessionRecord` 直接恢复 `authenticated`；网络、超时、TLS、`5xx` 或协议解析失败保持该状态，不增加网络模式状态。
 - `session-expired` 由明确 `401` 驱动，需要重新登录；账户停用和 server identity 变化分别进入对应阻断状态。
-- `incompatible-server` 当前缺少正式后端握手，必须在实现前补协议或以最低支持版本白名单实现。
+- `incompatible-server` 由 `GET /api/mobile/compatibility` 的 protocol v3、最低客户端版本、Reader/Library schema、`bookResourceAsset` 和稳定 `serverIdentity` 判定；v2 或缺少必要 capability 的服务端不得进入 Shell。
 
 ### 5.2 会话协议
 
@@ -168,7 +168,7 @@ session-expired
 - `HttpOnly`；
 - `SameSite=Lax`；
 - `Secure` 由部署配置决定；
-- 默认 30 天，接近到期自动续期；
+- 服务端 Cookie 默认有效期为 30 天并可在接近到期时续期；该传输层会话期限不是 Mobile 离线授权、宽限期或本地剩余天数；
 - Cookie path 可能跟随部署 base path；
 - 仓库没有 App 专用 Bearer access/refresh token API。
 
@@ -206,10 +206,10 @@ authzVersion
 serverIdentity + userId + authzVersion
 ```
 
-Reader 媒体和书签按内容版本隔离；Reader 阅读进度单独使用：
+Reader 媒体与下载以 `bookId + resourceId + assetId` 归属，书签与阅读状态 owner 为 `resourceId`；本地精确阅读进度单独使用：
 
 ```text
-bookId + resourceId
+serverIdentity + userId + clientId + bookId + resourceId
 ```
 
 服务器切换、用户切换、登出、账户停用或 `authzVersion` 变化时，必须清理不再授权的封面、详情、媒体、搜索历史与播放状态。待同步进度先隔离，只有在确认不可恢复后才允许删除。
@@ -235,26 +235,28 @@ OpenAPI 不是当前客户端唯一真相：仓库已有关键端点 request bod
 
 ### 7.1 进度 outbox
 
-Reader 进度写入必须保留当前 Web 已验证的语义：
+Reader 进度只实现 [`mobile-reader-architecture.md`](mobile-reader-architecture.md) 定义的 Reader v4 状态机；该文档是跨 Web、Android、iOS 的唯一权威，本文不再定义兼容状态机。固定生命周期为：
 
 ```text
 本地事务先写
 → 更新 UI
-→ 1.5 秒量级防抖
-→ 单写者租约
-→ clientSequence 严格顺序
-→ 成功或过期 mutation compare-delete
-→ 网络失败退避重试
-→ 指纹/终止错误 quarantine
+→ 500 ms trailing debounce
+→ durable latest-only pending slot
+→ single-flight Reader v4 PUT（mutationId + baseRevision）
+→ 成功先持久化 confirmed revision，再以 mutationId 防误删 pending
+→ 网络失败保留 pending，生命周期恢复时重试
+→ 409 消费被拒 mutation，并在打开的会话内显示非阻断远端进度 notice
 ```
 
 关键行为：
 
 - 网络恢复、App 进入后台、离开 Reader 时尝试 flush；
-- `401` 保留队列，重新登录后在同一 server/user namespace 续传；
-- `403/404/410/422` 进入终止或人工恢复状态；
-- 进度读写不得因 Publication fingerprint 变化而拒绝；资源位置仍须属于路由指定的卷册；
-- `applied=false` 的旧序列可安全消费，不能回滚较新本地进度。
+- 可重试失败保留最新 durable pending；不可重试失败记录稳定的 terminal failure code，不建立第二套 quarantine 队列；
+- 进度读写不得因 Publication fingerprint 变化而拒绝；资源位置仍须属于路由指定的 `resourceId`；
+- 启动恢复按精确位置捕获时间确定性选择，时间相同由服务端胜出；显式深链、章节、页码或书签目标始终优先；
+- 服务端 revision 前进时，较新的本地 pending 基于最新 revision 重建 mutation，较新的服务端位置消费旧 pending；
+- 启动条件不得显示 local/cloud/cancel 阻断对话框；远端替代位置只通过可关闭、可跳转且需精确复核的非模态 notice 呈现；
+- 不得重新引入 1.5 秒防抖、单写者租约、`clientSequence`、旧序列 `applied` 状态或独立 quarantine 状态机。
 
 ### 7.2 书签同步
 
@@ -262,12 +264,12 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 ### 7.3 本地下载工件边界
 
-格式访问策略固定为：可重排格式缺少 completed 本地工件时返回 `NeedsDownload`；PDF/漫画在线返回 `RemoteStream`，同一命名空间和 Resource/Asset 存在 completed 本地工件时优先 `LocalArtifact`，网络不可用且无工件时为 `Unavailable`。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
+格式访问策略固定为：阅读和离线下载是两个独立用户意图。受支持的可重排格式、PDF 和漫画在线且缺少已验证本地工件时直接进入 Reader bootstrap，不得创建下载任务或要求先下载；同一命名空间和 Resource/Asset 存在 completed 本地工件时可直接打开本地原文件，网络不可用且无已验证工件时为不可用。只有用户明确触发的下载动作可创建下载任务。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；下载任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
 
 第一阶段可以承诺：
 
-- 已显式下载或已经可靠缓存的单个 Resource；
-- 最近使用的作品详情、封面与必要 bootstrap 快照；
+- 已显式完成、通过完整性验证并原子发布的原始 Resource/Asset 工件；
+- authenticated cover 性能缓存与 Reader navigation/range/render 缓存；
 - 本地进度 durable outbox；
 - 本地书签；
 - 明确的下载、网络失败、待同步和内容失效状态。
@@ -275,6 +277,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 第一阶段不能承诺：
 
 - 全量书库长期镜像；
+- Home、Library、Facet、Book Detail 或 Reader bootstrap 的持久 GET 页面快照；
 - 增量 catalog 同步；
 - 任意未下载内容离线可用；
 - 无冲突的多设备离线书签合并；
@@ -283,8 +286,8 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 ## 8. 必须保留的用户任务链
 
-1. **日常续读**：首页继续阅读 → 详情/卷 → Reader 或播放器 → 本地耐久进度 → 联网同步 → 首页刷新。
-2. **发现与开始**：搜索 / 书库 / 系列 / 作者 / 书架 → 保留筛选上下文的作品列表 → 详情 → 媒介/卷 → 阅读或播放。
+1. **日常续读**：首页继续阅读 → Book Detail/ReadableResource → Reader 或播放器 → 本地耐久进度 → 联网同步 → 首页刷新。
+2. **发现与开始**：搜索 / 书库 / 系列 / 作者 / 书架 → 保留筛选上下文的图书列表 → Book Detail → ReadableResource → 阅读或播放。
 3. **个人整理**：作品动作或书库选择模式 → 加入个人书架；书架 → 作品 → 返回原上下文。
 4. **在线阅读与离线下载**：所有受支持原始格式均可从详情在线进入 Reader 或播放器；已有已验证本地副本时可优先使用，但本地副本缺失不阻塞。用户可独立下载到本机 → Download Center 管理/搜索 completed 内容 → 从本地打开 → 产生本地进度 → 有网时继续正常同步。
 5. **账户安全**：我的 → 修改账户/语言/密码或退出 → 会话刷新 → 正确保留或清理私有命名空间。
@@ -309,7 +312,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 
 下列问题必须在对应 App 能力进入实现前解决或形成明确降级：
 
-1. **原生兼容握手缺失**：需要服务器 API 版本、最低客户端版本、Reader schema 与下载能力矩阵。
+1. **兼容握手验收**：`GET /api/mobile/compatibility` 已固定 protocol v3、最低客户端版本 3、Reader schema v4、Library schema v1 与 Book/Resource/Asset、受管下载 capability；仍须覆盖 base path、错误映射、旧客户端拒绝和 `serverIdentity` 变化的真机验收。
 2. **后台下载授权**：iOS/Android 后台下载是否可安全复用 Cookie Jar 必须实测；否则需资源绑定、短期有效的下载凭证。
 3. **自签名证书与重定向策略**：服务器添加流程必须定义 TLS 错误、受信任范围、base path 和多服务器切换规则。
 4. **跨 renderer 续读**：EPUB CFI/href/snapshot 与原生引擎位置兼容需用真实 EPUB/MOBI/FB2 语料验证 Web ↔ App 双向恢复。
@@ -329,7 +332,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 | 1 | 书库 | 有条件通过 | 三列封面适合快速浏览，但长标题截断、管理/上传动作拥挤；App 需原生 Grid/List 与筛选 Sheet |
 | 2 | 汉堡导航抽屉 | 不通过 | Web 全量 IA 被压进抽屉；不得作为 App 一级导航，改为四 Tab + 二级 Stack |
 | 3 | 首页 | 通过其任务优先级 | 继续阅读是最强任务，最近阅读/最近入库可独立失败；保留任务结构，不复制 Web 卡片样式 |
-| 4 | 作品详情 | 有条件通过 | 媒介切换、卷册和继续 CTA 真实；App 需原生 segmented control、稳定 CTA 与动作 Sheet |
+| 4 | Book Detail | 有条件通过 | 真实来源目录、ReadableResource 和继续 CTA 可复用；App 需原生内容浏览、稳定 CTA 与按 Web 权限过滤的动作 Menu/Sheet |
 | 5 | PDF Reader | 有条件通过 | 沉浸阅读、点按唤出工具、进度和目录有效；需原生返回、缩放、scrubber，并移除未实现的笔记承诺 |
 | 6 | 设置中心 | 不通过 | 个人设置和系统管理混在网格中；App 只保留账户/语言/下载/关于，系统管理 Web-only |
 | 7 | 入库设置 | 不通过 | 390px 下工具条和 Tab 横向溢出；若以后提供任务状态，应使用时间线/列表 + 筛选 Sheet + 详情 Stack |
@@ -347,7 +350,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 | 入口与返回 | 所属 Tab、Stack、deep link、系统返回行为明确 |
 | 真实 API | method/path、请求/响应 schema、分页/Range 行为明确 |
 | 权限 | 未登录、member、system manager、admin、资源范围分别定义 |
-| 完整状态 | loading、empty、error、offline、permission、success、conflict、stale 均有去向 |
+| 完整状态 | loading、empty、error、permission、success、conflict 均有去向；请求失败不恢复持久化 GET 页面 |
 | 本地数据 | namespace、缓存、清理、加密/安全存储和迁移策略明确 |
 | 原生形态 | iOS/Android 控件、Sheet/Menu、系统分享/文件/媒体能力明确 |
 | 组件所有权 | 按全局开发规范标记 A/System-owned、B/Native-themed、C/App-owned 或 D/Approved-motion；平台差异和精确还原区域明确 |
@@ -365,7 +368,7 @@ Reader 进度写入必须保留当前 Web 已验证的语义：
 - 书库与筛选：`apps/web/features/library/library-page.tsx`、`apps/web/features/library/api/works.ts`、`apps/web/features/library/api/filtering.ts`
 - 系列/作者：`apps/web/features/library/library-grouping-page.tsx`
 - 书架：`apps/web/features/shelves/`、`apps/api-python/app/modules/shelf/presentation/http.py`
-- 作品详情：`apps/web/features/works/`、`apps/api-python/app/modules/library/presentation/http.py`
+- Book Detail：`apps/web/features/books/`、`apps/api-python/app/modules/library/presentation/http.py`
 - Reader v4：`apps/web/features/reader/v4/`、`apps/api-python/app/modules/reader/presentation/v4.py`
 - 跨客户端 Reader 契约：`packages/reader-core/src/`
 - 音频：`apps/web/features/audio/`

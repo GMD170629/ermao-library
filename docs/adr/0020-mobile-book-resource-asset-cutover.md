@@ -2,7 +2,7 @@
 
 - 状态：Accepted（实现与真机验收进行中）
 - 日期：2026-08-23
-- 依据：ADR 0006、0010、0011、0016、0018、0019
+- 依据：ADR 0006、0011、0014、0015、0016、0018、0019
 - 类型：Mobile-only、破坏性本地契约切换
 
 ## 1. 背景
@@ -86,7 +86,10 @@ Mobile 切换建立一个不可与旧客户端混用的新握手代际：
 
 ## 5. 保留的下载边界
 
-移动端离线下载继续保留，并遵守 ADR 0010 的设备所有权与安全边界：
+移动端 completed 下载继续保留。设备拥有 managed-download manifest 与 app-private
+内容目录，命名空间为 `serverIdentity + userId + authorizationVersion`。该清单不是服务端
+页面快照，也不提供独立授权；明确 logout、身份或授权 namespace 变化时必须清理。下载
+与 Reader 访问遵守以下边界：
 
 1. 从 Reader bootstrap 的 `assets/resourceUrl` 选择原始授权媒体；
 2. 只接受 `/api/assets/{assetId}` 或 `/api/resources/{resourceId}/asset`；
@@ -95,6 +98,19 @@ Mobile 切换建立一个不可与旧客户端混用的新握手代际：
 5. 原子发布后才写 completed catalog；
 6. 取消、截断、越界、重定向异常和空间不足不得留下可读 completed 工件；
 7. Reader 优先使用同一 namespace、Book、Resource 和 Asset 的已验证本地工件。
+
+只有通过完整性和格式验证并已原子发布的工件可以标记为 completed。partial、取消、长度
+不符、格式不符、缺失或发布失败的文件均不可读。弱 ETag 不得充当 `If-Range` 验证器；在
+没有经过验证的 Last-Modified 或强校验和契约前，中断后重新开始完整传输是正确行为。
+
+Download Center 是 completed 本地下载、活动任务和失败任务的唯一发现入口，按 Book
+组织并可搜索本地 Book、作者与 Resource 元数据。Library 不提供 downloaded-only 筛选，
+不得通过网络 Library 列表推断设备清单。
+
+Shared KMP 拥有任务状态机、Reader 本地工件选择策略、bootstrap 映射、鉴权分块传输契约
+与 catalog port。Android/iOS 拥有 app-private 文件、staging、原子 manifest 持久化、平台
+生命周期协调、原生导航和破坏性确认。后台继续下载只有在 Cookie、base path、TLS、进程
+终止和锁屏行为通过对应物理设备验收后才能作为发布能力。
 
 目录型 Resource 若服务端没有单一可下载原始工件，保持不可下载，不在客户端合成 ZIP、
 EPUB 或其他派生出版物。

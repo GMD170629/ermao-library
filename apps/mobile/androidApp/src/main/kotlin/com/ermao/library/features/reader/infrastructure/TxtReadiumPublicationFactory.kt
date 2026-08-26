@@ -85,8 +85,11 @@ internal object StrictTxtDecoder {
         val decoded = candidates.firstNotNullOfOrNull { (charset, offset) ->
             decodeOrNull(bytes, charset, offset)
         } ?: throw IllegalArgumentException("TXT publication encoding is unsupported")
-        require('\u0000' !in decoded) { "TXT publication contains NUL characters" }
-        return decoded
+        val withoutTrailingPadding = decoded.trimEnd('\u0000')
+        require(withoutTrailingPadding.isNotEmpty() && '\u0000' !in withoutTrailingPadding) {
+            "TXT publication contains NUL characters"
+        }
+        return withoutTrailingPadding
     }
 
     private fun decodeOrNull(bytes: ByteArray, charset: Charset, offset: Int): String? = try {

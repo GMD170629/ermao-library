@@ -39,16 +39,6 @@ enum ContentClientError: Error, Equatable, Sendable {
     case invalidResponse
 }
 
-enum ContentProvenance: Sendable {
-    case network
-}
-
-struct ContentFetch<Value: Sendable>: Sendable {
-    let value: Value
-    let provenance: ContentProvenance
-    let isStale: Bool
-}
-
 enum LibraryScope: String, Codable, Hashable, Sendable {
     case books
     case series
@@ -72,11 +62,6 @@ enum LibraryFacetSort: String, Codable, Hashable, Sendable {
     case recentRead
 }
 
-enum OfflineFilterAvailability: Equatable, Sendable {
-    case available
-    case unavailable(reasonCode: String)
-}
-
 enum LibraryReadingStatus: String, Codable, Hashable, Sendable {
     case unread = "UNREAD"
     case reading = "READING"
@@ -90,10 +75,9 @@ enum FacetKind: String, Codable, Hashable, Sendable {
 
 struct LibraryFilters: Codable, Equatable, Hashable, Sendable {
     var readingStatus: LibraryReadingStatus?
-    var downloadedOnly = false
 
-    var isEmpty: Bool { readingStatus == nil && !downloadedOnly }
-    var count: Int { (readingStatus == nil ? 0 : 1) + (downloadedOnly ? 1 : 0) }
+    var isEmpty: Bool { readingStatus == nil }
+    var count: Int { readingStatus == nil ? 0 : 1 }
 }
 
 struct BooksQuery: Equatable, Hashable, Sendable {
@@ -472,12 +456,9 @@ protocol ContentClient: Sendable {
     func fetchRecentReading(context: ContentRequestContext, limit: Int) async throws -> [BookCard]
     func fetchRecentAdded(context: ContentRequestContext, limit: Int) async throws -> [BookCard]
     func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage
-    func fetchBooksResult(context: ContentRequestContext, query: BooksQuery) async throws -> ContentFetch<BookPage>
     func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption]
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage
-    func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage>
     func fetchFacet(context: ContentRequestContext, query: FacetQuery) async throws -> FacetPage
-    func fetchFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage>
     func fetchBookDetail(context: ContentRequestContext, query: BookDetailQuery) async throws -> BookDetailContent
     func fetchBookResources(
         context: ContentRequestContext,
@@ -551,18 +532,6 @@ extension ContentClient {
         pageSize: Int
     ) async throws -> BookResourceDetailPage {
         throw ContentClientError.invalidResponse
-    }
-
-    func fetchBooksResult(context: ContentRequestContext, query: BooksQuery) async throws -> ContentFetch<BookPage> {
-        ContentFetch(value: try await fetchBooks(context: context, query: query), provenance: .network, isStale: false)
-    }
-
-    func fetchGroupingsResult(context: ContentRequestContext, query: GroupingsQuery) async throws -> ContentFetch<GroupingPage> {
-        ContentFetch(value: try await fetchGroupings(context: context, query: query), provenance: .network, isStale: false)
-    }
-
-    func fetchFacetResult(context: ContentRequestContext, query: FacetQuery) async throws -> ContentFetch<FacetPage> {
-        ContentFetch(value: try await fetchFacet(context: context, query: query), provenance: .network, isStale: false)
     }
 
 }

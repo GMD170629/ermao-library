@@ -1,0 +1,4 @@
+framework module ErmaoArchiveCore {
+    umbrella header "ErmaoArchiveCore.h"
+    export *
+}

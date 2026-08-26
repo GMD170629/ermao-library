@@ -3,7 +3,7 @@ import SwiftUI
 struct LibraryView: View {
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let openWork: (String) -> Void
     let openFacet: (FacetKind, String) -> Void
 
@@ -17,7 +17,7 @@ struct LibraryView: View {
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         onUnauthorized: @escaping @MainActor () -> Void,
         openWork: @escaping (String) -> Void,
         openFacet: @escaping (FacetKind, String) -> Void
@@ -31,7 +31,6 @@ struct LibraryView: View {
             wrappedValue: LibraryStore(
                 context: context,
                 client: client,
-                cache: cache,
                 onUnauthorized: onUnauthorized
             )
         )
@@ -63,7 +62,6 @@ struct LibraryView: View {
         .sheet(isPresented: $presentsFilter) {
             LibraryFilterSheet(
                 applied: store.current.filters,
-                offlineAvailability: store.offlineFilterAvailability,
                 onApply: store.applyFilters
             )
             .presentationDetents([.medium, .large])
@@ -119,7 +117,7 @@ struct LibraryView: View {
     private var resultsHeader: some View {
         VStack(alignment: .leading, spacing: .space1) {
             HStack(spacing: .space1) {
-                if case .ready(_, let total, _, _) = store.current.results {
+                if case .ready(_, let total) = store.current.results {
                     Text(
                         String(
                             format: String(localized: "library.results.works.format", locale: locale),
@@ -129,13 +127,6 @@ struct LibraryView: View {
                     )
                         .appTextStyle(.label)
                         .foregroundStyle(theme.textSecondary)
-                }
-                if case .ready(_, _, _, let refreshing) = store.current.results,
-                   refreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(theme.brandAccent)
-                        .accessibilityLabel(Text("library.stale.refreshing"))
                 }
                 Spacer()
                 if store.selectedScope == .books {
@@ -232,7 +223,7 @@ struct LibraryView: View {
             .frame(minHeight: 360)
         case .empty:
             emptyResultsView
-        case .ready(let items, _, _, _):
+        case .ready(let items, _):
             worksContent(items.compactMap(\.book))
             PaginationStatusView(
                 isLoading: store.current.isLoadingNextPage,
@@ -406,7 +397,7 @@ struct LibraryView: View {
 struct WorkCollectionView: View {
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let kind: HomeCollectionKind
     let openWork: (String) -> Void
 
@@ -416,7 +407,7 @@ struct WorkCollectionView: View {
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         kind: HomeCollectionKind,
         onUnauthorized: @escaping @MainActor () -> Void,
         openWork: @escaping (String) -> Void
@@ -430,7 +421,6 @@ struct WorkCollectionView: View {
             wrappedValue: LibraryStore(
                 context: context,
                 client: client,
-                cache: cache,
                 onUnauthorized: onUnauthorized
             )
         )
@@ -478,7 +468,7 @@ struct WorkCollectionView: View {
                 actionTitle: "common.retry",
                 action: store.reload
             )
-        case .ready(let items, _, _, _):
+        case .ready(let items, _):
             WorkGrid(
                 works: items.compactMap(\.book),
                 context: context,
@@ -519,7 +509,7 @@ private struct GroupingCoverStackView: View {
     let works: [BookCard]
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let isCompact: Bool
 
     private var coverWidth: CGFloat { isCompact ? 44 : 56 }
@@ -562,14 +552,10 @@ private struct LibraryFilterSheet: View {
 
     init(
         applied: LibraryFilters,
-        offlineAvailability: OfflineFilterAvailability,
         onApply: @escaping (LibraryFilters) -> Void
     ) {
         self.onApply = onApply
-        _ = offlineAvailability
-        var normalized = applied
-        normalized.downloadedOnly = false
-        _draft = State(initialValue: normalized)
+        _draft = State(initialValue: applied)
     }
 
     var body: some View {

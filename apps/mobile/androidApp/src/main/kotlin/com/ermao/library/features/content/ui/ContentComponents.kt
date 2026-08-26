@@ -43,15 +43,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.components.WarmPageContentMessage
 import com.ermao.library.ui.components.WarmPageContentMessageKind
-import com.ermao.library.ui.components.WarmPageStatusBanner
-import com.ermao.library.ui.components.WarmPageStatusBannerKind
 import com.ermao.library.ui.components.rememberForwardProgress
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
@@ -69,6 +66,27 @@ enum class CoverSize {
     Medium,
     Large,
 }
+
+internal fun compactCoverGridColumnCount(
+    compactColumns: Int,
+    largeTextColumns: Int,
+    fontScale: Float,
+): Int = if (fontScale >= COMPACT_COVER_LARGE_TEXT_SCALE) {
+    minOf(largeTextColumns, compactColumns)
+} else {
+    compactColumns
+}
+
+internal fun compactCoverGridItemWidth(
+    availableWidth: Dp,
+    horizontalGap: Dp,
+    columns: Int,
+): Dp {
+    require(columns > 0)
+    return ((availableWidth - horizontalGap * (columns - 1)) / columns).coerceAtLeast(0.dp)
+}
+
+private const val COMPACT_COVER_LARGE_TEXT_SCALE = 1.3f
 
 @Composable
 fun BookCover(
@@ -378,16 +396,6 @@ fun ReadingProgressTrack(
 
 internal fun responsiveCoverColumnCount(availableWidth: Dp, fontScale: Float): Int =
     if (availableWidth >= 360.dp && fontScale <= 1.15f) 3 else 2
-
-@Composable
-fun ContentStatusBanner(freshness: ContentFreshness, modifier: Modifier = Modifier) {
-    if (freshness == ContentFreshness.Fresh) return
-    WarmPageStatusBanner(
-        kind = WarmPageStatusBannerKind.Stale,
-        message = stringResource(R.string.content_stale_banner),
-        modifier = modifier,
-    )
-}
 
 @Composable
 fun ContentAreaMessage(

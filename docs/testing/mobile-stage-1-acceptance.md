@@ -1,14 +1,18 @@
 # Mobile Stage 1 acceptance record
 
-- Scope: server profiles, first-run setup, login, reauthentication, offline
-  entitlement, private-data namespaces, and authenticated-shell gating
+- Scope: server profiles, first-run setup, login, reauthentication,
+  verified-session restoration, private-data namespaces, and authenticated-shell gating
 - Status: implementation and acceptance in progress
-- Stage 0 prerequisite: Shared, Android, backend, emulator deployment, and real
-  FastAPI base-path/TLS evidence passed; the physical-device iOS gate remains pending
+- Stage 0 prerequisite: historical Shared, Android, backend, and real FastAPI
+  base-path/TLS evidence exists; current Android and iOS physical-device gates remain pending
 - Rule: a missing iOS environment may defer iOS evidence, but it does not convert the
   iOS job into an allowed failure and does not permit Stage 1 to be marked complete
 
-## Evidence collected on 2026-08-12
+## Historical evidence collected on 2026-08-12
+
+The following predates ADR 0015 and the physical-device-default policy. It remains evidence
+only for the journeys actually executed and does not satisfy the current session contract or
+runtime gates.
 
 - Ruff format and lint passed for the Mobile compatibility and authentication contract
   files.
@@ -73,6 +77,7 @@ Shared and Android:
 ```bash
 cd apps/mobile
 ./gradlew --stacktrace \
+  verifyMobileOfflineContract \
   verifyDesignTokens \
   :shared:testAndroidHostTest \
   :androidApp:testDebugUnitTest \
@@ -86,7 +91,7 @@ Set `IOS_DEVICE_ID` to the physical-device identifier shown by `xcodebuild -show
 
 ```bash
 cd apps/mobile
-./gradlew verifyDesignTokens :shared:compileKotlinIosArm64
+./gradlew verifyMobileOfflineContract verifyDesignTokens :shared:compileKotlinIosArm64
 cd ../..
 xcodebuild \
   -project apps/mobile/iosApp/ErmaoLibrary.xcodeproj \
@@ -118,8 +123,8 @@ servers.
 - Exactly one profile is active. A failed switch leaves the previous profile active and
   does not send its cookie to the target server.
 - Editing an active server identity follows the same isolation rules as switching.
-- Removing a profile clearly accounts for its cookie, entitlement, cache, downloads, and
-  pending outbox; cleanup is idempotent and never silently discards pending work.
+- Removing a profile clearly accounts for its Cookie, verified-session record, cover cache,
+  downloads, Reader state, and pending synchronization; cleanup is idempotent.
 - System trust is the default. The insecure TLS exception requires the risk page and a
   native destructive confirmation, is stored per profile, and never becomes global.
 - Incompatible servers cannot reach setup/login or bypass compatibility checks.
@@ -135,19 +140,21 @@ servers.
   cached private shell.
 - Setup/login success is followed by `/api/auth/me`. Only a verified response may open the
   four-tab shell.
-- Force-stop and cold launch restore only the active profile's encrypted cookie, then
-  revalidate through `/api/auth/me` before showing private content.
+- Force-stop and cold launch with a matching verified-session record immediately restore the
+  active profile's ordinary Shell, then continue compatibility and `/api/auth/me` validation.
 
-### Reauthentication, entitlement, and namespace
+### Reauthentication, verified session, and namespace
 
 - An explicit protected-resource `401` opens full-screen Reauthenticate and preserves
   pending sync work. It never leaves the old shell visible underneath.
-- Each successful `/api/auth/me` records a 30-day entitlement bound to
-  `serverIdentity + userId`. Expiry boundaries are deterministic; a wall-clock rollback
-  cannot extend access and is treated as expired.
-- Offline grace exposes only complete downloads, local bookmarks, and pending sync state.
-  Expired entitlement removes the offline entry. Explicit logout, account disablement, or
-  server-identity mismatch revokes it immediately.
+- Each successful `/api/auth/me` records a non-expiring `VerifiedSessionRecord` containing
+  profile/server/user identity, the authorization snapshot/version, and validation time.
+  It has no status, client-side expiry, remaining-days calculation, or separate Shell.
+- Temporary network, TLS, parsing, and `5xx` failures preserve an already restored ordinary
+  Shell. Explicit `401`, account disablement, or server-identity mismatch clears the Cookie
+  and verified-session record immediately.
+- Completed downloads remain discoverable through Download Center; cover/Reader caches,
+  progress, bookmarks, and preferences do not authorize first use or restore GET pages.
 - Reauthenticating as the same server/user restores only a validated navigation intent.
   A different user clears all four tab stacks and opens Home.
 - Private data is namespaced by `serverIdentity + userId + authzVersion`. An authorization
@@ -163,8 +170,8 @@ App-owned content may use platform-specific visual regression images.
 
 Minimum device coverage:
 
-- Android: minimum supported API plus API 36 emulator, and one physical device for
-  process death, Keystore, TLS, network transitions, and system back.
+- Android: one explicitly addressed non-emulator physical device for install,
+  instrumentation, process death, Keystore, TLS, network transitions, and system back.
 - iOS: at least one connected physical iPhone for every build/test gate, including
   process death, Keychain, TLS, Dynamic Type, VoiceOver, and the supported OS-version matrix.
 
@@ -172,14 +179,14 @@ Minimum device coverage:
 
 Stage 1 is complete only when all of the following are true on the same candidate revision:
 
-- backend, Shared, Android, Android emulator, KMP iOS, Xcode build, and XCTest gates pass
+- backend, Shared, Android physical-device, KMP iOS, signed `iphoneos`, and XCTest gates pass
   without new skips, flaky retries, warnings, or weakened checks;
-- Server Center, native Setup, Login, Reauthenticate, 30-day entitlement, logout, server
+- Server Center, native Setup, Login, Reauthenticate, verified-session restoration, logout, server
   switching/removal, and namespace invalidation contain no Stage 0 placeholders or
   fallback-to-success paths;
 - the disposable real-server journeys pass for fresh setup, login, process restart,
-  two-server isolation, TLS risk, `401`, disabled account, entitlement expiry, and
-  authorization-version changes;
+  two-server isolation, TLS risk, transient network failure, `401`, disabled account,
+  server-identity change, and authorization-version changes;
 - passwords, cookies, certificate details, internal paths, and private payloads do not
   appear in logs or plaintext preferences;
 - Phase 6 states have bilingual, light/dark, large-text, accessibility, and platform-back

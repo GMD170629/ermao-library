@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -14,42 +14,27 @@ from app.bootstrap.imports import (
     get_library_scan_settings,
     update_library_scan_settings,
 )
-from app.bootstrap.media import media_streaming
 from app.bootstrap.system import (
     clear_system_events_with_audit,
     configured_max_event_bytes,
-    get_setting,
     library_import_dashboard_snapshot,
     list_settings,
     list_system_events_page,
     management_overview_snapshot,
-    persist_opds_settings_update,
     persist_system_settings_update,
     prepare_system_event,
     run_system_health_checks,
     system_event_storage_view,
 )
 from app.contracts.http_errors import ErrorResponses
-from app.core.authorization import can_manage_system
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.modules.backup.application.restore import BackupRecordValidationError
 from app.modules.imports.public import (
     LibraryScanSettings,
-)
-from app.modules.opds.public import (
-    OPDS_ENABLED_SETTING_KEY,
-    OPDS_PUBLIC_BASE_URL_SETTING_KEY,
-    OpdsPublicBaseUrlInvalid,
-    OpdsPublicBaseUrlRequired,
-    resolve_opds_settings,
-    validate_opds_activation,
 )
 from app.modules.system.application.queries import (
     SettingsUpdateError,
     app_config_payload,
-    backup_created_payload,
-    backup_detail_payload,
     dashboard_system_status_payload,
     management_events_payload,
     parse_event_date_bounds,
@@ -60,12 +45,6 @@ from app.modules.system.presentation.health_schemas import SystemManagerRequired
 from app.modules.system.presentation.schemas import (
     AppConfigPayload,
     AppConfigResponse,
-    BackupArchiveResponse,
-    BackupDeleteResponse,
-    BackupResponse,
-    BackupRestoreRequest,
-    BackupRestoreResponse,
-    BackupsResponse,
     ClearedEventsPayload,
     ClearedEventsResponse,
     DashboardSystemStatusPayload,
@@ -76,18 +55,11 @@ from app.modules.system.presentation.schemas import (
     ManagementEventsResponse,
     ManagementOverviewPayload,
     ManagementOverviewResponse,
-    OpdsSystemSettingsPayload,
-    OpdsSystemSettingsResponse,
     SystemSettingsResponse,
     UpdateLibraryScanSystemSettingsRequest,
-    UpdateOpdsSystemSettingsRequest,
     UpdateSystemSettingsRequest,
 )
 from app.schemas.responses import fail, ok
-from app.services.backup_service import BackupFormatError
-from app.services.backup_service import create_backup as create_backup_archive
-from app.services.backup_service import list_backups as list_backup_archives
-from app.services.backup_service import restore_backup as restore_backup_archive
 from app.services.import_preferences import (
     IMPORT_PREFERENCE_KEYS,
     normalize_import_setting_value,
@@ -149,19 +121,6 @@ def get_system_settings(
     return ok(system_settings_payload(list_settings(db)))
 
 
-def _opds_settings_payload(db: Session) -> OpdsSystemSettingsPayload:
-    snapshot = resolve_opds_settings(
-        get_setting(db, OPDS_ENABLED_SETTING_KEY, None),
-        stored_public_base_url=get_setting(db, OPDS_PUBLIC_BASE_URL_SETTING_KEY, None),
-    )
-    return OpdsSystemSettingsPayload(
-        enabled=snapshot.enabled,
-        configured=snapshot.configured,
-        publicBaseUrl=snapshot.public_base_url,
-        catalogUrl=snapshot.catalog_url,
-    )
-
-
 def _library_scan_settings_payload(
     db: Session, settings: Settings
 ) -> LibraryScanSystemSettingsPayload:
@@ -217,81 +176,6 @@ def update_library_scan_system_settings(
             intervalMinutes=updated.interval_minutes,
         )
     )
-
-
-@router.get("/system-settings/opds", response_model=OpdsSystemSettingsResponse)
-def get_opds_system_settings(
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> OpdsSystemSettingsResponse | Response:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if not can_manage_system(user):
-        return fail(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    return ok(_opds_settings_payload(db))
-
-
-@router.put("/system-settings/opds", response_model=OpdsSystemSettingsResponse)
-def update_opds_system_settings(
-    payload: UpdateOpdsSystemSettingsRequest,
-    request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> OpdsSystemSettingsResponse | Response:
-    user, auth_error = _auth(db, request, settings)
-    if auth_error:
-        return auth_error
-    if not can_manage_system(user):
-        return fail(
-            "需要系统管理权限",
-            status_code=403,
-            code="SYSTEM_MANAGER_REQUIRED",
-        )
-    try:
-        normalized_public_base_url = validate_opds_activation(
-            payload.enabled, payload.public_base_url
-        )
-    except OpdsPublicBaseUrlRequired:
-        return fail(
-            "启用 OPDS 前必须填写公开 URL",
-            status_code=409,
-            code="OPDS_PUBLIC_BASE_URL_REQUIRED",
-        )
-    except OpdsPublicBaseUrlInvalid:
-        return fail(
-            "OPDS 公开 URL 必须是有效的 HTTP 或 HTTPS 地址，"
-            "且不能包含凭据、查询参数或片段",
-            status_code=400,
-            code="OPDS_PUBLIC_BASE_URL_INVALID",
-        )
-
-    prepared_settings: dict[str, object] = {
-        OPDS_ENABLED_SETTING_KEY: payload.enabled,
-        OPDS_PUBLIC_BASE_URL_SETTING_KEY: normalized_public_base_url,
-    }
-    prepared_event = prepare_system_event(
-        level="info",
-        source="system",
-        actor_type="admin",
-        actor_id=user.id,
-        action="opds.settings.updated",
-        target_type="settings",
-        message="已开启 OPDS" if payload.enabled else "已关闭 OPDS",
-        metadata={"enabled": payload.enabled},
-    )
-
-    persist_opds_settings_update(
-        db,
-        setting_values=prepared_settings,
-        event=prepared_event,
-    )
-    return ok(_opds_settings_payload(db))
 
 
 @router.put("/system-settings", response_model=SystemSettingsResponse)
@@ -467,136 +351,4 @@ def clear_system_events(
         data=ClearedEventsPayload.model_validate(
             {"deleted": deleted, "storage": _event_storage_snapshot(db)}
         )
-    )
-
-
-@router.get("/backups", response_model=BackupsResponse)
-def list_backups(
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    BackupsResponse | Response,
-    ErrorResponses(SystemManagerRequiredError),
-]:
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    return ok({"backups": list_backup_archives(settings)})
-
-
-@router.get("/backups/{backup_id}", response_model=BackupResponse)
-def get_backup(
-    backup_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    BackupResponse | Response,
-    ErrorResponses(SystemManagerRequiredError),
-]:
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
-    if not path.exists():
-        return fail("备份不存在", status_code=404)
-    return ok(backup_detail_payload(backup_id, path, list_backup_archives(settings)))
-
-
-@router.post("/backups", status_code=201, response_model=BackupResponse)
-def create_backup(
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    BackupResponse | Response,
-    ErrorResponses(SystemManagerRequiredError),
-]:
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    backup = create_backup_archive(db, settings)
-    return ok(backup_created_payload(backup), status_code=201)
-
-
-@router.post("/backups/{backup_id}/restore", response_model=BackupRestoreResponse)
-def restore_backup(
-    backup_id: str,
-    request: Request,
-    _payload: BackupRestoreRequest | None = Body(default=None),
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    BackupRestoreResponse | Response,
-    ErrorResponses(SystemManagerRequiredError),
-]:
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
-    if not path.exists():
-        return fail("备份不存在", status_code=404)
-    try:
-        result = restore_backup_archive(db, settings, backup_id)
-    except (BackupFormatError, BackupRecordValidationError) as exc:
-        return fail(
-            str(exc),
-            status_code=400,
-            code="BACKUP_CONTENT_INVALID",
-        )
-    except ValueError as exc:
-        if str(exc) == "BACKUP_REVISION_UNSUPPORTED":
-            return fail(
-                "备份数据库版本不受支持，请使用旧版应用恢复后再升级。 "
-                "/ Unsupported backup revision; restore it with the old "
-                "application before upgrading.",
-                status_code=400,
-                code="BACKUP_REVISION_UNSUPPORTED",
-            )
-        return fail(str(exc), status_code=400)
-    return ok(result)
-
-
-@router.delete("/backups/{backup_id}", response_model=BackupDeleteResponse)
-def delete_backup(
-    backup_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[
-    BackupDeleteResponse | Response,
-    ErrorResponses(SystemManagerRequiredError),
-]:
-    _user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    path = settings.resolved_storage_root / "backups" / f"{backup_id}.zip"
-    if path.exists():
-        path.unlink()
-        return ok({"deleted": True, "id": backup_id})
-    return ok({"deleted": False, "id": backup_id})
-
-
-@router.get(
-    "/backups/{backup_id}/download",
-    response_class=BackupArchiveResponse,
-)
-def download_backup(
-    backup_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> Annotated[Response, ErrorResponses(SystemManagerRequiredError)]:
-    user, auth_error = _system_manager(db, request, settings)
-    if auth_error:
-        return auth_error
-    return media_streaming.send_file(
-        settings.resolved_storage_root / "backups" / f"{backup_id}.zip",
-        request,
-        user.id,
-        media_type="application/zip",
-        name=f"{backup_id}.zip",
-        route="backup-download",
-        asset_id=backup_id,
     )

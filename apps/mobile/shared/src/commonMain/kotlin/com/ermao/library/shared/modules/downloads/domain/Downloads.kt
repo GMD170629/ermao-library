@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.downloads.domain
 
+private val DOWNLOAD_IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+
 data class DownloadNamespace(
     val serverIdentity: String,
     val userId: String,
@@ -17,6 +19,8 @@ data class DownloadNamespace(
 
 enum class DownloadReaderType { Reflowable, Pdf, Comic, Audio }
 
+enum class DownloadArtifactKind { SingleOriginalAsset, OriginalPageSet }
+
 data class DownloadSource(
     val apiPath: String,
     val mimeType: String,
@@ -26,6 +30,17 @@ data class DownloadSource(
         require(apiPath.isSafeMediaApiPath())
         require(mimeType.isNotBlank())
         require(totalBytes > 0)
+    }
+}
+
+data class DownloadBundleMember(
+    val assetId: String,
+    val sequenceIndex: Int,
+    val source: DownloadSource,
+) {
+    init {
+        require(assetId.isNotBlank())
+        require(sequenceIndex >= 0)
     }
 }
 
@@ -54,8 +69,10 @@ data class DownloadDescriptor(
     val source: DownloadSource,
     val resourceIndex: Double? = null,
     val resourceSortOrder: Int? = null,
-    /** False when the server exposes only a streaming representation (for example IMAGE_DIR). */
     val isDownloadable: Boolean = true,
+    val artifactKind: DownloadArtifactKind = DownloadArtifactKind.SingleOriginalAsset,
+    /** Empty for legacy single-file records; normalized through [bundleMembers]. */
+    val members: List<DownloadBundleMember> = emptyList(),
 ) {
     init {
         require(bookTitle.isNotBlank())
@@ -64,7 +81,29 @@ data class DownloadDescriptor(
         require(coverApiPath == null || coverApiPath.isSafeApiPath())
         require(resourceIndex == null || resourceIndex.isFinite())
         require(resourceSortOrder == null || resourceSortOrder >= 0)
+        require(isDownloadable)
+        when (artifactKind) {
+            DownloadArtifactKind.SingleOriginalAsset -> require(
+                members.isEmpty() ||
+                    (members.size == 1 &&
+                        members.single().assetId == identity.assetId &&
+                        members.single().sequenceIndex == 0 &&
+                        members.single().source == source),
+            ) { "Single-original download has inconsistent members" }
+            DownloadArtifactKind.OriginalPageSet -> {
+                require(readerType == DownloadReaderType.Comic && format.equals("image_dir", ignoreCase = true))
+                require(members.isNotEmpty())
+                require(members.map(DownloadBundleMember::sequenceIndex) == members.indices.toList())
+                require(members.map(DownloadBundleMember::assetId).distinct().size == members.size)
+                require(members.all { it.source.mimeType in DOWNLOAD_IMAGE_MIME_TYPES })
+            }
+        }
     }
+
+    val bundleMembers: List<DownloadBundleMember>
+        get() = if (members.isEmpty()) listOf(DownloadBundleMember(identity.assetId, 0, source)) else members
+
+    val totalBytes: Long get() = bundleMembers.sumOf { it.source.totalBytes }
 }
 
 data class CompletedDownloadArtifact(
@@ -76,7 +115,7 @@ data class CompletedDownloadArtifact(
 ) {
     init {
         require(localReference.isNotBlank())
-        require(verifiedBytes == descriptor.source.totalBytes)
+        require(verifiedBytes == descriptor.totalBytes)
         require(completedAtEpochMillis > 0)
         require(lastOpenedAtEpochMillis == null || lastOpenedAtEpochMillis > 0)
     }
@@ -106,7 +145,7 @@ data class DownloadTask(
 ) {
     init {
         require(id.isNotBlank())
-        require(transferredBytes in 0..descriptor.source.totalBytes)
+        require(transferredBytes in 0..descriptor.totalBytes)
         require((status == DownloadTaskStatus.Completed) == (artifact != null))
         require(artifact == null || artifact.identity == descriptor.identity)
         require(failureCode == null || failureCode.isNotBlank())
@@ -132,7 +171,7 @@ fun DownloadTask.transition(event: DownloadTaskEvent): DownloadTask = when (even
     }
     is DownloadTaskEvent.BytesTransferred -> {
         require(status == DownloadTaskStatus.Downloading)
-        require(event.totalTransferredBytes in transferredBytes..descriptor.source.totalBytes)
+        require(event.totalTransferredBytes in transferredBytes..descriptor.totalBytes)
         copy(transferredBytes = event.totalTransferredBytes)
     }
     DownloadTaskEvent.Pause -> {
@@ -164,7 +203,7 @@ fun DownloadTask.transition(event: DownloadTaskEvent): DownloadTask = when (even
         require(event.artifact.identity == descriptor.identity)
         copy(
             status = DownloadTaskStatus.Completed,
-            transferredBytes = descriptor.source.totalBytes,
+            transferredBytes = descriptor.totalBytes,
             failureCode = null,
             artifact = event.artifact,
         )

@@ -1,9 +1,9 @@
 # Mobile Reader Architecture
 
 Status: Reader v4 cross-format exact-progress contract implemented; physical-device conformance pending
-Last updated: 2026-08-23
+Last updated: 2026-08-26
 
-This document is the architecture contract for the native Reader and its Reader v4 cross-platform progress integration. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
+This document is the single authoritative architecture contract for the native Reader and its Reader v4 cross-platform progress integration. If a Mobile phase document or historical acceptance artifact describes a different progress state machine, this document wins and the conflicting material must be removed rather than implemented as compatibility behavior. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
 ## 1. Scope and exactness boundary
 
@@ -267,7 +267,8 @@ Automated contracts must cover:
 
 - mutation idempotency and monotonic revision;
 - stale base revision producing a session remote notice without immediate replay;
-- startup pending-versus-server local/cloud/cancel decisions;
+- deterministic non-blocking startup restoration: explicit targets win; otherwise the newest valid exact location wins, server wins equal capture times, invalid pending state is retired, and newer local pending state rebases onto the fresh revision;
+- absence of startup local/cloud/cancel dialogs and of legacy debounce, lease, `clientSequence`, applied-sequence, or quarantine state machines;
 - progress GET null/200/304, revision ETag, same-client and same-anchor suppression;
 - accepting a remote position only after exact post-navigation verification;
 - the next genuinely different exact location rebasing onto the remote revision;

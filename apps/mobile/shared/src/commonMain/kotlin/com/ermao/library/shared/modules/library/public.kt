@@ -53,7 +53,6 @@ fun createLibraryFilters(
     readingStatus: ReadingStatus?,
 ): LibraryFilters = LibraryFilters(
     readingStatus = readingStatus,
-    downloadedOnly = false,
 )
 
 /** Swift-friendly access to the shared Web-parity Work Detail selection policy. */

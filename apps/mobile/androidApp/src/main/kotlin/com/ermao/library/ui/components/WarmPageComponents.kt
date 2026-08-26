@@ -9,10 +9,6 @@ enum class WarmPageContentMessageKind {
     Error,
 }
 
-enum class WarmPageStatusBannerKind {
-    Stale,
-}
-
 /** Compatibility bridge for pages migrated before the v2 visual component layer. */
 @Composable
 fun WarmPageContentMessage(
@@ -43,17 +39,5 @@ fun WarmPageContentMessage(
             retryLabel = actionLabel,
             onRetry = onAction,
         )
-    }
-}
-
-/** Compatibility bridge. Stale deliberately renders as an uncontained activity row. */
-@Composable
-fun WarmPageStatusBanner(
-    kind: WarmPageStatusBannerKind,
-    message: String,
-    modifier: Modifier = Modifier,
-) {
-    when (kind) {
-        WarmPageStatusBannerKind.Stale -> WarmPageStaleStatus(message, modifier)
     }
 }

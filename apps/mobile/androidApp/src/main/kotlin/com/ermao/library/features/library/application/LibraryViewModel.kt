@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.GroupingCard
@@ -13,7 +12,6 @@ import com.ermao.library.features.content.model.LibraryScope
 import com.ermao.library.features.content.model.ReadingFilter
 import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.WorksFilters
-import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toCard
 import com.ermao.library.features.content.model.toFacetKind
 import com.ermao.library.features.content.model.toShared
@@ -23,11 +21,9 @@ import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.modules.library.GroupingQuery
 import com.ermao.library.shared.modules.library.LibraryFilters
 import com.ermao.library.shared.modules.library.LibraryPage
-import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.shared.modules.library.ReadingStatus
 import com.ermao.library.shared.modules.library.BooksQuery
 import com.ermao.library.shared.core.network.AppErrorKind
-import com.ermao.library.shared.modules.library.application.FilterCommitResult
 import com.ermao.library.shared.modules.library.application.LibraryDiscoveryRuntime
 import com.ermao.library.shared.modules.library.application.LibraryScrollAnchor
 import kotlinx.coroutines.CancellationException
@@ -57,7 +53,6 @@ data class ScopeUiState(
     val isLoadingMore: Boolean = false,
     val errorCode: String? = null,
     val paginationErrorCode: String? = null,
-    val freshness: ContentFreshness = ContentFreshness.Fresh,
     val scrollAnchor: ScrollAnchor = ScrollAnchor(),
 )
 
@@ -67,9 +62,6 @@ data class LibraryUiState(
     val selectedLibraryId: String? = null,
     val scopes: Map<LibraryScope, ScopeUiState> = LibraryScope.entries.associateWith { ScopeUiState() },
     val filterDraft: WorksFilters? = null,
-    val offlineFilterAvailability: OfflineFilterAvailability = OfflineFilterAvailability.Unavailable(
-        "MANAGED_DOWNLOADS_UNAVAILABLE",
-    ),
     val selectedBookId: String? = null,
 ) {
     val current: ScopeUiState get() = scopes.getValue(selectedScope)
@@ -170,7 +162,7 @@ class LibraryViewModel(
 
     fun applyFilter() {
         val draft = mutableUiState.value.filterDraft ?: return
-        if (discoveryRuntime.applyFilters(draft.toSharedFilters()) !is FilterCommitResult.Applied) return
+        discoveryRuntime.applyFilters(draft.toSharedFilters())
         updateScope(LibraryScope.Books) { it.copy(filters = draft) }
         mutableUiState.update { it.copy(filterDraft = null) }
         if (mutableUiState.value.selectedScope == LibraryScope.Books) loadScope(LibraryScope.Books, reset = true)
@@ -217,22 +209,20 @@ class LibraryViewModel(
         val page = if (reset) 1 else current.loadedPage + 1
         val sharedScope = scope.toDiscoveryScope()
         val requestToken = if (reset) {
-            discoveryRuntime.beginInitialRequest(
-                sharedScope,
-                retainsVisibleContent = current.works.isNotEmpty() || current.groups.isNotEmpty(),
-            )
+            discoveryRuntime.beginInitialRequest(sharedScope)
         } else {
             discoveryRuntime.beginNextPage(sharedScope, page) ?: return
         }
         updateScope(scope) {
-            if (reset && it.works.isEmpty() && it.groups.isEmpty()) {
-                it.copy(isLoading = true, errorCode = null, paginationErrorCode = null)
-            } else if (reset) {
+            if (reset) {
                 it.copy(
-                    isLoading = false,
+                    works = emptyList(),
+                    groups = emptyList(),
+                    total = 0,
+                    loadedPage = 0,
+                    isLoading = true,
                     errorCode = null,
                     paginationErrorCode = null,
-                    freshness = ContentFreshness.Stale,
                 )
             }
             else it.copy(isLoadingMore = true, paginationErrorCode = null)
@@ -249,14 +239,9 @@ class LibraryViewModel(
                 }
                 when (result) {
                     is ContentResult.Content -> {
-                        if (discoveryRuntime.acceptPage(
-                                requestToken,
-                                result.value.items.isEmpty(),
-                                result.source,
-                                result.isStale,
-                            )
+                        if (discoveryRuntime.acceptPage(requestToken, result.value.items.isEmpty())
                         ) {
-                            applyPage(scope, result.value, result.freshness(), reset)
+                            applyPage(scope, result.value, reset)
                         }
                     }
                     is ContentResult.Failure -> {
@@ -281,7 +266,7 @@ class LibraryViewModel(
                                 )
                             }
                         } else {
-                            discoveryRuntime.fail(requestToken, result.error.code, hasVisibleContent = false)
+                            discoveryRuntime.fail(requestToken, result.error.code)
                             applyFailure(scope, result.error.code, reset)
                         }
                     }
@@ -289,7 +274,7 @@ class LibraryViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                discoveryRuntime.fail(requestToken, "CONTENT_LOAD_FAILED", hasVisibleContent(scope))
+                discoveryRuntime.fail(requestToken, "CONTENT_LOAD_FAILED")
                 applyFailure(scope, "CONTENT_LOAD_FAILED", reset)
             }
         }
@@ -316,7 +301,6 @@ class LibraryViewModel(
     private fun applyPage(
         scope: LibraryScope,
         page: LibraryPage<*>,
-        freshness: ContentFreshness,
         reset: Boolean,
     ) = updateScope(scope) { current ->
         if (scope == LibraryScope.Books) {
@@ -331,7 +315,6 @@ class LibraryViewModel(
                 isLoadingMore = false,
                 errorCode = null,
                 paginationErrorCode = null,
-                freshness = freshness,
             )
         } else {
             val incoming = page.items.filterIsInstance<com.ermao.library.shared.modules.library.GroupingSummary>().map { group ->
@@ -347,7 +330,6 @@ class LibraryViewModel(
                 isLoadingMore = false,
                 errorCode = null,
                 paginationErrorCode = null,
-                freshness = freshness,
             )
         }
     }
@@ -362,14 +344,9 @@ class LibraryViewModel(
                 isLoading = false,
                 isLoadingMore = false,
                 errorCode = code,
-                freshness = ContentFreshness.Fresh,
             )
         }
         else it.copy(isLoadingMore = false, paginationErrorCode = code)
-    }
-
-    private fun hasVisibleContent(scope: LibraryScope): Boolean = mutableUiState.value.scopes.getValue(scope).let {
-        it.works.isNotEmpty() || it.groups.isNotEmpty()
     }
 
     private fun updateCurrent(transform: (ScopeUiState) -> ScopeUiState) =
@@ -408,7 +385,6 @@ private fun WorksFilters.toSharedFilters(): LibraryFilters = LibraryFilters(
                 ReadingFilter.Finished -> ReadingStatus.Finished
             }
         },
-        downloadedOnly = downloadedOnly,
 )
 
 private fun LibraryScope.toDiscoveryScope(): com.ermao.library.shared.modules.library.LibraryScope = when (this) {

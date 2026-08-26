@@ -178,7 +178,7 @@ struct KindleQueueView: View {
 
     private func status(_ task: KindleSendTask) -> some View {
         let title: String; let color: Color
-        switch task.status { case .queued: title = copy[.queued]; color = .secondary; case .sending: title = copy[.sending]; color = theme.actionAccent; case .sent: title = copy[.sent]; color = .green; case .failed: title = copy[.failed]; color = .red; case .cancelled: title = copy[.cancelled]; color = .secondary }
+        switch task.status { case .queued: title = copy[.queued]; color = .secondary; case .sending: title = copy[.sending]; color = theme.actionAccent; case .sent: title = copy[.sent]; color = .green; case .failed: title = copy[.failed]; color = .red; case .cancelled: title = copy[.cancelled]; color = .secondary; case .unknown: title = copy[.unknown]; color = .secondary }
         return Text(title).appTextStyle(.label).foregroundStyle(color)
     }
     private func filtered(_ tasks: [KindleSendTask]) -> [KindleSendTask] {

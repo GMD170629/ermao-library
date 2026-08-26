@@ -33,16 +33,7 @@ enum class ReadingStatus(val wireValue: String) {
 
 data class LibraryFilters(
     val readingStatus: ReadingStatus? = null,
-    val downloadedOnly: Boolean = false,
 )
-
-sealed interface OfflineFilterAvailability {
-    data object Available : OfflineFilterAvailability
-
-    data class Unavailable(val reasonCode: String) : OfflineFilterAvailability {
-        init { require(reasonCode.isNotBlank()) }
-    }
-}
 
 data class BooksQuery(
     val query: String = "",
@@ -60,7 +51,6 @@ data class BooksQuery(
         libraryId.orEmpty(),
         sort.name,
         filters.readingStatus?.wireValue.orEmpty(),
-        filters.downloadedOnly.toString(),
     ).joinToString("|")
 }
 
@@ -289,15 +279,8 @@ data class ContentRequestContext(
     init { require(profile.serverIdentity == namespace.serverIdentity) }
 }
 
-enum class ContentSource { Network }
-
 sealed interface ContentResult<out T> {
-    data class Content<T>(
-        val value: T,
-        val source: ContentSource,
-        val cachedAtEpochMillis: Long? = null,
-        val isStale: Boolean = false,
-    ) : ContentResult<T>
+    data class Content<T>(val value: T) : ContentResult<T>
 
     data class Failure(val error: com.ermao.library.shared.core.network.AppError) : ContentResult<Nothing>
 }
@@ -309,7 +292,7 @@ interface ContentRepository {
     suspend fun loadRecentAdded(context: ContentRequestContext, limit: Int = 10): ContentResult<List<BookSummary>>
     suspend fun loadBooks(context: ContentRequestContext, query: BooksQuery): ContentResult<LibraryPage<BookSummary>>
     suspend fun loadLibraryOptions(context: ContentRequestContext): ContentResult<List<LibraryOption>> =
-        ContentResult.Content(emptyList(), ContentSource.Network)
+        ContentResult.Content(emptyList())
     suspend fun loadGroupings(context: ContentRequestContext, query: GroupingQuery): ContentResult<LibraryPage<GroupingSummary>>
     suspend fun loadFacet(context: ContentRequestContext, query: FacetQuery): ContentResult<FacetPage>
     suspend fun loadBookDetail(context: ContentRequestContext, query: BookDetailQuery): ContentResult<BookDetailSummary>

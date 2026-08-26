@@ -17,7 +17,6 @@ import com.ermao.library.shared.modules.library.BooksQuery
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentResult
-import com.ermao.library.shared.modules.library.ContentSource
 import com.ermao.library.shared.modules.library.FacetPage
 import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.GroupingQuery
@@ -50,7 +49,7 @@ class KtorContentRepository(
         val snapshot = HomeSnapshot(continueReading.await(), recentReading.await(), recentAdded.await())
         val hasNetworkContent = listOf(snapshot.continueReading, snapshot.recentReading, snapshot.recentAdded)
             .any { it is HomeSection.Content<*> }
-        if (hasNetworkContent) ContentResult.Content(snapshot, ContentSource.Network)
+        if (hasNetworkContent) ContentResult.Content(snapshot)
         else ContentResult.Failure(firstHomeError(snapshot))
     }
 
@@ -58,7 +57,7 @@ class KtorContentRepository(
         context: ContentRequestContext,
     ): ContentResult<com.ermao.library.shared.modules.library.ContinueReadingItem?> =
         when (val section = requestContinueReading(context)) {
-            is HomeSection.Content -> ContentResult.Content(section.value, ContentSource.Network)
+            is HomeSection.Content -> ContentResult.Content(section.value)
             is HomeSection.Failure -> ContentResult.Failure(section.error)
         }
 
@@ -85,7 +84,7 @@ class KtorContentRepository(
                 ),
             )
         }) {
-            is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
+            is ApiResult.Success -> ContentResult.Content(result.value.toPage())
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
 
@@ -108,10 +107,7 @@ class KtorContentRepository(
                         "LIBRARY_FILTER_SCHEMA_INVALID",
                     ),
                 )
-            ContentResult.Content(
-                libraryField.options.map { LibraryOption(it.value, it.label) },
-                ContentSource.Network,
-            )
+            ContentResult.Content(libraryField.options.map { LibraryOption(it.value, it.label) })
         }
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
@@ -134,7 +130,7 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toPage(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toPage())
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -157,10 +153,7 @@ class KtorContentRepository(
                 ),
             )
         }) {
-            is ApiResult.Success -> ContentResult.Content(
-                result.value.toFacetPage(query.kind, query.facetId),
-                ContentSource.Network,
-            )
+            is ApiResult.Success -> ContentResult.Content(result.value.toFacetPage(query.kind, query.facetId))
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
 
@@ -176,7 +169,7 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain())
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -196,7 +189,7 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain())
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -213,7 +206,7 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain())
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -234,7 +227,7 @@ class KtorContentRepository(
             ),
         )
     }) {
-        is ApiResult.Success -> ContentResult.Content(result.value.toDomain(), ContentSource.Network)
+        is ApiResult.Success -> ContentResult.Content(result.value.toDomain())
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
 
@@ -247,7 +240,6 @@ class KtorContentRepository(
     }) {
         is ApiResult.Success -> ContentResult.Content(
             AuthenticatedCover(result.value.bytes, result.value.mimeType, result.value.etag, result.value.notModified),
-            ContentSource.Network,
         )
         is ApiResult.Failure -> ContentResult.Failure(result.error)
     }
@@ -275,7 +267,7 @@ class KtorContentRepository(
     ): ContentResult<List<BookSummary>> {
         require(limit in 1..50)
         return when (val result = requestBooks(context, path, limit)) {
-            is ApiResult.Success -> ContentResult.Content(result.value, ContentSource.Network)
+            is ApiResult.Success -> ContentResult.Content(result.value)
             is ApiResult.Failure -> ContentResult.Failure(result.error)
         }
     }

@@ -47,6 +47,9 @@ final class IosReadiumRuntime {
         case .txt:
             let publication = try IosTxtPublicationFactory().open(managed)
             return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+        case .fb2:
+            let publication = try IosFb2PublicationFactory().open(managed)
+            return IosOpenedReadiumPublication(publication: publication) { publication.close() }
         case .pdf:
             return try await openPDF(managed)
         default:

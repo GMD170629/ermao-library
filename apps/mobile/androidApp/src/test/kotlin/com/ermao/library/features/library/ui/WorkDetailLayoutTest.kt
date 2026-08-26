@@ -2,9 +2,13 @@ package com.ermao.library.features.library.ui
 
 import androidx.compose.ui.unit.dp
 import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.content.ui.compactCoverGridColumnCount
+import com.ermao.library.features.content.ui.compactCoverGridItemWidth
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.shared.modules.library.BookContentEntry
+import com.ermao.library.shared.modules.library.BookContentsPage
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,6 +16,161 @@ import kotlin.test.assertTrue
 import org.junit.Test
 
 class WorkDetailLayoutTest {
+    @Test
+    fun workContentPresentationMatchesWebDirectoryAndResourceRules() {
+        fun entry(
+            id: String,
+            title: String,
+            kind: String,
+            resourceId: String? = null,
+            representativeResourceId: String? = null,
+            coverUrl: String? = null,
+        ) = BookContentEntry(
+            sourceNodeId = id,
+            parentSourceNodeId = "root",
+            name = title,
+            title = title,
+            description = null,
+            kind = kind,
+            physicalKind = if (kind == "FOLDER") "DIRECTORY" else "REGULAR_FILE",
+            sizeBytes = null,
+            observedAt = "2026-08-26T00:00:00Z",
+            hasChildren = kind == "FOLDER",
+            resourceId = resourceId,
+            representativeResourceId = representativeResourceId,
+            coverUrl = coverUrl,
+        )
+        val resources = listOf(
+            ResourceContent(
+                id = "representative-1",
+                title = "Representative 1",
+                format = "CBR",
+                coverUrl = "/representative-cover",
+                progressPercent = null,
+                readable = true,
+                selected = false,
+            ),
+            ResourceContent(
+                id = "representative-2",
+                title = "Representative 2",
+                format = "ZIP",
+                coverUrl = "/ignored-cover",
+                progressPercent = null,
+                readable = true,
+                selected = false,
+            ),
+            ResourceContent(
+                id = "direct",
+                title = "01 Launch",
+                format = "CBZ",
+                resourceIndex = 7.0,
+                coverUrl = "/resource-cover",
+                progressPercent = 25,
+                readable = true,
+                selected = false,
+            ),
+        )
+        val root = entry("root", "Star Harbor", "FOLDER")
+        val page = BookContentsPage(
+            bookId = "book-1",
+            currentSourceNodeId = root.sourceNodeId,
+            currentResourceId = null,
+            currentNode = root,
+            currentResourceIds = listOf("direct"),
+            parentSourceNodeId = null,
+            breadcrumbs = emptyList(),
+            entries = listOf(
+                entry("direct-node", "01 Launch.cbz", "FILE", resourceId = "direct"),
+                entry(
+                    "directory-1",
+                    "Single Volumes",
+                    "FOLDER",
+                    representativeResourceId = "representative-1",
+                ),
+                entry(
+                    "directory-2",
+                    "Color Edition",
+                    "FOLDER",
+                    representativeResourceId = "representative-2",
+                    coverUrl = "/entry-cover",
+                ),
+                entry("directory-3", "Extras", "FOLDER"),
+            ),
+            page = 1,
+            pageSize = 100,
+            total = 4,
+            totalPages = 1,
+        )
+
+        val items = workContentItemPresentations(page, resources, bookCoverUrl = "/book-cover")
+
+        assertEquals(
+            listOf(
+                WorkContentItemKind.SourceDirectory,
+                WorkContentItemKind.SourceDirectory,
+                WorkContentItemKind.SourceDirectory,
+                WorkContentItemKind.ReadableResource,
+            ),
+            items.map { it.kind },
+        )
+        assertEquals(
+            listOf("Single Volumes", "Color Edition", "Extras", "01 Launch"),
+            items.map { it.title },
+        )
+        assertEquals(
+            listOf("/representative-cover", "/entry-cover", "/book-cover", "/resource-cover"),
+            items.map { it.coverUrl },
+        )
+        assertEquals(listOf("01", "02", "03", "07"), items.map { it.indexLabel })
+    }
+
+    @Test
+    fun workContentBreadcrumbsUseBookTitleOnceAndOnlyApiBreadcrumbsAfterIt() {
+        fun entry(id: String, title: String) = BookContentEntry(
+            sourceNodeId = id,
+            parentSourceNodeId = if (id == "root") null else "root",
+            name = title,
+            title = title,
+            description = null,
+            kind = "FOLDER",
+            physicalKind = "DIRECTORY",
+            sizeBytes = null,
+            observedAt = "2026-08-26T00:00:00Z",
+            hasChildren = true,
+            resourceId = null,
+            representativeResourceId = null,
+            coverUrl = null,
+        )
+        val root = entry("root", "Star Harbor")
+        val directory = entry("single-volumes", "Single Volumes")
+        val rootPage = BookContentsPage(
+            bookId = "book-1",
+            currentSourceNodeId = root.sourceNodeId,
+            currentResourceId = null,
+            currentNode = root,
+            currentResourceIds = emptyList(),
+            parentSourceNodeId = null,
+            breadcrumbs = emptyList(),
+            entries = emptyList(),
+            page = 1,
+            pageSize = 100,
+            total = 0,
+            totalPages = 1,
+        )
+        val nestedPage = rootPage.copy(
+            currentSourceNodeId = directory.sourceNodeId,
+            currentNode = directory,
+            parentSourceNodeId = root.sourceNodeId,
+            breadcrumbs = listOf(directory),
+        )
+
+        assertEquals(listOf("Star Harbor"), workContentBreadcrumbs("Star Harbor", rootPage).map { it.title })
+        assertEquals(
+            listOf("Star Harbor", "Single Volumes"),
+            workContentBreadcrumbs("Star Harbor", nestedPage).map { it.title },
+        )
+    }
+
     @Test
     fun selectedVolumePublicationDateUsesTheActiveLocaleAndPreservesUnknownValues() {
         assertEquals("Nov 1, 2010", formatWorkMetadataDate("2010-11-01T00:00:00Z", Locale.US))
@@ -130,21 +289,32 @@ class WorkDetailLayoutTest {
     }
 
     @Test
-    fun comicAndPdfRemainRemoteStreamEntriesWithoutCompletedArtifacts() {
-        assertEquals(
-            WorkDetailPrimaryActionIntent.OpenSelectedVolume,
-            workDetailPrimaryActionPresentation(
-                selectedResource = testResource(readerType = "comic", format = "CBZ", progressPercent = null),
-                download = null,
-            ).intent,
+    fun supportedOnlineFormatsOpenReaderWithoutCompletedArtifacts() {
+        val formats = listOf(
+            "reflowable" to "EPUB",
+            "reflowable" to "MOBI",
+            "reflowable" to "AZW",
+            "reflowable" to "AZW3",
+            "reflowable" to "PRC",
+            "reflowable" to "FB2",
+            "reflowable" to "TXT",
+            "comic" to "CBZ",
+            "pdf" to "PDF",
         )
-        assertEquals(
-            WorkDetailPrimaryActionIntent.OpenSelectedVolume,
-            workDetailPrimaryActionPresentation(
-                selectedResource = testResource(readerType = "pdf", format = "PDF", progressPercent = null),
-                download = null,
-            ).intent,
-        )
+
+        formats.forEach { (readerType, format) ->
+            val resource = testResource(readerType = readerType, format = format, progressPercent = null)
+            assertEquals(
+                WorkDetailPrimaryActionIntent.OpenSelectedVolume,
+                workDetailPrimaryActionPresentation(resource, download = null).intent,
+                format,
+            )
+            assertEquals(
+                WorkDetailVolumeDownloadState.NotDownloaded,
+                workDetailVolumePresentation(resource, selected = true, download = null).downloadState,
+                format,
+            )
+        }
     }
 
     @Test
@@ -209,19 +379,30 @@ class WorkDetailLayoutTest {
     }
 
     @Test
-    fun volumeRailShowsAboutThreeCoversAndExpandsForLargeText() {
-        val standard = workDetailVolumeRailItemWidth(
-            availableWidth = 360.dp,
-            gap = 12.dp,
+    fun volumeRailAndPageGridUseTheSameCoverWidthAsHomeShelves() {
+        val standardColumns = compactCoverGridColumnCount(
+            compactColumns = 3,
+            largeTextColumns = 2,
             fontScale = 1f,
         )
-        val accessibility = workDetailVolumeRailItemWidth(
-            availableWidth = 360.dp,
-            gap = 12.dp,
+        val accessibilityColumns = compactCoverGridColumnCount(
+            compactColumns = 3,
+            largeTextColumns = 2,
             fontScale = 1.5f,
         )
+        val standard = compactCoverGridItemWidth(
+            availableWidth = 360.dp,
+            horizontalGap = 12.dp,
+            columns = standardColumns,
+        )
+        val accessibility = compactCoverGridItemWidth(
+            availableWidth = 360.dp,
+            horizontalGap = 12.dp,
+            columns = accessibilityColumns,
+        )
 
-        assertEquals(105.dp, standard)
+        assertEquals(112.dp, standard)
+        assertEquals(174.dp, accessibility)
         assertTrue(accessibility > standard)
     }
 

@@ -6,9 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.HomeContent
-import com.ermao.library.features.content.model.freshness
 import com.ermao.library.features.content.model.toUiContent
 import com.ermao.library.features.content.model.hasSectionFailure
 import com.ermao.library.ErmaoLibraryApplication
@@ -28,7 +26,6 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val content: HomeContent? = null,
-    val freshness: ContentFreshness = ContentFreshness.Fresh,
     val errorCode: String? = null,
 )
 
@@ -65,8 +62,9 @@ class HomeViewModel(
         if (mutableUiState.value.isRefreshing) return
         mutableUiState.update {
             it.copy(
-                isLoading = !isRefresh && it.content == null,
+                isLoading = true,
                 isRefreshing = isRefresh,
+                content = null,
                 errorCode = null,
             )
         }
@@ -81,7 +79,6 @@ class HomeViewModel(
                             isLoading = false,
                             isRefreshing = false,
                             content = content,
-                            freshness = result.freshness(),
                             errorCode = "HOME_PARTIAL_FAILURE".takeIf { result.value.hasSectionFailure() },
                         ) }
                     }

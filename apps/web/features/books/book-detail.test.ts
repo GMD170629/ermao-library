@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { BookView, ReadableResourceView } from '../../types/book';
-import { allVisibleResources, selectedResourceForBook, bookDetailHref, resourcePageFromQuery, singleReadableResourceForBook } from './book-detail';
+import {
+  allVisibleResources,
+  bookDetailHref,
+  librarySeriesHref,
+  libraryTagHref,
+  resourcePageFromQuery,
+  selectedResourceForBook,
+  singleReadableResourceForBook
+} from './book-detail';
 
 function resource(id: string, progress = 0, hidden = false): ReadableResourceView {
   return {
@@ -73,6 +81,17 @@ test('deep links use only bookId and resourceId', () => {
   assert.equal(bookDetailHref('book-1', null, '/library?status=READING', 8), '/books/book-1?returnTo=%2Flibrary%3Fstatus%3DREADING');
   assert.equal(resourcePageFromQuery('4'), 4);
   assert.equal(resourcePageFromQuery('-1'), 1);
+});
+
+test('book metadata links open exact library filters', () => {
+  assert.equal(librarySeriesHref(' 龙族 '), '/library?seriesName=%E9%BE%99%E6%97%8F');
+
+  const tagUrl = new URL(libraryTagHref(' 奇幻 '), 'https://example.test');
+  assert.equal(tagUrl.pathname, '/library');
+  assert.deepEqual(JSON.parse(tagUrl.searchParams.get('filters') ?? ''), {
+    combinator: 'ALL',
+    conditions: [{ field: 'tag', operator: 'equals', value: '奇幻' }]
+  });
 });
 
 test('resource selection prefers URL, continue, first unfinished, then first resource', () => {

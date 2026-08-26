@@ -30,7 +30,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
             )
             let result = try await IosMobiPublicationFactory().open(
                 fileURL: url,
-                sourceID: "physical-\(fixture.0)",
+                resourceID: "physical-\(fixture.0)",
                 displayTitle: fixture.0
             )
             let firstLink = try XCTUnwrap(result.publication.readingOrder.first)
@@ -46,7 +46,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture()
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            sourceID: "parser-normalization"
+            resourceID: "parser-normalization"
         )
 
         XCTAssertEqual(result.format, .kf8)
@@ -80,7 +80,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture(binarySize: IosMobiBook.maximumReadBytes * 2 + 31)
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            sourceID: "streaming-fixture"
+            resourceID: "streaming-fixture"
         )
         let resourceLink = try XCTUnwrap(
             result.publication.resources.first { $0.href == "assets/large.bin" }
@@ -104,7 +104,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let book = FixedMobiBook.fixture(structuralTocRoot: true)
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            sourceID: "structural-toc"
+            resourceID: "structural-toc"
         )
 
         let root = try XCTUnwrap(result.publication.manifest.tableOfContents.first)
@@ -130,7 +130,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
         let result = try await IosMobiPublicationFactory().build(
             book: book,
-            sourceID: "sanitizer-fixture"
+            resourceID: "sanitizer-fixture"
         )
         let markupLink = try XCTUnwrap(
             result.publication.readingOrder.first { $0.href == "text/chapter.xhtml" }
@@ -162,7 +162,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: invalidPath,
-                sourceID: "invalid-path"
+                resourceID: "invalid-path"
             )
             XCTFail("Expected invalid resource path")
         } catch {
@@ -173,7 +173,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: duplicatePath,
-                sourceID: "duplicate-path"
+                resourceID: "duplicate-path"
             )
             XCTFail("Expected duplicate resource path")
         } catch {
@@ -184,7 +184,7 @@ final class MobiPublicationFactoryTests: XCTestCase {
         do {
             _ = try await IosMobiPublicationFactory().build(
                 book: invalidToc,
-                sourceID: "invalid-toc"
+                resourceID: "invalid-toc"
             )
             XCTFail("Expected invalid table of contents")
         } catch {
@@ -202,42 +202,42 @@ final class MobiPublicationFactoryTests: XCTestCase {
         )
     }
 
-    func testManagedStorePersistsValidatedSidecarEpubBySourceIdentity() async throws {
+    func testManagedStorePersistsValidatedOriginalAzw3BySourceIdentity() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("managed-mobi-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try IosManagedPublicationStore(root: root)
-        let sidecar = Data([
-            0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
-            0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-        ]) + Data("mimetypeapplication/epub+zip".utf8)
-        let staging = try await store.prepareDownload(
-            sourceID: "volume-azw3",
-            expectedSize: Int64(sidecar.count)
+        let originalURL = try XCTUnwrap(
+            Bundle(for: Self.self).url(forResource: "test", withExtension: "azw3")
         )
-        try sidecar.write(to: staging)
+        let original = try Data(contentsOf: originalURL)
+        let staging = try await store.prepareDownload(
+            resourceID: "volume-azw3",
+            expectedSize: Int64(original.count)
+        )
+        try original.write(to: staging)
 
         let imported = try await store.commitDownload(
             staging: staging,
-            sourceID: "volume-azw3",
+            resourceID: "volume-azw3",
             displayTitle: "AZW3 fixture",
-            byteCount: Int64(sidecar.count),
-            expectedSize: Int64(sidecar.count),
+            byteCount: Int64(original.count),
+            expectedSize: Int64(original.count),
             parserVersion: IosMobiBook.parserIdentifier,
             normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier,
-            sourceFormat: .epub,
+            sourceFormat: .azw3,
             bookID: "work-azw3",
-            resourceID: "volume-azw3"
+            assetID: "asset-azw3"
         )
-        XCTAssertEqual(imported.sourceFormat, .epub)
-        XCTAssertEqual(imported.fileURL.pathExtension, "epub")
-        let restored = try await store.resolve(sourceID: imported.sourceID)
-        XCTAssertEqual(restored.sourceFormat, .epub)
-        XCTAssertEqual(restored.sourceID, "volume-azw3")
-        XCTAssertEqual(restored.byteCount, Int64(sidecar.count))
+        XCTAssertEqual(imported.sourceFormat, .azw3)
+        XCTAssertEqual(imported.fileURL.pathExtension, "azw3")
+        XCTAssertEqual(try Data(contentsOf: imported.fileURL), original)
+        let restored = try await store.resolve(resourceID: imported.resourceID)
+        XCTAssertEqual(restored.sourceFormat, .azw3)
+        XCTAssertEqual(restored.resourceID, "volume-azw3")
+        XCTAssertEqual(restored.byteCount, Int64(original.count))
     }
+
 }
 
 private actor FixedMobiBook: IosMobiBookAccess {

@@ -2,7 +2,9 @@ package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
+import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
+import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
 import com.ermao.library.shared.modules.reader.domain.LocalReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
@@ -46,9 +48,38 @@ data class ReaderPublicationDownload(
     }
 }
 
+/**
+ * Resource identity used while opening through Reader v4.
+ *
+ * This is deliberately separate from [ReaderPublicationDownload]: IMAGE_DIR is a remotely
+ * page-addressable publication but has no single original publication file. Its original pages
+ * are downloaded by the downloads capability as an OriginalPageSet bundle.
+ */
+data class ReaderRemotePublicationAccess(
+    val resourceId: String,
+    val displayTitle: String,
+    val bookId: String,
+    val sourceFormat: ReaderSourceFormat,
+    val assetId: String? = null,
+) {
+    init {
+        require(resourceId.isNotBlank())
+        require(displayTitle.isNotBlank())
+        require(bookId.isNotBlank())
+        require(assetId == null || assetId.isNotBlank())
+        require(sourceFormat == ReaderSourceFormat.ImageDir || assetId != null) {
+            "A single-file Reader source must retain its original Asset identity"
+        }
+        require(sourceFormat != ReaderSourceFormat.ImageDir || assetId == null) {
+            "IMAGE_DIR must not advertise one PAGE Asset as the publication"
+        }
+    }
+}
+
 data class ReaderBootstrap(
     val target: ReaderProgressSyncTarget,
-    val publication: ReaderPublicationDownload,
+    val remoteAccess: ReaderRemotePublicationAccess,
+    val downloadableOriginal: ReaderPublicationDownload?,
     val remoteSnapshot: ReaderProgressSnapshotV4?,
     /** Canonical Reader v4 navigation units. Native publications must never replace this list. */
     val units: List<ReaderNavigationUnit> = emptyList(),
@@ -70,9 +101,25 @@ data class ReaderBootstrap(
         require(units.map(ReaderNavigationUnit::index).distinct().size == units.size) {
             "Reader navigation unit indexes are not unique"
         }
-        require(comicPages.isEmpty() || publication.originalSourceFormat.isComic)
+        require(target.resourceId == remoteAccess.resourceId)
+        require(target.bookId == remoteAccess.bookId)
+        require(target.sourceFormat == remoteAccess.sourceFormat.readerFormat)
+        require(comicPages.isEmpty() || remoteAccess.sourceFormat.isComic)
         require((comicAccess == null) == comicPages.isEmpty())
-        require(pdfPages.isEmpty() || publication.sourceFormat == ReaderSourceFormat.Pdf)
+        require(pdfPages.isEmpty() || remoteAccess.sourceFormat == ReaderSourceFormat.Pdf)
+        require(remoteAccess.sourceFormat == ReaderSourceFormat.ImageDir || downloadableOriginal != null) {
+            "Single-file Reader formats must expose their downloadable original"
+        }
+        require(remoteAccess.sourceFormat != ReaderSourceFormat.ImageDir || downloadableOriginal == null) {
+            "IMAGE_DIR originals are a page set, not a single publication download"
+        }
+        downloadableOriginal?.let { original ->
+            require(original.resourceId == remoteAccess.resourceId)
+            require(original.bookId == remoteAccess.bookId)
+            require(original.assetId == remoteAccess.assetId)
+            require(original.sourceFormat == remoteAccess.sourceFormat)
+            require(original.originalSourceFormat == remoteAccess.sourceFormat)
+        }
         require(pageCount == null || pageCount > 0) { "Reader page count must be positive" }
         require(comicPages.map(ReaderComicPage::pageIndex) == comicPages.indices.toList()) {
             "Comic pages are not canonical and contiguous"
@@ -149,6 +196,8 @@ sealed interface ReaderBootstrapResult {
         init {
             require(failureCode.isNotBlank())
         }
+
+        val readerErrorCode: ReaderErrorCode = readerErrorCodeForFailure(failureCode, recoverable)
     }
 }
 
@@ -179,6 +228,8 @@ sealed interface PublicationDownloadResult {
         init {
             require(failureCode.isNotBlank())
         }
+
+        val readerErrorCode: ReaderErrorCode = readerErrorCodeForFailure(failureCode, recoverable)
     }
 }
 
@@ -212,11 +263,16 @@ class BootstrapReaderPublication(
         request: ReaderBootstrapRequest,
         bootstrap: ReaderBootstrap,
     ): ReaderPublicationBootstrapResult {
-        val publication = bootstrap.publication
-        localSourceResolver?.resolve(publication)?.let { local ->
-            return ReaderPublicationBootstrapResult.Content(local, bootstrap)
+        val access = bootstrap.remoteAccess
+        val downloadableOriginal = bootstrap.downloadableOriginal
+        if (downloadableOriginal != null) {
+            localSourceResolver?.resolve(downloadableOriginal)?.let { local ->
+                return ReaderPublicationBootstrapResult.Content(local, bootstrap)
+            }
         }
-        if (nativePdfiumRangeV1 && publication.sourceFormat == ReaderSourceFormat.Pdf) {
+        if (nativePdfiumRangeV1 && access.sourceFormat == ReaderSourceFormat.Pdf) {
+            val publication = downloadableOriginal
+                ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_ASSET_MISSING", false)
             return ReaderPublicationBootstrapResult.Content(
                 RemoteByteRangeReaderSource(
                     resourceId = publication.resourceId,
@@ -230,17 +286,17 @@ class BootstrapReaderPublication(
                 bootstrap,
             )
         }
-        if (publication.originalSourceFormat.isComic) {
+        if (access.sourceFormat.isComic) {
             val access = bootstrap.comicAccess
                 ?: return ReaderPublicationBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
             return ReaderPublicationBootstrapResult.Content(
                 RemoteComicReaderSource(
-                    resourceId = publication.resourceId,
-                    displayTitle = publication.displayTitle,
-                    bookId = publication.bookId,
-                    assetId = publication.assetId,
+                    resourceId = bootstrap.remoteAccess.resourceId,
+                    displayTitle = bootstrap.remoteAccess.displayTitle,
+                    bookId = bootstrap.remoteAccess.bookId,
+                    assetId = bootstrap.remoteAccess.assetId,
                     namespace = request.namespace,
-                    sourceFormat = publication.originalSourceFormat,
+                    sourceFormat = bootstrap.remoteAccess.sourceFormat,
                     manifestApiPath = access.manifestApiPath,
                     pageApiPathTemplate = access.pageApiPathTemplate,
                     pages = bootstrap.comicPages.map {
@@ -256,6 +312,8 @@ class BootstrapReaderPublication(
                 bootstrap,
             )
         }
+        val publication = downloadableOriginal
+            ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_ASSET_MISSING", false)
         return when (val downloaded = downloadPort.download(publication, sinkFactory)) {
             is PublicationDownloadResult.Failure -> ReaderPublicationBootstrapResult.Failure(
                 downloaded.failureCode,
@@ -275,5 +333,11 @@ sealed interface ReaderPublicationBootstrapResult {
         val bootstrap: ReaderBootstrap,
     ) : ReaderPublicationBootstrapResult
 
-    data class Failure(val failureCode: String, val recoverable: Boolean) : ReaderPublicationBootstrapResult
+    data class Failure(val failureCode: String, val recoverable: Boolean) : ReaderPublicationBootstrapResult {
+        init {
+            require(failureCode.isNotBlank())
+        }
+
+        val readerErrorCode: ReaderErrorCode = readerErrorCodeForFailure(failureCode, recoverable)
+    }
 }

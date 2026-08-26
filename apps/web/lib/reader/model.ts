@@ -107,9 +107,13 @@ export type RemoteProgressNotice = Readonly<{
 export type ReaderDeviceLabelResolver = (clientId: string) => string | null;
 
 export type PendingVsServerDecision =
-  | Readonly<{ kind: 'server'; snapshot: ReaderProgressSnapshot | null; discardPending: boolean }>
-  | Readonly<{ kind: 'local-pending'; pending: PendingProgressMutation; localExact: ExactProgressRecord }>
-  | Readonly<{ kind: 'requires-choice'; pending: PendingProgressMutation; localExact: ExactProgressRecord; server: ReaderProgressSnapshot }>;
+  | Readonly<{ kind: 'server'; snapshot: ReaderProgressSnapshot | null; discardPendingMutationId: string | null }>
+  | Readonly<{
+      kind: 'local-pending';
+      pending: PendingProgressMutation;
+      localExact: ExactProgressRecord;
+      rebaseRevision: number | null;
+    }>;
 
 export type ProgressUpload = Readonly<{
   resourceId: string;

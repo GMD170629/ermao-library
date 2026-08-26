@@ -46,11 +46,15 @@ from app.models import (
 )
 from app.models.import_pipeline import Source
 from app.models.settings import ReaderBookPreference, SystemSetting
+from app.modules.backup.infrastructure.archive import (
+    backup_path,
+    create_backup,
+    restore_backup,
+)
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
-from app.services.backup_service import backup_path, create_backup, restore_backup
 
 TARGET_CORE_TABLES = frozenset(
     {

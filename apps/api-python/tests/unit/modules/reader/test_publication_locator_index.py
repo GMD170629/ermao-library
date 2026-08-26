@@ -36,6 +36,7 @@ class _ReaderRepository:
             source_node_id="source-1",
             title="Legacy MOBI",
             format="MOBI",
+            source_format="MOBI",
             resource_index=1,
             sort_order=0,
             page_count=None,

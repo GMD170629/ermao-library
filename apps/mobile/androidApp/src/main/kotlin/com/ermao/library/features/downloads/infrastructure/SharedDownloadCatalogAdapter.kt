@@ -1,11 +1,14 @@
 package com.ermao.library.features.downloads.infrastructure
 
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
+import com.ermao.library.features.downloads.model.AndroidDownloadMemberRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.shared.modules.downloads.CompletedDownloadArtifact
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.shared.modules.downloads.DownloadDescriptor
+import com.ermao.library.shared.modules.downloads.DownloadArtifactKind
+import com.ermao.library.shared.modules.downloads.DownloadBundleMember
 import com.ermao.library.shared.modules.downloads.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.DownloadNamespace
 import com.ermao.library.shared.modules.downloads.DownloadSource
@@ -85,7 +88,7 @@ class SharedDownloadCatalogAdapter(
 }
 
 private fun java.io.File.deleteManagedFile() {
-    if (exists() && !delete()) throw AndroidDownloadStorageException("Unable to delete managed download")
+    if (exists() && !deleteRecursively()) throw AndroidDownloadStorageException("Unable to delete managed download")
 }
 
 private fun DownloadNamespace.toAndroid() = AndroidDownloadNamespace(serverIdentity, userId, authorizationVersion)
@@ -112,9 +115,21 @@ private fun AndroidDownloadRecord.descriptor() = DownloadDescriptor(
     resourceTitle = resourceTitle,
     format = format,
     readerType = downloadReaderType(readerType),
-    source = DownloadSource(sourceApiPath, sourceMimeType, expectedBytes),
+    source = DownloadSource(sourceApiPath, sourceMimeType, sourceBytes ?: expectedBytes),
     resourceIndex = resourceIndex,
     resourceSortOrder = resourceSortOrder,
+    artifactKind = DownloadArtifactKind.valueOf(artifactKind),
+    members = members.map { member ->
+        DownloadBundleMember(
+            assetId = member.assetId,
+            sequenceIndex = member.sequenceIndex,
+            source = DownloadSource(
+                member.sourceApiPath,
+                member.sourceMimeType,
+                member.expectedBytes,
+            ),
+        )
+    },
 )
 
 private fun AndroidDownloadRecord.toArtifact() = CompletedDownloadArtifact(
@@ -141,7 +156,18 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
         assetId = descriptor.identity.assetId,
         sourceApiPath = descriptor.source.apiPath,
         sourceMimeType = descriptor.source.mimeType,
-        expectedBytes = descriptor.source.totalBytes,
+        expectedBytes = descriptor.totalBytes,
+        sourceBytes = descriptor.source.totalBytes,
+        artifactKind = descriptor.artifactKind.name,
+        members = descriptor.members.map { member ->
+            AndroidDownloadMemberRecord(
+                assetId = member.assetId,
+                sequenceIndex = member.sequenceIndex,
+                sourceApiPath = member.source.apiPath,
+                sourceMimeType = member.source.mimeType,
+                expectedBytes = member.source.totalBytes,
+            )
+        },
         transferredBytes = transferredBytes,
         status = status.toAndroid(),
         localReference = artifact?.localReference,

@@ -3,6 +3,12 @@
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
+from app.modules.library.infrastructure.publication_navigation import (
+    SqlAlchemyLibraryNavigationProjection,
+)
+from app.modules.library.infrastructure.publication_source import (
+    SqlAlchemyPublicationSourceRepository,
+)
 from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigation,
 )
@@ -27,9 +33,6 @@ from app.modules.publications.infrastructure.mobi_adapter import (
 )
 from app.modules.publications.infrastructure.navigation_cache import (
     ConfiguredPublicationParserProfiles,
-)
-from app.modules.publications.infrastructure.source_repository import (
-    SqlAlchemyPublicationSourceRepository,
 )
 from app.modules.publications.infrastructure.txt_adapter import (
     TXT_PARSER_IDENTIFIER,
@@ -107,10 +110,17 @@ def ensure_publication_navigation(
     adapter, profiles = _publication_adapter_and_profiles(settings)
 
     def lookup_unit_of_work() -> PublicationNavigationLookupUnitOfWork:
-        return SqlAlchemyPublicationNavigationLookupUnitOfWork(session_factory)
+        return SqlAlchemyPublicationNavigationLookupUnitOfWork(
+            session_factory,
+            SqlAlchemyPublicationSourceRepository,
+            SqlAlchemyLibraryNavigationProjection,
+        )
 
     def unit_of_work() -> PublicationNavigationUnitOfWork:
-        return SqlAlchemyPublicationNavigationUnitOfWork(session_factory)
+        return SqlAlchemyPublicationNavigationUnitOfWork(
+            session_factory,
+            SqlAlchemyLibraryNavigationProjection,
+        )
 
     return EnsurePublicationNavigation(
         lookup_unit_of_work_factory=lookup_unit_of_work,

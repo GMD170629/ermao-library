@@ -228,7 +228,6 @@ private fun AdministrativePageSnapshot.supports(route: AdministrativeSettingsRou
     is AdministrativeSettingsRoute.CategoryGovernance -> this is CategoryGovernanceSnapshot
     AdministrativeSettingsRoute.MetadataProviders -> this is MetadataProvidersSnapshot
     is AdministrativeSettingsRoute.MetadataProviderEdit -> this is MetadataProviderEditorSnapshot
-    is AdministrativeSettingsRoute.MetadataPipeline -> this is MetadataPipelineSnapshot
     AdministrativeSettingsRoute.Opds -> this is OpdsSnapshot
     AdministrativeSettingsRoute.Backups -> this is BackupsSnapshot
     AdministrativeSettingsRoute.DetailOrder -> this is DetailOrderSnapshot
@@ -241,7 +240,7 @@ private fun AdministrativeSettingsRoute.supportsPolling(): Boolean =
 
 private fun AdministrativePageSnapshot.pollingActive(): Boolean = when (this) {
     is ImportScanJobSnapshot -> job.active
-    is HealthSnapshot -> status == HealthStatus.Checking || importQueueRestarting
+    is HealthSnapshot -> status == HealthStatus.Checking
     else -> false
 }
 

@@ -214,6 +214,8 @@ def _order(
             .scalar_subquery()
         )
         return [direction(latest_read_at), ascending(LibraryBook.id)]
+    if query.sort == "recent_import":
+        return [direction(LibraryBook.created_at), direction(LibraryBook.id)]
     return [direction(LibraryBook.updated_at), direction(LibraryBook.id)]
 
 

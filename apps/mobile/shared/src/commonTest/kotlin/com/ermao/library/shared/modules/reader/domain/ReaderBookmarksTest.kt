@@ -32,4 +32,19 @@ class ReaderBookmarksTest {
             replacePendingReaderBookmarkSnapshot(listOf(first), listOf(second)),
         )
     }
+
+    @Test
+    fun allServerBookmarkLocationMorphologiesRetainTheirWireFields() {
+        val locations = listOf(
+            ReaderBookmarkLocation.reflow("chapter-1.xhtml", 0.25),
+            ReaderBookmarkLocation.comic(3),
+            ReaderBookmarkLocation.pdf(4),
+            ReaderBookmarkLocation.audio("asset-1", "chapter-2", 42_000),
+        )
+
+        assertEquals(listOf("reflow", "comic", "pdf", "audio"), locations.map { it.kind })
+        assertEquals(3, locations[1].pageIndex)
+        assertEquals(4, locations[2].pageNumber)
+        assertEquals(42_000, locations[3].positionMs)
+    }
 }

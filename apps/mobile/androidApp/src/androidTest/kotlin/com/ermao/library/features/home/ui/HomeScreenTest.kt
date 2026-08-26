@@ -23,7 +23,6 @@ import com.ermao.library.shared.modules.library.AuthenticatedCover
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
-import com.ermao.library.shared.modules.library.ContentSource
 import com.ermao.library.shared.modules.library.FacetPage
 import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.GroupingQuery
@@ -233,7 +232,6 @@ private object StubContentRepository : ContentRepository {
         etag: String?,
     ): ContentResult<AuthenticatedCover> = ContentResult.Content(
         value = AuthenticatedCover(ByteArray(0), null, null),
-        source = ContentSource.Network,
     )
 
     override suspend fun invalidate(namespace: PrivateDataNamespace) = Unit

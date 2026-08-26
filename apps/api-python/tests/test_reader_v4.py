@@ -465,6 +465,47 @@ def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
     assert repeated.json()["data"] == progress
 
 
+@pytest.mark.parametrize(
+    ("suffix", "expected_source_format", "expected_mime"),
+    [
+        ("mobi", "mobi", "application/x-mobipocket-ebook"),
+        ("azw", "azw", "application/vnd.amazon.ebook"),
+        ("azw3", "azw3", "application/vnd.amazon.ebook"),
+        ("prc", "prc", "application/x-mobipocket-ebook"),
+    ],
+)
+def test_reader_v4_kindle_family_bootstrap_preserves_original_format(
+    client: TestClient,
+    db_session: Session,
+    test_settings,
+    suffix: str,
+    expected_source_format: str,
+    expected_mime: str,
+) -> None:
+    _login(client, db_session)
+    source = test_settings.resolved_storage_root / f"reader-source.{suffix}"
+    source.write_bytes(b"original")
+    resource, _asset = _add_resource(
+        db_session,
+        book_id=f"book-kindle-{suffix}",
+        resource_id=f"resource-kindle-{suffix}",
+        asset_id=f"asset-kindle-{suffix}",
+        source_path=source,
+        title=f"Kindle {suffix}",
+        fmt="KINDLE",
+        mime_type="application/octet-stream",
+    )
+
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+
+    assert response.status_code == 200
+    bootstrap = response.json()["data"]
+    assert bootstrap["sourceFormat"] == expected_source_format
+    assert bootstrap["resource"]["format"] == expected_source_format.upper()
+    assert bootstrap["assets"][0]["mimeType"] == expected_mime
+    assert bootstrap["publication"]["kind"] == "reflowable"
+
+
 def test_reader_v4_exact_save_after_reading_status_uses_current_revision(
     client: TestClient,
     db_session: Session,
@@ -1203,9 +1244,13 @@ def test_resource_asset_route_streams_the_selected_asset_only(
     source_node.observed_mtime_ns = (
         stored_file.stat().st_mtime_ns // 1_000_000
     ) * 1_000_000
+    asset_metadata = db_session.get(LibraryResourceAssetMetadata, asset.id)
+    assert asset_metadata is not None
+    asset_metadata.mime_type = "application/octet-stream"
     db_session.commit()
 
     response = client.get(f"/api/assets/{asset.id}")
+    head_response = client.head(f"/api/assets/{asset.id}")
     download_response = client.get(f"/api/assets/{asset.id}?download=true")
     range_response = client.get(
         f"/api/assets/{asset.id}", headers={"Range": "bytes=1-4"}
@@ -1214,11 +1259,16 @@ def test_resource_asset_route_streams_the_selected_asset_only(
     assert response.status_code == 200
     assert response.content == b"reader-v4"
     assert response.headers["content-type"] == "application/epub+zip"
+    assert head_response.status_code == 200
+    assert head_response.content == b""
+    assert head_response.headers["content-type"] == "application/epub+zip"
     assert download_response.status_code == 200
+    assert download_response.headers["content-type"] == "application/epub+zip"
     assert download_response.headers["content-disposition"].startswith("attachment;")
     assert range_response.status_code == 206
     assert range_response.content == b"eade"
     assert range_response.headers["content-range"] == "bytes 1-4/9"
+    assert range_response.headers["content-type"] == "application/epub+zip"
 
 
 def test_resource_asset_route_rejects_external_symlink_after_import(

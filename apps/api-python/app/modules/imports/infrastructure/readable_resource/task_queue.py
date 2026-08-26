@@ -21,7 +21,7 @@ from app.modules.imports.application.readable_resource.ports import (
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
 )
-from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.library.public import AssetRole
 
 
 class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
@@ -136,6 +136,37 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             row.finished_at = None
             row.role = role.value
             self._session.flush()
+        return self._to_record(row)
+
+    def requeue_asset_for_adapter_upgrade(
+        self,
+        *,
+        library_id: str,
+        resource_id: str,
+        source_node_id: str,
+        role: AssetRole,
+    ) -> LibraryImportTaskRecord:
+        row = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "IMPORT_ASSET",
+                LibraryImportTask.resource_id == resource_id,
+                LibraryImportTask.source_node_id == source_node_id,
+            )
+        )
+        if row is None:
+            return self.enqueue(
+                kind="IMPORT_ASSET",
+                library_id=library_id,
+                resource_id=resource_id,
+                source_node_id=source_node_id,
+                role=role,
+            )
+        row.state = "QUEUED"
+        row.error_summary = None
+        row.started_at = None
+        row.finished_at = None
+        row.role = role.value
+        self._session.flush()
         return self._to_record(row)
 
     def next_queued(self) -> LibraryImportTaskRecord | None:

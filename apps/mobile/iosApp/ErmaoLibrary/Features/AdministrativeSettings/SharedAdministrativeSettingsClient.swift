@@ -12,7 +12,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     private var cachedSources: [String: LibrarySource] = [:]
     private var cachedProviderConfigurations: [String: MetadataProviderConfiguration] = [:]
     private var latestHealthRunID: String?
-    private var latestQueueOperationID: String?
 
     init(
         repository: any ErmaoShared.AdministrativeSettingsRepository,
@@ -175,7 +174,11 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func cancelDirectoryScan() async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_SCAN_CANCEL_UNAVAILABLE") }
 
     func loadImportTasks(status: ImportTaskStatus?) async throws -> [ImportTask] { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_LIST_UNAVAILABLE") }
-    func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_LOGS_UNAVAILABLE") }
+    func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail {
+        let task: ErmaoShared.ImportTask = try value(try await repository.loadImportTask(context: context, taskId: id))
+        let logs: ErmaoShared.ImportTaskLogPage = try value(try await repository.listImportTaskLogs(context: context, taskId: id, page: 1, pageSize: 100))
+        return ImportTaskDetail(task: map(task), logs: logs.logs.map(map))
+    }
     func retryImportTask(id: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_RETRY_UNAVAILABLE") }
     func deleteImportTask(id: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_DELETE_UNAVAILABLE") }
     func clearCompletedImportTasks() async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_CLEAR_UNAVAILABLE") }
@@ -202,12 +205,16 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func deleteCategory(id: String) async throws { let _: ErmaoShared.LibraryOperation = try value(try await repository.deleteCategory(context: context, categoryId: id)) }
 
     func loadMetadataProviders() async throws -> [MetadataProvider] { let wire: ErmaoShared.MetadataProviders = try value(try await repository.loadMetadataProviders(context: context)); return wire.providers.map(map) }
-    func setMetadataProviderEnabled(id: String, enabled: Bool) async throws -> MetadataProvider { let config = try await loadMetadataProviderConfiguration(id: id); var updated = config; let provider = config.provider; updated = MetadataProviderConfiguration(provider: MetadataProvider(id: provider.id, displayName: provider.displayName, enabled: enabled, status: provider.status, responseMilliseconds: provider.responseMilliseconds, supportedMediaKinds: provider.supportedMediaKinds, hasSecret: provider.hasSecret, priority: provider.priority), values: config.values, secretReplacements: config.secretReplacements, clearedSecretKeys: config.clearedSecretKeys); return try await saveMetadataProviderConfiguration(updated).provider }
+    func setMetadataProviderEnabled(id: String, enabled: Bool) async throws -> MetadataProvider {
+        let providers: ErmaoShared.MetadataProviders = try value(try await repository.loadMetadataProviders(context: context))
+        let ordered = providers.providers.map { ErmaoShared.MetadataProviderOrderItem(providerId: $0.id, enabled: $0.id == id ? enabled : $0.enabled) }
+        let updated: ErmaoShared.MetadataProviders = try value(try await repository.updateMetadataProviderOrder(context: context, items: ordered))
+        guard let provider = updated.providers.first(where: { $0.id == id }) else { throw protocolFailure() }
+        return map(provider)
+    }
     func loadMetadataProviderConfiguration(id: String) async throws -> MetadataProviderConfiguration { let wire: ErmaoShared.MetadataProvider = try value(try await repository.loadMetadataProvider(context: context, providerId: id)); let mapped = mapConfiguration(wire); cachedProviderConfigurations[id] = mapped; return mapped }
     func saveMetadataProviderConfiguration(_ configuration: MetadataProviderConfiguration) async throws -> MetadataProviderConfiguration { let wire: ErmaoShared.MetadataProvider = try value(try await repository.updateMetadataProvider(context: context, providerId: configuration.provider.id, update: map(configuration))); let mapped = mapConfiguration(wire); cachedProviderConfigurations[wire.id] = mapped; return mapped }
     func testMetadataProvider(id: String) async throws -> MetadataProvider { let wire: ErmaoShared.ProviderTestResult = try value(try await repository.testMetadataProvider(context: context, providerId: id)); return map(wire.provider) }
-    func loadMetadataPipeline() async throws -> MetadataPipeline { let wire: ErmaoShared.MetadataProviders = try value(try await repository.loadMetadataProviders(context: context)); guard let pipeline = wire.pipelines.first else { return MetadataPipeline(mediaKind: .ebook, providerIDs: [], enabledProviderIDs: []) }; return map(pipeline) }
-    func saveMetadataPipeline(_ pipeline: MetadataPipeline) async throws -> MetadataPipeline { let entries = pipeline.providerIDs.map { ErmaoShared.MetadataPipelineEntry(providerId: $0, enabled: pipeline.enabledProviderIDs.contains($0)) }; let wire: ErmaoShared.MetadataProviders = try value(try await repository.updateMetadataPipeline(context: context, mediaKind: map(pipeline.mediaKind), entries: entries)); guard let updated = wire.pipelines.first(where: { $0.mediaKind == map(pipeline.mediaKind) }) else { throw protocolFailure() }; return map(updated) }
 
     func loadOPDSConfiguration() async throws -> OPDSConfiguration { let wire: ErmaoShared.OpdsSettings = try value(try await repository.loadOpdsSettings(context: context)); return map(wire) }
     func saveOPDSConfiguration(_ configuration: OPDSConfiguration) async throws -> OPDSConfiguration { let wire: ErmaoShared.OpdsSettings = try value(try await repository.updateOpdsSettings(context: context, enabled: configuration.enabled, publicBaseUrl: configuration.publicBaseURL.isEmpty ? nil : configuration.publicBaseURL)); return map(wire) }
@@ -219,9 +226,8 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func loadWorkDetailOrder() async throws -> [AdministrativeWorkDetailSection] { let wire: ErmaoShared.WorkDetailTabOrder = try value(try await repository.loadWorkDetailTabOrder(context: context)); return wire.tabs.map(map) }
     func saveWorkDetailOrder(_ order: [AdministrativeWorkDetailSection]) async throws -> [AdministrativeWorkDetailSection] { let wire: ErmaoShared.WorkDetailTabOrder = try value(try await repository.updateWorkDetailTabOrder(context: context, order: ErmaoShared.WorkDetailTabOrder(tabs: order.map(map)))); return wire.tabs.map(map) }
 
-    func loadSystemHealth() async throws -> SystemHealthSnapshot { if let latestHealthRunID { let wire: ErmaoShared.HealthRun = try value(try await repository.loadHealthRun(context: context, runId: latestHealthRunID)); return map(wire) }; return SystemHealthSnapshot(checkedAt: nil, components: [], queueRestartInProgress: false, queueRestartStatus: nil) }
+    func loadSystemHealth() async throws -> SystemHealthSnapshot { if let latestHealthRunID { let wire: ErmaoShared.HealthRun = try value(try await repository.loadHealthRun(context: context, runId: latestHealthRunID)); return map(wire) }; return SystemHealthSnapshot(checkedAt: nil, components: []) }
     func runSystemHealthCheck() async throws -> SystemHealthSnapshot { var wire: ErmaoShared.HealthRun = try value(try await repository.startHealthRun(context: context)); latestHealthRunID = wire.runId; while wire.status == .running { try Task.checkCancellation(); try await Task.sleep(nanoseconds: 600_000_000); wire = try value(try await repository.loadHealthRun(context: context, runId: wire.runId)) }; return map(wire) }
-    func restartImportQueueSafely() async throws -> SystemHealthSnapshot { var operation: ErmaoShared.QueueOperation = try value(try await repository.restartImportQueue(context: context)); latestQueueOperationID = operation.id; while !["completed", "failed"].contains(operation.status.lowercased()) { try Task.checkCancellation(); try await Task.sleep(nanoseconds: 600_000_000); operation = try value(try await repository.loadQueueOperation(context: context, operationId: operation.id)) }; let health = try await loadSystemHealth(); return SystemHealthSnapshot(checkedAt: health.checkedAt, components: health.components, queueRestartInProgress: false, queueRestartStatus: operation.messageCode) }
     func loadLogs(filter: LogFilter) async throws -> LogPage { let wire: ErmaoShared.ManagementEventPage = try value(try await repository.listManagementEvents(context: context, filter: managementFilter(filter, pageSize: 200))); return map(wire) }
     func loadLogSettings() async throws -> LogSettings { let wire: ErmaoShared.LogSettings = try value(try await repository.loadLogSettings(context: context)); return LogSettings(limitMegabytes: Int(wire.storage.maximumBytes / 1_048_576)) }
     func saveLogSettings(_ settings: LogSettings) async throws -> LogSettings { let wire: ErmaoShared.EventStorage = try value(try await repository.updateLogCapacity(context: context, maximumBytes: Int64(settings.limitMegabytes) * 1_048_576)); return LogSettings(limitMegabytes: Int(wire.maximumBytes / 1_048_576)) }

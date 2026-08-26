@@ -27,6 +27,8 @@ typealias PdfReaderLocation = com.ermao.library.shared.modules.reader.domain.Pdf
 typealias ReaderCapabilities = com.ermao.library.shared.modules.reader.domain.ReaderCapabilities
 typealias ReaderError = com.ermao.library.shared.modules.reader.domain.ReaderError
 typealias ReaderErrorCode = com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
+fun readerErrorCodeForFailure(failureCode: String, recoverable: Boolean): ReaderErrorCode =
+    com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure(failureCode, recoverable)
 typealias ReaderFormat = com.ermao.library.shared.modules.reader.domain.ReaderFormat
 typealias ReaderSourceFormat = com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 typealias ReaderEngineCapability = com.ermao.library.shared.modules.reader.domain.ReaderEngineCapability
@@ -124,6 +126,8 @@ typealias ReaderBootstrapFailure =
 typealias ReaderBootstrapGateway = com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 typealias ReaderPublicationDownload =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
+typealias ReaderRemotePublicationAccess =
+    com.ermao.library.shared.modules.reader.application.ReaderRemotePublicationAccess
 typealias LocalReaderSourceResolver =
     com.ermao.library.shared.modules.reader.application.LocalReaderSourceResolver
 typealias ReaderComicPage = com.ermao.library.shared.modules.reader.application.ReaderComicPage

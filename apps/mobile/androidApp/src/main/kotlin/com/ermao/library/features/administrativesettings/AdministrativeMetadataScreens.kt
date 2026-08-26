@@ -1,7 +1,6 @@
 package com.ermao.library.features.administrativesettings
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,8 +59,6 @@ fun MetadataProvidersScreen(
                     enabled = provider.available,
                 )
             }
-            AdministrativeSection(AdministrativeCopy.QueryPipeline, locale)
-            AdministrativeNavigationRow(AdministrativeCopy.QueryPipeline.text(locale), snapshot.pipelineSummary, { onNavigate(AdministrativeSettingsRoute.MetadataPipeline()) })
             PrimaryAction(AdministrativeCopy.SaveConfiguration, locale, !state.mutationInFlight) {
                 onCommand(AdministrativeCommand.SaveMetadataProviders(providers))
             }
@@ -141,38 +138,4 @@ private fun MetadataProviderFieldKind.parse(value: String): ProviderFieldValue =
     MetadataProviderFieldKind.Decimal -> ProviderFieldValue.Decimal(value.toDoubleOrNull() ?: 0.0)
     MetadataProviderFieldKind.TextList -> ProviderFieldValue.TextList(value.split(',').map(String::trim).filter(String::isNotBlank))
     MetadataProviderFieldKind.Toggle -> ProviderFieldValue.Toggle(value.toBooleanStrictOrNull() ?: false)
-}
-
-@Composable
-fun MetadataPipelineScreen(
-    mediaKind: MediaKind,
-    state: AdministrativePageState<MetadataPipelineSnapshot>,
-    locale: AdministrativeLocale,
-    onCommand: (AdministrativeCommand) -> Unit,
-    onRetry: () -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    AdministrativePage(AdministrativeCopy.MetadataPipeline, locale, onBack, modifier) {
-        PageStateContent(state, locale, onRetry) { initial ->
-            var steps by remember(initial) { mutableStateOf(initial.steps) }
-            steps.forEachIndexed { index, step ->
-                ListItem(
-                    headlineContent = { Text(step.label) },
-                    leadingContent = { Text("${index + 1}") },
-                    trailingContent = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            TextButton(enabled = index > 0, onClick = { steps = steps.moved(index, index - 1) }) { Text("↑") }
-                            TextButton(enabled = index < steps.lastIndex, onClick = { steps = steps.moved(index, index + 1) }) { Text("↓") }
-                        }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                )
-                AdministrativeSwitchRow(step.label, step.enabled, { enabled -> steps = steps.map { if (it.id == step.id) it.copy(enabled = enabled) else it } })
-            }
-            PrimaryAction(AdministrativeCopy.SavePipeline, locale, !state.mutationInFlight) {
-                onCommand(AdministrativeCommand.SaveMetadataPipeline(mediaKind, steps))
-            }
-        }
-    }
 }

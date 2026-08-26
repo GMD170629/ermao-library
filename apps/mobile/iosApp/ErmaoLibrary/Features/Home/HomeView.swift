@@ -8,7 +8,7 @@ enum HomeCollectionKind: String, Hashable, Codable, Sendable {
 struct HomeView: View {
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let openWork: (String) -> Void
     let openCollection: (HomeCollectionKind) -> Void
 
@@ -18,7 +18,7 @@ struct HomeView: View {
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         onUnauthorized: @escaping @MainActor () -> Void,
         openWork: @escaping (String) -> Void,
         openCollection: @escaping (HomeCollectionKind) -> Void
@@ -32,7 +32,6 @@ struct HomeView: View {
             wrappedValue: HomeStore(
                 context: context,
                 client: client,
-                cache: cache,
                 onUnauthorized: onUnauthorized
             )
         )
@@ -97,7 +96,7 @@ struct HomeView: View {
                     actionTitle: "common.retry",
                     action: store.retryContinueReading
                 )
-            case .content(let item, _):
+            case .content(let item):
                 VStack(spacing: .space1Half) {
                     Button { openWork(item.book.id) } label: {
                         HStack(spacing: .space2) {
@@ -109,7 +108,7 @@ struct HomeView: View {
                                 cache: cache,
                                 cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
                             )
-                            .frame(width: 104)
+                            .frame(width: BookCoverLayout.horizontalCardWidth)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
                                 Text(item.book.title).appTextStyle(.headline).lineLimit(2)
                                 Text(item.book.author ?? "—")
@@ -190,7 +189,7 @@ struct HomeView: View {
                     actionTitle: "common.retry",
                     action: retry
                 )
-            case .content(let works, _):
+            case .content(let works):
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: .space2) {
                         ForEach(works) { work in
@@ -211,7 +210,7 @@ struct HomeView: View {
                                         CoverProgressView(progress: progress)
                                     }
                                 }
-                                .frame(width: 104)
+                                .frame(width: BookCoverLayout.horizontalCardWidth)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.borderless)

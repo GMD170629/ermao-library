@@ -400,7 +400,6 @@ final class ReaderPersistenceTests: XCTestCase {
             target: makeTarget(namespace: namespace, resourceID: "upload-volume"),
             server: port
         )
-        defer { runtime.close() }
         let store = runtime.store
         let progress = try decodeProgress(sourceID: "upload-volume", updatedAt: 1_775_988_523_456)
 
@@ -414,6 +413,27 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertNotNil(state.pending)
         XCTAssertEqual(state.pending?.capturedAtEpochMillis, progress.updatedAtEpochMillis)
         XCTAssertTrue(port.lastLocatorPayload?.contains("chapter.xhtml") == true)
+        runtime.close()
+        await database.close()
+    }
+
+    func testLocalOnlyProgressStorePersistsWithoutCreatingPendingUpload() async throws {
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 4, resourceID: "offline-volume"),
+            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
+        )
+        let store = IosLocalOnlyReaderProgressStore(database: database)
+        let progress = try decodeProgress(sourceID: "offline-volume", updatedAt: 1_775_988_623_456)
+
+        try await store.save(progress: progress)
+        try await store.retryPendingUpload()
+        try await store.awaitPendingUpload()
+
+        let restored = try await store.load(sourceId: "offline-volume")
+        let state = try await store.syncState()
+        XCTAssertEqual(restored?.updatedAtEpochMillis, progress.updatedAtEpochMillis)
+        XCTAssertNil(state.pending)
+        await database.close()
     }
 
     func testSingleFlightUploadKeepsOnlyLatestWaitingLocation() async throws {
@@ -428,7 +448,6 @@ final class ReaderPersistenceTests: XCTestCase {
             target: makeTarget(namespace: namespace, resourceID: "single-flight-volume"),
             server: port
         )
-        defer { runtime.close() }
         let store = runtime.store
 
         try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 100))
@@ -441,6 +460,8 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(port.uploadedTimestamps, [100, 300])
         let restored = try await store.load(sourceId: "single-flight-volume")
         XCTAssertEqual(restored?.updatedAtEpochMillis, 300)
+        runtime.close()
+        await database.close()
     }
 
     private func makeNamespace(
@@ -512,7 +533,7 @@ final class ReaderPersistenceTests: XCTestCase {
         updatedAt: Int64,
         clientID: String = "ios-installation-c"
     ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":6,"sourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
+        ##"{"schema":"ermao.reader-progress","version":7,"resourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
     }
 
     private func legacyProgressURL(sourceID: String, root: URL) -> URL {

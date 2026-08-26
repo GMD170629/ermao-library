@@ -10,6 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import ReadableResourceNavigationUnit
+from app.modules.library.infrastructure.publication_navigation import (
+    SqlAlchemyLibraryNavigationProjection,
+)
+from app.modules.library.infrastructure.publication_source import (
+    SqlAlchemyPublicationSourceRepository,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -200,11 +206,18 @@ def _ensure(
     )
     return EnsurePublicationNavigation(
         lookup_unit_of_work_factory=lambda: (
-            SqlAlchemyPublicationNavigationLookupUnitOfWork(factory)
+            SqlAlchemyPublicationNavigationLookupUnitOfWork(
+                factory,
+                SqlAlchemyPublicationSourceRepository,
+                SqlAlchemyLibraryNavigationProjection,
+            )
         ),
         publication_adapter=adapter,
         profile_resolver=ConfiguredPublicationParserProfiles({"epub": profile}),
-        unit_of_work_factory=lambda: SqlAlchemyPublicationNavigationUnitOfWork(factory),
+        unit_of_work_factory=lambda: SqlAlchemyPublicationNavigationUnitOfWork(
+            factory,
+            SqlAlchemyLibraryNavigationProjection,
+        ),
     )
 
 

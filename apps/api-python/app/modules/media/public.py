@@ -1,5 +1,10 @@
 """Stable media application contracts."""
 
+from app.modules.media.application.cover_proxy import (
+    UnsafeCoverUrl,
+    configured_cover_origins,
+    validate_cover_url,
+)
 from app.modules.media.application.page_index import (
     ReadOnlyResourcePageIndex,
     ResolvedResourcePageIndex,
@@ -14,4 +19,7 @@ __all__ = [
     "ResourcePageIndexProjection",
     "ResourcePageSource",
     "ResourcePageUnit",
+    "UnsafeCoverUrl",
+    "configured_cover_origins",
+    "validate_cover_url",
 ]

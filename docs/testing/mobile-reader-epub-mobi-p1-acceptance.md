@@ -13,8 +13,8 @@ State: implementation complete; release gates remain open
   and normalization identities are checked before opening.
 - Lazy Android and iOS Readium Publications backed by one serialized libmobi
   handle. Native reads are capped at 256 KiB and close is idempotent.
-- Product Reader entry from online bootstrap, managed downloads, Download Center,
-  Work Detail, Shell and offline grace routes.
+- Product Reader entry from online bootstrap, completed managed downloads, Download Center,
+  Work Detail, and the ordinary authenticated Shell.
 - EPUB Navigator reuse for both EPUB and MOBI-family reflowable Publications,
   including TOC, preferences, bookmarks and exact-location restoration.
 - The obsolete Android and iOS POC applications were retired after their corpus
@@ -24,7 +24,8 @@ The implementation does not generate a converted EPUB, ZIP or unpack directory.
 
 ## Android evidence
 
-Dedicated AVD: `Shuku_API_36` (`emulator-5554`).
+Historical pre-ADR 0015 evidence used AVD `Shuku_API_36` (`emulator-5554`) and does not
+satisfy the current physical-device runtime gate.
 
 - Shared tests, `mobiCore` and `androidApp` unit tests passed.
 - `mobiCore` and `androidApp` warning-as-error lint passed.

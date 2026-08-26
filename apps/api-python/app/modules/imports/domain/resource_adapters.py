@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from app.modules.library.domain.readable_resource_states import AssetRole
+from app.modules.library.public import AssetRole
 
 
 class ResourceAdapterId(str, Enum):
@@ -55,12 +55,16 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.TXT,
-        adapter_version="1",
+        adapter_version="2",
         format_label="TXT",
         file_extensions=frozenset({".txt", ".fb2"}),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
+        format_by_extension=(
+            (".txt", "TXT"),
+            (".fb2", "FB2"),
+        ),
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.KINDLE,

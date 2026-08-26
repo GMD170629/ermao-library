@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.archive.infrastructure.ArchiveCoreException
 import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.shared.modules.reader.ReaderMorphology
@@ -27,7 +28,9 @@ import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
+import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
 import java.io.FileNotFoundException
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -47,6 +50,7 @@ internal class ReadiumComicSession(
     private val source: ReaderSource,
     private val canonicalPages: List<ReaderComicPage>,
     private val publicationStore: AndroidReaderPublicationStore,
+    private val localPageSetDirectory: File? = null,
     private val progressStore: ReaderProgressStore,
     private val deviceIdentity: AndroidReaderDeviceIdentity,
     private val readium: AndroidReadiumRuntime,
@@ -121,15 +125,25 @@ internal class ReadiumComicSession(
         val opened = try {
             when (source) {
                 is LocalReaderSource -> {
-                    if (source.sourceFormat !in setOf(
+                    if (source.sourceFormat == com.ermao.library.shared.modules.reader.ReaderSourceFormat.ImageDir) {
+                        ImageDirectoryReadiumPublicationFactory().open(
+                            requireNotNull(localPageSetDirectory) { "IMAGE_DIR bundle is missing" },
+                            source.resourceId,
+                            source.displayTitle,
+                        )
+                    } else {
+                        if (source.sourceFormat !in setOf(
                             com.ermao.library.shared.modules.reader.ReaderSourceFormat.Cbz,
                             com.ermao.library.shared.modules.reader.ReaderSourceFormat.Zip,
-                        )
-                    ) {
-                        throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ComicArchiveFormatUnsupported))
+                            com.ermao.library.shared.modules.reader.ReaderSourceFormat.Cbr,
+                            com.ermao.library.shared.modules.reader.ReaderSourceFormat.Rar,
+                            )
+                        ) {
+                            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ComicArchiveFormatUnsupported))
+                        }
+                        val file = publicationStore.resolve(source)
+                        CbzReadiumPublicationFactory().open(file, source.displayTitle, canonicalPages)
                     }
-                    val file = publicationStore.resolve(source)
-                    CbzReadiumPublicationFactory(readium.assetRetriever).open(file, source.displayTitle, canonicalPages)
                 }
                 is RemoteComicReaderSource -> RemoteComicReadiumPublicationFactory(
                     requireNotNull(comicPageServer) { "Comic page server is missing" },
@@ -140,6 +154,11 @@ internal class ReadiumComicSession(
             throw error
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
+        } catch (error: ArchiveCoreException) {
+            throw ReaderOpenFailure(
+                ReaderError(readerErrorCodeForFailure(error.stableCode, recoverable = false)),
+                cause = error,
+            )
         } catch (error: IllegalArgumentException) {
             val code = if (source is LocalReaderSource) {
                 ReaderErrorCode.ComicArchiveCorrupt

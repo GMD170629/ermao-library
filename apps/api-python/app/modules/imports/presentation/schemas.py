@@ -9,7 +9,7 @@ from pydantic import Field
 
 from app.contracts.http import HttpContractModel, SuccessEnvelope
 from app.contracts.http_errors import HttpContractError
-from app.modules.library.domain.layout import LibraryOrganizationMode
+from app.modules.library.public import LibraryOrganizationMode
 
 
 class Library(HttpContractModel):

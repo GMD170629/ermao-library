@@ -1,6 +1,103 @@
 import SwiftUI
 @preconcurrency import ErmaoShared
 
+enum WorkDescriptionPlainText {
+    private static let blockTags: Set<String> = [
+        "article", "blockquote", "br", "div", "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "ol", "p", "section", "table", "tr", "ul",
+    ]
+    private static let suppressedTags: Set<String> = ["script", "style"]
+
+    static func normalize(_ rawValue: String?) -> String? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else { return nil }
+        let value = decodeEntities(in: textOutsideMarkup(rawValue))
+            .replacingOccurrences(of: "\0", with: "")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: #"[\t ]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func textOutsideMarkup(_ input: String) -> String {
+        var result = ""
+        var cursor = input.startIndex
+        var suppressedTag: String?
+        while cursor < input.endIndex {
+            guard input[cursor] == "<",
+                  let close = input[cursor...].firstIndex(of: ">"),
+                  input.distance(from: cursor, to: close) <= 4_096
+            else {
+                if suppressedTag == nil { result.append(input[cursor]) }
+                cursor = input.index(after: cursor)
+                continue
+            }
+            let tagBody = input[input.index(after: cursor) ..< close]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let isClosing = tagBody.hasPrefix("/")
+            let nameStart = isClosing ? tagBody.dropFirst() : tagBody[...]
+            let name = nameStart.prefix { $0.isLetter || $0.isNumber }.lowercased()
+            if suppressedTags.contains(name) {
+                if isClosing {
+                    if suppressedTag == name { suppressedTag = nil }
+                } else if !tagBody.hasSuffix("/") {
+                    suppressedTag = name
+                }
+            } else if suppressedTag == nil, blockTags.contains(name) {
+                result.append("\n")
+            }
+            cursor = input.index(after: close)
+        }
+        return result
+    }
+
+    private static func decodeEntities(in input: String) -> String {
+        var result = ""
+        var cursor = input.startIndex
+        while cursor < input.endIndex {
+            guard input[cursor] == "&" else {
+                result.append(input[cursor])
+                cursor = input.index(after: cursor)
+                continue
+            }
+            let searchEnd = input.index(cursor, offsetBy: 18, limitedBy: input.endIndex) ?? input.endIndex
+            guard let semicolon = input[cursor ..< searchEnd].firstIndex(of: ";") else {
+                result.append("&")
+                cursor = input.index(after: cursor)
+                continue
+            }
+            let name = String(input[input.index(after: cursor) ..< semicolon])
+            guard let decoded = decodeEntity(name) else {
+                result.append(contentsOf: input[cursor ... semicolon])
+                cursor = input.index(after: semicolon)
+                continue
+            }
+            result.append(decoded)
+            cursor = input.index(after: semicolon)
+        }
+        return result
+    }
+
+    private static func decodeEntity(_ name: String) -> Character? {
+        let named: [String: Character] = [
+            "amp": "&", "apos": "'", "gt": ">", "lt": "<", "nbsp": " ", "quot": "\"",
+        ]
+        if let value = named[name.lowercased()] { return value }
+        let numericValue: UInt32?
+        if name.lowercased().hasPrefix("#x") {
+            numericValue = UInt32(name.dropFirst(2), radix: 16)
+        } else if name.hasPrefix("#") {
+            numericValue = UInt32(name.dropFirst())
+        } else {
+            numericValue = nil
+        }
+        guard let numericValue, let scalar = Unicode.Scalar(numericValue) else { return nil }
+        return Character(scalar)
+    }
+}
+
 struct WorkReaderSelection: Equatable, Sendable {
     let bookID: String
     let resourceID: String
@@ -45,7 +142,7 @@ struct WorkDetailView: View {
     let context: ContentRequestContext
     let client: any ContentClient
     let shelfClient: any ShelfClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     @ObservedObject var downloads: DownloadCenterStore
     let openFacet: (FacetKind, String) -> Void
     let openDownloads: () -> Void
@@ -87,7 +184,7 @@ struct WorkDetailView: View {
         context: ContentRequestContext,
         client: any ContentClient,
         shelfClient: any ShelfClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         downloads: DownloadCenterStore,
         managementRepository: (any ErmaoShared.WorkManagementRepository)? = nil,
         canManageSystem: Bool = false,
@@ -111,7 +208,6 @@ struct WorkDetailView: View {
             wrappedValue: BookDetailStore(
                 context: context,
                 client: client,
-                cache: cache,
                 bookID: bookID,
                 onUnauthorized: onUnauthorized
             )
@@ -272,7 +368,13 @@ struct WorkDetailView: View {
         .overlay { controlMenuOverlay }
         .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
-        .task { store.load() }
+        .task {
+            #if DEBUG
+            store.load(resourceID: ProcessInfo.processInfo.environment["ERMAO_UI_TEST_LIVE_INITIAL_RESOURCE_ID"])
+            #else
+            store.load()
+            #endif
+        }
         .onAppear { store.refreshIfLoaded() }
         .onChange(of: managementStore?.completedAction) { _, action in
             handleManagementCompletion(action)
@@ -350,7 +452,7 @@ struct WorkDetailView: View {
                 title: "content.inaccessible.title",
                 message: "content.inaccessible.message"
             )
-        case .ready(let detail, _):
+        case .ready(let detail):
             readyContent(detail)
         }
     }
@@ -505,6 +607,7 @@ struct WorkDetailView: View {
                 action: { requestReaderAccess(detail: detail) }
             )
             .frame(height: 52)
+            .accessibilityIdentifier("work.reader.action")
             HStack(spacing: 0) {
                 quickAction(downloadActionTitle(selected), systemImage: selected.map { downloadSystemImage(resourceID: $0.id) } ?? "arrow.down") {
                     handlePrimaryDownload(detail)
@@ -596,20 +699,7 @@ struct WorkDetailView: View {
     }
 
     private func normalizedDescription(_ detail: BookDetailContent) -> String? {
-        guard let rawValue = detail.description?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawValue.isEmpty else { return nil }
-        let rendered = rawValue.data(using: .utf8).flatMap { data in
-            try? NSAttributedString(
-                data: data,
-                options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue],
-                documentAttributes: nil
-            ).string
-        } ?? rawValue
-        let value = rendered
-            .replacingOccurrences(of: #"[\t ]+"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
+        WorkDescriptionPlainText.normalize(detail.description)
     }
 
     @ViewBuilder
@@ -658,28 +748,45 @@ struct WorkDetailView: View {
 
             if let page = store.contentsPage {
                 contentBreadcrumbs(detail: detail, page: page)
-                let entries = visibleContentEntries(page)
-                if entries.isEmpty {
+                let items = workContentItemPresentations(page: page, detail: detail)
+                if items.isEmpty {
                     Text("work.contents.empty")
                         .appTextStyle(.body)
                         .foregroundStyle(theme.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
                 } else if store.contentLayout == .grid {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: .space2) {
-                        ForEach(entries) { entry in
-                            contentGridEntry(entry, detail: detail)
+                    LazyVGrid(
+                        columns: [
+                            GridItem(
+                                .adaptive(
+                                    minimum: BookCoverLayout.horizontalCardWidth,
+                                    maximum: BookCoverLayout.horizontalCardWidth
+                                ),
+                                spacing: .space2,
+                                alignment: .top
+                            )
+                        ],
+                        alignment: .leading,
+                        spacing: .space2
+                    ) {
+                        ForEach(items) { item in
+                            contentGridItem(item)
                         }
                     }
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(entries) { entry in
-                            if entry.isSourceFolder {
-                                sourceFolderRow(entry)
-                            } else if let resourceID = entry.resourceID,
-                                      let resource = detail.resources.first(where: { $0.id == resourceID }) {
-                                resourceListRow(resource, entry: entry, detail: detail)
-                            } else if entry.isDirectResource {
-                                unresolvedResourceRow(entry)
+                        ForEach(items) { item in
+                            if item.kind == .sourceDirectory {
+                                sourceDirectoryRow(item)
+                            } else if let resource = item.resource {
+                                resourceListRow(
+                                    resource,
+                                    entry: item.entry,
+                                    detail: detail,
+                                    displayIndex: item.indexLabel
+                                )
+                            } else {
+                                unresolvedResourceRow(item)
                             }
                             Divider().overlay(theme.divider.opacity(0.72))
                         }
@@ -715,75 +822,105 @@ struct WorkDetailView: View {
         }
     }
 
-    private func contentGridEntry(_ entry: BookContentEntry, detail: BookDetailContent) -> some View {
-        let resource = entry.resourceID.flatMap { id in detail.resources.first(where: { $0.id == id }) }
+    private func contentGridItem(_ item: WorkContentItemPresentation) -> some View {
         return Button {
-            if let resource { store.selectResource(resource.id) }
-            else { store.openContents(entry.sourceNodeID) }
+            if item.kind == .sourceDirectory {
+                store.openContents(item.entry.sourceNodeID)
+            } else if let resourceID = item.resource?.id ?? item.entry.resourceID {
+                store.selectResource(resourceID)
+            }
         } label: {
             VStack(alignment: .leading, spacing: .space1) {
-                if let resource {
+                ZStack(alignment: .topLeading) {
                     BookCoverView(
-                        reference: entry.cover ?? resource.cover,
-                        title: resource.title,
+                        reference: item.cover,
+                        title: item.title,
                         context: context,
                         client: client,
                         cache: cache
                     )
-                    .frame(maxWidth: .infinity)
-                } else {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(Color.orange.opacity(0.88))
-                        .frame(maxWidth: .infinity, minHeight: 150)
-                        .background(theme.surface)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .frame(width: BookCoverLayout.horizontalCardWidth)
+                    .overlay(alignment: .bottom) {
+                        if item.kind == .readableResource,
+                           let progress = item.resource?.progress,
+                           progress > 0 {
+                            ResourceCoverProgressView(progress: progress)
+                                .padding(.horizontal, .space1)
+                                .padding(.bottom, .spaceHalf)
+                        }
+                    }
+
+                    Text(item.indexLabel)
+                        .appTextStyle(.caption)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.canvas)
+                        .frame(width: 32, height: 32)
+                        .background(theme.textPrimary.opacity(0.62))
+                        .clipShape(Circle())
+                        .padding(.space1)
                 }
-                Text(entry.title)
-                    .appTextStyle(.body)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(theme.textPrimary)
-                    .lineLimit(2)
-                Text(resource?.formatLabel ?? String(localized: "work.contents.folder"))
-                    .appTextStyle(.caption)
-                    .foregroundStyle(theme.textSecondary)
+
+                HStack(alignment: .top, spacing: .spaceHalf) {
+                    Text(item.title)
+                        .appTextStyle(.body)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(theme.textPrimary)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    if item.kind == .sourceDirectory {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(theme.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                if item.kind == .readableResource, let format = item.resource?.formatLabel {
+                    Text(format)
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                } else if item.kind == .readableResource {
+                    Text("work.contents.readableResource")
+                        .appTextStyle(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(width: BookCoverLayout.horizontalCardWidth, alignment: .leading)
         }
         .buttonStyle(.plain)
-    }
-
-    private func visibleContentEntries(_ page: BookContentsPage) -> [BookContentEntry] {
-        var entries = page.entries.filter { $0.isSourceFolder || $0.isDirectResource }
-        if page.currentNode.isDirectResource,
-           !entries.contains(where: { $0.id == page.currentNode.id }) {
-            entries.insert(page.currentNode, at: 0)
-        }
-        return entries
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(
+            item.kind == .sourceDirectory
+                ? "work.contents.folder.\(item.entry.sourceNodeID)"
+                : "work.resource.\(item.resource?.id ?? item.entry.resourceID ?? item.entry.sourceNodeID)"
+        )
+        .accessibilityLabel(Text(item.title))
+        .accessibilityValue(Text(
+            item.kind == .sourceDirectory
+                ? sourceDirectoryLabel(position: item.position, locale: locale)
+                : item.resource?.formatLabel ?? String(localized: "work.contents.readableResource")
+        ))
     }
 
     private func contentBreadcrumbs(detail: BookDetailContent, page: BookContentsPage) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: .spaceHalf) {
-                Button { store.openContents(nil) } label: {
-                    Text(detail.book.title)
-                }
-                .buttonStyle(.plain)
-                ForEach(page.breadcrumbs) { entry in
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(theme.textTertiary)
-                    Button { store.openContents(entry.sourceNodeID) } label: {
-                        Text(entry.title)
+                ForEach(workContentBreadcrumbs(bookTitle: detail.book.title, page: page)) { breadcrumb in
+                    if !breadcrumb.isRoot {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(theme.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                    Button { store.openContents(breadcrumb.sourceNodeID) } label: {
+                        Text(breadcrumb.title)
                     }
                     .buttonStyle(.plain)
-                }
-                if page.currentSourceNodeID != nil,
-                   page.breadcrumbs.last?.sourceNodeID != page.currentNode.sourceNodeID {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(theme.textTertiary)
-                    Text(page.currentNode.title)
+                    .accessibilityIdentifier(
+                        breadcrumb.isRoot
+                            ? "work.contents.breadcrumb.root"
+                            : "work.contents.breadcrumb.\(breadcrumb.sourceNodeID ?? "unknown")"
+                    )
                 }
             }
             .appTextStyle(.caption)
@@ -793,20 +930,24 @@ struct WorkDetailView: View {
         .accessibilityLabel(Text("work.contents.breadcrumbs"))
     }
 
-    private func sourceFolderRow(_ entry: BookContentEntry) -> some View {
-        Button { store.openContents(entry.sourceNodeID) } label: {
+    private func sourceDirectoryRow(_ item: WorkContentItemPresentation) -> some View {
+        Button { store.openContents(item.entry.sourceNodeID) } label: {
             HStack(spacing: .space2) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 30, weight: .regular))
-                    .foregroundStyle(Color.orange.opacity(0.88))
-                    .frame(width: 40, height: 40)
+                BookCoverView(
+                    reference: item.cover,
+                    title: item.title,
+                    context: context,
+                    client: client,
+                    cache: cache
+                )
+                .frame(width: 40)
                 VStack(alignment: .leading, spacing: .spaceHalf) {
-                    Text(entry.title)
+                    Text(item.title)
                         .appTextStyle(.body)
                         .fontWeight(.semibold)
                         .foregroundStyle(theme.textPrimary)
                         .lineLimit(1)
-                    Text(entry.hasChildren ? "work.contents.folder.hasChildren" : "work.contents.folder.empty")
+                    Text(sourceDirectoryLabel(position: item.position, locale: locale))
                         .appTextStyle(.caption)
                         .foregroundStyle(theme.textSecondary)
                 }
@@ -819,25 +960,30 @@ struct WorkDetailView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("work.contents.folder.\(entry.sourceNodeID)")
+        .accessibilityIdentifier("work.contents.folder.\(item.entry.sourceNodeID)")
     }
 
-    private func unresolvedResourceRow(_ entry: BookContentEntry) -> some View {
+    private func unresolvedResourceRow(_ item: WorkContentItemPresentation) -> some View {
         Button {
-            guard let resourceID = entry.resourceID else { return }
+            guard let resourceID = item.entry.resourceID else { return }
             store.selectResource(resourceID)
         } label: {
             HStack(spacing: .space2) {
+                Text(item.indexLabel)
+                    .appTextStyle(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(theme.textSecondary)
+                    .frame(width: 28, alignment: .leading)
                 BookCoverView(
-                    reference: entry.cover,
-                    title: entry.title,
+                    reference: item.cover,
+                    title: item.title,
                     context: context,
                     client: client,
                     cache: cache
                 )
                 .frame(width: 40)
                 VStack(alignment: .leading, spacing: .spaceHalf) {
-                    Text(entry.title)
+                    Text(item.title)
                         .appTextStyle(.body)
                         .fontWeight(.semibold)
                         .foregroundStyle(theme.textPrimary)
@@ -860,10 +1006,11 @@ struct WorkDetailView: View {
     private func resourceListRow(
         _ resource: BookResource,
         entry: BookContentEntry?,
-        detail: BookDetailContent
+        detail: BookDetailContent,
+        displayIndex: String? = nil
     ) -> some View {
         HStack(spacing: .space1) {
-            Text(resourceDisplayIndex(resource, detail: detail))
+            Text(displayIndex ?? resourceDisplayIndex(resource, detail: detail))
                 .appTextStyle(.caption)
                 .monospacedDigit()
                 .foregroundStyle(resource.isSelected ? theme.brandAccent : theme.textSecondary)
@@ -872,7 +1019,7 @@ struct WorkDetailView: View {
             Button { store.selectResource(resource.id) } label: {
                 HStack(spacing: .space2) {
                     BookCoverView(
-                        reference: entry?.cover ?? resource.cover,
+                        reference: resource.cover ?? entry?.cover,
                         title: resource.title,
                         context: context,
                         client: client,
@@ -1000,7 +1147,20 @@ struct WorkDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
                 } else {
                     if resource.readerType.lowercased() == "comic" || resource.readerType.lowercased() == "pdf" {
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: .space2) {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(
+                                    .adaptive(
+                                        minimum: BookCoverLayout.horizontalCardWidth,
+                                        maximum: BookCoverLayout.horizontalCardWidth
+                                    ),
+                                    spacing: .space2,
+                                    alignment: .top
+                                )
+                            ],
+                            alignment: .leading,
+                            spacing: .space2
+                        ) {
                             ForEach(page.units) { unit in
                                 resourcePageTile(unit, detail: detail)
                             }
@@ -1047,10 +1207,13 @@ struct WorkDetailView: View {
                         client: client,
                         cache: cache
                     )
-                    .frame(maxWidth: .infinity)
+                    .frame(width: BookCoverLayout.horizontalCardWidth)
                 } else {
                     Image(systemName: "photo")
-                        .frame(maxWidth: .infinity, minHeight: 150)
+                        .frame(
+                            width: BookCoverLayout.horizontalCardWidth,
+                            height: BookCoverLayout.horizontalCardHeight
+                        )
                         .background(theme.surface)
                 }
                 Text(unit.title.isEmpty
@@ -1060,6 +1223,7 @@ struct WorkDetailView: View {
                     .foregroundStyle(theme.textPrimary)
                     .lineLimit(1)
             }
+            .frame(width: BookCoverLayout.horizontalCardWidth, alignment: .leading)
         }
         .buttonStyle(.plain)
     }
@@ -1378,7 +1542,7 @@ struct WorkDetailView: View {
     }
 
     private var currentDetail: BookDetailContent? {
-        guard case .ready(let detail, _) = store.state else { return nil }
+        guard case .ready(let detail) = store.state else { return nil }
         return detail
     }
 
@@ -1865,13 +2029,6 @@ struct WorkDetailView: View {
 
     private func requestReaderAccess(detail: BookDetailContent) {
         guard let resource = selectedResource(detail) else { return }
-        if let handoff = ManagedReaderAccessPolicy.verifiedLocalHandoff(
-            record: downloads.record(for: resource.id),
-            resourceID: resource.id
-        ) {
-            openReader(handoff)
-            return
-        }
         guard let readerType = ManagedDownloadReaderType.fixtureValue(
             format: resource.format,
             readerType: resource.readerType
@@ -1892,7 +2049,7 @@ struct WorkDetailView: View {
     }
 
     private func requestReaderAccessForSelectedResource() {
-        guard case .ready(let detail, _) = store.state else { return }
+        guard case .ready(let detail) = store.state else { return }
         requestReaderAccess(detail: detail)
     }
 
@@ -2012,6 +2169,94 @@ struct WorkDetailView: View {
         default: "reader.handoff.error.message"
         }
     }
+}
+
+enum WorkContentItemKind: Equatable {
+    case sourceDirectory
+    case readableResource
+}
+
+struct WorkContentItemPresentation: Identifiable, Equatable {
+    let entry: BookContentEntry
+    let kind: WorkContentItemKind
+    let resource: BookResource?
+    let cover: CoverReference?
+    let title: String
+    let position: Int
+    let indexLabel: String
+
+    var id: String { entry.sourceNodeID }
+}
+
+struct WorkContentBreadcrumbPresentation: Identifiable, Equatable {
+    let title: String
+    let sourceNodeID: String?
+
+    var id: String { sourceNodeID ?? "work-contents-root" }
+    var isRoot: Bool { sourceNodeID == nil }
+}
+
+func workContentItemPresentations(
+    page: BookContentsPage,
+    detail: BookDetailContent
+) -> [WorkContentItemPresentation] {
+    var entries = page.entries.filter { $0.isSourceFolder || $0.isDirectResource }
+    if page.currentNode.isDirectResource,
+       !entries.contains(where: { $0.sourceNodeID == page.currentNode.sourceNodeID }) {
+        entries.insert(page.currentNode, at: 0)
+    }
+
+    let resourcesByID = Dictionary(uniqueKeysWithValues: detail.resources.map { ($0.id, $0) })
+    let directories = entries.filter(\.isSourceFolder)
+    let directResources = entries.filter(\.isDirectResource)
+
+    let directoryItems = directories.enumerated().map { position, entry in
+        let representative = entry.representativeResourceID.flatMap { resourcesByID[$0] }
+        return WorkContentItemPresentation(
+            entry: entry,
+            kind: .sourceDirectory,
+            resource: representative,
+            cover: entry.cover ?? representative?.cover ?? detail.book.cover,
+            title: entry.title,
+            position: position,
+            indexLabel: paddedWorkContentIndex(position)
+        )
+    }
+    let resourceItems = directResources.enumerated().map { position, entry in
+        let resource = entry.resourceID.flatMap { resourcesByID[$0] }
+        return WorkContentItemPresentation(
+            entry: entry,
+            kind: .readableResource,
+            resource: resource,
+            cover: resource?.cover ?? entry.cover,
+            title: resource?.title ?? entry.title,
+            position: position,
+            indexLabel: resource?.displayIndex(position: position) ?? paddedWorkContentIndex(position)
+        )
+    }
+    return directoryItems + resourceItems
+}
+
+func workContentBreadcrumbs(
+    bookTitle: String,
+    page: BookContentsPage
+) -> [WorkContentBreadcrumbPresentation] {
+    [WorkContentBreadcrumbPresentation(title: bookTitle, sourceNodeID: nil)]
+        + page.breadcrumbs.map {
+            WorkContentBreadcrumbPresentation(title: $0.title, sourceNodeID: $0.sourceNodeID)
+        }
+}
+
+func sourceDirectoryLabel(position: Int, locale: Locale = .current) -> String {
+    String(
+        format: String(localized: "work.contents.sourceDirectory.format", locale: locale),
+        locale: locale,
+        position + 1
+    )
+}
+
+private func paddedWorkContentIndex(_ zeroBasedPosition: Int) -> String {
+    String(format: "%02d", zeroBasedPosition + 1)
 }
 
 private struct ResourceCoverProgressView: View {

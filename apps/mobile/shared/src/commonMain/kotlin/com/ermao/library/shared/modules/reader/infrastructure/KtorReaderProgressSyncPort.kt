@@ -15,16 +15,22 @@ import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 
-class KtorReaderProgressSyncPort(
-    private val clients: ApiClientFactory,
+class KtorReaderProgressSyncPort internal constructor(
     private val profile: ServerProfile,
+    private val createClient: (ServerProfile) -> com.ermao.library.shared.core.network.ApiClient,
     private val mapper: ReaderServerWireMapper = ReaderServerWireMapper(),
 ) : ReaderProgressServerPort {
+    constructor(
+        clients: ApiClientFactory,
+        profile: ServerProfile,
+        mapper: ReaderServerWireMapper = ReaderServerWireMapper(),
+    ) : this(profile, clients::create, mapper)
+
     override suspend fun push(upload: ReaderProgressUpload): ReaderProgressPushResult {
         require(upload.target.namespace.serverIdentity == profile.serverIdentity) {
             "Reader progress upload belongs to another server"
         }
-        val client = clients.create(profile)
+        val client = createClient(profile)
         return try {
             when (val result = client.execute(
                 ApiRequest(
@@ -68,9 +74,9 @@ class KtorReaderProgressSyncPort(
         require(target.namespace.serverIdentity == profile.serverIdentity) {
             "Reader progress query belongs to another server"
         }
-        val client = clients.create(profile)
+        val client = createClient(profile)
         return try {
-            when (val result = client.loadAuthenticatedAsset(
+            when (val result = client.loadAuthenticatedJson(
                 apiPath = "/api/reader/v4/resources/${encodePathSegment(target.resourceId)}/progress",
                 etag = etag,
                 maximumBytes = 196_608,

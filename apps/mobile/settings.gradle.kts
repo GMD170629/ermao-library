@@ -20,4 +20,5 @@ rootProject.name = "ermao-mobile"
 include(":shared")
 include(":androidApp")
 include(":mobiCore")
+include(":archiveCore")
 include(":pdfiumNative")

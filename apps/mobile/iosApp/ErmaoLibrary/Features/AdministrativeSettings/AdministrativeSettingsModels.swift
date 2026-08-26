@@ -22,7 +22,6 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case categoryGovernance
     case metadataProviders
     case metadataProvider(providerID: String)
-    case metadataPipeline
     case opds
     case backups
     case workDetailOrder
@@ -152,6 +151,7 @@ enum KindleTaskStatus: String, CaseIterable, Hashable, Sendable {
     case sent
     case failed
     case cancelled
+    case unknown
 }
 
 struct KindleSendTask: Identifiable, Equatable, Sendable {
@@ -297,6 +297,11 @@ struct ImportTask: Identifiable, Equatable, Sendable {
     let id: String
     let filename: String
     let sourcePath: String
+    let libraryName: String?
+    let resourceTitle: String?
+    let sourceName: String?
+    let sourceRelativePath: String?
+    let bookTitle: String?
     let status: ImportTaskStatus
     let progress: Double?
     let createdAt: Date
@@ -452,7 +457,6 @@ struct MetadataProvider: Identifiable, Equatable, Sendable {
     var enabled: Bool
     let status: MetadataProviderStatus
     let responseMilliseconds: Int?
-    let supportedMediaKinds: Set<MediaKind>
     let hasSecret: Bool
     let priority: Int
 }
@@ -471,18 +475,6 @@ enum ProviderEditableValue: Equatable, Sendable {
     case decimal(Double)
     case textList([String])
     case empty
-}
-
-enum MetadataPipelineStage: String, CaseIterable, Hashable, Sendable {
-    case isbn
-    case titleAndAuthor
-    case fileMetadata
-}
-
-struct MetadataPipeline: Equatable, Sendable {
-    var mediaKind: MediaKind
-    var providerIDs: [String]
-    var enabledProviderIDs: Set<String>
 }
 
 struct OPDSConfiguration: Equatable, Sendable {
@@ -528,8 +520,6 @@ struct HealthComponent: Identifiable, Equatable, Sendable {
 struct SystemHealthSnapshot: Equatable, Sendable {
     let checkedAt: Date?
     let components: [HealthComponent]
-    let queueRestartInProgress: Bool
-    let queueRestartStatus: String?
 }
 
 enum LogLevel: String, CaseIterable, Hashable, Sendable {

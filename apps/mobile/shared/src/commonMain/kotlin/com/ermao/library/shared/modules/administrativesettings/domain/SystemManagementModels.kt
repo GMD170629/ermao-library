@@ -110,18 +110,6 @@ data class HealthRun(
     val summary: HealthRunSummary,
 )
 
-data class QueueOperation(
-    val id: String,
-    val queueName: String,
-    val action: String,
-    val status: String,
-    val messageCode: String,
-    val requestedAt: String,
-    val startedAt: String?,
-    val finishedAt: String?,
-    val updatedAt: String,
-)
-
 data class ManagementEventFilter(
     val page: Int = 1,
     val pageSize: Int = 20,
@@ -145,9 +133,19 @@ data class ManagementEvent(
     val targetType: String?,
     val targetId: String?,
     val message: String,
-    val metadata: Map<String, String>,
+    val metadata: Map<String, EventMetadataValue>,
     val createdAt: String?,
 )
+
+sealed interface EventMetadataValue {
+    data class Text(val value: String) : EventMetadataValue
+    data class Integer(val value: Long) : EventMetadataValue
+    data class Decimal(val value: Double) : EventMetadataValue
+    data class Toggle(val value: Boolean) : EventMetadataValue
+    data class ListValue(val value: List<EventMetadataValue>) : EventMetadataValue
+    data class ObjectValue(val value: Map<String, EventMetadataValue>) : EventMetadataValue
+    data object Empty : EventMetadataValue
+}
 
 data class EventStorage(
     val sizeBytes: Long,

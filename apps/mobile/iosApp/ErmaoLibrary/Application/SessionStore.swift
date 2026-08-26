@@ -33,7 +33,7 @@ final class SessionStore: ObservableObject {
     init(
         runtime: MobileRuntimeClient,
         credentialStore: ServerCredentialStore = KeychainServerCredentialStore(),
-        privateContentCache: any PrivateContentCacheClearing = LibraryCacheStore()
+        privateContentCache: any PrivateContentCacheClearing = AuthenticatedCoverCache()
     ) {
         self.runtime = runtime
         self.credentialStore = credentialStore

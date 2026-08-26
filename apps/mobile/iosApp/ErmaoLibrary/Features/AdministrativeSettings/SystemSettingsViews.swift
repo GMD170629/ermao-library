@@ -102,26 +102,22 @@ struct WorkDetailOrderView: View {
 struct SystemHealthView: View {
     @ObservedObject var store: AdministrativeSettingsStore
     @State private var state: AdministrativeLoadState<SystemHealthSnapshot> = .idle
-    @State private var restartShown = false
     @Environment(\.administrativeCopy) private var copy
     @Environment(\.appTheme) private var theme
 
     var body: some View {
         AdministrativeStateView(state: state, retry: load) { snapshot in
             List {
-                Section { if let checked = snapshot.checkedAt { LabeledContent(copy[.lastChecked], value: checked.administrativeFormatted(locale: copy.locale)) }; Button(copy[.runHealthCheck], action: runCheck).frame(maxWidth: .infinity); Button(copy[.restartImportQueue]) { restartShown = true }.frame(maxWidth: .infinity) }
-                if snapshot.queueRestartInProgress { Section { HStack { ProgressView(); Text(copy[.waitForCurrentImports]) }; if let status = snapshot.queueRestartStatus { Text(status).textSelection(.enabled) } } }
+                Section { if let checked = snapshot.checkedAt { LabeledContent(copy[.lastChecked], value: checked.administrativeFormatted(locale: copy.locale)) }; Button(copy[.runHealthCheck], action: runCheck).frame(maxWidth: .infinity) }
                 ForEach(groups(snapshot.components), id: \.0) { group, components in Section(group) { ForEach(components) { component in HStack { VStack(alignment: .leading) { Text(component.name); if let detail = component.detail { Text(detail).font(.caption).foregroundStyle(theme.textSecondary) } }; Spacer(); AdministrativeStatusLabel(title: status(component.status), status: component.status == .healthy ? .good : component.status == .warning ? .warning : component.status == .failed ? .failed : .neutral) } } } }
             }.administrativeListSurface()
         }.navigationTitle(copy[.healthTitle]).navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(copy[.restartQueueTitle], isPresented: $restartShown, titleVisibility: .visible) { Button(copy[.safeRestart], role: .destructive, action: restart); Button(copy[.cancel], role: .cancel) {} } message: { Text(copy[.restartQueueMessage]) }
         .task { await loadAsync() }.onDisappear { store.cancelPendingRequests() }.administrativeNotice(store: store)
     }
     private func groups(_ values: [HealthComponent]) -> [(String, [HealthComponent])] { Dictionary(grouping: values, by: \.group).sorted { $0.key < $1.key } }
     private func status(_ value: HealthStatus) -> String { switch value { case .healthy: copy[.healthy]; case .warning: copy[.warning]; case .failed: copy[.failed]; case .checking: copy[.checking] } }
     private func load() { Task { await loadAsync() } }; private func loadAsync() async { state = .loading; state = await store.load(scope: "health") { try await store.client.loadSystemHealth() } }
     private func runCheck() { Task { let result = await store.performValue(id: "health-check") { try await store.client.runSystemHealthCheck() }; if case let .success(updated) = result { state = .loaded(updated) } } }
-    private func restart() { Task { let result = await store.performValue(id: "restart-import-queue") { try await store.client.restartImportQueueSafely() }; if case let .success(updated) = result { state = .loaded(updated) } } }
 }
 
 struct SystemLogsView: View {

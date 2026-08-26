@@ -72,7 +72,6 @@
     <string name="content_loading_title">正在加载</string>
     <string name="content_error_title">无法加载内容</string>
     <string name="content_error_message">请检查网络后重试，当前页面状态已保留。</string>
-    <string name="content_stale_banner">正在显示已保存结果，并在后台刷新书库。</string>
     <string name="home_loading_message">正在读取你的阅读动态。</string>
     <string name="home_continue_title">继续阅读</string>
     <string name="home_view_detail_action">继续阅读</string>
@@ -133,8 +132,6 @@
     <string name="library_filter_title">筛选作品</string>
     <string name="library_filter_draft_description">选择后应用，不会立即改变结果。</string>
     <string name="library_filter_reading">阅读状态</string>
-    <string name="library_filter_offline">已下载</string>
-    <string name="library_filter_downloaded">已下载</string>
     <string name="library_permission_revalidating_title">正在检查访问权限</string>
     <string name="library_permission_revalidating_message">重新检查访问权限期间，私有结果将保持隐藏。</string>
     <string name="reading_unread">未读</string>
@@ -442,11 +439,12 @@
     <string name="reader_contents_empty">本书没有提供目录。</string>
     <string name="reader_restore_warning">无法使用精确保存位置，已从最接近的安全位置开始阅读。</string>
     <string name="reader_error_title">无法打开此书</string>
-    <string name="reader_error_unsupported">此文件不是受支持的 EPUB 出版物。</string>
-    <string name="reader_error_corrupt">EPUB 文件已损坏或不完整。</string>
-    <string name="reader_error_drm">无法打开受 DRM 保护的 EPUB。</string>
-    <string name="reader_error_parse">无法读取 EPUB 的结构。</string>
-    <string name="reader_error_missing">本地 EPUB 文件不可用或已发生变化。</string>
+    <string name="reader_error_unsupported">阅读器暂不支持此出版物格式。</string>
+    <string name="reader_error_corrupt">原始图书文件已损坏或不完整。</string>
+    <string name="reader_error_drm">无法打开受保护的图书。</string>
+    <string name="reader_error_parse">无法读取图书结构。</string>
+    <string name="reader_error_missing">原始或已下载的图书文件不可用或已发生变化。</string>
+    <string name="reader_error_network">图书尚未下载，且服务器当前不可用。请检查网络后重试。</string>
     <string name="reader_error_memory">此出版物过大，无法在本设备上安全打开。</string>
     <string name="reader_error_location">无法恢复保存的阅读位置。</string>
     <string name="reader_error_generic">阅读引擎无法打开此出版物。</string>
@@ -487,13 +485,6 @@
     <plurals name="downloads_resource_summary">
         <item quantity="other">%1$d 个资源 · %2$s</item>
     </plurals>
-    <string name="download_checking_local">正在检查当前已下载副本…</string>
-    <string name="download_preparing_task">正在创建下载任务…</string>
-    <string name="download_progress_detail">已下载 %1$s / %2$s · %3$d%%</string>
-    <string name="download_first_open_explanation">首次打开需要下载一次，之后将直接进入阅读。</string>
-    <string name="download_preparation_failed">无法为阅读准备这本图书。</string>
-    <string name="download_opening_reader">下载完成，正在打开阅读器…</string>
-    <string name="download_cancel_and_return">取消并返回</string>
     <string name="downloads_task_context">%1$s · %2$s</string>
     <string name="downloads_unavailable_title">下载不可用</string>
     <string name="downloads_unavailable_message">此下载已缺失、未完成，或当前账户不再有权使用。</string>
@@ -510,6 +501,12 @@
     <string name="work_chapter_read">已读</string>
     <string name="work_chapter_unread">未读</string>
     <string name="reader_error_comic_open">无法打开已下载的漫画文件。文件可能损坏、加密，或当前设备不支持该压缩格式。</string>
+    <string name="reader_error_comic_encrypted">漫画压缩包已加密，无法打开。</string>
+    <string name="reader_error_comic_part_missing">多卷漫画压缩包缺少必需的分卷文件。</string>
+    <string name="reader_error_comic_format">漫画不是受支持的 ZIP、RAR 或 RAR5 压缩格式。</string>
+    <string name="reader_error_comic_corrupt">漫画压缩包已损坏或不完整。</string>
+    <string name="reader_error_comic_page_decode">无法解码漫画页面。</string>
+    <string name="reader_error_comic_memory">漫画展开后超过本设备的安全内存限制。</string>
     <string name="reader_retry_open">重新获取并打开</string>
     <string name="reader_read_online">在线阅读</string>
     <string name="reader_delete_download">删除下载</string>
@@ -556,9 +553,8 @@
     </plurals>
     <string name="work_contents_grid">网格</string>
     <string name="work_contents_list">列表</string>
-    <string name="work_contents_root">目录</string>
-    <string name="work_contents_folder">文件夹</string>
     <string name="work_contents_file">文件</string>
+    <string name="work_contents_source_directory">来源目录 %1$d</string>
     <string name="work_contents_loading">正在加载来源目录…</string>
     <string name="work_contents_error_title">图书内容加载失败</string>
     <string name="work_contents_error_message">来源目录加载失败（%1$s）。</string>

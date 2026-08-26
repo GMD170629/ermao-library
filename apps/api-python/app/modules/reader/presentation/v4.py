@@ -196,7 +196,7 @@ def _authorized_bootstrap(
 
 def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
     context = bootstrap.context
-    source_format = context.resource.format.strip().lower()
+    source_format = context.resource.source_format.strip().lower()
     if source_format not in _COMIC_ARCHIVE_SOURCE_FORMATS:
         raise ReaderValidationError(
             ReaderErrorBody(
@@ -387,7 +387,7 @@ def _resource_summary(
     resource: ReaderResourceDto,
     progress: ReaderProgressDto | None,
 ) -> ReaderResourceSummary:
-    reader_type = _reader_type(resource.format)
+    reader_type = _reader_type(resource.source_format)
     return ReaderResourceSummary(
         id=resource.id,
         bookId=resource.book_id,
@@ -395,7 +395,7 @@ def _resource_summary(
         title=resource.title,
         resourceIndex=resource.resource_index,
         sortOrder=resource.sort_order,
-        format=resource.format,
+        format=resource.source_format,
         readerType=reader_type.value,
         pageCount=resource.page_count,
         chapterCount=resource.chapter_count,
@@ -531,7 +531,7 @@ def reader_bootstrap_v4(
     reader_type = _reader_type(context.resource.format)
     progress = bootstrap.progress_by_resource_id.get(resource_id)
     capabilities = capabilities_for_reader_type(reader_type)
-    normalized_format = context.resource.format.lower()
+    normalized_format = context.resource.source_format.lower()
     publication_access = None
     if normalized_format in _PUBLICATION_SERVER_FORMATS:
         publication_access = ReaderPublicationAccess(
@@ -666,7 +666,7 @@ def get_comic_manifest_v4(
     ),
 ]:
     _user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
-    source_format = bootstrap.context.resource.format.strip().lower()
+    source_format = bootstrap.context.resource.source_format.strip().lower()
     if source_format not in _COMIC_SOURCE_FORMATS:
         raise ReaderValidationError(
             ReaderErrorBody(

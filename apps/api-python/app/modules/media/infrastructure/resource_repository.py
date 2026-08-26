@@ -7,10 +7,12 @@ from typing import cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.core.natural_sort import natural_sort_key
 from app.models import (
     Library,
     LibraryBook,
+    LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
@@ -34,6 +36,7 @@ class SqlAlchemyMediaResourceRepository:
                 LibrarySourceNode,
                 LibraryResourceAssetMetadata,
                 Library,
+                LibraryReadableResource,
             )
             .join(
                 LibrarySourceNode,
@@ -44,6 +47,10 @@ class SqlAlchemyMediaResourceRepository:
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
             )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == LibraryResourceAsset.resource_id,
+            )
             .where(
                 LibraryResourceAsset.id == asset_id,
                 LibraryResourceAsset.import_state == "READY",
@@ -59,6 +66,7 @@ class SqlAlchemyMediaResourceRepository:
                 LibrarySourceNode,
                 LibraryResourceAssetMetadata,
                 Library,
+                LibraryReadableResource,
             )
             .join(
                 LibrarySourceNode,
@@ -69,6 +77,10 @@ class SqlAlchemyMediaResourceRepository:
                 LibraryResourceAssetMetadata.asset_id == LibraryResourceAsset.id,
             )
             .join(Library, Library.id == LibraryResourceAsset.library_id)
+            .join(
+                LibraryReadableResource,
+                LibraryReadableResource.id == LibraryResourceAsset.resource_id,
+            )
             .where(
                 LibraryResourceAsset.resource_id == resource_id,
                 LibraryResourceAsset.import_state == "READY",
@@ -122,12 +134,13 @@ class SqlAlchemyMediaResourceRepository:
     ) -> MediaAssetResource | None:
         if row is None:
             return None
-        asset, source_node, metadata, library = cast(
+        asset, source_node, metadata, library, resource = cast(
             tuple[
                 LibraryResourceAsset,
                 LibrarySourceNode,
                 LibraryResourceAssetMetadata | None,
                 Library,
+                LibraryReadableResource,
             ],
             row,
         )
@@ -135,9 +148,10 @@ class SqlAlchemyMediaResourceRepository:
             id=asset.id,
             path=source_node.relative_path,
             source_root=library.root_path,
-            mime_type=(
-                metadata.mime_type
-                if metadata is not None and metadata.mime_type
-                else "application/octet-stream"
+            mime_type=resolve_asset_mime_type(
+                resource_format=resource.format,
+                asset_role=asset.role,
+                filename=source_node.name,
+                stored_mime_type=metadata.mime_type if metadata is not None else None,
             ),
         )

@@ -7,6 +7,8 @@ import { createPortal } from 'react-dom';
 import { cn } from './cn';
 
 export type ContextMenuPosition = Readonly<{ x: number; y: number }>;
+export type ContextActionMenuWidth = 'default' | 'compact';
+export type ContextActionMenuHorizontalAlign = 'start' | 'center' | 'end';
 
 export type ContextActionMenuItem<Action extends string> = Readonly<{
   action: Action;
@@ -26,6 +28,8 @@ export function ContextActionMenu<Action extends string>({
   badge,
   items,
   footer,
+  width = 'default',
+  horizontalAlign = 'start',
   onClose,
   onSelect,
   returnFocusTo
@@ -36,6 +40,8 @@ export function ContextActionMenu<Action extends string>({
   badge?: string;
   items: readonly ContextActionMenuItem<Action>[];
   footer?: string;
+  width?: ContextActionMenuWidth;
+  horizontalAlign?: ContextActionMenuHorizontalAlign;
   onClose: () => void;
   onSelect: (action: Action) => void;
   returnFocusTo?: HTMLElement | null;
@@ -97,9 +103,14 @@ export function ContextActionMenu<Action extends string>({
   }, [position]);
 
   if (!position || typeof document === 'undefined') return null;
-  const width = 316;
+  const menuWidth = width === 'compact' ? 252 : 316;
   const estimatedHeight = Math.min(window.innerHeight - 24, 88 + items.length * 58 + (footer ? 48 : 0));
-  const left = Math.max(12, Math.min(position.x, window.innerWidth - width - 12));
+  const requestedLeft = horizontalAlign === 'center'
+    ? position.x - menuWidth / 2
+    : horizontalAlign === 'end'
+      ? position.x - menuWidth
+      : position.x;
+  const left = Math.max(12, Math.min(requestedLeft, window.innerWidth - menuWidth - 12));
   const top = Math.max(12, Math.min(position.y, window.innerHeight - estimatedHeight - 12));
 
   return createPortal(
@@ -107,7 +118,7 @@ export function ContextActionMenu<Action extends string>({
       ref={menuRef}
       role="menu"
       aria-label={ariaLabel}
-      style={{ left, top, width, maxHeight: 'calc(100vh - 24px)' }}
+      style={{ left, top, width: menuWidth, maxHeight: 'calc(100vh - 24px)' }}
       className="fixed z-[130] rounded-2xl border border-black/[0.1] bg-[#FFFEFC] p-2 shadow-[0_22px_70px_rgba(47,37,31,0.24)]"
     >
       <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-1.5">
@@ -118,7 +129,7 @@ export function ContextActionMenu<Action extends string>({
         {items.map((item) => {
           const Icon = item.icon;
           const submenuOpen = item.submenu && openSubmenuAction === item.action;
-          const submenuOnLeft = left + width * 2 + 8 > window.innerWidth - 12;
+          const submenuOnLeft = left + menuWidth * 2 + 8 > window.innerWidth - 12;
           return <div key={item.action} className="relative" onMouseEnter={() => setOpenSubmenuAction(item.submenu ? item.action : null)}>
             {item.separatorBefore ? <div className="my-1.5 h-px bg-black/[0.06]" /> : null}
             <button

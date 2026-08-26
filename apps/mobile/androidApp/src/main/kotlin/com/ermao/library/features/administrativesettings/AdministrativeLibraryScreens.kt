@@ -258,6 +258,11 @@ fun ImportTaskDetailScreen(
     AdministrativePage(AdministrativeCopy.ImportTaskDetail, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { snapshot ->
             AdministrativeValueRow(AdministrativeCopy.DisplayName.text(locale), snapshot.task.fileName)
+            snapshot.libraryName?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskLibrary.text(locale), it) }
+            snapshot.bookTitle?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskBook.text(locale), it) }
+            snapshot.resourceTitle?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskResource.text(locale), it) }
+            snapshot.sourceName?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskSource.text(locale), it) }
+            snapshot.sourceRelativePath?.let { AdministrativeValueRow(AdministrativeCopy.ImportTaskSourcePath.text(locale), it) }
             AdministrativeValueRow(AdministrativeCopy.Directory.text(locale), snapshot.task.sourcePath)
             AdministrativeValueRow(AdministrativeCopy.Progress.text(locale), "${snapshot.processedAssetCount} / ${snapshot.assetCount}")
             AdministrativeValueRow(AdministrativeCopy.Retry.text(locale), snapshot.attempts.toString())

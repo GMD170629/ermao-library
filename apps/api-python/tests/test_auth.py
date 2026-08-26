@@ -13,6 +13,7 @@ from sqlalchemy import event, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.bootstrap.auth as auth_bootstrap
+import app.modules.auth.infrastructure.transactions as auth_transactions
 from app.bootstrap.system import prepare_system_event
 from app.core.auth import SESSION_REFRESH_DAYS, hash_password, utcnow
 from app.core.config import Settings, get_settings
@@ -103,7 +104,7 @@ def test_admin_user_and_audit_event_roll_back_atomically(db_session, monkeypatch
         raise RuntimeError("event persistence failed")
 
     monkeypatch.setattr(
-        auth_bootstrap,
+        auth_transactions,
         "write_prepared_system_events",
         fail_event_write,
     )

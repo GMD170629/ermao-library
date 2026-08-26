@@ -388,11 +388,10 @@ class ReaderActivity : AppCompatActivity() {
             is ReaderPublicationBootstrapFailure -> {
                 LOGGER.log(
                     Level.SEVERE,
-                    "reader_bootstrap_failed code=${result.failureCode} recoverable=${result.recoverable}",
+                    "reader_error platform=android format=unknown entry=work_detail stage=bootstrap " +
+                        "code=${result.failureCode}",
                 )
-                showOpenError(
-                    if (result.recoverable) ReaderErrorCode.NetworkUnavailable else ReaderErrorCode.ResourceMissing,
-                )
+                showOpenError(result.readerErrorCode)
             }
             is ReaderPublicationBootstrapContent -> {
                 navigationCache.save(
@@ -446,20 +445,10 @@ class ReaderActivity : AppCompatActivity() {
                     progressClientId = clientId
                     progressEtag = result.bootstrap.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
                         ?: "\"reader-progress-0\""
-                    when (startupDecision) {
-                        is PendingVsServerDecision.UseServer -> if (startupDecision.discardPending) {
-                            database.loadSyncState().pending?.let {
-                                coordinator.discardStartupPending(
-                                    it.mutationId,
-                                    startupDecision.snapshot?.revision ?: 0,
-                                )
-                            }
-                        }
-                        is PendingVsServerDecision.UseLocalPending -> {
-                            startupRemoteSnapshot = null
-                            coordinator.retryPending(result.bootstrap.target)
-                        }
+                    if (startupDecision is PendingVsServerDecision.UseLocalPending) {
+                        startupRemoteSnapshot = null
                     }
+                    coordinator.applyStartupDecision(result.bootstrap.target, startupDecision)
                     syncingProgressStore = syncingStore
                     sessionProgressStore = syncingStore
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -538,7 +527,13 @@ class ReaderActivity : AppCompatActivity() {
             readerNamespace.userId,
         )
         val localFile = application.downloadFiles.resolveLocalReference(request.localReference)
-        if (localFile == null || !localFile.isFile) {
+        val exactSourceFormat = ReaderSourceFormat.fromWireValue(request.sourceFormat)
+        if (exactSourceFormat == null) {
+            showOpenError(ReaderErrorCode.UnsupportedFormat)
+            return
+        }
+        val isOriginalPageSet = exactSourceFormat == ReaderSourceFormat.ImageDir
+        if (localFile == null || (isOriginalPageSet && !localFile.isDirectory) || (!isOriginalPageSet && !localFile.isFile)) {
             showOpenError(ReaderErrorCode.ResourceMissing)
             return
         }
@@ -550,20 +545,26 @@ class ReaderActivity : AppCompatActivity() {
                 readerNamespace.authorizationVersion,
             ),
         )
-        val exactSourceFormat = ReaderSourceFormat.fromWireValue(request.sourceFormat)
-        if (exactSourceFormat == null) {
-            showOpenError(ReaderErrorCode.UnsupportedFormat)
-            return
-        }
-        val source = localFile.inputStream().use { input ->
-            publicationStore.publishLocalPublication(
+        val source = if (isOriginalPageSet) {
+            LocalReaderSource(
                 resourceId = request.resourceId,
                 displayTitle = request.displayTitle,
-                input = input,
-                sourceFormat = exactSourceFormat,
+                format = exactSourceFormat.readerFormat,
                 bookId = request.bookId,
                 assetId = request.assetId,
+                sourceFormat = exactSourceFormat,
             )
+        } else {
+            localFile.inputStream().use { input ->
+                publicationStore.publishLocalPublication(
+                    resourceId = request.resourceId,
+                    displayTitle = request.displayTitle,
+                    input = input,
+                    sourceFormat = exactSourceFormat,
+                    bookId = request.bookId,
+                    assetId = request.assetId,
+                )
+            }
         }
         val authenticated = activeSession.authenticated
         var progressStore: ReaderProgressStore = NonBlockingReaderProgressStore
@@ -639,20 +640,10 @@ class ReaderActivity : AppCompatActivity() {
                         progressClientId = clientId
                         progressEtag = bootstrap.value.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
                             ?: "\"reader-progress-0\""
-                        when (startupDecision) {
-                            is PendingVsServerDecision.UseServer -> if (startupDecision.discardPending) {
-                                database.loadSyncState().pending?.let {
-                                    coordinator.discardStartupPending(
-                                        it.mutationId,
-                                        startupDecision.snapshot?.revision ?: 0,
-                                    )
-                                }
-                            }
-                            is PendingVsServerDecision.UseLocalPending -> {
-                                remoteSnapshot = null
-                                coordinator.retryPending(bootstrap.value.target)
-                            }
+                        if (startupDecision is PendingVsServerDecision.UseLocalPending) {
+                            remoteSnapshot = null
                         }
+                        coordinator.applyStartupDecision(bootstrap.value.target, startupDecision)
                         syncingProgressStore = syncingStore
                         progressStore = syncingStore
                         if (startupDecision !is PendingVsServerDecision.UseLocalPending) {
@@ -709,6 +700,7 @@ class ReaderActivity : AppCompatActivity() {
             comicPages = comicPages,
             pdfPages = pdfPages,
             pageCount = pageCount,
+            localPageSetDirectory = localFile.takeIf { isOriginalPageSet },
             namespace = ReaderSyncNamespace(
                 readerNamespace.serverIdentity,
                 readerNamespace.userId,
@@ -749,22 +741,22 @@ class ReaderActivity : AppCompatActivity() {
                     is ReaderBootstrapContent -> result.value
                     is ReaderBootstrapFailure -> throw ReaderOpenFailure(
                         ReaderError(
-                            if (result.recoverable) ReaderErrorCode.NetworkUnavailable
-                            else ReaderErrorCode.ResourceMissing,
+                            result.readerErrorCode,
                         ),
                     )
                 }
                 val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace)
+                val downloadableOriginal = bootstrap.downloadableOriginal
+                    ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing))
                 val refreshed = when (val result = gateway.download(
-                    bootstrap.publication,
+                    downloadableOriginal,
                     publicationStore.downloadSinkFactory(),
                 )) {
                     is PublicationDownloadContent -> result.source as? LocalReaderSource
                         ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError))
                     is PublicationDownloadFailure -> throw ReaderOpenFailure(
                         ReaderError(
-                            if (result.recoverable) ReaderErrorCode.NetworkUnavailable
-                            else ReaderErrorCode.ParseFailed,
+                            result.readerErrorCode,
                         ),
                     )
                 }
@@ -871,17 +863,7 @@ class ReaderActivity : AppCompatActivity() {
         progressEtag = "\"reader-progress-${durableState.confirmedRevision}\""
         syncingProgressStore = syncingStore
 
-        when (startupDecision) {
-            is PendingVsServerDecision.UseServer -> if (startupDecision.discardPending) {
-                durableState.pending?.let { pending ->
-                    coordinator.discardStartupPending(
-                        pending.mutationId,
-                        startupDecision.snapshot?.revision ?: durableState.confirmedRevision,
-                    )
-                }
-            }
-            is PendingVsServerDecision.UseLocalPending -> coordinator.retryPending(target)
-        }
+        coordinator.applyStartupDecision(target, startupDecision)
         return syncingStore
     }
 
@@ -919,7 +901,11 @@ class ReaderActivity : AppCompatActivity() {
             pendingManagedRepair = null
             opening = false
             openError = failure.readerError
-            LOGGER.log(Level.SEVERE, "reader_open_failed code=${failure.readerError.code.wireValue}")
+            LOGGER.log(
+                Level.SEVERE,
+                "reader_error platform=android format=unknown entry=reader stage=open " +
+                    "code=${failure.readerError.code.wireValue}",
+            )
             return false
         } catch (_: RuntimeException) {
             readerSession.release()
@@ -932,7 +918,10 @@ class ReaderActivity : AppCompatActivity() {
     private fun showOpenError(code: ReaderErrorCode) {
         opening = false
         openError = ReaderError(code)
-        LOGGER.log(Level.SEVERE, "reader_open_failed code=${code.wireValue}")
+        LOGGER.log(
+            Level.SEVERE,
+            "reader_error platform=android format=unknown entry=reader stage=open code=${code.wireValue}",
+        )
     }
 
     private suspend fun retryPendingUploadWithinLifecycleBudget() {
@@ -958,6 +947,7 @@ class ReaderActivity : AppCompatActivity() {
         pageCount: Int? = null,
         comicPageServer: ComicPageServerPort? = null,
         remotePdfium: AndroidRemotePdfiumSessionConfiguration? = null,
+        localPageSetDirectory: File? = null,
         namespace: ReaderSyncNamespace? = null,
     ): AndroidReaderNavigatorSession {
         val sourceFormat = requireNotNull(source.sourceFormat) { "Reader source format is missing" }
@@ -972,10 +962,17 @@ class ReaderActivity : AppCompatActivity() {
             val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace)
             val readium = AndroidReadiumRuntime(applicationContext)
             val sessionPages = if (source is LocalReaderSource) {
-                val file = publicationStore.resolve(source)
-                com.ermao.library.features.reader.infrastructure.CbzReadiumPublicationFactory(
-                    readium.assetRetriever,
-                ).indexPages(file, comicPages)
+                if (source.sourceFormat == ReaderSourceFormat.ImageDir) {
+                    com.ermao.library.features.reader.infrastructure.ImageDirectoryReadiumPublicationFactory()
+                        .indexPages(
+                            requireNotNull(localPageSetDirectory) { "IMAGE_DIR bundle is missing" },
+                            source.resourceId,
+                        )
+                } else {
+                    val file = publicationStore.resolve(source)
+                    com.ermao.library.features.reader.infrastructure.CbzReadiumPublicationFactory()
+                        .indexPages(file, comicPages)
+                }
             } else {
                 comicPages
             }
@@ -986,6 +983,7 @@ class ReaderActivity : AppCompatActivity() {
                 source = source,
                 canonicalPages = sessionPages,
                 publicationStore = publicationStore,
+                localPageSetDirectory = localPageSetDirectory,
                 progressStore = progressStore,
                 deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
                 readium = readium,
@@ -1269,7 +1267,10 @@ class ReaderActivity : AppCompatActivity() {
 private data class PendingManagedRepair(val localReference: String, val parsedSource: File)
 
 private fun String.isSupportedManagedSourceFormat(): Boolean =
-    trim().uppercase() in setOf("EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT", "CBZ", "ZIP", "CBR", "RAR", "PDF")
+    trim().uppercase() in setOf(
+        "EPUB", "MOBI", "AZW", "AZW3", "PRC", "TXT", "FB2",
+        "CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR", "PDF",
+    )
 
 private object NonBlockingReaderProgressStore : ReaderProgressStore {
     override suspend fun load(resourceId: String): ReaderProgress? = null

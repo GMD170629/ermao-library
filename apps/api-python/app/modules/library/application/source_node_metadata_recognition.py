@@ -6,12 +6,28 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class MetadataProviderSearchError(Exception):
+    """A configured metadata provider could not complete a search."""
+
+
 @dataclass(frozen=True, slots=True)
 class SourceNodeMetadataCandidate:
     id: str
     source: str
     title: str | None
+    author: str | None
     description: str | None
+    tags: tuple[str, ...]
+    series_name: str | None
+    series_index: float | None
+    publisher: str | None
+    published_at: str | None
+    language: str | None
+    isbn: str | None
+    identifier: str | None
+    narrator: str | None
+    abridged: bool | None
+    resource_index: float | None
     cover_url: str | None
     confidence: float
 
@@ -60,6 +76,7 @@ class RecognizeSourceNodeMetadata:
 
 
 __all__ = [
+    "MetadataProviderSearchError",
     "RecognizeSourceNodeMetadata",
     "SourceNodeMetadataCandidate",
     "SourceNodeMetadataRecognitionPort",

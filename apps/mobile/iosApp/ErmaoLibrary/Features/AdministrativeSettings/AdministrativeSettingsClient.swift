@@ -71,8 +71,6 @@ protocol AdministrativeSettingsClient: Sendable {
         _ configuration: MetadataProviderConfiguration
     ) async throws -> MetadataProviderConfiguration
     func testMetadataProvider(id: String) async throws -> MetadataProvider
-    func loadMetadataPipeline() async throws -> MetadataPipeline
-    func saveMetadataPipeline(_ pipeline: MetadataPipeline) async throws -> MetadataPipeline
 
     func loadOPDSConfiguration() async throws -> OPDSConfiguration
     func saveOPDSConfiguration(_ configuration: OPDSConfiguration) async throws -> OPDSConfiguration
@@ -86,7 +84,6 @@ protocol AdministrativeSettingsClient: Sendable {
 
     func loadSystemHealth() async throws -> SystemHealthSnapshot
     func runSystemHealthCheck() async throws -> SystemHealthSnapshot
-    func restartImportQueueSafely() async throws -> SystemHealthSnapshot
     func loadLogs(filter: LogFilter) async throws -> LogPage
     func loadLogSettings() async throws -> LogSettings
     func saveLogSettings(_ settings: LogSettings) async throws -> LogSettings

@@ -10,8 +10,8 @@ from app.db.bootstrap import bootstrap_database
 from app.db.runner import apply_schema
 from app.db.sqlite import create_sqlite_engine
 from app.models.settings import SystemSetting
+from app.modules.backup.infrastructure.archive import create_backup, restore_backup
 from app.modules.mobile.public import SERVER_IDENTITY_SETTING_KEY
-from app.services.backup_service import create_backup, restore_backup
 
 
 def _read_server_identity(db: Session) -> str | None:

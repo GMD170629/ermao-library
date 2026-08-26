@@ -18,7 +18,6 @@ data class OrganizeBookSummary(
     val id: String,
     val title: String,
     val author: String?,
-    val availableMediaKinds: List<MediaKind>,
 )
 
 data class OrganizeJob(
@@ -72,7 +71,6 @@ data class OrganizeCandidate(
     val id: String,
     val title: String?,
     val author: String?,
-    val availableMediaKinds: List<MediaKind>,
     val coverPath: String?,
     val metadataQuality: Int,
     val reasonCodes: List<String>,
@@ -204,7 +202,6 @@ data class MetadataProvider(
     val version: String,
     val description: String,
     val mode: String,
-    val mediaKinds: List<MediaKind>,
     val fields: List<String>,
     val capabilities: List<String>,
     val automaticRateLimit: ProviderAutomaticRateLimit?,
@@ -218,34 +215,16 @@ data class MetadataProvider(
     val lastError: String?,
 )
 
-data class PipelineProvider(
-    val providerId: String,
-    val name: String,
-    val description: String,
-    val enabled: Boolean,
-    val position: Int,
-    val lastTestStatus: String?,
-    val lastError: String?,
-)
-
-data class MetadataPipeline(
-    val mediaKind: MediaKind,
-    val providers: List<PipelineProvider>,
-)
-
 data class MetadataProviders(
     val providers: List<MetadataProvider>,
-    val pipelines: List<MetadataPipeline>,
 )
 
 data class MetadataProviderUpdate(
-    val enabled: Boolean,
-    val priority: Int,
     val config: Map<String, ProviderSettingValue>,
     val clearSecrets: List<String>,
 )
 
-data class MetadataPipelineEntry(
+data class MetadataProviderOrderItem(
     val providerId: String,
     val enabled: Boolean,
 )

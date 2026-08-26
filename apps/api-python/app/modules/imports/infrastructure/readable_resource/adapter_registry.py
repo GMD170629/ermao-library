@@ -11,6 +11,7 @@ from app.contracts.local_metadata import (
     DEFAULT_LOCAL_METADATA_PRIORITY,
     LocalMetadataSource,
 )
+from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.contracts.publication_metadata import PublicationMetadata
 from app.contracts.publication_titles import titles_from_local_source
 from app.infrastructure.comic_archives import (
@@ -39,13 +40,16 @@ from app.modules.imports.application.readable_resource.ports import (
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
     ResourceAdapterSpec,
+    source_format_for_filename,
 )
 from app.modules.imports.infrastructure.sidecar_opf import (
     discover_directory_sidecar_opf,
     discover_sidecar_opf,
 )
-from app.modules.library.domain.readable_resource_states import AssetRole
-from app.modules.library.public import is_transparent_audiobook_directory_name
+from app.modules.library.public import (
+    AssetRole,
+    is_transparent_audiobook_directory_name,
+)
 from app.modules.metadata.public import parse_opf_metadata
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
@@ -239,7 +243,12 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             role=role,
             sequence_index=None,
             sort_key=absolute_path.name,
-            mime_type=mime_type if audio_metadata is not None else None,
+            mime_type=resolve_asset_mime_type(
+                resource_format=source_format_for_filename(adapter, absolute_path.name),
+                asset_role=role.value,
+                filename=absolute_path.name,
+                stored_mime_type=mime_type,
+            ),
             duration_ms=(
                 audio_metadata.duration_ms if audio_metadata is not None else None
             ),

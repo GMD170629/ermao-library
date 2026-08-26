@@ -353,8 +353,11 @@ struct MultiDownloadSheet: View {
         }
         .padding(.leading, CGFloat(depth) * 20 + 24)
         .contentShape(Rectangle())
+        .onTapGesture { toggleResource(resource.id) }
         .contextMenu { statusMenu(record: downloads.record(for: resource.id), resource: resource) }
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("work.multiDownload.resource.\(resource.id)")
+        .accessibilityAddTraits(.isButton)
         .accessibilityValue(Text(statusText(resource.id)))
     }
 
@@ -424,6 +427,7 @@ struct MultiDownloadSheet: View {
                 submit()
             }
             .frame(height: 52)
+            .accessibilityIdentifier("work.multiDownload.confirm")
         }
         .padding(.horizontal, .space2)
         .padding(.vertical, .space1)

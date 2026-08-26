@@ -1,5 +1,6 @@
 package com.ermao.library.features.home.ui
 
+import com.ermao.library.features.content.ui.compactCoverGridColumnCount
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.test.assertEquals
@@ -10,9 +11,9 @@ import org.junit.Test
 class HomeContinuePresentationTest {
     @Test
     fun largeTextReducesHomeShelvesToTwoReadableColumns() {
-        assertEquals(3, homeShelfColumnCount(compactColumns = 3, fontScale = 1.29f))
-        assertEquals(2, homeShelfColumnCount(compactColumns = 3, fontScale = 1.3f))
-        assertEquals(2, homeShelfColumnCount(compactColumns = 3, fontScale = 2f))
+        assertEquals(3, compactCoverGridColumnCount(compactColumns = 3, largeTextColumns = 2, fontScale = 1.29f))
+        assertEquals(2, compactCoverGridColumnCount(compactColumns = 3, largeTextColumns = 2, fontScale = 1.3f))
+        assertEquals(2, compactCoverGridColumnCount(compactColumns = 3, largeTextColumns = 2, fontScale = 2f))
     }
 
     @Test

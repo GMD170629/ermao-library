@@ -21,6 +21,13 @@ class TxtReadiumPublicationFactoryTest {
     }
 
     @Test
+    fun `strict decoder accepts legacy trailing NUL padding`() {
+        val bytes = "有效正文".toByteArray(Charset.forName("GB18030")) + ByteArray(160)
+
+        assertEquals("有效正文", StrictTxtDecoder.decode(bytes))
+    }
+
+    @Test
     fun decoderSupportsBomUnicodeAndGb18030ButRejectsInvalidText() {
         val utf16 = byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + "章节".toByteArray(Charsets.UTF_16LE)
         assertEquals("章节", StrictTxtDecoder.decode(utf16))

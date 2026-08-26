@@ -32,6 +32,7 @@ class ReaderResourceDto:
     source_node_id: str
     title: str
     format: str
+    source_format: str
     resource_index: float | None
     sort_order: int
     page_count: int | None

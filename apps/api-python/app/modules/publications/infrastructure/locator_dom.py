@@ -6,12 +6,15 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
 from xml.etree import ElementTree
 
 from app.modules.publications.domain.model import (
     PublicationMarkupError,
     PublicationSecurityError,
+)
+from app.modules.publications.domain.security import (
+    WEB_SECURITY_PROFILE,
+    PublicationSecurityProfile,
 )
 
 MAXIMUM_MARKUP_BYTES = 64 * 1024 * 1024
@@ -69,24 +72,6 @@ _NAMED_ENTITY_REFERENCE = re.compile(r"&(?P<name>[A-Za-z][A-Za-z0-9]+);")
 _STANDARD_XHTML_ENTITY_CODEPOINTS = {"nbsp": 0xA0}
 _SPACE = re.compile(r"\s+")
 
-
-@dataclass(frozen=True, slots=True)
-class PublicationSecurityProfile:
-    identifier: str
-    content_security_policy: str
-
-
-WEB_SECURITY_PROFILE = PublicationSecurityProfile(
-    identifier="web-v2",
-    content_security_policy=(
-        "default-src 'none'; base-uri 'none'; connect-src 'none'; "
-        "form-action 'none'; frame-src 'none'; child-src 'none'; "
-        "object-src 'none'; script-src blob:; "
-        "style-src 'self' blob: 'unsafe-inline'; "
-        "img-src 'self' blob: data:; font-src 'self' blob: data:; "
-        "media-src 'self' blob: data:"
-    ),
-)
 
 _SECURITY_STYLE = (
     "iframe,frame,object,embed,applet{display:none!important;}"

@@ -1,5 +1,9 @@
 export { UploadBookDialog } from './upload-book-dialog';
 export {
+  LibraryTagInput,
+  type LibraryTagInputProps
+} from './ui/library-tag-input';
+export {
   SmartFilterBuilder,
   type SmartFilterCondition,
   type SmartFilterField,

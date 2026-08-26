@@ -43,6 +43,10 @@ enum IosReaderFailureCode: String, Sendable {
     case comicPageDecodeFailed = "COMIC_PAGE_DECODE_FAILED"
     case comicOutOfMemoryRisk = "COMIC_OUT_OF_MEMORY_RISK"
 
+    init(sharedCode: ErmaoShared.ReaderErrorCode) {
+        self = Self(rawValue: sharedCode.wireValue) ?? .engineError
+    }
+
     var localizedDescription: String {
         switch self {
         case .unsupportedFormat: String(localized: "reader.error.UNSUPPORTED_FORMAT")
@@ -63,10 +67,13 @@ enum IosReaderFailureCode: String, Sendable {
         case .pdfInvalid: String(localized: "reader.error.PDF_INVALID")
         case .pdfPageLoadFailed: String(localized: "reader.error.PDF_PAGE_LOAD_FAILED")
         case .pdfRenderFailed: String(localized: "reader.error.PDF_RENDER_FAILED")
-        case .comicArchiveOpenFailed, .comicArchiveEncrypted, .comicArchivePartMissing,
-             .comicArchiveFormatUnsupported, .comicArchiveCorrupt, .comicPageDecodeFailed,
-             .comicOutOfMemoryRisk:
-            String(localized: "reader.error.COMIC_ARCHIVE_OPEN_FAILED")
+        case .comicArchiveOpenFailed: String(localized: "reader.error.COMIC_ARCHIVE_OPEN_FAILED")
+        case .comicArchiveEncrypted: String(localized: "reader.error.COMIC_ARCHIVE_ENCRYPTED")
+        case .comicArchivePartMissing: String(localized: "reader.error.COMIC_ARCHIVE_PART_MISSING")
+        case .comicArchiveFormatUnsupported: String(localized: "reader.error.COMIC_ARCHIVE_FORMAT_UNSUPPORTED")
+        case .comicArchiveCorrupt: String(localized: "reader.error.COMIC_ARCHIVE_CORRUPT")
+        case .comicPageDecodeFailed: String(localized: "reader.error.COMIC_PAGE_DECODE_FAILED")
+        case .comicOutOfMemoryRisk: String(localized: "reader.error.COMIC_OUT_OF_MEMORY_RISK")
         }
     }
 }
@@ -100,7 +107,7 @@ struct IosReaderProgressContract: Equatable, Sendable {
     let deviceID: String
 }
 
-/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v6 documents.
+/// Strict Swift-side projection of shared local-exact `ReaderProgressJson` v7 documents.
 /// The KMP codec remains the persistence authority; this decoder lets iOS map
 /// an engine locator without turning its arbitrary JSON members into domain state.
 enum IosReaderProgressContractDecoder {
@@ -124,7 +131,7 @@ enum IosReaderProgressContractDecoder {
                 && ($0.suffix.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? true)
         } ?? true
         let engineLocatorIsValid = document.location.engineLocator.map(\.isObject) ?? true
-        guard document.schema == "ermao.reader-progress", document.version == 6,
+        guard document.schema == "ermao.reader-progress", document.version == 7,
               ["reflow", "pdf", "comic", "audio"].contains(document.location.kind),
               !document.resourceId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               resourceKeyIsValid,
@@ -194,7 +201,7 @@ enum IosReaderProgressContractDecoder {
     }
 
     private static func enginePayload(_ value: JSONValue, schemaVersion: Int) throws -> String {
-        guard schemaVersion == 6 else { throw IosReaderFailure(code: .locationRestoreFailed) }
+        guard schemaVersion == 7 else { throw IosReaderFailure(code: .locationRestoreFailed) }
         guard case let .object(fields) = value,
               fields["engine"]?.stringValue == "readium",
               fields["platform"]?.stringValue == "ios",

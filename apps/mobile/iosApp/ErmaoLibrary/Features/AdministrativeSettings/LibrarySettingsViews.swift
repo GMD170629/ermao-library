@@ -200,6 +200,11 @@ struct ImportTaskDetailView: View {
         AdministrativeStateView(state: state, retry: load) { detail in
             List {
                 Section {
+                    if let libraryName = detail.task.libraryName { LabeledContent(copy[.importLibrary], value: libraryName) }
+                    if let bookTitle = detail.task.bookTitle { LabeledContent(copy[.importBook], value: bookTitle) }
+                    if let resourceTitle = detail.task.resourceTitle { LabeledContent(copy[.importResource], value: resourceTitle) }
+                    if let sourceName = detail.task.sourceName { LabeledContent(copy[.sourceName], value: sourceName) }
+                    if let sourceRelativePath = detail.task.sourceRelativePath { LabeledContent(copy[.importSourcePath], value: sourceRelativePath) }
                     LabeledContent(copy[.taskSource], value: detail.task.sourcePath)
                     LabeledContent(copy[.accountStatus], value: detail.task.status.rawValue)
                     LabeledContent(copy[.taskCreated], value: detail.task.createdAt.administrativeFormatted(locale: copy.locale))

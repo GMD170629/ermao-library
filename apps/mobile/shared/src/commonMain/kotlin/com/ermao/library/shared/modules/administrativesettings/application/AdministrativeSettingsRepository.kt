@@ -36,9 +36,8 @@ import com.ermao.library.shared.modules.administrativesettings.domain.ManagedUse
 import com.ermao.library.shared.modules.administrativesettings.domain.ManagementEventFilter
 import com.ermao.library.shared.modules.administrativesettings.domain.ManagementEvent
 import com.ermao.library.shared.modules.administrativesettings.domain.ManagementEventPage
-import com.ermao.library.shared.modules.administrativesettings.domain.MediaKind
-import com.ermao.library.shared.modules.administrativesettings.domain.MetadataPipelineEntry
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProvider
+import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviderOrderItem
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviderUpdate
 import com.ermao.library.shared.modules.administrativesettings.domain.MetadataProviders
 import com.ermao.library.shared.modules.administrativesettings.domain.Library
@@ -54,7 +53,6 @@ import com.ermao.library.shared.modules.administrativesettings.domain.OrganizeRu
 import com.ermao.library.shared.modules.administrativesettings.domain.PendingOrganizeJobs
 import com.ermao.library.shared.modules.administrativesettings.domain.OrganizePolicy
 import com.ermao.library.shared.modules.administrativesettings.domain.ProviderTestResult
-import com.ermao.library.shared.modules.administrativesettings.domain.QueueOperation
 import com.ermao.library.shared.modules.administrativesettings.domain.SmtpSettingsUpdate
 import com.ermao.library.shared.modules.administrativesettings.domain.SmtpTestResult
 import com.ermao.library.shared.modules.administrativesettings.domain.UpdateManagedUser
@@ -95,7 +93,7 @@ interface AdministrativeSettingsRepository {
     suspend fun retryImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>
     suspend fun deleteImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTaskDeletion>
     suspend fun clearCompletedImportTasks(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Int>
-    suspend fun clearImportQueue(context: AdministrativeSettingsContext): AdministrativeSettingsResult<QueueOperation>
+    suspend fun clearImportQueue(context: AdministrativeSettingsContext): AdministrativeSettingsResult<Int>
     suspend fun rescanImportFolders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<ImportRescanRequest>
     suspend fun scanDirectory(context: AdministrativeSettingsContext, path: String): AdministrativeSettingsResult<ImportScanJob>
     suspend fun listImportScanJobs(context: AdministrativeSettingsContext, status: ImportScanStatus?): AdministrativeSettingsResult<List<ImportScanJob>>
@@ -123,10 +121,10 @@ interface AdministrativeSettingsRepository {
     suspend fun deleteCategory(context: AdministrativeSettingsContext, categoryId: String): AdministrativeSettingsResult<LibraryOperation>
 
     suspend fun loadMetadataProviders(context: AdministrativeSettingsContext): AdministrativeSettingsResult<MetadataProviders>
+    suspend fun updateMetadataProviderOrder(context: AdministrativeSettingsContext, items: List<MetadataProviderOrderItem>): AdministrativeSettingsResult<MetadataProviders>
     suspend fun loadMetadataProvider(context: AdministrativeSettingsContext, providerId: String): AdministrativeSettingsResult<MetadataProvider>
     suspend fun updateMetadataProvider(context: AdministrativeSettingsContext, providerId: String, update: MetadataProviderUpdate): AdministrativeSettingsResult<MetadataProvider>
     suspend fun testMetadataProvider(context: AdministrativeSettingsContext, providerId: String): AdministrativeSettingsResult<ProviderTestResult>
-    suspend fun updateMetadataPipeline(context: AdministrativeSettingsContext, mediaKind: MediaKind, entries: List<MetadataPipelineEntry>): AdministrativeSettingsResult<MetadataProviders>
 
     suspend fun loadOpdsSettings(context: AdministrativeSettingsContext): AdministrativeSettingsResult<OpdsSettings>
     suspend fun updateOpdsSettings(context: AdministrativeSettingsContext, enabled: Boolean, publicBaseUrl: String?): AdministrativeSettingsResult<OpdsSettings>
@@ -141,8 +139,6 @@ interface AdministrativeSettingsRepository {
 
     suspend fun startHealthRun(context: AdministrativeSettingsContext): AdministrativeSettingsResult<HealthRun>
     suspend fun loadHealthRun(context: AdministrativeSettingsContext, runId: String): AdministrativeSettingsResult<HealthRun>
-    suspend fun restartImportQueue(context: AdministrativeSettingsContext): AdministrativeSettingsResult<QueueOperation>
-    suspend fun loadQueueOperation(context: AdministrativeSettingsContext, operationId: String): AdministrativeSettingsResult<QueueOperation>
 
     suspend fun listManagementEvents(context: AdministrativeSettingsContext, filter: ManagementEventFilter): AdministrativeSettingsResult<ManagementEventPage>
     suspend fun loadAllManagementEventsForExport(context: AdministrativeSettingsContext, filter: ManagementEventFilter): AdministrativeSettingsResult<List<ManagementEvent>>

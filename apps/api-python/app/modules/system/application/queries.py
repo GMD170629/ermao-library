@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from app.core.i18n import SUPPORTED_LOCALES, configured_locale, normalize_locale
@@ -182,35 +180,4 @@ def dashboard_system_status_payload(
             "storageWritable",
             {"status": "unknown", "message": "待检测"},
         ),
-    }
-
-
-def backup_created_payload(backup: Any) -> dict[str, Any]:
-    return {
-        "backup": {
-            "id": backup.id,
-            "name": backup.filename,
-            "filename": backup.filename,
-            "sizeBytes": backup.size_bytes,
-            "createdAt": backup.created_at,
-            "counts": backup.counts,
-        }
-    }
-
-
-def backup_detail_payload(
-    backup_id: str,
-    path: Path,
-    archives: list[dict[str, Any]],
-) -> dict[str, Any]:
-    backup = next((item for item in archives if item["id"] == backup_id), None)
-    if backup is not None:
-        return {"backup": backup}
-    return {
-        "backup": {
-            "id": backup_id,
-            "name": path.name,
-            "sizeBytes": path.stat().st_size,
-            "createdAt": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
-        }
     }

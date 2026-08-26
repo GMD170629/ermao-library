@@ -235,6 +235,65 @@ def test_book_list_projections_expose_nullable_author_and_ready_resource(
     }
 
 
+def test_recent_import_orders_by_created_at_with_deterministic_id_tiebreaker(
+    client: TestClient, db_session: Session
+) -> None:
+    """The import sort follows the book creation/import timestamp, not edits."""
+
+    _login(client, db_session)
+    books = {
+        book_id: _book(
+            db_session,
+            book_id=book_id,
+            title=book_id,
+            author="Author",
+        )
+        for book_id in ("older", "newer", "tie-a", "tie-b")
+    }
+    books["older"].created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    books["older"].updated_at = datetime(2026, 12, 1, tzinfo=UTC)
+    books["newer"].created_at = datetime(2026, 2, 1, tzinfo=UTC)
+    books["newer"].updated_at = datetime(2026, 1, 1, tzinfo=UTC)
+    for book_id in ("tie-a", "tie-b"):
+        books[book_id].created_at = datetime(2026, 2, 1, tzinfo=UTC)
+        books[book_id].updated_at = datetime(2025, 1, 1, tzinfo=UTC)
+    db_session.commit()
+
+    descending = client.get(
+        "/api/books",
+        params={
+            "sort": "recent_import",
+            "sortDirection": "desc",
+            "view": "management",
+            "pageSize": 100,
+        },
+    )
+    assert descending.status_code == 200, descending.text
+    assert [book["id"] for book in descending.json()["data"]["books"]] == [
+        "tie-b",
+        "tie-a",
+        "newer",
+        "older",
+    ]
+
+    ascending = client.get(
+        "/api/books",
+        params={
+            "sort": "recent_import",
+            "sortDirection": "asc",
+            "view": "management",
+            "pageSize": 100,
+        },
+    )
+    assert ascending.status_code == 200, ascending.text
+    assert [book["id"] for book in ascending.json()["data"]["books"]] == [
+        "older",
+        "newer",
+        "tie-a",
+        "tie-b",
+    ]
+
+
 def test_book_list_rejects_unknown_projection(client: TestClient) -> None:
     response = client.get("/api/books", params={"view": "unknown"})
 

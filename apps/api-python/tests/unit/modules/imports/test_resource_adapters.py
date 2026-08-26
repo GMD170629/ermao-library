@@ -95,6 +95,20 @@ def test_comic_archive_source_format_is_concrete(
 
 @pytest.mark.parametrize(
     ("filename", "expected_format"),
+    (("notes.txt", "TXT"), ("book.fb2", "FB2")),
+)
+def test_text_adapter_preserves_the_concrete_source_format(
+    filename: str,
+    expected_format: str,
+) -> None:
+    adapter = unique_adapter_or_none(match_file_adapters(filename))
+    assert adapter is not None
+    assert adapter.adapter_id is ResourceAdapterId.TXT
+    assert source_format_for_filename(adapter, filename) == expected_format
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format"),
     (
         ("issue.cbz", "CBZ"),
         ("issue.cbr", "CBR"),

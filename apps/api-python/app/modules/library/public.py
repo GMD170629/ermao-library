@@ -94,6 +94,7 @@ from app.modules.library.domain.book_placement import (
     resource_root_folder_creates_empty_book_on_discovery,
 )
 from app.modules.library.domain.facets import FACET_KINDS
+from app.modules.library.domain.layout import LibraryOrganizationMode
 from app.modules.library.domain.organization_modes import (
     OrganizationModeViolationCode,
     TargetLibraryOrganizationMode,
@@ -127,14 +128,6 @@ from app.modules.library.domain.source_nodes import (
     evaluate_path_key_occupancy,
     parse_source_node_relative_path,
 )
-from app.modules.library.presentation.schemas import BookView
-from app.modules.library.presentation.views import (
-    book_view,
-    bookshelf_item_view,
-    bookshelf_item_views,
-    get_book,
-    preferred_book_cover_path,
-)
 
 __all__ = [
     "CATALOG_FACET_KINDS",
@@ -154,7 +147,6 @@ __all__ = [
     "BookListQuery",
     "BookListResult",
     "BookResourceRepositoryPort",
-    "BookView",
     "BookshelfItemQueryPort",
     "BookshelfItemSummary",
     "CatalogAsset",
@@ -188,6 +180,7 @@ __all__ = [
     "LibraryGroupingBook",
     "LibraryGroupingPage",
     "LibraryGroupingQueryPort",
+    "LibraryOrganizationMode",
     "LibrarySourceTreeConfig",
     "ListBookshelfItems",
     "ListCatalogBooks",
@@ -216,12 +209,8 @@ __all__ = [
     "SourceNodeViolationCode",
     "TargetLibraryOrganizationMode",
     "audiobook_resource_owns_path",
-    "book_view",
-    "bookshelf_item_view",
-    "bookshelf_item_views",
     "decide_book_anchor_for_resource",
     "evaluate_path_key_occupancy",
-    "get_book",
     "is_asset_path_within_resource_scope",
     "is_resource_anchor_within_book_scope",
     "is_same_or_descendant_path",
@@ -231,7 +220,6 @@ __all__ = [
     "parse_filter_expression",
     "parse_source_node_relative_path",
     "parse_target_organization_mode",
-    "preferred_book_cover_path",
     "prepare_book_facet",
     "resolve_asset_display_titles",
     "resource_is_openable",

@@ -1,0 +1,4 @@
+module ErmaoArchiveCore {
+    header "archive_core.h"
+    export *
+}

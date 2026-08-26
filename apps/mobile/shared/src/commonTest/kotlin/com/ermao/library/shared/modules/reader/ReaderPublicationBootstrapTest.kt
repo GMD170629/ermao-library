@@ -9,14 +9,18 @@ import com.ermao.library.shared.modules.reader.application.ReaderBootstrap
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
+import com.ermao.library.shared.modules.reader.application.ReaderComicAccess
+import com.ermao.library.shared.modules.reader.application.ReaderComicPage
 import com.ermao.library.shared.modules.reader.application.ReaderPublicationBootstrapResult
 import com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
+import com.ermao.library.shared.modules.reader.application.ReaderRemotePublicationAccess
 import com.ermao.library.shared.modules.reader.domain.LocalReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
+import com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -80,6 +84,44 @@ class ReaderPublicationBootstrapTest {
         assertEquals(1, downloadCalls)
     }
 
+    @Test
+    fun imageDirectoryOpensRemotePagesWithoutTreatingFirstPageAsPublication() = runBlocking {
+        var downloadCalls = 0
+        val imageBootstrap = bootstrap().copy(
+            target = ReaderProgressSyncTarget(namespace(), "book-1", "resource-1", ReaderFormat.Comic),
+            remoteAccess = ReaderRemotePublicationAccess(
+                resourceId = "resource-1",
+                displayTitle = "Image directory",
+                bookId = "book-1",
+                sourceFormat = ReaderSourceFormat.ImageDir,
+                assetId = null,
+            ),
+            downloadableOriginal = null,
+            comicPages = listOf(ReaderComicPage(0, "pages/0", "image/png")),
+            comicAccess = ReaderComicAccess(
+                manifestApiPath = "/api/reader/v4/resources/resource-1/comic/manifest",
+                pageApiPathTemplate = "/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}",
+                imageVariants = setOf("original", "data-saver"),
+            ),
+            pdfPages = emptyList(),
+            pageCount = 1,
+        )
+        val bootstrapper = BootstrapReaderPublication(
+            bootstrapGateway = ReaderBootstrapGateway { ReaderBootstrapResult.Content(imageBootstrap) },
+            downloadPort = PublicationDownloadPort { _, _ ->
+                downloadCalls += 1
+                PublicationDownloadResult.Failure("UNEXPECTED_DOWNLOAD", false)
+            },
+            sinkFactory = PublicationDownloadSinkFactory { error("Download sink must not open") },
+        )
+
+        val content = assertIs<ReaderPublicationBootstrapResult.Content>(bootstrapper.execute(request()))
+        val source = assertIs<RemoteComicReaderSource>(content.source)
+        assertEquals(ReaderSourceFormat.ImageDir, source.sourceFormat)
+        assertEquals(null, source.assetId)
+        assertEquals(0, downloadCalls)
+    }
+
     private fun bootstrapper(
         downloadPort: PublicationDownloadPort,
         resolver: LocalReaderSourceResolver? = null,
@@ -94,7 +136,14 @@ class ReaderPublicationBootstrapTest {
 
     private fun bootstrap() = ReaderBootstrap(
         target = ReaderProgressSyncTarget(namespace(), "book-1", "resource-1", ReaderFormat.Pdf),
-        publication = ReaderPublicationDownload(
+        remoteAccess = ReaderRemotePublicationAccess(
+            resourceId = "resource-1",
+            displayTitle = "PDF",
+            bookId = "book-1",
+            sourceFormat = ReaderSourceFormat.Pdf,
+            assetId = "asset-1",
+        ),
+        downloadableOriginal = ReaderPublicationDownload(
             profile = profile(),
             resourceId = "resource-1",
             displayTitle = "PDF",

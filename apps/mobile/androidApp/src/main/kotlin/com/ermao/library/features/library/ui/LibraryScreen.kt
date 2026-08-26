@@ -64,7 +64,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.GroupingCard
@@ -82,7 +81,6 @@ import com.ermao.library.features.library.application.ScrollAnchor
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.shared.modules.library.ContentRequestContext
-import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.ui.components.WarmPageActionMenu
 import com.ermao.library.ui.components.WarmPageEmptyState
 import com.ermao.library.ui.components.WarmPageErrorState
@@ -98,7 +96,6 @@ import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageSearchField
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
-import com.ermao.library.ui.components.WarmPageStaleStatus
 import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -204,13 +201,6 @@ fun LibraryScreen(
                 filterFocusRequester,
                 interactionsEnabled,
             )
-            when (state.current.freshness) {
-                ContentFreshness.Stale -> WarmPageStaleStatus(
-                    message = stringResource(R.string.content_stale_banner),
-                    modifier = Modifier.padding(horizontal = theme.components.page.compactGutter),
-                )
-                ContentFreshness.Fresh -> Unit
-            }
             Box(Modifier.fillMaxSize()) {
                 key(state.selectedScope) {
                     LibraryResults(
@@ -233,7 +223,6 @@ fun LibraryScreen(
             filters = draft,
             copy = filterSheetCopy,
             onChange = onUpdateFilterDraft,
-            offlineAvailability = state.offlineFilterAvailability,
             onClear = onClearFilters,
             onApply = onApplyFilter,
             onDismiss = onDismissFilter,
@@ -303,8 +292,6 @@ internal data class LibraryFilterSheetCopy(
     val unread: String,
     val reading: String,
     val finished: String,
-    val offlineHeading: String,
-    val downloaded: String,
     val applyAction: String,
 ) {
     fun readingLabel(value: ReadingFilter): String = when (value) {
@@ -324,8 +311,6 @@ internal fun resolveLibraryFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFi
     unread = stringResource(R.string.reading_unread),
     reading = stringResource(R.string.reading_reading),
     finished = stringResource(R.string.reading_finished),
-    offlineHeading = stringResource(R.string.library_filter_offline),
-    downloaded = stringResource(R.string.library_filter_downloaded),
     applyAction = stringResource(R.string.apply_action),
 )
 
@@ -770,7 +755,6 @@ internal fun FilterSheet(
     filters: WorksFilters,
     copy: LibraryFilterSheetCopy,
     onChange: (WorksFilters) -> Unit,
-    offlineAvailability: OfflineFilterAvailability,
     onClear: () -> Unit,
     onApply: () -> Unit,
     onDismiss: () -> Unit,
@@ -784,7 +768,6 @@ internal fun FilterSheet(
             filters = filters,
             copy = copy,
             onChange = onChange,
-            offlineAvailability = offlineAvailability,
             onClear = onClear,
             onApply = onApply,
             onDismiss = onDismiss,
@@ -797,7 +780,6 @@ internal fun LibraryFilterSheetContent(
     filters: WorksFilters,
     copy: LibraryFilterSheetCopy,
     onChange: (WorksFilters) -> Unit,
-    offlineAvailability: OfflineFilterAvailability,
     onClear: () -> Unit,
     onApply: () -> Unit,
     onDismiss: () -> Unit,
@@ -845,19 +827,6 @@ internal fun LibraryFilterSheetContent(
                 FilterRow(copy.readingLabel(value), filters.reading == value) { checked ->
                     onChange(filters.copy(reading = if (checked) value else null))
                 }
-            }
-            if (offlineAvailability is OfflineFilterAvailability.Available) {
-                Text(
-                    text = copy.offlineHeading,
-                    style = theme.typography.headline,
-                    modifier = Modifier.padding(top = theme.spacing.two),
-                )
-                FilterRow(
-                    label = copy.downloaded,
-                    checked = filters.downloadedOnly,
-                    onCheckedChange = { checked -> onChange(filters.copy(downloadedOnly = checked)) },
-                    modifier = Modifier.testTag("library-filter-downloaded"),
-                )
             }
         }
         Box(

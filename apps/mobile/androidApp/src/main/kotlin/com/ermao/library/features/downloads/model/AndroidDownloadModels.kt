@@ -27,6 +27,15 @@ enum class AndroidDownloadStatus {
     FailedTerminal,
 }
 
+@Serializable
+data class AndroidDownloadMemberRecord(
+    val assetId: String,
+    val sequenceIndex: Int,
+    val sourceApiPath: String,
+    val sourceMimeType: String,
+    val expectedBytes: Long,
+)
+
 /** Book -> Resource -> Asset ownership for catalog v3. */
 @Serializable
 data class AndroidDownloadRecord(
@@ -44,6 +53,10 @@ data class AndroidDownloadRecord(
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
+    /** Source byte count is separate from bundle total in catalog v4. */
+    val sourceBytes: Long? = null,
+    val artifactKind: String = "SingleOriginalAsset",
+    val members: List<AndroidDownloadMemberRecord> = emptyList(),
     val transferredBytes: Long = 0,
     val status: AndroidDownloadStatus = AndroidDownloadStatus.Queued,
     val localReference: String? = null,
@@ -63,6 +76,7 @@ data class AndroidDownloadRecord(
         require(sourceApiPath.startsWith("/api/"))
         require(sourceMimeType.isNotBlank())
         require(expectedBytes > 0)
+        require((sourceBytes ?: expectedBytes) > 0)
         require(transferredBytes >= 0 && transferredBytes <= expectedBytes)
         require(verified == (status == AndroidDownloadStatus.Completed))
         require(!verified || !localReference.isNullOrBlank())

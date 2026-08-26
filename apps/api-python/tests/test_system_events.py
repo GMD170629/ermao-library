@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy import func, select
 
-import app.bootstrap.system as system_bootstrap
+import app.modules.system.infrastructure.runtime as system_runtime
 from app.bootstrap.system import (
     get_setting,
     maintain_system_events,
@@ -185,7 +185,7 @@ def test_system_settings_and_audit_event_commit_atomically(db_session, monkeypat
         raise RuntimeError("event persistence failed")
 
     monkeypatch.setattr(
-        system_bootstrap,
+        system_runtime,
         "write_prepared_system_events",
         fail_event_write,
     )

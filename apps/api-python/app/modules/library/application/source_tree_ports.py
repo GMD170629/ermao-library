@@ -209,6 +209,13 @@ class BookResourceRepositoryPort(Protocol):
         adapter: AdapterIdentity,
     ) -> ReadableResourceRecord: ...
 
+    def refresh_resource_adapter(
+        self,
+        *,
+        resource_id: str,
+        adapter: AdapterIdentity,
+    ) -> ReadableResourceRecord: ...
+
     def set_enablement(
         self,
         resource_id: str,

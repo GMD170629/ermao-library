@@ -104,10 +104,14 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                     resourceID: resourceID,
                     namespace: namespaceKey
                 )
-                guard managed.sourceFormat == .cbz || managed.sourceFormat == .zip else {
+                guard [.cbz, .zip, .cbr, .rar, .imagedir].contains(managed.sourceFormat) else {
                     throw IosReaderFailure(code: .comicArchiveFormatUnsupported)
                 }
-                opened = try await IosCbzPublicationFactory().open(managed, pageTitleHints: pages)
+                if managed.sourceFormat == .imagedir {
+                    opened = try IosImageDirectoryPublicationFactory().open(managed, pageTitleHints: pages)
+                } else {
+                    opened = try await IosCbzPublicationFactory().open(managed, pageTitleHints: pages)
+                }
                 openedSource = ErmaoShared.LocalReaderSource(
                     resourceId: managed.resourceID,
                     displayTitle: managed.displayTitle,

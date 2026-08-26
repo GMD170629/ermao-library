@@ -1061,7 +1061,8 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.ResourceMissing -> R.string.reader_error_missing
         ReaderErrorCode.OutOfMemoryRisk -> R.string.reader_error_memory
         ReaderErrorCode.LocationRestoreFailed -> R.string.reader_error_location
-        ReaderErrorCode.NetworkUnavailable, ReaderErrorCode.ReaderEngineError -> R.string.reader_error_generic
+        ReaderErrorCode.NetworkUnavailable -> R.string.reader_error_network
+        ReaderErrorCode.ReaderEngineError -> R.string.reader_error_generic
         ReaderErrorCode.RangeUnsupported -> R.string.reader_error_pdf_range_unsupported
         ReaderErrorCode.RangeInvalid -> R.string.reader_error_pdf_range_invalid
         ReaderErrorCode.ResourceChanged -> R.string.reader_error_pdf_resource_changed
@@ -1070,14 +1071,13 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.Invalid -> R.string.reader_error_pdf_invalid
         ReaderErrorCode.PageLoadFailed -> R.string.reader_error_pdf_page_load
         ReaderErrorCode.RenderFailed -> R.string.reader_error_pdf_render
-        ReaderErrorCode.ComicArchiveOpenFailed,
-        ReaderErrorCode.ComicArchiveEncrypted,
-        ReaderErrorCode.ComicArchivePartMissing,
-        ReaderErrorCode.ComicArchiveFormatUnsupported,
-        ReaderErrorCode.ComicArchiveCorrupt,
-        ReaderErrorCode.ComicPageDecodeFailed,
-        ReaderErrorCode.ComicOutOfMemoryRisk,
-        -> R.string.reader_error_comic_open
+        ReaderErrorCode.ComicArchiveOpenFailed -> R.string.reader_error_comic_open
+        ReaderErrorCode.ComicArchiveEncrypted -> R.string.reader_error_comic_encrypted
+        ReaderErrorCode.ComicArchivePartMissing -> R.string.reader_error_comic_part_missing
+        ReaderErrorCode.ComicArchiveFormatUnsupported -> R.string.reader_error_comic_format
+        ReaderErrorCode.ComicArchiveCorrupt -> R.string.reader_error_comic_corrupt
+        ReaderErrorCode.ComicPageDecodeFailed -> R.string.reader_error_comic_page_decode
+        ReaderErrorCode.ComicOutOfMemoryRisk -> R.string.reader_error_comic_memory
     }
     Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = MaterialTheme.shapes.large) {
         Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {

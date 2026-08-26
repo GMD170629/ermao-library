@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowLeft, BookOpen, CheckCircle2, Edit3, Ellipsis, Headphones, ImagePlus, Images, LoaderCircle, RefreshCw, ScanSearch, Send, Sparkles, Trash2, X, type LucideIcon } from 'lucide-react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cover } from '../../components/book/cover';
@@ -25,7 +26,16 @@ import {
 } from './api/client';
 import { KindleSendModal } from './kindle-send-modal';
 import { MetadataLookupModal } from './metadata-lookup-modal';
-import { allVisibleResources, selectedResourceForBook, bookDetailHref, bookDetailReturnHref, resourcePageFromQuery, singleReadableResourceForBook } from './book-detail';
+import {
+  allVisibleResources,
+  bookDetailHref,
+  bookDetailReturnHref,
+  librarySeriesHref,
+  libraryTagHref,
+  resourcePageFromQuery,
+  selectedResourceForBook,
+  singleReadableResourceForBook
+} from './book-detail';
 import { resourceDetailPageSize, type ResourceDetailPage } from './model/resource-detail';
 import type { BookContentLayout, BookContentSort, BookContentsPage } from './model/book-contents';
 import type { BookContentEntry } from './model/book-contents';
@@ -368,7 +378,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     const bounds = anchor.getBoundingClientRect();
     setBookActionRequest({
       target: { id: book.id, title: book.title, status: bookStatus },
-      position: { x: bounds.right, y: bounds.bottom + 6 },
+      position: { x: bounds.left + bounds.width / 2, y: bounds.bottom + 6 },
+      horizontalAlign: 'center',
       anchor,
       book
     });
@@ -469,6 +480,10 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   if (loading && !book) return <div className="flex min-h-[60vh] items-center justify-center"><LoaderCircle className="animate-spin text-[#ff4f2a]" /></div>;
   if (!book) return <div className="mx-auto max-w-lg p-8 text-center"><p className="text-stone-600">{error || t('图书不存在')}</p><Button className="mt-4" onClick={() => router.push(returnHref)}><I18nText>返回书库</I18nText></Button></div>;
 
+  const seriesName = book.seriesName?.trim() ?? '';
+  const tags = [...new Set(book.tags.map((tag) => tag.trim()).filter(Boolean))];
+  const hasBookMetadata = Boolean(seriesName || tags.length > 0);
+
   return <div className="w-full">
     <button type="button" onClick={() => router.push(returnHref)} className="mb-6 inline-flex items-center gap-2 text-sm text-stone-600 hover:text-stone-950"><ArrowLeft size={17} /><I18nText>返回全部图书</I18nText></button>
     <section className="rounded-[22px] border border-[#f1ddd3] bg-[#fffaf7] p-5 sm:p-6">
@@ -478,7 +493,30 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {book.completed ? <span className="inline-flex w-fit items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={14} /><I18nText>已完成</I18nText></span> : null}
           <h1 data-i18n-skip className="mt-2 line-clamp-2 text-3xl font-semibold leading-[1.15] tracking-tight text-stone-950 sm:text-[34px]">{book.title}</h1>
           <p data-i18n-skip className="mt-3 text-base text-stone-600">{book.author}</p>
-          {book.description ? <p data-i18n-skip className="mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600">{book.description}</p> : <p className="mt-5 text-sm text-stone-400"><I18nText>暂无简介</I18nText></p>}
+          {hasBookMetadata ? <div className="mt-4 flex min-w-0 flex-col items-start gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2">
+            {seriesName ? <span className="flex min-w-0 max-w-full items-center gap-2">
+              <span className="shrink-0 text-stone-400"><I18nText>系列</I18nText></span>
+              <Link
+                href={librarySeriesHref(seriesName)}
+                prefetch={false}
+                aria-label={t('查看系列“{value0}”中的图书', { value0: seriesName })}
+                data-i18n-skip
+                className="max-w-full truncate rounded-md font-medium text-stone-700 outline-none transition hover:text-[#D7462B] hover:underline focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+                title={seriesName}
+              >{seriesName}</Link>
+            </span> : null}
+            {tags.length > 0 ? <div className="flex max-w-full flex-wrap items-center gap-2 sm:border-l sm:border-stone-200 sm:pl-4">
+              {tags.map((tag) => <Link
+                key={tag}
+                href={libraryTagHref(tag)}
+                prefetch={false}
+                aria-label={t('查看标签“{value0}”下的图书', { value0: tag })}
+                data-i18n-skip
+                className="inline-flex min-h-7 items-center rounded-lg border border-[#efd7cc] bg-[#fff7f3] px-2.5 py-1 text-xs font-medium leading-4 text-stone-600 outline-none transition hover:border-[#efb7a5] hover:bg-[#fff0ea] hover:text-[#D7462B] focus-visible:ring-2 focus-visible:ring-[#F6B7A5]"
+              >{tag}</Link>)}
+            </div> : null}
+          </div> : null}
+          {book.description ? <p data-i18n-skip className={hasBookMetadata ? "mt-4 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600" : "mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600"}>{book.description}</p> : <p className={hasBookMetadata ? "mt-4 text-sm text-stone-400" : "mt-5 text-sm text-stone-400"}><I18nText>暂无简介</I18nText></p>}
           {bookCopy ? <div className="mt-7 max-w-3xl">
             <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-stone-700">{t(bookCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[#ff4f26]" style={{ width: `${bookProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(bookProgress)}%</span></div>
             <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(bookCopy.position)}</span><span data-i18n-skip className="text-stone-800">{bookResumeResource ? currentPositionLabel(bookResumeResource, requestedResource?.id === bookResumeResource.id ? resourceDetail : null, t) : ''}</span></div>

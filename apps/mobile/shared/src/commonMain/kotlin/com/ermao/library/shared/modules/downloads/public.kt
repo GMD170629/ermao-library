@@ -16,9 +16,15 @@ typealias DownloadBootstrapSuccess = com.ermao.library.shared.modules.downloads.
 typealias DownloadBootstrapFailure = com.ermao.library.shared.modules.downloads.application.DownloadBootstrapResult.Failure
 typealias DownloadByteSink = com.ermao.library.shared.modules.downloads.application.DownloadByteSink
 typealias DownloadByteSinkSession = com.ermao.library.shared.modules.downloads.application.DownloadByteSinkSession
+typealias DownloadBundleByteSink = com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSink
+typealias DownloadBundleByteSinkSession = com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSinkSession
+typealias DownloadBundleSinkRequest = com.ermao.library.shared.modules.downloads.application.DownloadBundleSinkRequest
+typealias DownloadBundleMemberSinkRequest = com.ermao.library.shared.modules.downloads.application.DownloadBundleMemberSinkRequest
 typealias DownloadCatalogRepository = com.ermao.library.shared.modules.downloads.application.DownloadCatalogRepository
 typealias CompletedTransfer = com.ermao.library.shared.modules.downloads.application.CompletedTransfer
 typealias DownloadDescriptor = com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
+typealias DownloadArtifactKind = com.ermao.library.shared.modules.downloads.domain.DownloadArtifactKind
+typealias DownloadBundleMember = com.ermao.library.shared.modules.downloads.domain.DownloadBundleMember
 typealias DownloadIdentity = com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 typealias DownloadNamespace = com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
 typealias DownloadProgressObserver = com.ermao.library.shared.modules.downloads.application.DownloadProgressObserver
@@ -56,13 +62,6 @@ typealias DownloadedBook = com.ermao.library.shared.modules.downloads.domain.Dow
 typealias DownloadsRuntime = com.ermao.library.shared.modules.downloads.application.DownloadsRuntime
 typealias InMemoryDownloadCatalogRepository = com.ermao.library.shared.modules.downloads.application.InMemoryDownloadCatalogRepository
 typealias KtorDownloadsGateway = com.ermao.library.shared.modules.downloads.infrastructure.KtorDownloadsGateway
-typealias ReaderAccessDecision = com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision
-typealias ReaderLocalArtifact = com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision.LocalArtifact
-typealias ReaderNeedsDownload = com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision.NeedsDownload
-typealias ReaderRemoteStream = com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision.RemoteStream
-typealias ReaderUnavailable = com.ermao.library.shared.modules.downloads.domain.ReaderAccessDecision.Unavailable
-typealias ReaderAccessPolicy = com.ermao.library.shared.modules.downloads.domain.ReaderAccessPolicy
-typealias ReaderAccessRequest = com.ermao.library.shared.modules.downloads.domain.ReaderAccessRequest
 
 fun createDownloadNamespace(
     serverIdentity: String,

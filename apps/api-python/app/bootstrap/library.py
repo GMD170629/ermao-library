@@ -39,6 +39,10 @@ from app.modules.library.application.management_commands import (
 from app.modules.library.application.queries import (
     SmartShelfCriteria,
 )
+from app.modules.library.application.recognized_metadata import (
+    ApplyRecognizedCover,
+    ApplyRecognizedMetadata,
+)
 from app.modules.library.application.resource_details import (
     ListResourceDetails,
     ResourceDetailAccessScope,
@@ -90,8 +94,23 @@ from app.modules.library.infrastructure.filter_options import (
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
+from app.modules.library.infrastructure.legacy_views import (
+    book_view,
+    bookshelf_book_list_view,
+    bookshelf_item_view,
+    bookshelf_item_views,
+    list_resource_views,
+    management_book_list_view,
+    preferred_book_cover_path,
+    resource_view,
+)
 from app.modules.library.infrastructure.operation_management import (
     SqlAlchemyLibraryOperationManagement,
+)
+from app.modules.library.infrastructure.recognized_metadata import (
+    FilesystemRecognizedCoverPublication,
+    SafeRemoteCoverDownloader,
+    SqlAlchemyRecognizedMetadata,
 )
 from app.modules.library.infrastructure.resource_commands import (
     SqlAlchemyResourceMetadata,
@@ -290,6 +309,20 @@ def recognize_source_node_metadata(db: Session) -> RecognizeSourceNodeMetadata:
     return RecognizeSourceNodeMetadata(ProviderSourceNodeMetadataRecognition(db))
 
 
+def apply_recognized_metadata(
+    db: Session,
+    settings: Settings,
+) -> ApplyRecognizedMetadata:
+    adapter = SqlAlchemyRecognizedMetadata(db)
+    covers = ApplyRecognizedCover(
+        adapter,
+        SafeRemoteCoverDownloader(),
+        FilesystemRecognizedCoverPublication(settings.resolved_storage_root),
+        db,
+    )
+    return ApplyRecognizedMetadata(adapter, db, covers)
+
+
 def delete_resource_asset(db: Session) -> DeleteResourceAsset:
     return DeleteResourceAsset(SqlAlchemyResourceAssetMutation(db), db)
 
@@ -315,6 +348,11 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
 
 __all__ = [
     "PreparedBookFacetWrite",
+    "apply_recognized_metadata",
+    "book_view",
+    "bookshelf_book_list_view",
+    "bookshelf_item_view",
+    "bookshelf_item_views",
     "bookshelf_items",
     "browse_book_contents",
     "bulk_find_replace",
@@ -339,15 +377,19 @@ __all__ = [
     "library_request_mutations",
     "library_storage",
     "list_books",
+    "list_resource_views",
     "load_book_facet_projections",
     "load_metadata_apply_job_ids",
+    "management_book_list_view",
     "merge_library_facets",
+    "preferred_book_cover_path",
     "prepare_book_facet",
     "prepare_book_facet_write",
     "recognize_source_node_metadata",
     "rename_library_facet",
     "resource_details",
     "resource_metadata",
+    "resource_view",
     "smart_shelf_book_ids",
     "update_book",
     "update_source_node_metadata",

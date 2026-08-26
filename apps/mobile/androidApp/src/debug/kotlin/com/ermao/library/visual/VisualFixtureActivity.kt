@@ -28,7 +28,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.ermao.library.features.content.model.ChapterReadingState
-import com.ermao.library.features.content.model.ContentFreshness
 import com.ermao.library.features.content.model.ContentSort
 import com.ermao.library.features.content.model.ContentViewMode
 import com.ermao.library.features.content.model.ContinueReadingCard
@@ -63,7 +62,6 @@ import com.ermao.library.shared.modules.library.GroupingQuery
 import com.ermao.library.shared.modules.library.GroupingSummary
 import com.ermao.library.shared.modules.library.HomeSnapshot
 import com.ermao.library.shared.modules.library.LibraryPage
-import com.ermao.library.shared.modules.library.OfflineFilterAvailability
 import com.ermao.library.shared.modules.library.BookDetailQuery
 import com.ermao.library.shared.modules.library.BooksQuery
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
@@ -311,7 +309,6 @@ private fun FixtureHome() {
                 recentReading = fixtureBooks.take(3),
                 recentAdded = fixtureBooks.drop(3).take(3),
             ),
-            freshness = ContentFreshness.Fresh,
         ),
         repository = fixtureRepository,
         context = fixtureRequestContext,
@@ -343,7 +340,6 @@ private fun FixtureLibrary(showFilter: Boolean) {
         loadedPage = 1,
         totalPages = 3,
         isLoading = false,
-        freshness = ContentFreshness.Fresh,
     )
     LibraryScreen(
         state = LibraryUiState(
@@ -355,10 +351,8 @@ private fun FixtureLibrary(showFilter: Boolean) {
             scopes = LibraryScope.entries.associateWith { scope ->
                 if (scope == LibraryScope.Books) booksState else ScopeUiState(isLoading = false)
             },
-            offlineFilterAvailability = OfflineFilterAvailability.Available,
             filterDraft = WorksFilters(
                 reading = ReadingFilter.Unread,
-                downloadedOnly = true,
             ).takeIf { showFilter },
         ),
         repository = fixtureRepository,
@@ -575,7 +569,6 @@ private val fixtureRepository: ContentRepository = object : ContentRepository {
             mimeType = "image/png",
             etag = "fixture-${apiPath.hashCode()}",
         ),
-        source = com.ermao.library.shared.modules.library.ContentSource.Network,
     )
 
     override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = forbidden("loadHome")

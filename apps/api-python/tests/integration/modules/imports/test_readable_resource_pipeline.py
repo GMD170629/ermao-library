@@ -370,6 +370,72 @@ def test_succeeded_not_reexecuted_and_no_duplicate_entities(tmp_path: Path) -> N
         engine.dispose()
 
 
+def test_scan_requeues_existing_fb2_when_text_adapter_contract_upgrades(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db)
+            (root / "book.fb2").write_text(
+                "<?xml version='1.0' encoding='utf-8'?><FictionBook/>",
+                encoding="utf-8",
+            )
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            resource = db.scalar(select(LibraryReadableResource))
+            task = db.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
+                )
+            )
+            assert resource is not None
+            assert task is not None
+            assert resource.adapter_id == "txt"
+            assert resource.adapter_version == "2"
+            assert resource.format == "FB2"
+            assert task.state == "SUCCEEDED"
+            original_task_id = task.id
+
+            # Reproduce the previously persisted v1 contract. A formal scan must migrate it;
+            # tests and production both go through the public queue/repository boundaries.
+            resource.adapter_version = "1"
+            resource.format = "TXT"
+            db.commit()
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
+            db.expire_all()
+
+            upgraded = db.get(LibraryReadableResource, resource.id)
+            requeued = db.get(LibraryImportTask, original_task_id)
+            interpretation = db.scalar(
+                select(LibrarySourceNodeInterpretation).where(
+                    LibrarySourceNodeInterpretation.source_node_id
+                    == resource.source_node_id
+                )
+            )
+            assert upgraded is not None
+            assert upgraded.adapter_id == "txt"
+            assert upgraded.adapter_version == "2"
+            assert upgraded.format == "FB2"
+            assert requeued is not None
+            assert requeued.state == "QUEUED"
+            assert interpretation is not None
+            assert interpretation.reason_code == "ADAPTER_CONTRACT_UPGRADED"
+
+            assert _drain(pipeline) == ["ok"]
+            db.expire_all()
+            assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
+    finally:
+        engine.dispose()
+
+
 def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"

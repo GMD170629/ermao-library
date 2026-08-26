@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from app.models import (
     LibrarySourceNodeMetadata,
 )
 from app.modules.library.application.source_node_metadata_recognition import (
+    MetadataProviderSearchError,
     SourceNodeMetadataCandidate,
     SourceNodeMetadataRecognitionPort,
     SourceNodeMetadataRecognitionResult,
@@ -58,7 +60,6 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         if (
             root is None
             or node.library_id != root.library_id
-            or node.physical_kind != "DIRECTORY"
             or not (
                 node.id == root.id
                 or node.relative_path.startswith(f"{root.relative_path.rstrip('/')}/")
@@ -95,20 +96,25 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             else node.name
         )
         context = {
-            "work": {
+            "book": {
                 "id": book.id,
                 "title": title,
                 "author": book_metadata.author,
                 "description": node_metadata.description if node_metadata else None,
+                "seriesName": book_metadata.series_name,
+                "seriesIndex": book_metadata.series_index,
             },
             "resources": resources,
         }
-        result = search_with_metadata_provider(
-            self._db,
-            context,
-            provider_id,
-            query or title,
-        )
+        try:
+            result = search_with_metadata_provider(
+                self._db,
+                context,
+                provider_id,
+                query or title,
+            )
+        except Exception as exc:
+            raise MetadataProviderSearchError(provider_id) from exc
         candidates = tuple(
             candidate
             for value in result.get("candidates", [])
@@ -134,16 +140,61 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
         confidence = (
             float(confidence_value)
             if isinstance(confidence_value, (int, float))
+            and not isinstance(confidence_value, bool)
+            and math.isfinite(float(confidence_value))
             else 0.0
         )
+        confidence = min(1.0, max(0.0, confidence))
+        tags_value = value.get("tags")
+        tags = (
+            tuple(
+                str(tag).strip()
+                for tag in tags_value
+                if isinstance(tag, str) and str(tag).strip()
+            )
+            if isinstance(tags_value, (list, tuple))
+            else ()
+        )
+
+        def optional_string(key: str) -> str | None:
+            candidate_value = value.get(key)
+            return (
+                str(candidate_value).strip()
+                if candidate_value is not None and str(candidate_value).strip()
+                else None
+            )
+
+        def optional_number(key: str) -> float | None:
+            candidate_value = value.get(key)
+            if isinstance(candidate_value, bool) or not isinstance(
+                candidate_value, (int, float)
+            ):
+                return None
+            parsed = float(candidate_value)
+            return parsed if math.isfinite(parsed) else None
+
         return SourceNodeMetadataCandidate(
             id=identifier,
             source=str(value.get("source") or provider_id),
-            title=str(value["title"]) if value.get("title") else None,
-            description=(
-                str(value["description"]) if value.get("description") else None
+            title=optional_string("title"),
+            author=optional_string("author"),
+            description=optional_string("description"),
+            tags=tags,
+            series_name=optional_string("seriesName"),
+            series_index=optional_number("seriesIndex"),
+            publisher=optional_string("publisher"),
+            published_at=optional_string("publishedAt"),
+            language=optional_string("language"),
+            isbn=optional_string("isbn"),
+            identifier=optional_string("identifier"),
+            narrator=optional_string("narrator"),
+            abridged=(
+                value.get("abridged")
+                if isinstance(value.get("abridged"), bool)
+                else None
             ),
-            cover_url=str(value["coverUrl"]) if value.get("coverUrl") else None,
+            resource_index=optional_number("resourceIndex"),
+            cover_url=optional_string("coverUrl"),
             confidence=confidence,
         )
 

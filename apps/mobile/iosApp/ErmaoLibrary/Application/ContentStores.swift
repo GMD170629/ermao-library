@@ -2,15 +2,9 @@ import Foundation
 import Combine
 @preconcurrency import ErmaoShared
 
-enum ContentCacheIssue: String, Sendable {
-    case readFailed
-    case writeFailed
-    case purgeFailed
-}
-
 enum HomeSectionState<Value: Sendable>: Sendable {
     case loading
-    case content(Value, isCached: Bool)
+    case content(Value)
     case empty
     case failure
 }
@@ -20,11 +14,9 @@ final class HomeStore: ObservableObject {
     @Published private(set) var continueReading: HomeSectionState<ContinueReadingItem> = .loading
     @Published private(set) var recentReading: HomeSectionState<[BookCard]> = .loading
     @Published private(set) var recentAdded: HomeSectionState<[BookCard]> = .loading
-    @Published private(set) var cacheIssue: ContentCacheIssue?
 
     private let context: ContentRequestContext
     private let client: any ContentClient
-    private let cache: LibraryCacheStore
     private let onUnauthorized: @MainActor () -> Void
     private var continueGeneration = UUID()
     private var recentReadingGeneration = UUID()
@@ -33,12 +25,10 @@ final class HomeStore: ObservableObject {
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
         onUnauthorized: @escaping @MainActor () -> Void
     ) {
         self.context = context
         self.client = client
-        self.cache = cache
         self.onUnauthorized = onUnauthorized
     }
 
@@ -80,14 +70,14 @@ final class HomeStore: ObservableObject {
             let value = try await client.fetchContinueReading(context: context)
             guard continueGeneration == generation else { return }
             if let value {
-                continueReading = .content(value, isCached: false)
+                continueReading = .content(value)
             } else {
                 continueReading = .empty
             }
         } catch {
             guard continueGeneration == generation else { return }
             if handleUnauthorized(error) { return }
-            if await handleInaccessible(error) { continueReading = .failure; return }
+            if handleInaccessible(error) { continueReading = .failure; return }
             continueReading = .failure
         }
     }
@@ -97,11 +87,11 @@ final class HomeStore: ObservableObject {
         do {
             let values = try await client.fetchRecentReading(context: context, limit: 12)
             guard recentReadingGeneration == generation else { return }
-            recentReading = values.isEmpty ? .empty : .content(values, isCached: false)
+            recentReading = values.isEmpty ? .empty : .content(values)
         } catch {
             guard recentReadingGeneration == generation else { return }
             if handleUnauthorized(error) { return }
-            if await handleInaccessible(error) { recentReading = .failure; return }
+            if handleInaccessible(error) { recentReading = .failure; return }
             recentReading = .failure
         }
     }
@@ -111,11 +101,11 @@ final class HomeStore: ObservableObject {
         do {
             let values = try await client.fetchRecentAdded(context: context, limit: 12)
             guard recentAddedGeneration == generation else { return }
-            recentAdded = values.isEmpty ? .empty : .content(values, isCached: false)
+            recentAdded = values.isEmpty ? .empty : .content(values)
         } catch {
             guard recentAddedGeneration == generation else { return }
             if handleUnauthorized(error) { return }
-            if await handleInaccessible(error) { recentAdded = .failure; return }
+            if handleInaccessible(error) { recentAdded = .failure; return }
             recentAdded = .failure
         }
     }
@@ -126,10 +116,8 @@ final class HomeStore: ObservableObject {
         return true
     }
 
-    private func handleInaccessible(_ error: Error) async -> Bool {
+    private func handleInaccessible(_ error: Error) -> Bool {
         guard case ContentClientError.inaccessible = error else { return false }
-        do { try await cache.removeNamespace(context.namespaceKey) }
-        catch { cacheIssue = .purgeFailed }
         return true
     }
 
@@ -150,7 +138,7 @@ enum LibraryResultItem: Identifiable, Sendable {
 enum LibraryResultState: Sendable {
     case idle
     case loading
-    case ready(items: [LibraryResultItem], total: Int, isCached: Bool, isRefreshing: Bool)
+    case ready(items: [LibraryResultItem], total: Int)
     case empty
     case failure
     case permissionRevalidating
@@ -176,7 +164,6 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var selectedScope: LibraryScope = .books
     @Published private(set) var libraryOptions: [LibrarySourceOption] = []
     @Published private(set) var selectedLibraryID: String?
-    @Published private(set) var cacheIssue: ContentCacheIssue?
     @Published private(set) var scopeStates: [LibraryScope: LibraryScopeState] = [
         .books: LibraryScopeState(),
         .series: LibraryScopeState(),
@@ -185,24 +172,17 @@ final class LibraryStore: ObservableObject {
 
     private let context: ContentRequestContext
     private let client: any ContentClient
-    private let cache: LibraryCacheStore
     private let onUnauthorized: @MainActor () -> Void
-    private let discoveryRuntime = ErmaoShared.LibraryDiscoveryRuntime(
-        offlineFilterAvailability: ErmaoShared.OfflineFilterAvailabilityUnavailable(
-            reasonCode: "MANAGED_DOWNLOADS_UNAVAILABLE"
-        )
-    )
+    private let discoveryRuntime = ErmaoShared.LibraryDiscoveryRuntime()
     private var searchTask: Task<Void, Never>?
 
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
         onUnauthorized: @escaping @MainActor () -> Void
     ) {
         self.context = context
         self.client = client
-        self.cache = cache
         self.onUnauthorized = onUnauthorized
     }
 
@@ -211,10 +191,6 @@ final class LibraryStore: ObservableObject {
     }
 
     var current: LibraryScopeState { scopeStates[selectedScope] ?? LibraryScopeState() }
-
-    let offlineFilterAvailability: OfflineFilterAvailability = .unavailable(
-        reasonCode: "MANAGED_DOWNLOADS_UNAVAILABLE"
-    )
 
     func selectScope(_ scope: LibraryScope) {
         guard selectedScope != scope else { return }
@@ -285,9 +261,8 @@ final class LibraryStore: ObservableObject {
     }
 
     func applyFilters(_ filters: LibraryFilters) {
-        guard selectedScope == .books, !filters.downloadedOnly else { return }
-        guard discoveryRuntime.applyFilters(filters: sharedFilters(filters)) is ErmaoShared.FilterCommitResultApplied
-        else { return }
+        guard selectedScope == .books else { return }
+        discoveryRuntime.applyFilters(filters: sharedFilters(filters))
         updateCurrent { $0.filters = filters }
         reload()
     }
@@ -314,10 +289,7 @@ final class LibraryStore: ObservableObject {
 
     func reload() {
         let scope = selectedScope
-        let token = discoveryRuntime.beginInitialRequest(
-            scope: sharedScope(scope),
-            retainsVisibleContent: current.readyItems?.isEmpty == false
-        )
+        let token = discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
         update(scope) {
             $0.results = .loading
             $0.loadedPage = 0
@@ -337,29 +309,15 @@ final class LibraryStore: ObservableObject {
     }
 
     private func revalidate(_ scope: LibraryScope) {
-        if case .ready(let items, let total, let cached, _) = scopeStates[scope]?.results {
-            update(scope) {
-                $0.results = .ready(
-                    items: items,
-                    total: total,
-                    isCached: cached,
-                    isRefreshing: true
-                )
-            }
-        } else {
-            update(scope) {
-                $0.results = .loading
-                $0.loadedPage = 0
-                $0.totalPages = 1
-                $0.isLoadingNextPage = false
-                $0.hasPaginationError = false
-                $0.paginationRequestKey = nil
-            }
+        update(scope) {
+            $0.results = .loading
+            $0.loadedPage = 0
+            $0.totalPages = 1
+            $0.isLoadingNextPage = false
+            $0.hasPaginationError = false
+            $0.paginationRequestKey = nil
         }
-        let token = discoveryRuntime.beginInitialRequest(
-            scope: sharedScope(scope),
-            retainsVisibleContent: scopeStates[scope]?.readyItems?.isEmpty == false
-        )
+        let token = discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
         Task { [weak self] in
             await self?.load(scope: scope, page: 1, token: token)
         }
@@ -418,19 +376,12 @@ final class LibraryStore: ObservableObject {
     ) async {
         guard let state = scopeStates[scope] else { return }
         do {
-            let fetched = try await fetch(scope: scope, state: state, page: page)
+            let response = try await fetch(scope: scope, state: state, page: page)
             guard discoveryRuntime.acceptPage(
                 token: token,
-                isEmpty: fetched.response.isEmpty,
-                source: .network,
-                isStale: false
+                isEmpty: response.isEmpty
             ) else { return }
-            apply(
-                fetched.response,
-                scope: scope,
-                page: page,
-                isCached: false
-            )
+            apply(response, scope: scope, page: page)
         } catch {
             if case ContentClientError.unauthorized = error {
                 discoveryRuntime.beginPermissionRevalidation()
@@ -446,8 +397,6 @@ final class LibraryStore: ObservableObject {
             }
             if case ContentClientError.inaccessible = error {
                 discoveryRuntime.markInaccessible(scope: sharedScope(scope))
-                do { try await cache.removeNamespace(context.namespaceKey) }
-                catch { cacheIssue = .purgeFailed }
                 update(scope) {
                     $0.results = .inaccessible
                     $0.isLoadingNextPage = false
@@ -456,14 +405,14 @@ final class LibraryStore: ObservableObject {
                 return
             }
             if page > 1 {
-                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED", hasVisibleContent: true)
+                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED")
                 update(scope) {
                     $0.isLoadingNextPage = false
                     $0.hasPaginationError = true
                     $0.paginationRequestKey = nil
                 }
             } else {
-                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED", hasVisibleContent: false)
+                _ = discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED")
                 update(scope) { $0.results = .failure }
             }
         }
@@ -481,50 +430,36 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    private struct PageFetch: Sendable {
-        let response: PageResponse
-        let provenance: ContentProvenance
-        let isStale: Bool
-    }
-
-    private func fetch(scope: LibraryScope, state: LibraryScopeState, page: Int) async throws -> PageFetch {
+    private func fetch(scope: LibraryScope, state: LibraryScopeState, page: Int) async throws -> PageResponse {
         switch scope {
         case .books:
-            let result = try await client.fetchBooksResult(
-                    context: context,
-                    query: BooksQuery(
-                        query: state.query,
-                        libraryID: selectedLibraryID,
-                        sort: state.sort,
-                        filters: state.filters,
-                        page: page,
-                        pageSize: 24
-                    )
+            let result = try await client.fetchBooks(
+                context: context,
+                query: BooksQuery(
+                    query: state.query,
+                    libraryID: selectedLibraryID,
+                    sort: state.sort,
+                    filters: state.filters,
+                    page: page,
+                    pageSize: 24
                 )
-            return PageFetch(
-                response: .books(result.value),
-                provenance: result.provenance,
-                isStale: result.isStale
             )
+            return .books(result)
         case .series, .authors:
-            let result = try await client.fetchGroupingsResult(
-                    context: context,
-                    query: GroupingsQuery(
-                        kind: scope == .series ? .series : .author,
-                        query: state.query,
-                        page: page,
-                        pageSize: 30
-                    )
+            let result = try await client.fetchGroupings(
+                context: context,
+                query: GroupingsQuery(
+                    kind: scope == .series ? .series : .author,
+                    query: state.query,
+                    page: page,
+                    pageSize: 30
                 )
-            return PageFetch(
-                response: .groupings(result.value),
-                provenance: result.provenance,
-                isStale: result.isStale
             )
+            return .groupings(result)
         }
     }
 
-    private func apply(_ response: PageResponse, scope: LibraryScope, page: Int, isCached: Bool) {
+    private func apply(_ response: PageResponse, scope: LibraryScope, page: Int) {
         let nextItems: [LibraryResultItem]
         let total: Int
         let totalPages: Int
@@ -543,7 +478,7 @@ final class LibraryStore: ObservableObject {
         update(scope) {
             $0.results = merged.isEmpty
                 ? .empty
-                : .ready(items: merged, total: total, isCached: isCached, isRefreshing: false)
+                : .ready(items: merged, total: total)
             $0.loadedPage = page
             $0.totalPages = totalPages
             $0.isLoadingNextPage = false
@@ -557,13 +492,13 @@ final class LibraryStore: ObservableObject {
         return items.filter { identifiers.insert($0.id).inserted }
     }
 
-    private func cacheKey(scope: LibraryScope, state: LibraryScopeState, page: Int) -> String {
+    private func queryRequestKey(scope: LibraryScope, state: LibraryScopeState, page: Int) -> String {
         let reading = state.filters.readingStatus?.rawValue ?? ""
-        return "library|\(scope.rawValue)|\(selectedLibraryID ?? "all")|\(state.query)|\(state.sort.rawValue)|\(state.viewMode.rawValue)|\(reading)|\(state.filters.downloadedOnly)|\(page)"
+        return "library|\(scope.rawValue)|\(selectedLibraryID ?? "all")|\(state.query)|\(state.sort.rawValue)|\(state.viewMode.rawValue)|\(reading)|\(page)"
     }
 
     private func paginationRequestKey(scope: LibraryScope, state: LibraryScopeState, page: Int) -> String {
-        cacheKey(scope: scope, state: state, page: page)
+        queryRequestKey(scope: scope, state: state, page: page)
     }
 
     private func updateCurrent(_ update: (inout LibraryScopeState) -> Void) {
@@ -608,14 +543,14 @@ final class LibraryStore: ObservableObject {
 
 private extension LibraryScopeState {
     var readyItems: [LibraryResultItem]? {
-        guard case .ready(let items, _, _, _) = results else { return nil }
+        guard case .ready(let items, _) = results else { return nil }
         return items
     }
 }
 
 enum FacetLoadState: Sendable {
     case loading
-    case ready(FacetPage, isCached: Bool)
+    case ready(FacetPage)
     case empty(FacetIdentity)
     case inaccessible
     case failure
@@ -626,20 +561,17 @@ final class FacetStore: ObservableObject {
     @Published private(set) var state: FacetLoadState = .loading
     @Published private(set) var isLoadingNextPage = false
     @Published private(set) var hasPaginationError = false
-    @Published private(set) var cacheIssue: ContentCacheIssue?
 
     private let context: ContentRequestContext
     private let client: any ContentClient
-    private let cache: LibraryCacheStore
     private let kind: FacetKind
     private let facetID: String
     private let onUnauthorized: @MainActor () -> Void
     private var requestGeneration = UUID()
 
-    init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, kind: FacetKind, facetID: String, onUnauthorized: @escaping @MainActor () -> Void) {
+    init(context: ContentRequestContext, client: any ContentClient, kind: FacetKind, facetID: String, onUnauthorized: @escaping @MainActor () -> Void) {
         self.context = context
         self.client = client
-        self.cache = cache
         self.kind = kind
         self.facetID = facetID
         self.onUnauthorized = onUnauthorized
@@ -653,7 +585,7 @@ final class FacetStore: ObservableObject {
     }
 
     func loadNextPageIfNeeded(bookID: String) {
-        guard case .ready(let page, _) = state,
+        guard case .ready(let page) = state,
               page.page < page.totalPages,
               page.books.suffix(6).contains(where: { $0.id == bookID }),
               !isLoadingNextPage else { return }
@@ -664,7 +596,7 @@ final class FacetStore: ObservableObject {
     }
 
     func retry() {
-        if case .ready(let page, _) = state, hasPaginationError {
+        if case .ready(let page) = state, hasPaginationError {
             isLoadingNextPage = true
             let generation = requestGeneration
             Task { [weak self] in await self?.loadPage(page.page + 1, generation: generation) }
@@ -675,7 +607,7 @@ final class FacetStore: ObservableObject {
 
     private func loadPage(_ page: Int, generation: UUID) async {
         do {
-            let fetched = try await client.fetchFacetResult(
+            let fetched = try await client.fetchFacet(
                 context: context,
                 query: FacetQuery(
                     kind: kind,
@@ -686,13 +618,11 @@ final class FacetStore: ObservableObject {
                 )
             )
             guard requestGeneration == generation else { return }
-            apply(fetched.value, appending: page > 1, isCached: false)
+            apply(fetched, appending: page > 1)
         } catch {
             guard requestGeneration == generation else { return }
             if case ContentClientError.unauthorized = error { onUnauthorized(); return }
             if case ContentClientError.inaccessible = error {
-                do { try await cache.removeNamespace(context.namespaceKey) }
-                catch { cacheIssue = .purgeFailed }
                 state = .inaccessible
                 return
             }
@@ -705,9 +635,9 @@ final class FacetStore: ObservableObject {
         }
     }
 
-    private func apply(_ result: FacetPage, appending: Bool, isCached: Bool) {
+    private func apply(_ result: FacetPage, appending: Bool) {
         var result = result
-        if appending, case .ready(let previous, _) = state {
+        if appending, case .ready(let previous) = state {
             var ids = Set(previous.books.map(\.id))
             result = FacetPage(
                 facet: result.facet,
@@ -718,7 +648,7 @@ final class FacetStore: ObservableObject {
                 totalPages: result.totalPages
             )
         }
-        state = result.books.isEmpty ? .empty(result.facet) : .ready(result, isCached: isCached)
+        state = result.books.isEmpty ? .empty(result.facet) : .ready(result)
         isLoadingNextPage = false
         hasPaginationError = false
     }
@@ -726,7 +656,7 @@ final class FacetStore: ObservableObject {
 
 enum BookDetailLoadState: Sendable {
     case loading
-    case ready(BookDetailContent, isCached: Bool)
+    case ready(BookDetailContent)
     case inaccessible
     case failure
 }
@@ -734,7 +664,6 @@ enum BookDetailLoadState: Sendable {
 @MainActor
 final class BookDetailStore: ObservableObject {
     @Published private(set) var state: BookDetailLoadState = .loading
-    @Published private(set) var cacheIssue: ContentCacheIssue?
     @Published private(set) var contentsPage: BookContentsPage?
     @Published private(set) var chapterPage: BookChapterPage?
     @Published private(set) var resourceDetailPage: BookResourceDetailPage?
@@ -748,7 +677,6 @@ final class BookDetailStore: ObservableObject {
 
     private let context: ContentRequestContext
     private let client: any ContentClient
-    private let cache: LibraryCacheStore
     private let bookID: String
     var bookIDValue: String { bookID }
     private let onUnauthorized: @MainActor () -> Void
@@ -758,10 +686,9 @@ final class BookDetailStore: ObservableObject {
     private var latestProgressUpdatesByResourceID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
-    init(context: ContentRequestContext, client: any ContentClient, cache: LibraryCacheStore, bookID: String, onUnauthorized: @escaping @MainActor () -> Void) {
+    init(context: ContentRequestContext, client: any ContentClient, bookID: String, onUnauthorized: @escaping @MainActor () -> Void) {
         self.context = context
         self.client = client
-        self.cache = cache
         self.bookID = bookID
         self.onUnauthorized = onUnauthorized
         ReaderProgressPresentationCenter.shared.updates
@@ -793,14 +720,12 @@ final class BookDetailStore: ObservableObject {
                     .flatMap { latestProgressUpdatesByResourceID[$0] }
                 let presented = latestProgressUpdate.map { value.applying($0) } ?? value
                 activeResourceID = presented.selectedResourceID
-                state = .ready(presented, isCached: false)
+                state = .ready(presented)
                 await loadContentBrowser(for: presented, generation: generation)
             } catch {
                 guard requestGeneration == generation else { return }
                 if case ContentClientError.unauthorized = error { onUnauthorized(); return }
                 if case ContentClientError.inaccessible = error {
-                    do { try await cache.removeNamespace(context.namespaceKey) }
-                    catch { cacheIssue = .purgeFailed }
                     state = .inaccessible
                     return
                 }
@@ -833,11 +758,11 @@ final class BookDetailStore: ObservableObject {
                     page: nextPage,
                     pageSize: pageSize
                 )
-                guard case .ready(let current, let isCached) = state else {
+                guard case .ready(let current) = state else {
                     isLoadingMoreResources = false
                     return
                 }
-                state = .ready(current.appending(page), isCached: isCached)
+                state = .ready(current.appending(page))
                 hasMoreResources = page.page < page.totalPages && !page.resources.isEmpty
                 isLoadingMoreResources = false
             } catch {
@@ -957,8 +882,8 @@ final class BookDetailStore: ObservableObject {
                     )
                 }
                 contentsPage = nil
-                if case .ready(let current, let isCached) = state {
-                    state = .ready(current.replacingChapters(chapters), isCached: isCached)
+                if case .ready(let current) = state {
+                    state = .ready(current.replacingChapters(chapters))
                 }
             } else {
                 if !force, contentsPage != nil {
@@ -1047,7 +972,7 @@ final class BookDetailStore: ObservableObject {
     }
 
     private var currentContent: BookDetailContent? {
-        guard case .ready(let content, _) = state else { return nil }
+        guard case .ready(let content) = state else { return nil }
         return content
     }
 
@@ -1055,10 +980,10 @@ final class BookDetailStore: ObservableObject {
         let previous = latestProgressUpdatesByResourceID[update.resourceId]
         guard update.capturedAtEpochMillis >= (previous?.capturedAtEpochMillis ?? -1) else { return }
         latestProgressUpdatesByResourceID[update.resourceId] = update
-        guard case .ready(let content, let isCached) = state else { return }
+        guard case .ready(let content) = state else { return }
         guard content.selectedResourceID == update.resourceId else { return }
         let presented = content.applying(update)
-        state = .ready(presented, isCached: isCached)
+        state = .ready(presented)
     }
 }
 

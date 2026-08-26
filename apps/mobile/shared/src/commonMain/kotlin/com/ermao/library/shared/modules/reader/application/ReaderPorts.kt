@@ -225,12 +225,15 @@ fun decideReaderResume(
 sealed interface PendingVsServerDecision {
     data class UseServer(
         val snapshot: ReaderProgressSnapshotV4?,
-        val discardPending: Boolean = false,
+        /** Mutation observed by the startup decision; retirement remains mutation-id guarded. */
+        val discardPendingMutationId: String? = null,
     ) : PendingVsServerDecision
 
     data class UseLocalPending(
         val progress: ReaderProgress,
         val mutation: com.ermao.library.shared.modules.reader.domain.ReaderProgressMutation,
+        /** Fresh bootstrap revision to rebase onto before upload; null retries the existing mutation. */
+        val rebaseRevision: Long? = null,
     ) : PendingVsServerDecision
 
 }
@@ -244,14 +247,16 @@ fun decidePendingVsServerStartup(
 ): PendingVsServerDecision {
     val pending = durableState.pending ?: return PendingVsServerDecision.UseServer(remoteSnapshot)
     val validLocal = localProgress?.takeIf {
-        it.resourceId == openedSource.resourceId &&
+        pending.resourceId == openedSource.resourceId &&
+            it.resourceId == openedSource.resourceId &&
+            it.deviceId == pending.clientId &&
             runCatching { it.exactPublicationLocation() }.isSuccess &&
             runCatching {
                 compareExactProgressLocations(it.exactPublicationLocation(), pending.locator) == ExactLocationMatch.Exact
             }.getOrDefault(false)
     }
     if (validLocal == null) {
-        return PendingVsServerDecision.UseServer(remoteSnapshot, discardPending = true)
+        return PendingVsServerDecision.UseServer(remoteSnapshot, discardPendingMutationId = pending.mutationId)
     }
     if (remoteSnapshot == null || pending.baseRevision == remoteSnapshot.revision) {
         return PendingVsServerDecision.UseLocalPending(validLocal, pending)
@@ -260,9 +265,13 @@ fun decidePendingVsServerStartup(
         remoteSnapshot.revision > pending.baseRevision &&
         remoteSnapshot.effectiveCapturedAtEpochMillis >= validLocal.updatedAtEpochMillis
     ) {
-        PendingVsServerDecision.UseServer(remoteSnapshot, discardPending = true)
+        PendingVsServerDecision.UseServer(remoteSnapshot, discardPendingMutationId = pending.mutationId)
     } else {
-        PendingVsServerDecision.UseLocalPending(validLocal, pending)
+        PendingVsServerDecision.UseLocalPending(
+            progress = validLocal,
+            mutation = pending,
+            rebaseRevision = remoteSnapshot.revision.takeIf { it > pending.baseRevision },
+        )
     }
 }
 

@@ -3,7 +3,7 @@ import SwiftUI
 struct FacetView: View {
     let context: ContentRequestContext
     let client: any ContentClient
-    let cache: LibraryCacheStore
+    let cache: AuthenticatedCoverCache
     let kind: FacetKind
     let facetID: String
     let openWork: (String) -> Void
@@ -15,7 +15,7 @@ struct FacetView: View {
     init(
         context: ContentRequestContext,
         client: any ContentClient,
-        cache: LibraryCacheStore,
+        cache: AuthenticatedCoverCache,
         kind: FacetKind,
         facetID: String,
         onUnauthorized: @escaping @MainActor () -> Void,
@@ -31,7 +31,6 @@ struct FacetView: View {
             wrappedValue: FacetStore(
                 context: context,
                 client: client,
-                cache: cache,
                 kind: kind,
                 facetID: facetID,
                 onUnauthorized: onUnauthorized
@@ -83,14 +82,14 @@ struct FacetView: View {
                 message: "content.inaccessible.message"
             )
         case .empty(let identity):
-            identityHeader(identity, count: 0, isCached: false)
+            identityHeader(identity, count: 0)
             ContentStatusView(
                 systemImage: "books.vertical",
                 title: "facet.empty.title",
                 message: "facet.empty.message"
             )
-        case .ready(let page, let cached):
-            identityHeader(page.facet, count: page.total, isCached: cached)
+        case .ready(let page):
+            identityHeader(page.facet, count: page.total)
             if kind == .series {
                 seriesWorks(page.books)
             } else {
@@ -112,7 +111,7 @@ struct FacetView: View {
         }
     }
 
-    private func identityHeader(_ identity: FacetIdentity, count: Int, isCached: Bool) -> some View {
+    private func identityHeader(_ identity: FacetIdentity, count: Int) -> some View {
         VStack(alignment: .leading, spacing: .space1) {
             VStack(alignment: .leading, spacing: .space1) {
                 Text(identity.name)
@@ -128,10 +127,6 @@ struct FacetView: View {
                     .foregroundStyle(theme.textTertiary)
             }
             .accessibilityElement(children: .combine)
-            if isCached {
-                ContentOfflineNotice(retry: store.load)
-                    .padding(.top, .spaceHalf)
-            }
             Divider()
         }
         .padding(.top, .space1)

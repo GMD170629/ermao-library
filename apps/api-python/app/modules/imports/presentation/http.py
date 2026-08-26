@@ -67,7 +67,7 @@ from app.modules.imports.presentation.schemas import (
 )
 from app.modules.imports.presentation.writes import router as writes_router
 from app.modules.imports.public import parse_release_title
-from app.modules.library.domain.layout import LibraryOrganizationMode
+from app.modules.library.public import LibraryOrganizationMode
 from app.schemas.responses import fail, ok
 from app.services.system_events import prepare_system_event
 
