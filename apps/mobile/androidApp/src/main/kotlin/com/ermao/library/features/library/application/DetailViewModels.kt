@@ -22,6 +22,8 @@ import com.ermao.library.shared.modules.library.BookDetailQuery
 import com.ermao.library.shared.modules.library.BookContentSort
 import com.ermao.library.shared.modules.library.BookContentsPage
 import com.ermao.library.shared.modules.library.BookContentsQuery
+import com.ermao.library.shared.modules.library.BookContentEntry
+import com.ermao.library.shared.modules.library.BookResourcePageQuery
 import com.ermao.library.shared.modules.library.BookDetailPresentation
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
@@ -31,6 +33,7 @@ import com.ermao.library.shared.modules.library.FacetSort
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsPage
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsQuery
 import com.ermao.library.shared.modules.library.selectBookDetailPresentation
+import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
@@ -160,6 +163,15 @@ data class WorkDetailUiState(
     val isSavingShelves: Boolean = false,
     val shelfErrorCode: String? = null,
     val shelfSaveCompleted: Boolean = false,
+    val isMultiDownloadVisible: Boolean = false,
+    val multiDownloadRootNodeId: String? = null,
+    val multiDownloadChildrenByNodeId: Map<String, List<BookContentEntry>> = emptyMap(),
+    val multiDownloadDescendantResourceIdsByNodeId: Map<String, Set<String>> = emptyMap(),
+    val multiDownloadExpandedNodeIds: Set<String> = emptySet(),
+    val multiDownloadLoadingNodeIds: Set<String> = emptySet(),
+    val isMultiDownloadResourcesLoading: Boolean = false,
+    val multiDownloadResources: List<ResourceContent> = emptyList(),
+    val multiDownloadErrorCode: String? = null,
 ) {
 }
 
@@ -171,6 +183,7 @@ class WorkDetailViewModel(
     private val bookId: String,
     private val onSessionUnauthorized: () -> Unit,
 ) : ViewModel() {
+    private var multiDownloadGeneration = 0L
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
     val uiState: StateFlow<WorkDetailUiState> = mutableUiState.asStateFlow()
     private var loadGeneration = 0
@@ -253,6 +266,83 @@ class WorkDetailViewModel(
 
     fun dismissShelfPicker() = mutableUiState.update { it.copy(isShelfPickerVisible = false, shelfErrorCode = null, shelfSaveCompleted = false) }
     fun consumeShelfSaveCompleted() = mutableUiState.update { it.copy(shelfSaveCompleted = false) }
+
+    fun openMultiDownload() {
+        val generation = ++multiDownloadGeneration
+        val resources = mutableUiState.value.content?.resources.orEmpty()
+        mutableUiState.update {
+            it.copy(
+                isMultiDownloadVisible = true,
+                multiDownloadRootNodeId = null,
+                multiDownloadChildrenByNodeId = emptyMap(),
+                multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
+                multiDownloadExpandedNodeIds = emptySet(),
+                multiDownloadLoadingNodeIds = emptySet(),
+                isMultiDownloadResourcesLoading = true,
+                multiDownloadResources = resources,
+                multiDownloadErrorCode = null,
+            )
+        }
+        loadMultiDownloadResources(generation)
+        loadMultiDownloadFolder(sourceNodeId = null, expand = true, generation = generation)
+    }
+
+    fun dismissMultiDownload() {
+        multiDownloadGeneration += 1
+        mutableUiState.update { it.copy(
+            isMultiDownloadVisible = false,
+            multiDownloadRootNodeId = null,
+            multiDownloadChildrenByNodeId = emptyMap(),
+            multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
+            multiDownloadExpandedNodeIds = emptySet(),
+            multiDownloadLoadingNodeIds = emptySet(),
+            isMultiDownloadResourcesLoading = false,
+            multiDownloadResources = emptyList(),
+            multiDownloadErrorCode = null,
+        ) }
+    }
+
+    fun retryMultiDownload() {
+        val generation = ++multiDownloadGeneration
+        mutableUiState.update {
+            it.copy(
+                multiDownloadRootNodeId = null,
+                multiDownloadChildrenByNodeId = emptyMap(),
+                multiDownloadDescendantResourceIdsByNodeId = emptyMap(),
+                multiDownloadExpandedNodeIds = emptySet(),
+                multiDownloadLoadingNodeIds = emptySet(),
+                isMultiDownloadResourcesLoading = true,
+                multiDownloadErrorCode = null,
+            )
+        }
+        loadMultiDownloadResources(generation)
+        loadMultiDownloadFolder(sourceNodeId = null, expand = true, generation = generation)
+    }
+
+    fun toggleMultiDownloadFolder(sourceNodeId: String) {
+        val state = mutableUiState.value
+        if (sourceNodeId in state.multiDownloadExpandedNodeIds) {
+            mutableUiState.update {
+                it.copy(multiDownloadExpandedNodeIds = it.multiDownloadExpandedNodeIds - sourceNodeId)
+            }
+            return
+        }
+        mutableUiState.update {
+            it.copy(multiDownloadExpandedNodeIds = it.multiDownloadExpandedNodeIds + sourceNodeId)
+        }
+        if (state.multiDownloadChildrenByNodeId[sourceNodeId] == null) {
+            loadMultiDownloadFolder(sourceNodeId, expand = true, generation = multiDownloadGeneration)
+        }
+    }
+
+    fun ensureMultiDownloadFolderLoaded(sourceNodeId: String) {
+        val state = mutableUiState.value
+        if (state.multiDownloadChildrenByNodeId[sourceNodeId] == null &&
+            sourceNodeId !in state.multiDownloadLoadingNodeIds
+        ) {
+            loadMultiDownloadFolder(sourceNodeId, expand = false, generation = multiDownloadGeneration)
+        }
+    }
     fun toggleShelf(shelfId: String) = mutableUiState.update { state ->
         val shelf = state.shelves.firstOrNull { it.id == shelfId }
         if (state.isSavingShelves || shelf?.kind != com.ermao.library.shared.modules.shelf.domain.ShelfKind.Static) state
@@ -322,6 +412,15 @@ class WorkDetailViewModel(
                             isSavingShelves = shelfState.isSavingShelves,
                             shelfErrorCode = shelfState.shelfErrorCode,
                             shelfSaveCompleted = shelfState.shelfSaveCompleted,
+                            isMultiDownloadVisible = shelfState.isMultiDownloadVisible,
+                            multiDownloadRootNodeId = shelfState.multiDownloadRootNodeId,
+                            multiDownloadChildrenByNodeId = shelfState.multiDownloadChildrenByNodeId,
+                            multiDownloadDescendantResourceIdsByNodeId = shelfState.multiDownloadDescendantResourceIdsByNodeId,
+                            multiDownloadExpandedNodeIds = shelfState.multiDownloadExpandedNodeIds,
+                            multiDownloadLoadingNodeIds = shelfState.multiDownloadLoadingNodeIds,
+                            isMultiDownloadResourcesLoading = shelfState.isMultiDownloadResourcesLoading,
+                            multiDownloadResources = shelfState.multiDownloadResources,
+                            multiDownloadErrorCode = shelfState.multiDownloadErrorCode,
                         )
                         if (detailSelection.presentation == BookDetailPresentation.ResourceDetail) {
                             selectedResourceId?.let { loadReadingUnits(it, page = 1) }
@@ -382,6 +481,135 @@ class WorkDetailViewModel(
                     if (generation != surfaceGeneration) it else {
                         it.copy(isSurfaceLoading = false, surfaceErrorCode = "BOOK_CONTENTS_LOAD_FAILED")
                     }
+                }
+            }
+        }
+    }
+
+    private fun loadMultiDownloadResources(generation: Long) {
+        viewModelScope.launch {
+            try {
+                val resources = mutableListOf<Resource>()
+                var pageNumber = 1
+                while (true) {
+                    when (val result = repository.loadBookResources(
+                        context,
+                        BookResourcePageQuery(
+                            bookId = bookId,
+                            page = pageNumber,
+                            pageSize = 100,
+                        ),
+                    )) {
+                        is ContentResult.Content -> {
+                            resources += result.value.resources
+                            if (pageNumber >= result.value.totalPages) break
+                            pageNumber += 1
+                        }
+                        is ContentResult.Failure -> {
+                            if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                            if (generation == multiDownloadGeneration) {
+                                mutableUiState.update {
+                                    it.copy(
+                                        isMultiDownloadResourcesLoading = false,
+                                        multiDownloadErrorCode = result.error.code,
+                                    )
+                                }
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                if (generation != multiDownloadGeneration) return@launch
+                mutableUiState.update { state ->
+                    state.copy(
+                        multiDownloadResources = resources.map { resource -> resource.toUiContent() },
+                        isMultiDownloadResourcesLoading = false,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == multiDownloadGeneration) {
+                    mutableUiState.update {
+                        it.copy(
+                            isMultiDownloadResourcesLoading = false,
+                            multiDownloadErrorCode = "MULTI_DOWNLOAD_RESOURCES_FAILED",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadMultiDownloadFolder(sourceNodeId: String?, expand: Boolean, generation: Long) {
+        val loadingKey = sourceNodeId ?: "__root__"
+        mutableUiState.update {
+            it.copy(
+                multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds + loadingKey,
+                multiDownloadErrorCode = null,
+            )
+        }
+        viewModelScope.launch {
+            try {
+                var firstPage: BookContentsPage? = null
+                val entries = mutableListOf<BookContentEntry>()
+                var pageNumber = 1
+                while (true) {
+                    when (val result = repository.loadBookContents(
+                        context,
+                        BookContentsQuery(
+                            bookId = bookId,
+                            sourceNodeId = sourceNodeId,
+                            sort = BookContentSort.NameAscending,
+                            page = pageNumber,
+                            pageSize = 200,
+                        ),
+                    )) {
+                        is ContentResult.Content -> {
+                            if (firstPage == null) firstPage = result.value
+                            entries += result.value.entries
+                            if (pageNumber >= result.value.totalPages) break
+                            pageNumber += 1
+                        }
+                        is ContentResult.Failure -> {
+                            if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                            if (generation != multiDownloadGeneration) return@launch
+                            mutableUiState.update {
+                                it.copy(
+                                    multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds - loadingKey,
+                                    multiDownloadErrorCode = result.error.code,
+                                )
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                if (generation != multiDownloadGeneration) return@launch
+                val page = requireNotNull(firstPage)
+                val nodeId = page.currentNode.sourceNodeId
+                mutableUiState.update { state ->
+                    state.copy(
+                        multiDownloadRootNodeId = state.multiDownloadRootNodeId ?: nodeId,
+                        multiDownloadChildrenByNodeId = state.multiDownloadChildrenByNodeId + (nodeId to entries),
+                        multiDownloadDescendantResourceIdsByNodeId =
+                            state.multiDownloadDescendantResourceIdsByNodeId +
+                                (nodeId to page.currentResourceIds.toSet()),
+                        multiDownloadExpandedNodeIds = if (expand) {
+                            state.multiDownloadExpandedNodeIds + nodeId
+                        } else {
+                            state.multiDownloadExpandedNodeIds
+                        },
+                        multiDownloadLoadingNodeIds = state.multiDownloadLoadingNodeIds - loadingKey - nodeId,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation == multiDownloadGeneration) mutableUiState.update {
+                    it.copy(
+                        multiDownloadLoadingNodeIds = it.multiDownloadLoadingNodeIds - loadingKey,
+                        multiDownloadErrorCode = "MULTI_DOWNLOAD_TREE_FAILED",
+                    )
                 }
             }
         }

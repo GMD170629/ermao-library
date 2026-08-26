@@ -1,5 +1,11 @@
 import Foundation
 
+struct ManagedDownloadBatchResult: Sendable {
+    let succeededCount: Int
+    let failedResourceIDs: Set<String>
+    var failedCount: Int { failedResourceIDs.count }
+}
+
 @MainActor
 final class DownloadCenterStore: ObservableObject {
     @Published private(set) var records: [ManagedDownloadRecord] = []
@@ -55,6 +61,58 @@ final class DownloadCenterStore: ObservableObject {
                 let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
                 try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
             } catch { recordPreparationError(error) }
+        }
+    }
+
+    func performBatch(
+        book: BookCard,
+        resources: [BookResource],
+        completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void
+    ) {
+        guard let context else {
+            completion(ManagedDownloadBatchResult(
+                succeededCount: 0,
+                failedResourceIDs: Set(resources.map(\.id))
+            ))
+            return
+        }
+        Task {
+            var succeeded = 0
+            var failed = Set<String>()
+            for resource in resources {
+                do {
+                    if let record = record(for: resource.id) {
+                        switch record.state {
+                        case .paused, .failedRetryable:
+                            start(record)
+                            succeeded += 1
+                        case .queued, .downloading, .completed:
+                            continue
+                        case .failedTerminal:
+                            failed.insert(resource.id)
+                        }
+                    } else {
+                        let bootstrap = try await transfer.prepare(
+                            context: context,
+                            resourceID: resource.id
+                        )
+                        try await enqueuePrepared(
+                            book: book,
+                            resource: resource,
+                            bootstrap: bootstrap,
+                            context: context
+                        )
+                        succeeded += 1
+                    }
+                } catch {
+                    failed.insert(resource.id)
+                    recordPreparationError(error)
+                }
+            }
+            completion(ManagedDownloadBatchResult(
+                succeededCount: succeeded,
+                failedResourceIDs: failed
+            ))
         }
     }
 

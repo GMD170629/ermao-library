@@ -29,6 +29,15 @@ typealias DownloadSource = com.ermao.library.shared.modules.downloads.domain.Dow
 typealias DownloadTask = com.ermao.library.shared.modules.downloads.domain.DownloadTask
 typealias DownloadTaskEvent = com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 typealias DownloadTaskStatus = com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
+typealias MultiDownloadEligibility = com.ermao.library.shared.modules.downloads.domain.MultiDownloadEligibility
+typealias MultiDownloadResourceState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadResourceState
+typealias MultiDownloadSelectionMark = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionMark
+typealias MultiDownloadSelectionState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionState
+typealias DownloadBatchCommand = com.ermao.library.shared.modules.downloads.domain.DownloadBatchCommand
+typealias DownloadBatchOutcomeKind = com.ermao.library.shared.modules.downloads.domain.DownloadBatchOutcomeKind
+typealias DownloadBatchResourceResult = com.ermao.library.shared.modules.downloads.domain.DownloadBatchResourceResult
+typealias DownloadBatchResult = com.ermao.library.shared.modules.downloads.domain.DownloadBatchResult
+typealias DownloadBatchSummary = com.ermao.library.shared.modules.downloads.domain.DownloadBatchSummary
 typealias DownloadTransferGateway = com.ermao.library.shared.modules.downloads.application.DownloadTransferGateway
 typealias DownloadTransferRequest = com.ermao.library.shared.modules.downloads.application.DownloadTransferRequest
 typealias DownloadTransferResult = com.ermao.library.shared.modules.downloads.application.DownloadTransferResult
@@ -95,6 +104,14 @@ fun downloadCompleteEvent(artifact: CompletedDownloadArtifact): DownloadTaskEven
 
 fun downloadCancelEvent(): DownloadTaskEvent =
     com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Cancel
+
+fun summarizeDownloadBatch(
+    selectedResourceIds: Set<String>,
+    resourcesById: Map<String, MultiDownloadResourceState>,
+): DownloadBatchSummary = com.ermao.library.shared.modules.downloads.domain.summarizeDownloadBatch(
+    selectedResourceIds,
+    resourcesById,
+)
 
 /** Swift-friendly request context; rejects invalid server identities and namespaces. */
 fun createDownloadRequestContext(

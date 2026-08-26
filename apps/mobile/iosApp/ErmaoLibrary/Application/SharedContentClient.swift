@@ -351,12 +351,12 @@ actor SharedContentClient: ContentClient {
 
     private func sharedContentSort(_ sort: BookContentSort) -> ErmaoShared.BookContentSort {
         switch sort {
-        case .nameAscending: .nameAscending
-        case .nameDescending: .nameDescending
-        case .updatedDescending: .updatedDescending
-        case .updatedAscending: .updatedAscending
-        case .typeAscending: .typeAscending
-        case .sizeDescending: .sizeDescending
+        case .nameAscending: .nameascending
+        case .nameDescending: .namedescending
+        case .updatedDescending: .updateddescending
+        case .updatedAscending: .updatedascending
+        case .typeAscending: .typeascending
+        case .sizeDescending: .sizedescending
         }
     }
 

@@ -34,6 +34,9 @@ import com.ermao.library.shared.modules.downloads.downloadBytesTransferredEvent
 import com.ermao.library.shared.modules.downloads.downloadPauseEvent
 import com.ermao.library.shared.modules.downloads.downloadResumeEvent
 import com.ermao.library.shared.modules.downloads.DownloadTaskStatus
+import com.ermao.library.shared.modules.downloads.DownloadBatchOutcomeKind
+import com.ermao.library.shared.modules.downloads.DownloadBatchResourceResult
+import com.ermao.library.shared.modules.downloads.DownloadBatchResult
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -114,6 +117,38 @@ class DownloadActionsViewModel(
         }
         activeTransfers[resourceId] = job
         job.invokeOnCompletion { activeTransfers.remove(resourceId, job) }
+    }
+
+    fun performBatch(resourceIds: Set<String>, onComplete: (DownloadBatchResult) -> Unit) {
+        if (resourceIds.isEmpty()) {
+            onComplete(DownloadBatchResult(emptyList()))
+            return
+        }
+        val records = recordsByResource.value
+        val results = resourceIds.sorted().map { resourceId ->
+            when (records[resourceId]?.status) {
+                null -> {
+                    requestDownload(resourceId)
+                    DownloadBatchResourceResult(resourceId, DownloadBatchOutcomeKind.Enqueued)
+                }
+                com.ermao.library.features.downloads.model.AndroidDownloadStatus.Paused -> {
+                    requestDownload(resourceId)
+                    DownloadBatchResourceResult(resourceId, DownloadBatchOutcomeKind.Resumed)
+                }
+                com.ermao.library.features.downloads.model.AndroidDownloadStatus.FailedRetryable -> {
+                    requestDownload(resourceId)
+                    DownloadBatchResourceResult(resourceId, DownloadBatchOutcomeKind.Retried)
+                }
+                com.ermao.library.features.downloads.model.AndroidDownloadStatus.FailedTerminal ->
+                    DownloadBatchResourceResult(
+                        resourceId,
+                        DownloadBatchOutcomeKind.Failed,
+                        records[resourceId]?.errorCode ?: "DOWNLOAD_NOT_RETRYABLE",
+                    )
+                else -> DownloadBatchResourceResult(resourceId, DownloadBatchOutcomeKind.Skipped)
+            }
+        }
+        onComplete(DownloadBatchResult(results))
     }
 
     fun requestReaderAccess(

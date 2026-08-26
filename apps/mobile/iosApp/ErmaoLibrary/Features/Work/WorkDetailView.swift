@@ -24,11 +24,13 @@ private struct WorkControlAction: Identifiable {
 
 private enum WorkDetailSheet: Identifiable {
     case shelves
+    case downloads
     case management(WorkManagementTask)
 
     var id: String {
         switch self {
         case .shelves: "shelves"
+        case .downloads: "downloads"
         case .management(let task): "management-\(task.id)"
         }
     }
@@ -148,6 +150,31 @@ struct WorkDetailView: View {
             case .shelves:
                 shelfPicker
                     .interactiveDismissDisabled(isLoadingShelves || isSavingShelves)
+            case .downloads:
+                if let detail = currentDetail {
+                    MultiDownloadSheet(
+                        context: context,
+                        client: client,
+                        detail: detail,
+                        downloads: downloads,
+                        onDismiss: { activeSheet = nil },
+                        onCompleted: { succeeded, failed in
+                            if failed == 0 {
+                                showFeedback(
+                                    String(format: String(localized: "work.multiDownload.completed"), succeeded),
+                                    isError: false
+                                )
+                            } else {
+                                showFeedback(
+                                    String(format: String(localized: "work.multiDownload.partial"), succeeded, failed),
+                                    isError: true
+                                )
+                            }
+                        }
+                    )
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                }
             case .management(let task):
                 NavigationStack { managementPage(task: task) }
                     .presentationDetents([.large])
@@ -1815,6 +1842,11 @@ struct WorkDetailView: View {
     }
 
     private func handlePrimaryDownload(_ detail: BookDetailContent) {
+        let downloadableResources = detail.resources.filter { $0.isReadable != false }
+        if downloadableResources.count > 1 || (store.contentsPage?.currentResourceIDs.count ?? 0) > 1 {
+            activeSheet = .downloads
+            return
+        }
         guard let resource = selectedResource(detail) else {
             showFeedback(String(localized: "work.download.unavailable"), isError: true)
             return

@@ -90,6 +90,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.disabled
@@ -151,6 +152,7 @@ import com.ermao.library.ui.theme.WarmPageThemeValues
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
+import com.ermao.library.shared.modules.downloads.DownloadBatchResult
 import com.ermao.library.features.workmanagement.application.WorkManagementViewModel
 import com.ermao.library.features.workmanagement.application.WorkManagementCompletion
 import com.ermao.library.features.workmanagement.ui.WorkManagementTarget
@@ -219,6 +221,14 @@ fun WorkDetailScreen(
     onDownloadResource: (String) -> Unit = {},
     onCancelDownload: (String) -> Unit = {},
     onRemoveDownload: (AndroidDownloadRecord) -> Unit = {},
+    onOpenMultiDownload: () -> Unit = {},
+    onDismissMultiDownload: () -> Unit = {},
+    onRetryMultiDownload: () -> Unit = {},
+    onToggleMultiDownloadFolder: (String) -> Unit = {},
+    onEnsureMultiDownloadFolderLoaded: (String) -> Unit = {},
+    onPerformDownloadBatch: (Set<String>, (DownloadBatchResult) -> Unit) -> Unit = { _, completion ->
+        completion(DownloadBatchResult(emptyList()))
+    },
     onOpenSelectedResource: (ResourceContent) -> Unit = {},
     onSelectReadingStatus: (WorkReadingStatus) -> Unit = {},
     managementViewModel: WorkManagementViewModel? = null,
@@ -381,10 +391,14 @@ fun WorkDetailScreen(
                     downloadRecordsByResource = downloadRecordsByResource,
                     downloadFailuresByResource = downloadFailuresByResource,
                     onDownloadResource = { resourceId ->
-                        onDownloadResource(resourceId)
-                        snackbarScope.launch {
-                            snackbarHostState.currentSnackbarData?.dismiss()
-                            snackbarHostState.showSnackbar(downloadQueuedMessage)
+                        if (state.content.resources.count(ResourceContent::readable) > 1) {
+                            onOpenMultiDownload()
+                        } else {
+                            onDownloadResource(resourceId)
+                            snackbarScope.launch {
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                                snackbarHostState.showSnackbar(downloadQueuedMessage)
+                            }
                         }
                     },
                     onCancelDownload = { resourceId ->
@@ -396,6 +410,7 @@ fun WorkDetailScreen(
                     },
                     onRequestRemoveDownload = { pendingDownloadRemoval = it },
                     onOpenSelectedResource = onOpenSelectedResource,
+                    onOpenMultiDownload = onOpenMultiDownload,
                     onOpenResourceControl = { resource, anchor ->
                         controlMenuState = WorkControlMenuState(WorkControlMenuTarget.Resource(resource), anchor)
                     },
@@ -535,6 +550,38 @@ fun WorkDetailScreen(
             onSave = onSaveShelves,
         )
     }
+    if (state.isMultiDownloadVisible) {
+        val resources = LocalResources.current
+        val multiDownloadPartial = stringResource(R.string.multi_download_partial)
+        MultiDownloadSheet(
+            state = state,
+            recordsByResource = downloadRecordsByResource,
+            onDismiss = onDismissMultiDownload,
+            onRetryTree = onRetryMultiDownload,
+            onToggleFolder = onToggleMultiDownloadFolder,
+            onEnsureFolderLoaded = onEnsureMultiDownloadFolderLoaded,
+            onPause = onCancelDownload,
+            onResumeOrRetry = onDownloadResource,
+            onRemove = { pendingDownloadRemoval = it },
+            onPerformBatch = onPerformDownloadBatch,
+            onBatchFeedback = { succeeded, failed ->
+                snackbarScope.launch {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    snackbarHostState.showSnackbar(
+                        if (failed == 0) {
+                            resources.getQuantityString(
+                                R.plurals.multi_download_completed,
+                                succeeded,
+                                succeeded,
+                            )
+                        } else {
+                            multiDownloadPartial.format(succeeded, failed)
+                        },
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -619,6 +666,7 @@ private fun WorkDetailBody(
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedResource: (ResourceContent) -> Unit,
+    onOpenMultiDownload: () -> Unit,
     onOpenResourceControl: (ResourceContent, Offset) -> Unit,
     listState: LazyListState,
     modifier: Modifier,
@@ -648,6 +696,7 @@ private fun WorkDetailBody(
             WorkDetailActionRow(
                 selectedResource = selectedResource,
                 selectedDownload = selectedResource?.let { resource -> downloadRecordsByResource[resource.id] },
+                hasMultipleReadableResources = content.resources.count(ResourceContent::readable) > 1,
                 onOpenShelfPicker = onOpenShelfPicker,
                 readingStatus = readingStatus,
                 readingStatusBusy = readingStatusBusy,
@@ -657,6 +706,7 @@ private fun WorkDetailBody(
                 onCancelDownload = onCancelDownload,
                 onRequestRemoveDownload = onRequestRemoveDownload,
                 onOpenSelectedResource = onOpenSelectedResource,
+                onOpenMultiDownload = onOpenMultiDownload,
             )
         }
         if (content.hasDescription) item { WorkAboutSection(content) }
@@ -710,6 +760,7 @@ private fun WorkDetailBody(
 private fun WorkDetailActionRow(
     selectedResource: ResourceContent?,
     selectedDownload: AndroidDownloadRecord?,
+    hasMultipleReadableResources: Boolean,
     onOpenShelfPicker: () -> Unit,
     readingStatus: WorkReadingStatus,
     readingStatusBusy: Boolean,
@@ -719,6 +770,7 @@ private fun WorkDetailActionRow(
     onCancelDownload: (String) -> Unit,
     onRequestRemoveDownload: (AndroidDownloadRecord) -> Unit,
     onOpenSelectedResource: (ResourceContent) -> Unit,
+    onOpenMultiDownload: () -> Unit,
 ) {
     val theme = WarmPageThemeValues
     val primaryAction = workDetailPrimaryActionPresentation(
@@ -763,7 +815,9 @@ private fun WorkDetailActionRow(
                     },
                 ),
                 onClick = {
-                    selectedResource?.let { resource ->
+                    if (selectedResource == null && hasMultipleReadableResources) {
+                        onOpenMultiDownload()
+                    } else selectedResource?.let { resource ->
                         when (downloadAction) {
                             WorkDetailDownloadAction.Downloading -> onCancelDownload(resource.id)
                             WorkDetailDownloadAction.NotDownloaded,
@@ -778,7 +832,7 @@ private fun WorkDetailActionRow(
                     { onRequestRemoveDownload(download) }
                 },
                 longClickLabel = stringResource(R.string.work_quick_remove_download),
-                enabled = selectedResource != null && !readingStatusBusy,
+                enabled = (selectedResource != null || hasMultipleReadableResources) && !readingStatusBusy,
                 modifier = Modifier.weight(1f),
                 testTag = "work-download-action",
             )

@@ -171,6 +171,34 @@
     <string name="work_quick_download_paused">继续下载</string>
     <string name="work_quick_download_retry">重试下载</string>
     <string name="work_quick_downloaded">已下载</string>
+    <string name="multi_download_title">下载卷册</string>
+    <string name="multi_download_loading">正在加载图书资源树…</string>
+    <string name="multi_download_error_title">无法加载卷册</string>
+    <string name="multi_download_error_message">无法加载本书的资源树。</string>
+    <string name="multi_download_toggle_folder">展开或收起目录</string>
+    <plurals name="multi_download_volume_count">
+        <item quantity="other">共 %1$d 卷</item>
+    </plurals>
+    <plurals name="multi_download_selected_count">
+        <item quantity="other">已选 %1$d 卷</item>
+    </plurals>
+    <string name="multi_download_summary">新增 %1$d · 继续 %2$d · 重试 %3$d</string>
+    <string name="multi_download_confirm">下载</string>
+    <string name="multi_download_not_downloaded">未下载</string>
+    <string name="multi_download_queued">排队中</string>
+    <string name="multi_download_downloading">下载中</string>
+    <string name="multi_download_paused">已暂停</string>
+    <string name="multi_download_verifying">校验中</string>
+    <string name="multi_download_downloaded">已下载</string>
+    <string name="multi_download_failed">失败</string>
+    <string name="multi_download_unavailable">不可下载</string>
+    <string name="multi_download_delete_task">删除任务</string>
+    <string name="multi_download_pause">暂停</string>
+    <string name="multi_download_resume">继续</string>
+    <plurals name="multi_download_completed">
+        <item quantity="other">已开始 %1$d 个下载操作</item>
+    </plurals>
+    <string name="multi_download_partial">成功：%1$d · 失败：%2$d</string>
     <string name="work_quick_remove_download">删除已下载卷册</string>
     <string name="work_quick_reading_unread">未读</string>
     <string name="work_quick_reading_read">已读</string>
