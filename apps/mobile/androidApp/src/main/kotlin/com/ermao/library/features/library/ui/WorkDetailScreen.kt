@@ -28,8 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -70,7 +68,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -82,8 +79,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -305,30 +300,12 @@ fun WorkDetailScreen(
     }
     val theme = WarmPageThemeValues
     val detailListState = rememberLazyListState()
-    val backdropCollapseDistancePx = with(LocalDensity.current) { 240.dp.toPx() }
-    val backdropCollapseFraction by remember(detailListState, backdropCollapseDistancePx) {
-        derivedStateOf {
-            workDetailBackdropCollapseFraction(
-                firstVisibleItemIndex = detailListState.firstVisibleItemIndex,
-                firstVisibleItemScrollOffset = detailListState.firstVisibleItemScrollOffset,
-                collapseDistancePx = backdropCollapseDistancePx,
-            )
-        }
-    }
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(theme.colors.canvas)
             .testTag("work-detail"),
     ) {
-        state.content?.let { content ->
-            WorkDetailBackdrop(
-                content = content,
-                repository = repository,
-                context = context,
-                collapseFraction = backdropCollapseFraction,
-            )
-        }
         WarmPageScaffold(
             role = WarmPageTopBarRole.Detail,
             title = stringResource(R.string.work_detail_title),
@@ -582,64 +559,6 @@ fun WorkDetailScreen(
             },
         )
     }
-}
-
-@Composable
-private fun WorkDetailBackdrop(
-    content: BookDetailContent,
-    repository: ContentRepository,
-    context: ContentRequestContext,
-    collapseFraction: Float,
-) {
-    val theme = WarmPageThemeValues
-    val translationDistancePx = with(LocalDensity.current) { 96.dp.toPx() }
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clipToBounds()
-            .graphicsLayer {
-                alpha = 1f - collapseFraction
-                translationY = -translationDistancePx * collapseFraction
-            },
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        BookCover(
-            content.book,
-            repository,
-            context,
-            CoverRole.Hero,
-            Modifier
-                .width(300.dp)
-                .graphicsLayer {
-                    alpha = 0.36f
-                    scaleX = 1.25f
-                    scaleY = 1.25f
-                }
-                .blur(12.dp),
-        )
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.00f to Color.Transparent,
-                        0.36f to Color.Transparent,
-                        0.72f to theme.colors.canvas.copy(alpha = 0.94f),
-                        1.00f to theme.colors.canvas,
-                    ),
-                ),
-        )
-    }
-}
-
-internal fun workDetailBackdropCollapseFraction(
-    firstVisibleItemIndex: Int,
-    firstVisibleItemScrollOffset: Int,
-    collapseDistancePx: Float,
-): Float {
-    if (firstVisibleItemIndex > 0) return 1f
-    if (collapseDistancePx <= 0f) return 1f
-    return (firstVisibleItemScrollOffset / collapseDistancePx).coerceIn(0f, 1f)
 }
 
 @Composable

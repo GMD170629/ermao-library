@@ -127,18 +127,12 @@ struct WorkDetailView: View {
     private var managementStore: WorkManagementStore? { managementHolder.store }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            if case .ready(let detail, _) = store.state {
-                heroBackdrop(detail)
-                    .ignoresSafeArea(edges: .top)
-            }
-            ScrollView {
-                content
-                    .padding(.horizontal, .space2)
-                    .padding(.bottom, .space4)
-            }
-            .accessibilityIdentifier("work.detail.screen")
+        ScrollView {
+            content
+                .padding(.horizontal, .space2)
+                .padding(.bottom, .space4)
         }
+        .accessibilityIdentifier("work.detail.screen")
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Color.clear.frame(height: .space2)
         }
@@ -315,41 +309,6 @@ struct WorkDetailView: View {
             mediaSection(detail)
                 .padding(.top, .space3)
         }
-    }
-
-    private func heroBackdrop(_ detail: BookDetailContent) -> some View {
-        ZStack {
-            BookCoverView(
-                reference: detail.book.cover,
-                title: detail.book.title,
-                context: context,
-                client: client,
-                cache: cache,
-                cornerRadius: 0
-            )
-            .frame(width: 300, height: 450)
-            .scaleEffect(1.25)
-            .saturation(0.9)
-            .blur(radius: 12, opaque: false)
-            .opacity(0.36)
-            .drawingGroup(opaque: false)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 460)
-        .clipped()
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .black, location: 0),
-                    .init(color: .black, location: 0.45),
-                    .init(color: .clear, location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
     }
 
     @ViewBuilder

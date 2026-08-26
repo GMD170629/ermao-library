@@ -13,14 +13,6 @@ import org.junit.Test
 
 class WorkDetailLayoutTest {
     @Test
-    fun backdropFadesWithTheHeaderAndIsGoneAfterTheFirstItemScrollsAway() {
-        assertEquals(0f, workDetailBackdropCollapseFraction(0, 0, 240f))
-        assertEquals(0.5f, workDetailBackdropCollapseFraction(0, 120, 240f))
-        assertEquals(1f, workDetailBackdropCollapseFraction(0, 480, 240f))
-        assertEquals(1f, workDetailBackdropCollapseFraction(1, 0, 240f))
-    }
-
-    @Test
     fun selectedVolumePublicationDateUsesTheActiveLocaleAndPreservesUnknownValues() {
         assertEquals("Nov 1, 2010", formatWorkMetadataDate("2010-11-01T00:00:00Z", Locale.US))
         assertEquals("legacy date", formatWorkMetadataDate("legacy date", Locale.US))
