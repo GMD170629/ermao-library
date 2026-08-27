@@ -66,6 +66,7 @@ internal class ReadiumPdfSession(
     private val readium: AndroidReadiumRuntime,
     private val remotePdfium: AndroidRemotePdfiumSessionConfiguration? = null,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
+    private val initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
     private val progressCoordinator: ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
@@ -143,14 +144,18 @@ internal class ReadiumPdfSession(
         pageCount = openedPageCount
         pages = pageHints(openedPageCount)
 
-        val localProgress = loadProgressSafely()
-        val decision = decideReaderResume(localProgress, remoteSnapshot, source)
+        val localProgress = if (initialTarget == null) loadProgressSafely() else null
+        val decision = decideReaderResume(localProgress, remoteSnapshot.takeIf { initialTarget == null }, source)
         val restorePlan = planReaderProgressRestore(
             decision.selected?.localProgress,
             decision.selected?.remoteSnapshot,
             source,
         )
-        val restorePage = restorePlan.candidates.firstNotNullOfOrNull { candidate ->
+        val explicitPage = initialTarget?.let { target ->
+            (target as? com.ermao.library.shared.modules.reader.ReaderNavigationTargetPdf)?.pageIndex?.takeIf(::isValidPage)
+                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
+        }
+        val restorePage = explicitPage ?: restorePlan.candidates.firstNotNullOfOrNull { candidate ->
             when (candidate) {
                 is ReaderRestorePdfPage -> candidate.pageIndex.takeIf(::isValidPage)
                 is ReaderRestoreExactLocalLocation ->

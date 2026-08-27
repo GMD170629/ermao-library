@@ -7,6 +7,59 @@ import kotlin.test.assertTrue
 
 class ReaderPreferencesTest {
     @Test
+    fun queuedChangesKeepLatestValuesFromOtherControls() {
+        val base = ReaderPreferences()
+        val first = base.copy(epub = base.epub.copy(fontSize = 24))
+        val second = base.copy(epub = base.epub.copy(lineHeight = 2.2))
+        val merged = mergeReaderPreferenceChanges(base, second, first)
+        assertEquals(24, merged.epub.fontSize)
+        assertEquals(2.2, merged.epub.lineHeight)
+        val last = base.copy(epub = base.epub.copy(fontSize = 30))
+        assertEquals(30, mergeReaderPreferenceChanges(base, last, merged).epub.fontSize)
+    }
+
+    @Test
+    fun controlsDistinguishUnsupportedInapplicableAndContextualLimits() {
+        val preferences = ReaderPreferences()
+        val reflow = readerPlatformCapabilities(ReaderMorphology.Reflowable, volumeKeys = false, pdfFit = false)
+        fun state(control: ReaderControl, current: ReaderPreferences = preferences, ready: Boolean = true) =
+            resolveReaderControl(control, ReaderMorphology.Reflowable, reflow, current, ready)
+        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontFamily))
+        assertEquals(ReaderControlAvailability.NotImplemented, state(ReaderControl.VolumeKeys))
+        assertEquals(ReaderControlAvailability.NotImplemented, state(ReaderControl.NegativeLetterSpacing))
+        assertEquals(ReaderControlAvailability.NotApplicable, state(ReaderControl.PdfFit))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.FontSize, ready = false))
+        val scrolling = preferences.copy(epub = preferences.epub.copy(flow = ReaderReadingMode.ContinuousScroll))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.Spread, scrolling))
+        val publisher = preferences.copy(epub = preferences.epub.copy(
+            typography = preferences.epub.typography.copy(preservePublisherStyles = true),
+        ))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.LineHeight, publisher))
+        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.PublisherStyles, publisher))
+        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontSize, publisher))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
+            ReaderControl.ParagraphIndent, ReaderMorphology.Reflowable, reflow, preferences, true,
+            setOf(ReaderControl.ParagraphIndent),
+        ))
+    }
+
+    @Test
+    fun resetPreservesOtherMorphologiesAndResetsCommonControls() {
+        val preferences = ReaderPreferences(
+            appearance = ReaderAppearancePreferences(theme = ReaderTheme.Night),
+            epub = ReaderEpubPreferences(fontSize = 24),
+            comic = ReaderComicPreferences(pageGap = 16),
+            pdf = ReaderPdfPreferences(rotation = 90),
+        )
+        ReaderMorphology.entries.forEach { morphology ->
+            val reset = resetReaderPreferences(preferences, morphology)
+            assertEquals(ReaderAppearancePreferences(), reset.appearance)
+            assertEquals(if (morphology == ReaderMorphology.Reflowable) ReaderEpubPreferences() else preferences.epub, reset.epub)
+            assertEquals(if (morphology == ReaderMorphology.Comic) ReaderComicPreferences() else preferences.comic, reset.comic)
+            assertEquals(if (morphology == ReaderMorphology.Pdf) ReaderPdfPreferences() else preferences.pdf, reset.pdf)
+        }
+    }
+    @Test
     fun defaultsMatchWebReaderV3() {
         val preferences = ReaderPreferences()
 
@@ -56,7 +109,7 @@ class ReaderPreferencesTest {
         assertTrue(ios.supportsParagraphLayout)
         assertFalse(ios.supportsNegativeLetterSpacing)
         assertFalse(ios.supportsIndependentPublisherStyles)
-        assertFalse(ios.supportsPageTurnAnimation)
+        assertTrue(ios.supportsPageTurnAnimation)
         assertFalse(ios.supportsSwipeToggle)
         assertFalse(ios.supportsAnnotations)
         assertFalse(ios.supportsVolumeKeyPageTurn)

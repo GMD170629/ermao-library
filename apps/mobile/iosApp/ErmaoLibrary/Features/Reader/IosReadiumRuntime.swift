@@ -45,11 +45,21 @@ final class IosReadiumRuntime {
         case .mobi, .azw, .azw3, .prc:
             return try await openMobiFamily(managed)
         case .txt:
-            let publication = try IosTxtPublicationFactory().open(managed)
-            return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+            do {
+                let publication = try IosTxtPublicationFactory().open(managed)
+                return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+            } catch {
+                throw IosReaderFailure(code: .corruptFile)
+            }
         case .fb2:
-            let publication = try IosFb2PublicationFactory().open(managed)
-            return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+            do {
+                let publication = try IosFb2PublicationFactory().open(managed)
+                return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+            } catch IosFb2PublicationError.limitExceeded {
+                throw IosReaderFailure(code: .outOfMemoryRisk)
+            } catch {
+                throw IosReaderFailure(code: .corruptFile)
+            }
         case .pdf:
             return try await openPDF(managed)
         default:

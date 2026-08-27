@@ -132,6 +132,9 @@ data object LibraryRoot : NavKey
 data object ShelvesRoot : NavKey
 
 @Serializable
+data class ShelfDetailRoute(val shelfId: String) : NavKey
+
+@Serializable
 data object MeRoot : NavKey
 
 @Serializable
@@ -200,6 +203,7 @@ fun MainShell(
     )
     val appContext = LocalContext.current.applicationContext
     val shelfRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfRepository(appContext) }
+    val shelfCatalogRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfCatalogRepository(appContext) }
     val sharedDownloadsRuntime = remember(sharedDownloadCatalog) { DownloadsRuntime(sharedDownloadCatalog) }
     val sharedDownloadNamespace = session.identity.namespace.toDownloadNamespace()
     val contentKey = listOf(
@@ -313,6 +317,52 @@ fun MainShell(
         TabId.Shelves -> shelvesBackStack
         TabId.Me -> meBackStack
     }
+    val libraryViewModel: LibraryViewModel = viewModel(
+        key = "library-$contentKey",
+        factory = LibraryViewModel.factory(contentRepository, contentContext, onSessionUnauthorized),
+    )
+    val libraryState by libraryViewModel.uiState.collectAsState()
+    val openBook: (String) -> Unit = { bookId ->
+        val route = BookDetailRoute(bookId)
+        val existing = libraryBackStack.indexOf(route)
+        if (existing >= 0) {
+            while (libraryBackStack.lastIndex > existing) libraryBackStack.removeLastOrNull()
+        } else if (libraryBackStack.lastOrNull() is BookDetailRoute) {
+            libraryBackStack[libraryBackStack.lastIndex] = route
+        } else libraryBackStack.add(route)
+    }
+    val libraryContent: @Composable (Modifier) -> Unit = { libraryModifier ->
+        LibraryScreen(
+            state = libraryState,
+            repository = contentRepository,
+            context = contentContext,
+            onSelectLibrary = libraryViewModel::selectLibrary,
+            onQueryChanged = libraryViewModel::updateQuery,
+            onClearQuery = libraryViewModel::clearQuery,
+            onSelectSort = libraryViewModel::selectSort,
+            onSelectViewMode = libraryViewModel::selectViewMode,
+            onOpenFilter = libraryViewModel::openFilter,
+            onUpdateFilterDraft = libraryViewModel::updateFilterDraft,
+            onRemoveReadingFilter = libraryViewModel::removeReadingFilter,
+            onClearFilters = libraryViewModel::clearFilters,
+            onApplyFilter = libraryViewModel::applyFilter,
+            onDismissFilter = libraryViewModel::dismissFilter,
+            onOpenWork = openBook,
+            onOpenFacet = { kind, id ->
+                val route = FacetRoute(kind.name, id)
+                val existingIndex = libraryBackStack.indexOf(route)
+                if (existingIndex >= 0) {
+                    while (libraryBackStack.lastIndex > existingIndex) libraryBackStack.removeLastOrNull()
+                } else {
+                    libraryBackStack.add(route)
+                }
+            },
+            onRetry = libraryViewModel::retry,
+            onLoadNextPage = libraryViewModel::loadNextPage,
+            onScrollAnchorChanged = libraryViewModel::updateScrollAnchor,
+            modifier = libraryModifier,
+        )
+    }
     val navigationItems = MobileNavigation.orderedRootTabs.map { tab ->
         val presentation = tab.presentation
         WarmPageNavigationItem(
@@ -370,148 +420,31 @@ fun MainShell(
                     )
                 }
                 entry<LibraryRoot> {
-                    val libraryViewModel: LibraryViewModel = viewModel(
-                        key = "library-$contentKey",
-                        factory = LibraryViewModel.factory(contentRepository, contentContext, onSessionUnauthorized),
-                    )
-                    val libraryState by libraryViewModel.uiState.collectAsState()
-                    BoxWithConstraints {
-                        val expanded = maxWidth >= WarmPageThemeValues.components.page.expandedBreakpoint
-                        val openBook: (String) -> Unit = { bookId ->
-                            if (expanded) {
-                                libraryViewModel.selectBook(bookId)
-                            } else {
-                                val route = BookDetailRoute(bookId)
-                                val existingIndex = libraryBackStack.indexOf(route)
-                                if (existingIndex >= 0) {
-                                    while (libraryBackStack.lastIndex > existingIndex) libraryBackStack.removeLastOrNull()
-                                } else {
-                                    libraryBackStack.add(route)
-                                }
-                            }
-                        }
-                        val libraryContent: @Composable (Modifier) -> Unit = { libraryModifier ->
-                            LibraryScreen(
-                                state = libraryState,
-                                repository = contentRepository,
-                                context = contentContext,
-                                onSelectLibrary = libraryViewModel::selectLibrary,
-                                onQueryChanged = libraryViewModel::updateQuery,
-                                onClearQuery = libraryViewModel::clearQuery,
-                                onSelectSort = libraryViewModel::selectSort,
-                                onSelectViewMode = libraryViewModel::selectViewMode,
-                                onOpenFilter = libraryViewModel::openFilter,
-                                onUpdateFilterDraft = libraryViewModel::updateFilterDraft,
-                                onRemoveReadingFilter = libraryViewModel::removeReadingFilter,
-                                onClearFilters = libraryViewModel::clearFilters,
-                                onApplyFilter = libraryViewModel::applyFilter,
-                                onDismissFilter = libraryViewModel::dismissFilter,
-                                onOpenWork = openBook,
-                                onOpenFacet = { kind, id ->
-                                    val route = FacetRoute(kind.name, id)
-                                    val existingIndex = libraryBackStack.indexOf(route)
-                                    if (existingIndex >= 0) {
-                                        while (libraryBackStack.lastIndex > existingIndex) libraryBackStack.removeLastOrNull()
-                                    } else {
-                                        libraryBackStack.add(route)
-                                    }
-                                },
-                                onRetry = libraryViewModel::retry,
-                                onLoadNextPage = libraryViewModel::loadNextPage,
-                                onScrollAnchorChanged = libraryViewModel::updateScrollAnchor,
-                                modifier = libraryModifier,
-                            )
-                        }
-                        if (expanded) {
-                            Row(Modifier.fillMaxSize()) {
-                                libraryContent(Modifier.weight(0.44f))
-                                Box(Modifier.weight(0.56f).fillMaxSize()) {
-                                    libraryState.selectedBookId?.let { bookId ->
-                                        val detailViewModel: WorkDetailViewModel = viewModel(
-                                            key = "expanded-book-$contentKey-$bookId",
-                                            factory = WorkDetailViewModel.factory(
-                                                contentRepository,
-                                                shelfRepository,
-                                                contentContext,
-                                                appContext,
-                                                bookId,
-                                                onSessionUnauthorized,
-                                            ),
-                                        )
-                                        val detailState by detailViewModel.uiState.collectAsState()
-                                        val managementViewModel: WorkManagementViewModel = viewModel(
-                                            key = "expanded-management-$contentKey-$bookId",
-                                            factory = WorkManagementViewModel.factory(
-                                                workManagementRepository,
-                                                contentContext,
-                                                bookId,
-                                                onSessionUnauthorized,
-                                            ),
-                                        )
-                                        WorkDetailScreen(
-                                            state = detailState,
-                                            repository = contentRepository,
-                                            context = contentContext,
-                                            onBack = { libraryViewModel.selectBook(null) },
-                                            onSelectResource = detailViewModel::selectResource,
-                                            onShowContentBrowser = detailViewModel::showContentBrowser,
-                                            onOpenSourceNode = detailViewModel::openSourceNode,
-                                            onSelectContentsSort = detailViewModel::selectContentsSort,
-                                            onSelectContentsPage = detailViewModel::selectContentsPage,
-                                            onSelectReadingUnitsPage = detailViewModel::selectReadingUnitsPage,
-                                            onRetrySurface = detailViewModel::retrySurface,
-                                            onOpenShelfPicker = detailViewModel::openShelfPicker,
-                                            onDismissShelfPicker = detailViewModel::dismissShelfPicker,
-                                            onToggleShelf = detailViewModel::toggleShelf,
-                                            onSaveShelves = detailViewModel::saveShelves,
-                                            onShelfSaveFeedbackShown = detailViewModel::consumeShelfSaveCompleted,
-                                            onViewShelves = onViewShelves,
-                                            onOpenFacet = { kind, id -> libraryBackStack.add(FacetRoute(kind.name, id)) },
-                                            onRetry = detailViewModel::retry,
-                                            onRefresh = detailViewModel::refresh,
-                                            downloadRecordsByResource = downloadRecordsByResource,
-                                            downloadFailuresByResource = downloadFailuresByResource,
-                                            onDownloadResource = downloadActionsViewModel::requestDownload,
-                                            onCancelDownload = downloadActionsViewModel::cancelDownload,
-                                            onRemoveDownload = downloadActionsViewModel::removeDownload,
-                                            onOpenMultiDownload = detailViewModel::openMultiDownload,
-                                            onDismissMultiDownload = detailViewModel::dismissMultiDownload,
-                                            onRetryMultiDownload = detailViewModel::retryMultiDownload,
-                                            onToggleMultiDownloadFolder = detailViewModel::toggleMultiDownloadFolder,
-                                            onEnsureMultiDownloadFolderLoaded = detailViewModel::ensureMultiDownloadFolderLoaded,
-                                            onPerformDownloadBatch = downloadActionsViewModel::performBatch,
-                                            managementViewModel = managementViewModel,
-                                            canManageSystem = session.authorization.canManageSystem,
-                                            onBookDeleted = {
-                                                downloadActionsViewModel.removeBook(bookId)
-                                                libraryViewModel.selectBook(null)
-                                            },
-                                            onOpenSelectedResource = { resource ->
-                                                openResource(
-                                                    context = appContext,
-                                                    profileId = session.profile.id,
-                                                    resource = resource,
-                                                    onUnavailable = { libraryBackStack.add(it) },
-                                                )
-                                            },
-                                            onOpenDownloadedResource = { record ->
-                                                openDownloadedResource(
-                                                    context = appContext,
-                                                    profileId = session.profile.id,
-                                                    record = record,
-                                                    onUnavailable = { libraryBackStack.add(it) },
-                                                )
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            libraryContent(Modifier.fillMaxSize())
-                        }
-                    }
+                    libraryContent(Modifier.fillMaxSize())
                 }
-                entry<ShelvesRoot> { EmptyTabRoot(TabId.Shelves) }
+                entry<ShelvesRoot> {
+                    com.ermao.library.features.shelves.ShelfCatalogRoute(
+                        repository = shelfCatalogRepository, contentRepository = contentRepository, context = contentContext,
+                        onUnauthorized = onSessionUnauthorized, onBack = {},
+                        onOpenShelf = { id -> shelvesBackStack.add(ShelfDetailRoute(id)) },
+                        onOpenBook = { id -> shelvesBackStack.add(BookDetailRoute(id)) },
+                    )
+                }
+                entry<ShelfDetailRoute> { route ->
+                    com.ermao.library.features.shelves.ShelfCatalogRoute(
+                        repository = shelfCatalogRepository, contentRepository = contentRepository, context = contentContext,
+                        shelfId = route.shelfId, onUnauthorized = onSessionUnauthorized,
+                        onBack = { shelvesBackStack.removeLastOrNull() },
+                        onOpenShelf = { id ->
+                            val target = ShelfDetailRoute(id)
+                            if (shelvesBackStack.lastOrNull() != target) shelvesBackStack.add(target)
+                        },
+                        onOpenBook = { id ->
+                            val target = BookDetailRoute(id)
+                            if (shelvesBackStack.lastOrNull() != target) shelvesBackStack.add(target)
+                        },
+                    )
+                }
                 entry<MeRoot> {
                     MeRootScreen(
                         state = meRootState,
@@ -713,83 +646,32 @@ fun MainShell(
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
                 entry<BookDetailRoute> { route ->
-                    val detailViewModel: WorkDetailViewModel = viewModel(
-                        key = "book-$contentKey-${route.bookId}",
-                        factory = WorkDetailViewModel.factory(contentRepository, shelfRepository, contentContext, appContext, route.bookId, onSessionUnauthorized),
-                    )
-                    val detailState by detailViewModel.uiState.collectAsState()
-                    val managementViewModel: WorkManagementViewModel = viewModel(
-                        key = "management-${route.bookId}",
-                        factory = WorkManagementViewModel.factory(
-                            workManagementRepository,
-                            contentContext,
-                            route.bookId,
-                            onSessionUnauthorized,
-                        ),
-                    )
-                    WorkDetailScreen(
-                        state = detailState,
-                        repository = contentRepository,
-                        context = contentContext,
-                        onBack = { currentBackStack.removeLastOrNull() },
-                        onSelectResource = detailViewModel::selectResource,
-                        onShowContentBrowser = detailViewModel::showContentBrowser,
-                        onOpenSourceNode = detailViewModel::openSourceNode,
-                        onSelectContentsSort = detailViewModel::selectContentsSort,
-                        onSelectContentsPage = detailViewModel::selectContentsPage,
-                        onSelectReadingUnitsPage = detailViewModel::selectReadingUnitsPage,
-                        onRetrySurface = detailViewModel::retrySurface,
-                        onOpenShelfPicker = detailViewModel::openShelfPicker,
-                        onDismissShelfPicker = detailViewModel::dismissShelfPicker,
-                        onToggleShelf = detailViewModel::toggleShelf,
-                        onSaveShelves = detailViewModel::saveShelves,
-                        onShelfSaveFeedbackShown = detailViewModel::consumeShelfSaveCompleted,
-                        onViewShelves = onViewShelves,
-                        onOpenFacet = { kind, id ->
-                            val route = FacetRoute(kind.name, id)
-                            val existingIndex = currentBackStack.indexOf(route)
-                            if (existingIndex >= 0) {
-                                while (currentBackStack.lastIndex > existingIndex) currentBackStack.removeLastOrNull()
-                            } else {
-                                currentBackStack.add(route)
+                    BoxWithConstraints {
+                        val showMaster = selectedTab == TabId.Library &&
+                            maxWidth >= WarmPageThemeValues.components.page.expandedBreakpoint
+                        Row(Modifier.fillMaxSize()) {
+                            if (showMaster) libraryContent(Modifier.weight(0.44f))
+                            Box(Modifier.weight(if (showMaster) 0.56f else 1f).fillMaxSize()) {
+                                BookContentNavigation(
+                                    bookId = route.bookId, repository = contentRepository, shelfRepository = shelfRepository,
+                                    context = contentContext, managementRepository = workManagementRepository,
+                                    downloads = downloadActionsViewModel, canManageSystem = session.authorization.canManageSystem,
+                                    onBack = { currentBackStack.removeLastOrNull() }, onUnauthorized = onSessionUnauthorized,
+                                    onViewShelves = onViewShelves,
+                                    onOpenFacet = { kind, id -> currentBackStack.add(FacetRoute(kind.name, id)) },
+                                    onOpenResource = { resource ->
+                                        openResource(appContext, session.profile.id, resource) { currentBackStack.add(it) }
+                                    },
+                                    onOpenReadingUnit = { resource, unit ->
+                                        openResource(appContext, session.profile.id, resource, unit) { currentBackStack.add(it) }
+                                    },
+                                    onOpenDownload = { record ->
+                                        openDownloadedResource(appContext, session.profile.id, record) { currentBackStack.add(it) }
+                                    },
+                                )
                             }
-                        },
-                        onRetry = detailViewModel::retry,
-                        onRefresh = detailViewModel::refresh,
-                        downloadRecordsByResource = downloadRecordsByResource,
-                        downloadFailuresByResource = downloadFailuresByResource,
-                        onDownloadResource = downloadActionsViewModel::requestDownload,
-                        onCancelDownload = downloadActionsViewModel::cancelDownload,
-                        onRemoveDownload = downloadActionsViewModel::removeDownload,
-                        onOpenMultiDownload = detailViewModel::openMultiDownload,
-                        onDismissMultiDownload = detailViewModel::dismissMultiDownload,
-                        onRetryMultiDownload = detailViewModel::retryMultiDownload,
-                        onToggleMultiDownloadFolder = detailViewModel::toggleMultiDownloadFolder,
-                        onEnsureMultiDownloadFolderLoaded = detailViewModel::ensureMultiDownloadFolderLoaded,
-                        onPerformDownloadBatch = downloadActionsViewModel::performBatch,
-                        managementViewModel = managementViewModel,
-                        canManageSystem = session.authorization.canManageSystem,
-                        onBookDeleted = {
-                            downloadActionsViewModel.removeBook(route.bookId)
-                            currentBackStack.removeLastOrNull()
-                        },
-                        onOpenSelectedResource = { resource ->
-                            openResource(
-                                context = appContext,
-                                profileId = session.profile.id,
-                                resource = resource,
-                                onUnavailable = { currentBackStack.add(it) },
-                            )
-                        },
-                        onOpenDownloadedResource = { record ->
-                            openDownloadedResource(
-                                context = appContext,
-                                profileId = session.profile.id,
-                                record = record,
-                                onUnavailable = { currentBackStack.add(it) },
-                            )
-                        },
-                    )
+                        }
+                    }
                 }
                 entry<FacetRoute> { route ->
                     val kind = LibraryScope.entries.firstOrNull { it.name == route.kind } ?: LibraryScope.Series
@@ -826,10 +708,12 @@ private fun openResource(
     context: android.content.Context,
     profileId: String,
     resource: ResourceContent,
+    unit: com.ermao.library.shared.modules.library.domain.ReadingUnit? = null,
     onUnavailable: (ReaderUnavailableRoute) -> Unit,
 ) {
     if (isSupportedNativeReaderEntry(resource.readerType, resource.format)) {
-        context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id))
+        context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id,
+            unit?.let { com.ermao.library.shared.modules.reader.readingUnitLaunchTarget(resource.readerType, it.href, it.metadata.pageNumber) }))
     } else {
         onUnavailable(ReaderUnavailableRoute(resource.id, resource.readerType))
     }

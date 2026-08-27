@@ -3,6 +3,8 @@ package com.ermao.library.features.library.application
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -16,7 +18,8 @@ import com.ermao.library.features.content.model.toCard
 import com.ermao.library.features.content.model.toFacetKind
 import com.ermao.library.features.content.model.toUiContent
 import com.ermao.library.shared.core.network.AppErrorKind
-import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.BookContentTarget
+import com.ermao.library.shared.modules.library.loadBookContentPage
 import com.ermao.library.shared.modules.library.BookContentSort
 import com.ermao.library.shared.modules.library.BookContentsPage
 import com.ermao.library.shared.modules.library.BookContentsQuery
@@ -30,7 +33,6 @@ import com.ermao.library.shared.modules.library.FacetQuery
 import com.ermao.library.shared.modules.library.FacetSort
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsPage
 import com.ermao.library.shared.modules.library.ResourceReadingUnitsQuery
-import com.ermao.library.shared.modules.library.selectBookDetailPresentation
 import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
@@ -140,6 +142,8 @@ class FacetViewModel(
 }
 
 data class WorkDetailUiState(
+    val isBookRoot: Boolean = true,
+    val rootSourceNodeId: String? = null,
     val isLoading: Boolean = true,
     val content: BookDetailContent? = null,
     val selectedResourceId: String? = null,
@@ -176,6 +180,8 @@ class WorkDetailViewModel(
     private val appContext: Context,
     private val bookId: String,
     private val onSessionUnauthorized: () -> Unit,
+    private val target: BookContentTarget = BookContentTarget.Root,
+    private val savedState: SavedStateHandle,
 ) : ViewModel() {
     private var multiDownloadGeneration = 0L
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
@@ -188,9 +194,13 @@ class WorkDetailViewModel(
         viewModelScope.launch {
             (appContext as ErmaoLibraryApplication).readerProgressPresentationCenter.updates.collect { update ->
                 if (update.namespaceKey == context.presentationKey() && update.bookId == bookId) {
+                    val previous = latestProgressUpdatesByResourceId[update.resourceId]
+                    if (previous != null && previous.capturedAtEpochMillis > update.capturedAtEpochMillis) return@collect
                     latestProgressUpdatesByResourceId[update.resourceId] = update
                     mutableUiState.update { state ->
-                        val content = state.content?.applying(update, state.selectedResourceId) ?: return@update state
+                        val current = state.content ?: return@update state
+                        val content = latestProgressUpdatesByResourceId.values.sortedBy { it.capturedAtEpochMillis }
+                            .fold(current) { result, progress -> result.applying(progress, state.selectedResourceId) }
                         if (content === state.content) return@update state
                         state.copy(content = content)
                     }
@@ -200,34 +210,34 @@ class WorkDetailViewModel(
         load()
     }
 
-    fun retry() = load(resourceId = mutableUiState.value.selectedResourceId)
+    fun retry() = load()
 
-    fun refresh() = load(resourceId = mutableUiState.value.selectedResourceId, showBlockingLoading = false)
+    fun refresh() = load(showBlockingLoading = false)
 
-    fun selectResource(resourceId: String) = loadReadingUnits(resourceId, page = 1)
-
-    fun showContentBrowser() {
-        val state = mutableUiState.value
-        mutableUiState.update {
-            it.copy(
-                presentation = BookDetailPresentation.ContentBrowser,
-                selectedResourceId = null,
-                readingUnits = null,
-            )
-        }
-        loadContents(state.contents?.currentSourceNodeId, page = state.contents?.page ?: 1, sort = state.contentsSort)
+    fun refreshAfterReadingStatusChange(resourceId: String) {
+        latestProgressUpdatesByResourceId.remove(resourceId)
+        load(showBlockingLoading = false)
     }
 
-    fun openSourceNode(sourceNodeId: String?) =
-        loadContents(sourceNodeId, page = 1, sort = mutableUiState.value.contentsSort)
+    fun refreshAfterBookReadingStatusChange() {
+        latestProgressUpdatesByResourceId.clear()
+        load(showBlockingLoading = false)
+    }
 
-    fun selectContentsSort(sort: BookContentSort) =
-        loadContents(mutableUiState.value.contents?.currentSourceNodeId, page = 1, sort = sort)
+    fun selectContentsSort(sort: BookContentSort) {
+        mutableUiState.update { it.copy(contentsSort = sort) }
+        savedState["contentSort"] = sort.name
+        savedState["contentPage"] = 1
+        load(showBlockingLoading = false)
+    }
 
-    fun selectContentsPage(page: Int) =
-        loadContents(mutableUiState.value.contents?.currentSourceNodeId, page = page, sort = mutableUiState.value.contentsSort)
+    fun selectContentsPage(page: Int) {
+        savedState["contentPage"] = page
+        load(showBlockingLoading = false)
+    }
 
     fun selectReadingUnitsPage(page: Int) {
+        savedState["readingUnitsPage"] = page
         val resourceId = mutableUiState.value.selectedResourceId ?: return
         loadReadingUnits(resourceId, page)
     }
@@ -237,7 +247,7 @@ class WorkDetailViewModel(
         if (state.presentation == BookDetailPresentation.ResourceDetail) {
             state.selectedResourceId?.let { loadReadingUnits(it, state.readingUnits?.page ?: 1) }
         } else {
-            loadContents(state.contents?.currentSourceNodeId, state.contents?.page ?: 1, state.contentsSort)
+            load(showBlockingLoading = false)
         }
     }
 
@@ -278,7 +288,7 @@ class WorkDetailViewModel(
             )
         }
         loadMultiDownloadResources(generation)
-        loadMultiDownloadFolder(sourceNodeId = null, expand = true, generation = generation)
+        loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
     }
 
     fun dismissMultiDownload() {
@@ -310,7 +320,7 @@ class WorkDetailViewModel(
             )
         }
         loadMultiDownloadResources(generation)
-        loadMultiDownloadFolder(sourceNodeId = null, expand = true, generation = generation)
+        loadMultiDownloadFolder(sourceNodeId = mutableUiState.value.contents?.currentSourceNodeId, expand = true, generation = generation)
     }
 
     fun toggleMultiDownloadFolder(sourceNodeId: String) {
@@ -380,101 +390,57 @@ class WorkDetailViewModel(
         }
     }
 
-    private fun load(resourceId: String? = null, showBlockingLoading: Boolean = true) {
+    private fun load(showBlockingLoading: Boolean = true) {
+        if (!showBlockingLoading && mutableUiState.value.isLoading) return
         val generation = ++loadGeneration
-        mutableUiState.update { it.copy(isLoading = showBlockingLoading, errorCode = null) }
-        viewModelScope.launch {
-            try {
-                when (val result = repository.loadBookDetail(context, BookDetailQuery(bookId, resourceId))) {
-                    is ContentResult.Content -> {
-                        if (generation != loadGeneration) return@launch
-                        val baseContent = result.value.toUiContent()
-                        val detailSelection = selectBookDetailPresentation(result.value.resources, resourceId)
-                        val selectedResourceId = detailSelection.resourceId
-                        val uiContent = selectedResourceId?.let(latestProgressUpdatesByResourceId::get)
-                            ?.let { baseContent.applying(it, selectedResourceId) } ?: baseContent
-                        val shelfState = mutableUiState.value
-                        mutableUiState.value = WorkDetailUiState(
-                            isLoading = false,
-                            content = uiContent,
-                            selectedResourceId = selectedResourceId,
-                            presentation = detailSelection.presentation,
-                            shelves = shelfState.shelves,
-                            selectedShelfIds = shelfState.selectedShelfIds,
-                            isShelfPickerVisible = shelfState.isShelfPickerVisible,
-                            isLoadingShelves = shelfState.isLoadingShelves,
-                            isSavingShelves = shelfState.isSavingShelves,
-                            shelfErrorCode = shelfState.shelfErrorCode,
-                            shelfSaveCompleted = shelfState.shelfSaveCompleted,
-                            isMultiDownloadVisible = shelfState.isMultiDownloadVisible,
-                            multiDownloadRootNodeId = shelfState.multiDownloadRootNodeId,
-                            multiDownloadChildrenByNodeId = shelfState.multiDownloadChildrenByNodeId,
-                            multiDownloadDescendantResourceIdsByNodeId = shelfState.multiDownloadDescendantResourceIdsByNodeId,
-                            multiDownloadExpandedNodeIds = shelfState.multiDownloadExpandedNodeIds,
-                            multiDownloadLoadingNodeIds = shelfState.multiDownloadLoadingNodeIds,
-                            isMultiDownloadResourcesLoading = shelfState.isMultiDownloadResourcesLoading,
-                            multiDownloadResources = shelfState.multiDownloadResources,
-                            multiDownloadErrorCode = shelfState.multiDownloadErrorCode,
-                        )
-                        if (detailSelection.presentation == BookDetailPresentation.ResourceDetail) {
-                            selectedResourceId?.let { loadReadingUnits(it, page = 1) }
-                        } else {
-                            loadContents(sourceNodeId = null, page = 1, sort = shelfState.contentsSort)
-                        }
-                    }
-                    is ContentResult.Failure -> mutableUiState.update {
-                        if (generation != loadGeneration) return@update it
-                        if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
-                        if (it.content == null) it.copy(isLoading = false, errorCode = result.error.code) else it.copy(isLoading = false)
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (generation != loadGeneration) return@launch
-                mutableUiState.update { if (it.content == null) it.copy(isLoading = false, errorCode = "CONTENT_LOAD_FAILED") else it.copy(isLoading = false) }
-            }
-        }
-    }
-
-    private fun loadContents(sourceNodeId: String?, page: Int, sort: BookContentSort) {
-        val generation = ++surfaceGeneration
+        surfaceGeneration += 1
+        val sort = BookContentSort.entries.firstOrNull { it.name == savedState.get<String>("contentSort") }
+            ?: mutableUiState.value.contentsSort
+        val page = savedState.get<Int>("contentPage")?.coerceAtLeast(1) ?: 1
         mutableUiState.update {
-            it.copy(
-                presentation = BookDetailPresentation.ContentBrowser,
-                selectedResourceId = null,
-                contentsSort = sort,
-                isSurfaceLoading = true,
-                surfaceErrorCode = null,
-            )
+            it.copy(isLoading = showBlockingLoading && it.content == null, isSurfaceLoading = true, errorCode = null)
         }
         viewModelScope.launch {
-            try {
-                when (val result = repository.loadBookContents(
-                    context,
-                    BookContentsQuery(bookId, sourceNodeId, sort, page),
-                )) {
-                    is ContentResult.Content -> mutableUiState.update {
-                        if (generation != surfaceGeneration) it else it.copy(
-                            contents = result.value,
+            when (val result = loadBookContentPage(repository, context, bookId, target, sort, page)) {
+                is ContentResult.Content -> {
+                    if (generation != loadGeneration) return@launch
+                    val snapshot = result.value
+                    val resourceId = (snapshot.target as? BookContentTarget.ResourceDetail)?.resourceId
+                    val base = snapshot.book.toUiContent()
+                    val content = latestProgressUpdatesByResourceId.values.sortedBy { it.capturedAtEpochMillis }.fold(base) { current, update ->
+                        current.applying(update, resourceId)
+                    }
+                    mutableUiState.update { state ->
+                        state.copy(
+                            isLoading = false,
                             isSurfaceLoading = false,
+                            content = content,
+                            isBookRoot = target == BookContentTarget.Root,
+                            rootSourceNodeId = snapshot.book.sourceNodeId,
+                            selectedResourceId = resourceId,
+                            presentation = if (resourceId == null) BookDetailPresentation.ContentBrowser else BookDetailPresentation.ResourceDetail,
+                            contents = snapshot.contents ?: state.contents,
+                            contentsSort = sort,
                             surfaceErrorCode = null,
                         )
                     }
-                    is ContentResult.Failure -> mutableUiState.update {
-                        if (generation != surfaceGeneration) it else {
-                            if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
-                            it.copy(isSurfaceLoading = false, surfaceErrorCode = result.error.code)
-                        }
-                    }
+                    if (resourceId != null) loadReadingUnits(
+                        resourceId, savedState.get<Int>("readingUnitsPage")?.coerceAtLeast(1) ?: 1,
+                    )
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                mutableUiState.update {
-                    if (generation != surfaceGeneration) it else {
-                        it.copy(isSurfaceLoading = false, surfaceErrorCode = "BOOK_CONTENTS_LOAD_FAILED")
-                    }
+                is ContentResult.Failure -> mutableUiState.update {
+                    if (generation != loadGeneration) return@update it
+                    if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                    val inaccessible = result.error.kind in setOf(
+                        AppErrorKind.Forbidden, AppErrorKind.NotFoundOrUnavailable, AppErrorKind.Gone,
+                    )
+                    it.copy(
+                        isLoading = false,
+                        isSurfaceLoading = false,
+                        content = if (inaccessible) null else it.content,
+                        errorCode = result.error.code,
+                        surfaceErrorCode = result.error.code,
+                    )
                 }
             }
         }
@@ -615,7 +581,6 @@ class WorkDetailViewModel(
             it.copy(
                 presentation = BookDetailPresentation.ResourceDetail,
                 selectedResourceId = resourceId,
-                readingUnits = null,
                 isSurfaceLoading = true,
                 surfaceErrorCode = null,
             )
@@ -667,8 +632,9 @@ class WorkDetailViewModel(
             appContext: Context,
             bookId: String,
             onSessionUnauthorized: () -> Unit,
+            target: BookContentTarget = BookContentTarget.Root,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { WorkDetailViewModel(repository, shelfRepository, context, appContext.applicationContext, bookId, onSessionUnauthorized) }
+            initializer { WorkDetailViewModel(repository, shelfRepository, context, appContext.applicationContext, bookId, onSessionUnauthorized, target, createSavedStateHandle()) }
         }
     }
 }
@@ -677,12 +643,19 @@ private fun ContentRequestContext.presentationKey(): String =
     "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
 
 internal fun BookDetailContent.applying(update: ReaderProgressPresentationUpdate, selectedResourceId: String?): BookDetailContent {
-    if (book.id != update.bookId || selectedResourceId != update.resourceId) return this
+    if (book.id != update.bookId) return this
+    if (selectedResourceId != update.resourceId) return copy(
+        continueResourceId = update.resourceId,
+        resources = resources.map { resource ->
+            if (resource.id == update.resourceId) resource.copy(progressPercent = update.percent.toInt().coerceIn(0, 100)) else resource
+        },
+    )
     val units = readingUnits.map { ReaderChapterUnit(href = it.href, sortOrder = it.sortOrder, readingOrderPosition = it.readingOrderPosition) }
     val states = resolveReaderChapterStatesFromLocation(units, update.location, update.percent)
     val progress = update.percent.toInt().coerceIn(0, 100)
     return copy(
         book = book.copy(progressPercent = progress),
+        continueResourceId = update.resourceId,
         completed = update.percent >= 100.0,
         resources = resources.map { resource -> if (resource.id == update.resourceId) resource.copy(progressPercent = progress) else resource },
         readingUnits = readingUnits.mapIndexed { index, unit ->

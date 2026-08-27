@@ -60,6 +60,7 @@ kotlin {
 dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(libs.readium.shared)
+    implementation(libs.readium.streamer)
 
     testImplementation(libs.junit4)
     testImplementation(kotlin("test"))

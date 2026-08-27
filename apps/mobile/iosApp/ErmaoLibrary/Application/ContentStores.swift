@@ -663,12 +663,15 @@ enum BookDetailLoadState: Sendable {
 
 @MainActor
 final class BookDetailStore: ObservableObject {
+    let destination: BookContentDestination
+    var isBookRoot: Bool { destination == .root }
     @Published private(set) var state: BookDetailLoadState = .loading
     @Published private(set) var contentsPage: BookContentsPage?
     @Published private(set) var chapterPage: BookChapterPage?
     @Published private(set) var resourceDetailPage: BookResourceDetailPage?
-    @Published private(set) var contentSort: BookContentSort = .nameAscending
-    @Published private(set) var contentLayout: BookContentLayout = .grid
+    @Published private(set) var viewState = BookContentViewState()
+    var contentSort: BookContentSort { viewState.sort }
+    var contentLayout: BookContentLayout { viewState.layout }
     @Published private(set) var isLoadingContentBrowser = false
     @Published private(set) var contentBrowserFailed = false
     @Published private(set) var isLoadingMoreResources = false
@@ -686,10 +689,11 @@ final class BookDetailStore: ObservableObject {
     private var latestProgressUpdatesByResourceID: [String: ErmaoShared.ReaderProgressPresentationUpdate] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
-    init(context: ContentRequestContext, client: any ContentClient, bookID: String, onUnauthorized: @escaping @MainActor () -> Void) {
+    init(context: ContentRequestContext, client: any ContentClient, bookID: String, destination: BookContentDestination = .root, onUnauthorized: @escaping @MainActor () -> Void) {
         self.context = context
         self.client = client
         self.bookID = bookID
+        self.destination = destination
         self.onUnauthorized = onUnauthorized
         ReaderProgressPresentationCenter.shared.updates
             .filter { $0.namespaceKey == context.namespaceKey && $0.bookId == bookID }
@@ -698,7 +702,7 @@ final class BookDetailStore: ObservableObject {
     }
 
     func load(resourceID: String? = nil, showBlockingLoading: Bool = true) {
-        activeResourceID = resourceID
+        activeResourceID = resourceID ?? destination.resourceID
         hasMoreResources = true
         if showBlockingLoading || currentContent == nil {
             state = .loading
@@ -713,15 +717,12 @@ final class BookDetailStore: ObservableObject {
             do {
                 let value = try await client.fetchBookDetail(
                     context: context,
-                    query: BookDetailQuery(bookID: bookID, resourceID: resourceID)
+                    query: BookDetailQuery(bookID: bookID, resourceID: activeResourceID)
                 )
                 guard requestGeneration == generation else { return }
-                let latestProgressUpdate = value.selectedResourceID
-                    .flatMap { latestProgressUpdatesByResourceID[$0] }
-                let presented = latestProgressUpdate.map { value.applying($0) } ?? value
-                activeResourceID = presented.selectedResourceID
+                let presented = applyingLatestProgress(to: value)
                 state = .ready(presented)
-                await loadContentBrowser(for: presented, generation: generation)
+                await loadContentBrowser(generation: generation)
             } catch {
                 guard requestGeneration == generation else { return }
                 if case ContentClientError.unauthorized = error { onUnauthorized(); return }
@@ -729,14 +730,34 @@ final class BookDetailStore: ObservableObject {
                     state = .inaccessible
                     return
                 }
-                state = .failure
+                if currentContent == nil { state = .failure } else { contentBrowserFailed = true }
             }
         }
     }
 
     func refreshIfLoaded() {
-        guard currentContent != nil else { return }
-        load(resourceID: activeResourceID, showBlockingLoading: false)
+        guard currentContent != nil, !isLoadingContentBrowser else { return }
+        load(showBlockingLoading: false)
+    }
+
+    func refreshAfterReadingStatusChange(resourceID: String) {
+        latestProgressUpdatesByResourceID.removeValue(forKey: resourceID)
+        load(showBlockingLoading: false)
+    }
+
+    func refreshAfterBookReadingStatusChange() {
+        latestProgressUpdatesByResourceID.removeAll()
+        load(showBlockingLoading: false)
+    }
+
+    func loadIfNeeded() {
+        guard currentContent == nil else { return }
+        load()
+    }
+
+    func restoreViewState(_ value: BookContentViewState) {
+        guard currentContent == nil, value.isValid else { return }
+        viewState = value
     }
 
     func loadMoreResources() {
@@ -772,147 +793,118 @@ final class BookDetailStore: ObservableObject {
         }
     }
 
-    func openContents(_ sourceNodeID: String?) {
-        guard currentContent != nil else { return }
-        let generation = requestGeneration
-        isLoadingContentBrowser = true
-        contentBrowserFailed = false
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let page = try await client.fetchBookContents(
-                    context: context,
-                    bookID: bookID,
-                    sourceNodeID: sourceNodeID,
-                    sort: contentSort,
-                    page: 1,
-                    pageSize: 200
-                )
-                guard requestGeneration == generation else { return }
-                contentsPage = page
-                isLoadingContentBrowser = false
-            } catch {
-                guard requestGeneration == generation else { return }
-                isLoadingContentBrowser = false
-                contentBrowserFailed = true
-            }
-        }
-    }
-
-    func showContentBrowser() {
-        activeResourceID = nil
-        resourceDetailPage = nil
-        chapterPage = nil
-        openContents(contentsPage?.currentSourceNodeID)
-    }
-
-    func selectResource(_ resourceID: String) {
-        guard let content = currentContent,
-              content.resources.contains(where: { $0.id == resourceID && $0.isReadable != false })
-        else { return }
-        activeResourceID = resourceID
-        contentsPage = nil
-        chapterPage = nil
-        loadResourceDetail(resourceID: resourceID, page: 1)
-    }
-
     func selectContentSort(_ sort: BookContentSort) {
         guard contentSort != sort else { return }
-        contentSort = sort
-        openContents(contentsPage?.currentSourceNodeID)
+        viewState.sort = sort
+        viewState.page = 1
+        loadContents(sourceNodeID: contentsPage?.currentSourceNodeID ?? destination.sourceNodeID, page: viewState.page)
     }
 
     func selectContentLayout(_ layout: BookContentLayout) {
-        contentLayout = layout
+        viewState.layout = layout
     }
 
     func selectContentPage(_ page: Int) {
+        guard page > 0 else { return }
+        viewState.page = page
         loadContents(sourceNodeID: contentsPage?.currentSourceNodeID, page: page)
     }
 
     func selectResourceDetailPage(_ page: Int) {
+        guard page > 0 else { return }
+        viewState.readingUnitsPage = page
         guard let resourceID = activeResourceID else { return }
         loadResourceDetail(resourceID: resourceID, page: page)
     }
 
     func retryContentBrowser() {
-        guard let content = currentContent else { return }
+        guard currentContent != nil else { return }
+        if destination == .root && contentsPage == nil {
+            load(showBlockingLoading: false)
+            return
+        }
         if let resourceID = activeResourceID {
+            if currentContent?.resources.contains(where: { $0.id == resourceID }) != true {
+                load(showBlockingLoading: false)
+                return
+            }
             loadResourceDetail(resourceID: resourceID, page: resourceDetailPage?.page ?? 1)
         } else {
-            openContents(contentsPage?.currentSourceNodeID)
+            loadContents(sourceNodeID: contentsPage?.currentSourceNodeID ?? destination.sourceNodeID, page: viewState.page)
         }
     }
 
     private func loadContentBrowser(
-        for content: BookDetailContent,
-        generation: UUID,
-        force: Bool = false
+        generation: UUID
     ) async {
         isLoadingContentBrowser = true
         contentBrowserFailed = false
         do {
-            if let resourceID = activeResourceID ?? content.selectedResourceID {
-                if !force, resourceDetailPage?.resourceID == resourceID {
-                    isLoadingContentBrowser = false
-                    return
-                }
-                let resource = content.resources.first(where: { $0.id == resourceID })
-                let page = try await client.fetchResourceDetail(
-                    context: context,
-                    bookID: bookID,
-                    resourceID: resourceID,
-                    page: 1,
-                    pageSize: resourceDetailPageSize(resource)
-                )
-                guard requestGeneration == generation else { return }
-                activeResourceID = resourceID
-                resourceDetailPage = page
-                let chapters = page.units.compactMap { unit -> BookChapter? in
-                    guard unit.unitType.lowercased() == "chapter" else { return nil }
-                    return BookChapter(
-                        id: unit.id,
-                        title: unit.title,
-                        progress: unit.chapterState == .current ? page.progress : nil,
-                        isCurrent: unit.chapterState == .current,
-                        href: unit.href,
-                        sortOrder: unit.sortOrder,
-                        readingOrderPosition: nil,
-                        state: unit.chapterState
-                    )
-                }
-                contentsPage = nil
-                if case .ready(let current) = state {
-                    state = .ready(current.replacingChapters(chapters))
-                }
-            } else {
-                if !force, contentsPage != nil {
-                    isLoadingContentBrowser = false
-                    return
-                }
+            if activeResourceID == nil {
                 let page = try await client.fetchBookContents(
-                    context: context,
-                    bookID: bookID,
-                    sourceNodeID: nil,
-                    sort: contentSort,
-                    page: 1,
-                    pageSize: 200
+                    context: context, bookID: bookID,
+                    sourceNodeID: destination.sourceNodeID,
+                    sort: contentSort, page: viewState.page, pageSize: 200
                 )
                 guard requestGeneration == generation else { return }
                 contentsPage = page
-                chapterPage = nil
+                if destination == .root {
+                    guard let rootTarget = page.currentNode.destination else { throw ContentClientError.inaccessible }
+                    activeResourceID = rootTarget.resourceID
+                }
+                try await ensureResources(
+                    Set(page.entries.compactMap(\.resourceID) + page.entries.compactMap(\.representativeResourceID) +
+                        (isBookRoot ? [currentContent?.continueResourceID].compactMap { $0 } : [])),
+                    generation: generation
+                )
+                guard requestGeneration == generation else { return }
+            }
+            if let resourceID = activeResourceID {
+                try await ensureResources([resourceID], generation: generation)
+                guard requestGeneration == generation else { return }
+                guard let resource = currentContent?.resources.first(where: { $0.id == resourceID }) else {
+                    throw ContentClientError.inaccessible
+                }
+                let page = try await client.fetchResourceDetail(
+                    context: context, bookID: bookID, resourceID: resourceID,
+                    page: viewState.readingUnitsPage, pageSize: resourceDetailPageSize(resource)
+                )
+                guard requestGeneration == generation else { return }
+                resourceDetailPage = page
+                if let current = currentContent {
+                    state = .ready(applyingLatestProgress(to: current))
+                }
+            } else {
                 resourceDetailPage = nil
+                chapterPage = nil
+                if let current = currentContent { state = .ready(applyingLatestProgress(to: current)) }
             }
             isLoadingContentBrowser = false
         } catch {
             guard requestGeneration == generation else { return }
             isLoadingContentBrowser = false
+            if case ContentClientError.unauthorized = error { onUnauthorized(); return }
+            if case ContentClientError.inaccessible = error { state = .inaccessible; return }
             contentBrowserFailed = true
         }
     }
 
+    private func ensureResources(_ ids: Set<String>, generation: UUID) async throws {
+        var pageNumber = 1
+        while !ids.isSubset(of: Set(currentContent?.resources.map(\.id) ?? [])) {
+            let page = try await client.fetchBookResources(
+                context: context, bookID: bookID, page: pageNumber, pageSize: 24
+            )
+            guard requestGeneration == generation else { return }
+            if let current = currentContent { state = .ready(current.appending(page)) }
+            if pageNumber >= page.totalPages || page.resources.isEmpty { break }
+            pageNumber += 1
+        }
+    }
+
     private func loadContents(sourceNodeID: String?, page: Int) {
-        let generation = requestGeneration
+        let generation = UUID()
+        requestGeneration = generation
         isLoadingContentBrowser = true
         contentBrowserFailed = false
         Task { [weak self] in
@@ -927,6 +919,8 @@ final class BookDetailStore: ObservableObject {
                     pageSize: 200
                 )
                 guard requestGeneration == generation else { return }
+                try await ensureResources(Set(value.entries.compactMap(\.resourceID) + value.entries.compactMap(\.representativeResourceID)), generation: generation)
+                guard requestGeneration == generation else { return }
                 contentsPage = value
                 isLoadingContentBrowser = false
             } catch {
@@ -938,7 +932,8 @@ final class BookDetailStore: ObservableObject {
     }
 
     private func loadResourceDetail(resourceID: String, page: Int) {
-        let generation = requestGeneration
+        let generation = UUID()
+        requestGeneration = generation
         isLoadingContentBrowser = true
         contentBrowserFailed = false
         Task { [weak self] in
@@ -976,13 +971,18 @@ final class BookDetailStore: ObservableObject {
         return content
     }
 
+    private func applyingLatestProgress(to content: BookDetailContent) -> BookDetailContent {
+        latestProgressUpdatesByResourceID.values
+            .sorted { $0.capturedAtEpochMillis < $1.capturedAtEpochMillis }
+            .reduce(content) { $0.applying($1, activeResourceID: activeResourceID) }
+    }
+
     private func apply(_ update: ErmaoShared.ReaderProgressPresentationUpdate) {
         let previous = latestProgressUpdatesByResourceID[update.resourceId]
         guard update.capturedAtEpochMillis >= (previous?.capturedAtEpochMillis ?? -1) else { return }
         latestProgressUpdatesByResourceID[update.resourceId] = update
         guard case .ready(let content) = state else { return }
-        guard content.selectedResourceID == update.resourceId else { return }
-        let presented = content.applying(update)
+        let presented = applyingLatestProgress(to: content)
         state = .ready(presented)
     }
 }
@@ -999,7 +999,9 @@ private extension BookDetailContent {
             resources: resources,
             selectedResourceID: selectedResourceID,
             readingStatus: readingStatus,
-            chapters: chapters
+            chapters: chapters,
+            rootSourceNodeID: rootSourceNodeID,
+            continueResourceID: continueResourceID
         )
     }
 
@@ -1019,21 +1021,21 @@ private extension BookDetailContent {
             resources: merged,
             selectedResourceID: selectedResourceID,
             readingStatus: readingStatus,
-            chapters: chapters
+            chapters: chapters,
+            rootSourceNodeID: rootSourceNodeID,
+            continueResourceID: continueResourceID
         )
     }
 
-    func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate) -> BookDetailContent {
-        guard book.id == update.bookId,
-              selectedResourceID == update.resourceId,
-              resources.contains(where: { $0.id == update.resourceId })
-        else { return self }
+    func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate, activeResourceID: String?) -> BookDetailContent {
+        guard book.id == update.bookId else { return self }
+        let updatesSelected = activeResourceID == update.resourceId
         let updatedBook = BookCard(
             id: book.id,
             title: book.title,
             author: book.author,
             cover: book.cover,
-            progress: update.percent
+            progress: updatesSelected ? update.percent : book.progress
         )
         let updatedResources = resources.map { resource in
             guard resource.id == update.resourceId else { return resource }
@@ -1061,35 +1063,24 @@ private extension BookDetailContent {
                 pageCount: resource.pageCount,
                 metadataSource: resource.metadataSource,
                 kindleSendAvailable: resource.kindleSendAvailable,
-                assets: resource.assets
+                assets: resource.assets,
+                importStatus: resource.importStatus
             )
         }
-        let currentChapterIndex = update.chapterTitle.flatMap { chapterTitle in
-            chapters.firstIndex { chapter in
-                chapter.title.compare(
-                    chapterTitle,
-                    options: [.caseInsensitive, .diacriticInsensitive]
-                ) == .orderedSame
-            }
-        }
+        let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromLocation(
+            units: chapters.map { ErmaoShared.ReaderChapterUnit(
+                href: $0.href, sortOrder: Int32($0.sortOrder),
+                readingOrderPosition: $0.readingOrderPosition.map { KotlinInt(int: Int32($0)) }
+            ) },
+            location: update.location, progressPercent: update.percent
+        )
         let updatedChapters = chapters.enumerated().map { index, chapter in
-            guard let currentChapterIndex else { return chapter }
-            let state: ChapterReadingState = if index < currentChapterIndex {
-                .read
-            } else if index == currentChapterIndex {
-                .current
-            } else {
-                .unread
-            }
+            let state: ChapterReadingState = states[index] == .current ? .current : (states[index] == .read ? .read : .unread)
             return BookChapter(
-                id: chapter.id,
-                title: chapter.title,
+                id: chapter.id, title: chapter.title,
                 progress: state == .current ? update.percent : nil,
-                isCurrent: state == .current,
-                href: chapter.href,
-                sortOrder: chapter.sortOrder,
-                readingOrderPosition: chapter.readingOrderPosition,
-                state: state
+                isCurrent: state == .current, href: chapter.href, sortOrder: chapter.sortOrder,
+                readingOrderPosition: chapter.readingOrderPosition, state: state
             )
         }
         return BookDetailContent(
@@ -1101,8 +1092,10 @@ private extension BookDetailContent {
             authorFacets: authorFacets,
             resources: updatedResources,
             selectedResourceID: selectedResourceID,
-            readingStatus: update.percent >= 100 ? .finished : .reading,
-            chapters: updatedChapters
+            readingStatus: updatesSelected ? (update.percent >= 100 ? .finished : .reading) : readingStatus,
+            chapters: updatesSelected ? updatedChapters : chapters,
+            rootSourceNodeID: rootSourceNodeID,
+            continueResourceID: update.resourceId
         )
     }
 }

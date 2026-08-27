@@ -1,5 +1,9 @@
 # 移动 App 第一阶段：Web → App 功能基线审计
 
+> 2026-08-27 书架确认稿：[行式书架目录 v2](mobile-shelves-row-layout.md) 新增顶部搜索与“全部 / 书架 / 合集”筛选，采用左文字右三封面、合集二级成员列表；仅覆盖旧书架构图与搜索限制。
+
+> 2026-08-27 Mobile 导航修订：[图书内容导航契约](mobile-book-content-navigation.md) 决定根节点与下级节点页面：目录推进目录页，可读资源推进独立资源详情；不按资源数量分流、不在原页切换，不修改后端或 Web。
+
 > 状态：已采纳的产品与技术基线
 > 审计日期：2026-08-11
 > 适用范围：从零重建的 `apps/mobile` 及其所依赖的 App 专用后端契约
@@ -8,7 +12,7 @@
 
 > v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
 
-> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。单个可读资源直接显示资源详情但不自动进入 Reader；多个资源显示真实来源目录。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。本修订覆盖本文中所有旧的卷册轨道、隐藏目录和下载后阅读描述。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。页面按绑定节点类型展示，详见上述导航修订。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。本修订覆盖本文中所有旧的卷册轨道、隐藏目录和下载后阅读描述。
 
 ## 1. 基线目的
 

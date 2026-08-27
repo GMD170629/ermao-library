@@ -1,7 +1,10 @@
 package com.ermao.library.features.library.ui
 
 import androidx.compose.ui.unit.dp
+import com.ermao.library.features.content.model.BookCard
+import com.ermao.library.features.content.model.BookDetailContent
 import com.ermao.library.features.content.model.ResourceContent
+import com.ermao.library.features.library.application.WorkDetailUiState
 import com.ermao.library.features.content.ui.compactCoverGridColumnCount
 import com.ermao.library.features.content.ui.compactCoverGridItemWidth
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
@@ -9,9 +12,14 @@ import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.shared.modules.library.BookContentEntry
 import com.ermao.library.shared.modules.library.BookContentsPage
+import com.ermao.library.shared.modules.library.BookDetailPresentation
+import com.ermao.library.shared.modules.library.BookDetailObjectKind
+import com.ermao.library.shared.modules.library.BookDetailDownloadState
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -122,6 +130,48 @@ class WorkDetailLayoutTest {
             items.map { it.coverUrl },
         )
         assertEquals(listOf("01", "02", "03", "07"), items.map { it.indexLabel })
+
+        val bookContent = BookDetailContent(
+            book = BookCard("book-1", "Book title", "Book author", "/book-cover", 50),
+            seriesId = null, seriesName = null, authorFacetId = null,
+            description = "Book introduction", tags = listOf("Book tag"),
+            resources = resources, selectedResourceId = null, continueResourceId = "direct",
+        )
+        val rootState = WorkDetailUiState(isLoading = false, content = bookContent, contents = page)
+        assertEquals(BookDetailObjectKind.Book, rootState.detailActionScope()?.objectKind)
+        assertEquals("book-1", rootState.detailActionScope()?.objectId)
+        assertEquals("direct", rootState.resolveReadingResource()?.id)
+        val anotherResume = rootState.copy(content = bookContent.copy(continueResourceId = "representative-1"))
+        assertEquals("book-1", anotherResume.detailActionScope()?.objectId)
+        assertEquals("representative-1", anotherResume.resolveReadingResource()?.id)
+        val childResourceState = rootState.copy(isBookRoot = false, selectedResourceId = "direct")
+        assertEquals(BookDetailObjectKind.Resource, childResourceState.detailActionScope()?.objectKind)
+        assertEquals("direct", childResourceState.detailActionScope()?.objectId)
+        assertNull(rootState.copy(isBookRoot = false).detailActionScope())
+        val rootPresentation = assertNotNull(workDetailPageContent(rootState))
+        assertEquals("direct", rootPresentation.continueResource?.id)
+        assertEquals(25, rootPresentation.continueResource?.progressPercent)
+        assertEquals(WorkDetailPrimaryActionLabel.ContinueReading, workDetailPrimaryActionPresentation(rootPresentation.continueResource, null).label)
+        assertNull(bookContent.copy(continueResourceId = "missing").continueResource)
+        assertNull(bookContent.copy(continueResourceId = null).continueResource)
+        val unread = resources.last().copy(progressPercent = null)
+        assertEquals(WorkDetailPrimaryActionLabel.StartReading, workDetailPrimaryActionPresentation(unread, null).label)
+        assertEquals(WorkDetailPrimaryActionLabel.StartListening, workDetailPrimaryActionPresentation(unread.copy(readerType = "audio"), null).label)
+        assertEquals("Book title", rootPresentation.book.title)
+        assertEquals("Book introduction", rootPresentation.description)
+        assertEquals("/book-cover", rootPresentation.book.coverUrl)
+        assertEquals(listOf("Book tag"), rootPresentation.tags)
+        assertNull(rootPresentation.book.progressPercent)
+
+        val childPresentation = assertNotNull(workDetailPageContent(rootState.copy(isBookRoot = false)))
+        assertEquals("Star Harbor", childPresentation.book.title)
+        assertNull(childPresentation.description)
+        val resourcePresentation = assertNotNull(workDetailPageContent(rootState.copy(
+            presentation = BookDetailPresentation.ResourceDetail, selectedResourceId = "direct",
+        )))
+        assertEquals("01 Launch", resourcePresentation.book.title)
+        assertEquals("/resource-cover", resourcePresentation.book.coverUrl)
+        assertEquals(25, resourcePresentation.book.progressPercent)
     }
 
     @Test
@@ -573,6 +623,19 @@ class WorkDetailLayoutTest {
                 fontScale = 1f,
             ),
         )
+    }
+
+    @Test
+    fun bookDownloadSummaryIncludesOtherVolumesButNeverOtherBooks() {
+        val resource = testResource("reflowable", "EPUB", 30)
+        val completed = completedDownload(resource)
+        val otherVolume = completed.copy(resourceId = "other-volume", status = AndroidDownloadStatus.Downloading, verified = false, localReference = null)
+        val unrelated = completed.copy(bookId = "other-book", resourceId = "outside")
+        val summary = workBookDownloadSummary("book-1", listOf(completed, otherVolume, unrelated))
+        assertEquals(BookDetailDownloadState.Downloading, summary.state)
+        assertEquals(1, summary.downloadedResources)
+        assertEquals(2, workBookDownloadSummary("book-1", listOf(completed, completed.copy(resourceId = "other-volume"), unrelated)).downloadedResources)
+        assertEquals(BookDetailDownloadState.NotDownloaded, workBookDownloadSummary("missing", listOf(completed)).state)
     }
 
     private fun testResource(

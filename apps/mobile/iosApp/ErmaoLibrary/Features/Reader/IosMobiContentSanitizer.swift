@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import ErmaoShared
 
 enum IosPublicationSecurityError: Error, Sendable {
     case invalidEncoding
@@ -13,8 +14,10 @@ enum IosPublicationSecurityPolicy {
     private static let contentSecurityPolicy =
         "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; " +
         "frame-src 'none'; child-src 'none'; object-src 'none'; script-src 'none'; " +
-        "style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; " +
-        "font-src 'self' blob: data:; media-src 'self' blob: data:"
+        // Readium serves its own CSS and declared fonts from a separate, local-only asset origin.
+        // Author scripts/network access remain forbidden; do not allow the whole readium: scheme.
+        "style-src 'self' readium://assets blob: 'unsafe-inline'; img-src 'self' blob: data:; " +
+        "font-src 'self' readium://assets blob: data:; media-src 'self' blob: data:"
     private static let securityStyle =
         "iframe,frame,object,embed,applet{display:none!important;}" +
         "input,button,select,textarea{pointer-events:none!important;}"
@@ -314,7 +317,11 @@ private final class StrictXhtmlDelegate: NSObject, XMLParserDelegate {
 struct IosPublicationSecurityAdapter: Sendable {
     func decorate(data: Data, mediaType: String) throws -> Data {
         if mediaType.lowercased() == "text/css" { return data }
-        return try IosPublicationSecurityPolicy.decorate(data: data)
+        guard let markup = String(data: data, encoding: .utf8) else {
+            throw IosPublicationSecurityError.invalidEncoding
+        }
+        let prepared = try MobiMarkupEnvelope().prepare(markup: markup)
+        return try IosPublicationSecurityPolicy.decorate(data: Data(prepared.utf8))
     }
 
     func decorateMarkup(_ source: String) throws -> String {

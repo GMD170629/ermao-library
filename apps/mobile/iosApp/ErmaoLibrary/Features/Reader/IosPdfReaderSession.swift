@@ -19,6 +19,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     @Published private(set) var tableOfContents: [IosReaderTocEntry] = []
     @Published var controlsVisible = false
+    @Published var activeControlPanel: IosReaderPanel?
     @Published private(set) var preferences: IosReaderPreferences
 
     let resourceID: String
@@ -33,6 +34,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let managedStore: IosManagedPublicationStore
     private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
     private let progressCoordination: IosReaderProgressSessionCoordination?
+    private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
     private let bookID: String
@@ -42,6 +44,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private var openedPublication: IosOpenedReadiumPublication?
     private var positions: [Locator] = []
     private var httpServer: GCDHTTPServer?
+    private var tapNavigation: IosPdfTapNavigation?
     private var pendingSave: Task<Void, Never>?
     private var expectedRestoredPage: Int?
     private var hasReadingActivity = false
@@ -62,6 +65,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
+        initialTarget: (any ErmaoShared.ReaderNavigationTarget)? = nil,
         namespaceKey: String,
         bookID: String,
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void,
@@ -80,6 +84,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         self.progressStore = progressStore
         self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
+        self.initialTarget = initialTarget
         self.namespaceKey = namespaceKey
         self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
@@ -138,7 +143,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 assetId: managed.assetID,
                 sourceFormat: managed.sourceFormat
             )
-            let initialPage = restorePage(local: local, remote: remoteSnapshot, source: openedSource)
+            let initialPage = try restorePage(local: local, remote: remoteSnapshot, source: openedSource)
             let server = GCDHTTPServer(
                 assetRetriever: AssetRetriever(httpClient: DefaultHTTPClient(ephemeral: true))
             )
@@ -151,6 +156,9 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 httpServer: server
             )
             navigator.delegate = self
+            tapNavigation = IosPdfTapNavigation(navigator: navigator) { [weak self] point in
+                self?.handleTap(at: point)
+            }
             httpServer = server
             self.navigator = navigator
             progressCoordination?.noticeHandler = { [weak self] snapshot in
@@ -232,14 +240,9 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     func applyPreferences(_ updated: IosReaderPreferences) async -> Bool {
-        let previous = preferences
-        if updated.pdfFit != previous.pdfFit {
-            zoomToFit()
-        }
-        guard preferencesStore.save(updated) else {
-            if updated.pdfFit != previous.pdfFit { zoomToFit() }
-            return false
-        }
+        guard canApplyControlPreferences(updated) else { return false }
+        guard updated == preferences.reset(for: .pdf) || (updated.pdfZoom == preferences.pdfZoom && updated.pdfFit == preferences.pdfFit && updated.pdfRotation == preferences.pdfRotation && updated.pdfCropMargins == preferences.pdfCropMargins) else { return false }
+        guard preferencesStore.save(updated) else { return false }
         preferences = updated
         return true
     }
@@ -312,7 +315,14 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         local: ErmaoShared.ReaderProgress?,
         remote: ErmaoShared.ReaderProgressSnapshotV4?,
         source: ErmaoShared.ReaderSource
-    ) -> Int? {
+    ) throws -> Int? {
+        if let initialTarget {
+            guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetPdf,
+                  (0 ..< canonicalPageCount).contains(Int(target.pageIndex))
+            else { throw IosReaderFailure(code: .locationRestoreFailed) }
+            expectedRestoredPage = Int(target.pageIndex)
+            return Int(target.pageIndex)
+        }
         let decision = ErmaoShared.PublicKt.decideReaderResume(
             localProgress: local,
             remoteSnapshot: remote,
@@ -436,6 +446,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     private func releaseRuntime() async {
+        tapNavigation?.close()
+        tapNavigation = nil
         navigator?.delegate = nil
         navigator = nil
         pdfiumNavigator?.close()
@@ -473,7 +485,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             )
         }
         let local = try? await progressStore.load(sourceId: resourceID)
-        let initialPage = restorePage(local: local, remote: remoteSnapshot, source: source) ?? 0
+        let initialPage = try restorePage(local: local, remote: remoteSnapshot, source: source) ?? 0
         let navigator = IosPdfiumNavigatorViewController(
             document: document,
             initialPageIndex: initialPage
@@ -537,16 +549,76 @@ extension IosPdfReaderSession: PDFNavigatorDelegate {
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) { presentationError = .engineError }
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+        // The owned recognizer also receives taps over PDFKit's selectable text views.
+        // Do not process the same touch a second time through Readium's recognizer.
+        guard tapNavigation == nil else { return }
+        handleTap(at: point)
+    }
+    private func handleTap(at point: CGPoint) {
         let width = max(1, self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width)
-        switch point.x / width {
-        case ..<0.3: Task { await goPrevious() }
-        case 0.7...: Task { await goNext() }
-        default: controlsVisible.toggle()
+        routeControlTap(fraction: point.x / width)
+    }
+    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
+        if event.key == .escape { activeControlPanel = nil; controlsVisible = true; return }
+        guard activeControlPanel == nil, preferences.keyboardPageTurn else { return }
+        switch event.key {
+        case .arrowLeft, .pageUp: Task { await goPrevious() }
+        case .arrowRight, .pageDown, .space: Task { await goNext() }
+        default: break
         }
     }
-    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {}
     func navigator(_ navigator: VisualNavigator, didReleaseKey event: KeyEvent) {}
     func navigator(_ navigator: SelectableNavigator, shouldShowMenuForSelection selection: Selection) -> Bool { false }
     func navigator(_ navigator: SelectableNavigator, didSelect selection: Selection) {}
     func navigator(_ navigator: SelectableNavigator, didFailToCreateSelection error: Error) {}
+}
+
+/// PDFKit's text interaction can consume Readium's lower-priority single tap on iOS.
+/// Own navigation at the native container while preserving selection, links and zoom.
+@MainActor
+private final class IosPdfTapNavigation: NSObject, UIGestureRecognizerDelegate {
+    private weak var navigator: PDFNavigatorViewController?
+    private var recognizer: UITapGestureRecognizer?
+    private let onTap: (CGPoint) -> Void
+
+    init(navigator: PDFNavigatorViewController, onTap: @escaping (CGPoint) -> Void) {
+        self.navigator = navigator
+        self.onTap = onTap
+        super.init()
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(didTap(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        navigator.view.addGestureRecognizer(recognizer)
+        self.recognizer = recognizer
+    }
+
+    func close() {
+        if let recognizer { recognizer.view?.removeGestureRecognizer(recognizer) }
+        recognizer = nil
+        navigator = nil
+    }
+
+    @objc private func didTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, let navigator, let pdfView = navigator.pdfView else { return }
+        if pdfView.currentSelection != nil {
+            pdfView.clearSelection()
+            return
+        }
+        let point = recognizer.location(in: pdfView)
+        if let page = pdfView.page(for: point, nearest: false),
+           let annotation = page.annotation(at: pdfView.convert(point, to: page)),
+           annotation.action != nil || annotation.url != nil {
+            return
+        }
+        onTap(recognizer.location(in: navigator.view))
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let tap = otherGestureRecognizer as? UITapGestureRecognizer else { return false }
+        return tap.numberOfTapsRequired > 1
+    }
 }

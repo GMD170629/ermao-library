@@ -1,5 +1,9 @@
 # 移动 App 第二阶段：4 Tab 信息架构与导航规范
 
+> 2026-08-27 书架确认稿：[行式书架目录 v2](mobile-shelves-row-layout.md) 新增顶部搜索与“全部 / 书架 / 合集”筛选，采用左文字右三封面、合集二级成员列表；仅覆盖旧书架构图与搜索限制。
+
+> 2026-08-27 Mobile 导航修订：[图书内容导航契约](mobile-book-content-navigation.md) 决定根节点与下级节点页面：目录推进目录页，可读资源推进独立资源详情；不按资源数量分流、不在原页切换，不修改后端或 Web。
+
 > 状态：已采纳的页面、导航与覆盖层设计基线
 > 决策日期：2026-08-11
 > 适用范围：从零重建的 `apps/mobile` 及其导航、深链、会话门、Reader、播放器和原生覆盖层
@@ -9,7 +13,7 @@
 
 > v1.0.0 会话契约（2026-08-26）：[`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 是会话恢复与 GET 失败的唯一真源。首发只有正常 App Shell 与鉴权 Gate，不定义客户端宽限期、第二套 Shell、手动网络模式或 GET 页面缓存回退；完成下载仍通过 Download Center 和正常 Reader 打开。
 
-> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份、路由和深链。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`；所有入口共享同一 `book.detail` 状态并保留来源上下文。单个可读资源显示资源详情；多个资源显示与 Web 相同的来源目录、面包屑、文件夹、分页、视图模式和排序。详情动作及其对象范围直接跟随 Web Work Detail 当前实现与权限过滤，不由 App 单独定义，也不把 `bookDetailManagement` 解释为全局开关。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份、路由和深链。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`；所有入口共享内容页面实现，各目的地独立保存来源和浏览上下文；目录保留 Web 的数据、排序和分页合同。详情动作及其对象范围直接跟随 Web Work Detail 当前实现与权限过滤，不由 App 单独定义，也不把 `bookDetailManagement` 解释为全局开关。
 
 ## 1. 文档目的与优先级
 
@@ -263,7 +267,7 @@ Web 管理只在 `canManageSystem` 或 `isAdmin` 时显示，使用系统浏览�
 
 | Route | 层级 | 规则 |
 |---|---|---|
-| `book.detail` | L2/L3 | 从哪个 Stack 进入就回哪个来源；选择 `resourceId`、目录位置、排序、视图、分页和滚动只更新当前详情状态，不创建 Version 层或重复详情页 |
+| `book.detail` | L2/L3 | 解析 Book 绑定节点后显示目录或资源详情；子节点原生推进，逐层返回并恢复各目的地上下文，不创建 Version 身份 |
 | `reader.session` | L4 | 隐藏 Tab 与 mini player；资源内 TOC、页码/位置使用 replace/update，不堆返回历史 |
 | `audio.now-playing` | L4 Cover | 播放状态独立于页面；关闭后回到精确来源并保留 mini player |
 | `downloads.detail` | L2/L3 | 展示一个持久下载任务的状态、错误和恢复动作；不使用临时 Sheet 代替 |
@@ -345,7 +349,7 @@ flowchart LR
 - 单个 `ReadableResource` 自动选中并显示资源详情，但不自动进入 Reader；多个资源显示服务端真实内容目录，不使用客户端推断的 Version 或 Volume 轨道。
 - 内容目录保留真实来源节点、面包屑、文件夹、可读资源、分页、网格/列表切换以及 Web 相同的六种排序；进入深层目录和返回后恢复目录上下文。
 - 资源详情按 `readerType` 显示章节及已读状态、漫画/PDF 页面预览或音轨信息，并覆盖加载、空、导入中、导入失败和分页错误状态。
-- 有效 resume 使用最近 `resourceId`；无 resume 时仅按服务端稳定顺序选择第一个可读资源。章节、页码和音轨是资源内 locator，不升级为 route identity。
+- 图书入口按服务端绑定节点类型解析，不按最近记录或第一个资源选择页面；明确的继续阅读入口仍使用其合法 resourceId。
 
 ### 7.4 下载
 

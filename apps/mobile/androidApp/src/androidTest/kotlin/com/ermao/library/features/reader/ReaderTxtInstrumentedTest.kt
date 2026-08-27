@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
+import com.ermao.library.features.reader.infrastructure.TxtReadiumPublicationFactory
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
@@ -27,6 +28,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.readium.r2.shared.publication.services.positions
 
 @RunWith(AndroidJUnit4::class)
 class ReaderTxtInstrumentedTest {
@@ -55,6 +57,19 @@ class ReaderTxtInstrumentedTest {
     fun removeArtifacts() = runBlocking {
         progressStore.delete(sourceId)
         publicationStore.delete(sourceId)
+    }
+
+    @Test
+    fun publicationProvidesProgressTargetsAcrossChapters() = runBlocking {
+        val publication = TxtReadiumPublicationFactory().open(publicationStore.resolve(source), "Reading")
+        try {
+            val positions = publication.positions()
+            assertTrue(positions.size >= 2)
+            assertEquals(setOf("text/chapter-0001.xhtml", "text/chapter-0002.xhtml"), positions.map { it.href.toString() }.toSet())
+            assertNotNull(positions.last().locations.totalProgression)
+        } finally {
+            publication.close()
+        }
     }
 
     @Test

@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="shelves_all">全部</string>
+    <string name="shelves_collections">合集</string>
+    <string name="shelves_scope">筛选书架</string>
+    <string name="shelves_search">搜索书架或合集</string>
+    <string name="shelves_search_collection">搜索合集内的书架</string>
+    <string name="shelves_create">新建</string>
+    <string name="shelves_name">名称</string>
+    <string name="shelves_description">描述（可选）</string>
+    <string name="shelves_choose_members">选择成员书架</string>
+    <string name="shelves_create_failed">创建失败，请检查名称和网络后重试。</string>
+    <string name="shelves_count_books">%1$s 本图书</string>
+    <string name="shelves_count_smart">智能书架 · %1$s 本图书</string>
+    <string name="shelves_count_collection">合集 · %1$s 个书架</string>
+    <string name="shelves_smart_hint">根据规则自动更新</string>
+    <string name="shelves_rules_unsupported">部分规则需在 Web 端查看</string>
+    <string name="shelves_empty">暂无书架</string>
+    <string name="shelves_empty_message">创建书架或合集，整理你的图书。</string>
+    <string name="shelves_no_results">没有匹配的书架</string>
+    <string name="shelves_no_results_message">试试其他名称，或清除搜索。</string>
+    <string name="shelves_empty_books">书架中暂无图书</string>
+    <string name="shelves_empty_books_message">可从图书详情加入书架；智能书架将按规则自动更新。</string>
+    <string name="shelves_error">无法加载书架</string>
+    <string name="shelves_error_message">请检查网络连接后重试。</string>
+    <string name="shelves_inaccessible">书架不存在或不可访问</string>
+    <string name="shelves_load_more">加载更多图书</string>
+    <string name="shelves_load_more_retry">加载更多失败，点击重试</string>
+    <string name="shelves_back">返回</string>
+    <string name="shelves_refresh">刷新</string>
     <string name="app_name">二毛图书</string>
 
     <string name="server_screen_description">添加自托管服务器，开始阅读。</string>
@@ -147,7 +175,6 @@
     <string name="work_detail_loading_message">正在加载作品详情和媒介。</string>
     <string name="work_unavailable_title">内容不可访问</string>
     <string name="work_unavailable_message">作品不存在，或你已经没有访问权限。</string>
-    <string name="work_reader_next_phase_message">Reader 和有声书播放将在下一阶段启用。</string>
     <string name="work_no_readable_resources">当前媒介没有可阅读的资源。</string>
     <string name="work_resources_title">媒体类型</string>
     <string name="work_detail_title">图书详情</string>
@@ -200,6 +227,7 @@
     <string name="multi_download_partial">成功：%1$d · 失败：%2$d</string>
     <string name="work_quick_remove_download">删除已下载卷册</string>
     <string name="work_quick_reading_unread">未读</string>
+    <string name="work_quick_reading_in_progress">在读</string>
     <string name="work_quick_reading_read">已读</string>
     <string name="work_quick_add">加入</string>
     <string name="work_quick_more">更多</string>
@@ -233,6 +261,9 @@
     <string name="work_primary_start_read_action">开始阅读</string>
     <string name="work_primary_listen_action">继续收听</string>
     <string name="work_primary_start_listen_action">开始收听</string>
+    <string name="work_book_reading">正在阅读 · %1$s</string>
+    <string name="work_book_download_count">已下载 %1$d 项</string>
+    <string name="work_book_listening">正在收听 · %1$s</string>
     <string name="cancel_action">取消</string>
 
     <string name="server_center_title">服务器</string>
@@ -389,6 +420,8 @@
     <string name="reader_font_family">字体</string>
     <string name="reader_font_weight">字重</string>
     <string name="reader_letter_spacing">字间距</string>
+    <string name="reader_font_mapping">苹方、黑体和微软雅黑使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。</string>
+    <string name="reader_negative_spacing_retained">已保存的负字间距仍保留，但暂不支持；当前生效值为 0。</string>
     <string name="reader_page_margin">页边距</string>
     <string name="reader_font_pingfang">苹方</string>
     <string name="reader_font_heiti">黑体</string>
@@ -408,7 +441,15 @@
     <string name="reader_show_clock">常显时钟</string>
     <string name="reader_keep_awake">保持屏幕唤醒</string>
     <string name="reader_page_turn_settings">翻页设置</string>
-    <string name="reader_page_turn_animation">动画</string>
+    <string name="reader_page_turn_animation">按钮与按键翻页动画</string>
+    <string name="reader_publisher_styles">原书样式</string>
+    <string name="reader_gesture_animation">滑动手势动画</string>
+    <string name="reader_publisher_colors">独立原书颜色</string>
+    <string name="reader_publisher_fonts">独立原书字体</string>
+    <string name="reader_page_width">最大页宽</string>
+    <string name="reader_smart_optimization">智能段落整理</string>
+    <string name="reader_deduplicate_indent">去重缩进</string>
+    <string name="reader_indent_unindented">自动补缩进</string>
     <string name="reader_animation_slide">滑动</string>
     <string name="reader_animation_off">关闭</string>
     <string name="reader_tap_zones">点击区域</string>
@@ -547,7 +588,6 @@
     <string name="management_delete">删除图书</string>
     <string name="management_delete_message">输入“%1$s”以永久删除图书、源文件、资源和阅读记录。</string>
     <string name="work_no_readable_resources_message">当前图书没有可在线打开的可读资源。</string>
-    <string name="work_contents_title">图书内容</string>
     <plurals name="work_contents_count">
         <item quantity="other">共 %1$d 项</item>
     </plurals>
@@ -566,14 +606,12 @@
     <string name="work_sort_updated_asc">最早更新</string>
     <string name="work_sort_type_asc">内容类型</string>
     <string name="work_sort_size_desc">内容大小</string>
-    <string name="work_back_to_contents">返回图书内容</string>
     <string name="work_resource_chapters_title">章节</string>
     <string name="work_resource_pages_title">页面</string>
     <string name="work_resource_tracks_title">音轨</string>
     <plurals name="work_resource_units_count">
         <item quantity="other">共 %1$d 项</item>
     </plurals>
-    <string name="work_open_reader">打开阅读器</string>
     <string name="work_open_player">打开播放器</string>
     <string name="work_resource_importing">资源仍在导入中。%1$s</string>
     <string name="work_resource_import_failed">导入失败。%1$s</string>
@@ -587,4 +625,5 @@
     <string name="work_chapter_current">正在阅读</string>
     <string name="work_pagination">第 %1$d / %2$d 页</string>
     <string name="download_bootstrap_invalid">离线下载信息无效（DOWNLOAD_BOOTSTRAP_INVALID），在线阅读仍可使用。</string>
+    <string name="work_contents_open_children">浏览下级内容</string>
 </resources>

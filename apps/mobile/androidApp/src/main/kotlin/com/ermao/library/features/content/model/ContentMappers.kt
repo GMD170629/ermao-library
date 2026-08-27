@@ -64,8 +64,7 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
     val mappedResources = resources.map { resource ->
         resource.toUiContent(resource.id == continueResourceId)
     }
-    val selectedResourceId = mappedResources.firstOrNull { it.selected }?.id
-        ?: mappedResources.firstOrNull()?.id
+    val selectedResourceId = continueResourceId
     return BookDetailContent(
         book = BookCard(
             id = id,
@@ -84,6 +83,7 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
         selectedResourceId = selectedResourceId,
         completed = completed,
         readingUnits = emptyList(),
+        continueResourceId = continueResourceId,
     )
 }
 

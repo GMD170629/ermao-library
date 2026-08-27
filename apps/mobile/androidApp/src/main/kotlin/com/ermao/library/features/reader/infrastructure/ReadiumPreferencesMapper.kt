@@ -26,16 +26,16 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
         val theme = effectiveTheme(preferences)
         val colors = theme.colors
         return EpubPreferences(
-            backgroundColor = if (epub.typography.allowPublisherColors) null else color(colors.background),
+            backgroundColor = color(colors.background),
             columnCount = when (epub.spreadMode) {
                 ReaderSpreadMode.Auto -> ColumnCount.AUTO
                 ReaderSpreadMode.Single -> ColumnCount.ONE
                 ReaderSpreadMode.Double -> ColumnCount.TWO
             },
-            fontFamily = if (epub.typography.allowPublisherFonts) null else fontFamily(epub.fontFamily),
+            fontFamily = fontFamily(epub.fontFamily),
             fontSize = epub.fontSize / READIUM_CSS_ROOT_FONT_SIZE,
             fontWeight = epub.fontWeight / NORMAL_FONT_WEIGHT,
-            lineHeight = if (epub.typography.preservePublisherStyles) null else epub.lineHeight,
+            lineHeight = epub.lineHeight,
             letterSpacing = epub.letterSpacing.coerceAtLeast(0.0),
             pageMargins = when (epub.pageMargin) {
                 ReaderPageMargin.Narrow -> 0.5
@@ -44,16 +44,14 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
             },
             paragraphIndent = epub.typography.paragraphIndent,
             paragraphSpacing = epub.typography.paragraphSpacing,
-            // Readium exposes one all-or-nothing publisher stylesheet flag.
-            // Keep it disabled so the supported native typography preferences remain effective.
-            publisherStyles = false,
+            publisherStyles = epub.typography.preservePublisherStyles,
             scroll = epub.flow == ReaderReadingMode.ContinuousScroll,
             textAlign = when (epub.typography.textAlign) {
                 ReaderTextAlignment.PublisherDefault -> null
                 ReaderTextAlignment.Start -> TextAlign.START
                 ReaderTextAlignment.Justify -> TextAlign.JUSTIFY
             },
-            textColor = if (epub.typography.allowPublisherColors) null else color(colors.foreground),
+            textColor = color(colors.foreground),
             theme = when (theme) {
                 ReaderTheme.Warm -> Theme.SEPIA
                 ReaderTheme.Night, ReaderTheme.Black -> Theme.DARK
@@ -71,9 +69,9 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
 
     private fun fontFamily(value: ReaderFontFamily): FontFamily = FontFamily(
         when (value) {
-            ReaderFontFamily.Pingfang, ReaderFontFamily.Heiti, ReaderFontFamily.Yahei -> FontFamily.SANS_SERIF.name
-            ReaderFontFamily.Songti -> FontFamily.SERIF.name
-            ReaderFontFamily.Kaiti -> FontFamily.CURSIVE.name
+            ReaderFontFamily.Pingfang, ReaderFontFamily.Heiti, ReaderFontFamily.Yahei -> "Shuku Sans"
+            ReaderFontFamily.Songti -> "Shuku Songti"
+            ReaderFontFamily.Kaiti -> "Shuku Kaiti"
         },
     )
 

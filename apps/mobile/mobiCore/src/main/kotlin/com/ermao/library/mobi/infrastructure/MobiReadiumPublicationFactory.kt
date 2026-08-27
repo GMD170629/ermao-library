@@ -1,5 +1,7 @@
 package com.ermao.library.mobi.infrastructure
 
+import org.readium.r2.streamer.parser.epub.EpubPositionsService
+
 import java.io.File
 import java.io.IOException
 import org.readium.r2.shared.InternalReadiumApi
@@ -109,6 +111,18 @@ class MobiReadiumPublicationFactory {
                     tableOfContents = tableOfContents,
                 ),
                 container = transformContainer(container),
+                servicesBuilder = Publication.ServicesBuilder(
+                    // Use parser descriptor lengths, never the security-decorated resources:
+                    // asking a TransformingResource for its length reads the entire body.
+                    positions = {
+                        EpubPositionsService(
+                            readingOrder,
+                            Layout.REFLOWABLE,
+                            container,
+                            EpubPositionsService.ReflowableStrategy.ArchiveEntryLength(1024),
+                        )
+                    },
+                ),
             )
             return MobiReadiumPublication(
                 publication = publication,

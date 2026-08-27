@@ -415,13 +415,15 @@ final class ContentStoreTests: XCTestCase {
         )
         store.reload()
         try await waitUntil {
-            store.current.readyItems?.map(\.id) == ["page-1"]
+            if case .ready(let items, _) = store.current.results { return items.map(\.id) == ["book:page-1"] }
+            return false
         }
 
-        store.loadNextPageIfNeeded(visibleItemID: "page-1")
+        store.loadNextPageIfNeeded(visibleItemID: "book:page-1")
         try await waitUntil { store.current.hasPaginationError }
 
-        XCTAssertEqual(store.current.readyItems?.map(\.id), ["page-1"])
+        guard case .ready(let items, _) = store.current.results else { return XCTFail("Expected accepted page") }
+        XCTAssertEqual(items.map(\.id), ["book:page-1"])
         XCTAssertEqual(store.current.loadedPage, 1)
     }
 
@@ -491,46 +493,84 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyRoot.path))
     }
 
-    func testSingleReadableResourceLoadsChaptersInsteadOfBookContents() async throws {
+    func testDirectoryRootDoesNotCollapseWhenItHasOneReadableResource() async throws {
         let client = DetailBrowserContentClient(resourceCount: 1)
         let store = BookDetailStore(
-            context: contentContext,
-            client: client,
-            bookID: "browser-work",
-            onUnauthorized: {}
-        )
-
-        store.load()
-        try await waitUntil { store.chapterPage?.chapters.map(\.title) == ["Opening", "Arrival"] }
-
-        XCTAssertNil(store.contentsPage)
-        let chapterRequestCount = await client.chapterRequestCount
-        let contentsRequestCount = await client.contentsRequestCount
-        XCTAssertEqual(chapterRequestCount, 1)
-        XCTAssertEqual(contentsRequestCount, 0)
-        guard case .ready(let content) = store.state else {
-            return XCTFail("Expected the single-resource detail to remain ready")
-        }
-        XCTAssertEqual(content.chapters.map(\.state), [.read, .current])
-    }
-
-    func testMultipleReadableResourcesLoadsHierarchicalBookContents() async throws {
-        let client = DetailBrowserContentClient(resourceCount: 2)
-        let store = BookDetailStore(
-            context: contentContext,
-            client: client,
-            bookID: "browser-work",
-            onUnauthorized: {}
+            context: contentContext, client: client, bookID: "browser-work", onUnauthorized: {}
         )
 
         store.load()
         try await waitUntil { store.contentsPage?.entries.map(\.title) == ["Volume One"] }
 
-        XCTAssertNil(store.chapterPage)
-        let contentsRequestCount = await client.contentsRequestCount
-        let chapterRequestCount = await client.chapterRequestCount
-        XCTAssertEqual(contentsRequestCount, 1)
-        XCTAssertEqual(chapterRequestCount, 0)
+        XCTAssertNil(store.resourceDetailPage)
+        let contentsCount = await client.contentsRequestCount
+        XCTAssertEqual(contentsCount, 1)
+        let chapterCount = await client.chapterRequestCount
+        XCTAssertEqual(chapterCount, 0)
+    }
+
+    func testBookResumeTargetDoesNotSelectOrCollapseDirectoryAndSurvivesRefresh() async throws {
+        let client = DetailBrowserContentClient(resourceCount: 2)
+        let store = BookDetailStore(context: contentContext, client: client, bookID: "browser-work", onUnauthorized: {})
+        store.load()
+        try await waitUntil { store.contentsPage != nil && !store.isLoadingContentBrowser }
+        guard case .ready(let initial) = store.state else { return XCTFail("Expected book detail") }
+        XCTAssertEqual(initial.continueResource?.id, "resource-1")
+        XCTAssertEqual(initial.continueResource?.progress, 40)
+        XCTAssertEqual(initial.readingResource(isBookRoot: true, selectedResourceID: nil)?.id, "resource-1")
+        XCTAssertEqual(initial.readingResource(isBookRoot: false, selectedResourceID: "resource-2")?.id, "resource-2")
+        XCTAssertNil(initial.readingResource(isBookRoot: false, selectedResourceID: nil))
+        XCTAssertNil(store.selectedResourceID)
+
+        ReaderProgressPresentationCenter.shared.publish(
+            namespaceKey: contentContext.namespaceKey, bookID: "browser-work", resourceID: "resource-2", percent: 75,
+            progress: try exactReflowableProgress(sourceID: "resource-2", href: "chapter.xhtml", fragment: "one", updatedAtEpochMillis: 2_000),
+            chapterTitle: "Chapter"
+        )
+        store.refreshIfLoaded()
+        try await waitUntil { await client.contentsRequestCount == 2 && !store.isLoadingContentBrowser }
+        guard case .ready(let refreshed) = store.state else { return XCTFail("Expected refreshed book detail") }
+        XCTAssertEqual(refreshed.continueResource?.id, "resource-2")
+        XCTAssertEqual(refreshed.continueResource?.progress, 75)
+        XCTAssertNil(store.selectedResourceID)
+        XCTAssertNil(store.resourceDetailPage)
+        store.refreshAfterBookReadingStatusChange()
+        try await waitUntil { await client.contentsRequestCount == 3 && !store.isLoadingContentBrowser }
+        guard case .ready(let afterBookStatusChange) = store.state else { return XCTFail("Expected book state reload") }
+        XCTAssertNil(afterBookStatusChange.resources.first { $0.id == "resource-2" }?.progress)
+        XCTAssertEqual(afterBookStatusChange.continueResourceID, "resource-1")
+    }
+
+    func testDirectoryRootUsesTheSamePageWhenItHasMultipleResources() async throws {
+        let client = DetailBrowserContentClient(resourceCount: 2)
+        let store = BookDetailStore(
+            context: contentContext, client: client, bookID: "browser-work", onUnauthorized: {}
+        )
+
+        store.load()
+        try await waitUntil { store.contentsPage?.entries.map(\.title) == ["Volume One"] }
+
+        XCTAssertNil(store.resourceDetailPage)
+        let contentsCount = await client.contentsRequestCount
+        XCTAssertEqual(contentsCount, 1)
+        let chapterCount = await client.chapterRequestCount
+        XCTAssertEqual(chapterCount, 0)
+    }
+
+    func testExplicitResourceDestinationLoadsResourceDetailWithoutOpeningReader() async throws {
+        let client = DetailBrowserContentClient(resourceCount: 2)
+        let store = BookDetailStore(
+            context: contentContext, client: client, bookID: "browser-work",
+            destination: .resource(resourceID: "resource-2"), onUnauthorized: {}
+        )
+
+        store.load()
+        try await waitUntil { store.resourceDetailPage?.resourceID == "resource-2" }
+
+        XCTAssertNil(store.contentsPage)
+        XCTAssertEqual(store.selectedResourceID, "resource-2")
+        let contentsCount = await client.contentsRequestCount
+        XCTAssertEqual(contentsCount, 0)
     }
 
     func testReaderProgressImmediatelyUpdatesVisibleWorkDetailAndChapterStates() async throws {
@@ -575,6 +615,7 @@ final class ContentStoreTests: XCTestCase {
             context: contentContext,
             client: ProgressContentClient(content: initial),
             bookID: "reader-work",
+            destination: .resource(resourceID: "resource-1"),
             onUnauthorized: {}
         )
         store.load()
@@ -621,7 +662,8 @@ final class ContentStoreTests: XCTestCase {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(unchanged.book.progress, 42)
-        XCTAssertNil(unchanged.resources.first(where: { $0.id == "resource-2" })?.progress)
+        XCTAssertEqual(unchanged.resources.first(where: { $0.id == "resource-2" })?.progress, 75)
+        XCTAssertEqual(unchanged.continueResource?.id, "resource-2")
         XCTAssertEqual(unchanged.chapters.map(\.state), [.read, .current])
 
         ReaderProgressPresentationCenter.shared.publish(
@@ -641,6 +683,7 @@ final class ContentStoreTests: XCTestCase {
             return XCTFail("Expected work detail to remain ready")
         }
         XCTAssertEqual(reordered.book.progress, 55)
+        XCTAssertEqual(reordered.continueResource?.id, "resource-2")
         XCTAssertEqual(reordered.chapters.map(\.state), [.current, .unread])
     }
 
@@ -700,6 +743,7 @@ final class ContentStoreTests: XCTestCase {
             context: contentContext,
             client: ProgressContentClient(content: initial),
             bookID: "position-work",
+            destination: .resource(resourceID: "resource-position"),
             onUnauthorized: {}
         )
         store.load()
@@ -736,7 +780,7 @@ final class ContentStoreTests: XCTestCase {
         updatedAtEpochMillis: Int64
     ) throws -> ReaderProgress {
         let payload = """
-        {"schema":"ermao.reader-progress","version":6,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
+        {"schema":"ermao.reader-progress","version":7,"resourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
         """
         return try PublicKt.createReaderProgressJson().decode(payload: payload)
     }
@@ -748,7 +792,7 @@ final class ContentStoreTests: XCTestCase {
         updatedAtEpochMillis: Int64
     ) throws -> ReaderProgress {
         let payload = """
-        {"schema":"ermao.reader-progress","version":6,"sourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
+        {"schema":"ermao.reader-progress","version":7,"resourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
         """
         return try PublicKt.createReaderProgressJson().decode(payload: payload)
     }
@@ -1041,7 +1085,8 @@ private actor DetailBrowserContentClient: ContentClient {
             resources: resources,
             selectedResourceID: resources.first?.id,
             readingStatus: .reading,
-            chapters: []
+            chapters: [],
+            continueResourceID: "resource-1"
         )
     }
     func fetchBookContents(

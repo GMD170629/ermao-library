@@ -108,6 +108,8 @@ class ReaderActivity : AppCompatActivity() {
     private var openError by mutableStateOf<ReaderError?>(null)
     private var readerTitle by mutableStateOf("")
     private var controlsVisible by mutableStateOf(false)
+    private var readerPanelVisible = false
+    private var readerSelectionMode: android.view.ActionMode? = null
     private var touchDownX = 0f
     private var touchDownY = 0f
     private var touchDownAt = 0L
@@ -193,7 +195,10 @@ class ReaderActivity : AppCompatActivity() {
             readerTitle = getString(com.ermao.library.R.string.app_name)
         }
 
-        onBackPressedDispatcher.addCallback(this) { closeReader() }
+        onBackPressedDispatcher.addCallback(this) {
+            val selection = readerSelectionMode
+            if (selection != null) selection.finish() else closeReader()
+        }
         setContent {
             ReaderScreen(
                 title = readerTitle,
@@ -202,6 +207,7 @@ class ReaderActivity : AppCompatActivity() {
                 openError = openError,
                 controlsVisible = controlsVisible,
                 onControlsVisibleChange = { controlsVisible = it },
+                onPanelVisibilityChange = { readerPanelVisible = it },
                 onClose = ::closeReader,
                 onRetryOpen = when {
                     managedRequest != null -> { { retryManagedDownload(managedRequest) } }
@@ -244,7 +250,21 @@ class ReaderActivity : AppCompatActivity() {
             .onSuccess { networkCallbackRegistered = true }
     }
 
+    override fun onActionModeStarted(mode: android.view.ActionMode) {
+        super.onActionModeStarted(mode)
+        readerSelectionMode = mode
+    }
+
+    override fun onActionModeFinished(mode: android.view.ActionMode) {
+        super.onActionModeFinished(mode)
+        if (readerSelectionMode == mode) readerSelectionMode = null
+    }
+
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Reflowable content uses Readium's unhandled-tap API, after links and selection.
+        if (controller?.morphology == com.ermao.library.shared.modules.reader.ReaderMorphology.Reflowable || readerPanelVisible) {
+            return super.dispatchTouchEvent(event)
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = event.x
@@ -263,6 +283,9 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (readerPanelVisible || readerSelectionMode != null || currentFocus?.onCheckIsTextEditor() == true) {
+            return super.dispatchKeyEvent(event)
+        }
         if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) {
             return super.dispatchKeyEvent(event)
         }
@@ -285,6 +308,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun routeReaderTap(horizontalFraction: Float) {
+        if (readerPanelVisible || readerSelectionMode != null) return
         val reader = controller ?: return
         when (reader.preferences.value.interaction.tapZones) {
             ReaderTapZones.Disabled -> controlsVisible = true
@@ -476,6 +500,7 @@ class ReaderActivity : AppCompatActivity() {
                         source.resourceId,
                     ),
                     namespaceKey = namespace.presentationKey(),
+                    initialTarget = request.initialTarget,
                     navigationUnits = result.bootstrap.units,
                     comicPages = result.bootstrap.comicPages,
                     pdfPages = result.bootstrap.pdfPages,
@@ -941,6 +966,7 @@ class ReaderActivity : AppCompatActivity() {
         bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
         bookmarkSyncTarget: ReaderBookmarkSyncTarget? = null,
         namespaceKey: String? = null,
+        initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
         navigationUnits: List<ReaderNavigationUnit> = emptyList(),
         comicPages: List<ReaderComicPage> = emptyList(),
         pdfPages: List<ReaderPdfPage> = emptyList(),
@@ -989,6 +1015,7 @@ class ReaderActivity : AppCompatActivity() {
                 readium = readium,
                 comicPageServer = comicPageServer,
                 remoteSnapshot = remoteSnapshot,
+                initialTarget = initialTarget,
                 progressCoordinator = progressCoordinator,
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1009,6 +1036,7 @@ class ReaderActivity : AppCompatActivity() {
                 readium = AndroidReadiumRuntime(applicationContext),
                 remotePdfium = remotePdfium,
                 remoteSnapshot = remoteSnapshot,
+                initialTarget = initialTarget,
                 progressCoordinator = progressCoordinator,
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1030,6 +1058,7 @@ class ReaderActivity : AppCompatActivity() {
             locatorMapper = ReadiumLocatorMapper(),
             preferencesMapper = ReadiumPreferencesMapper(resources),
             remoteSnapshot = remoteSnapshot,
+            initialTarget = initialTarget,
             progressCoordinator = progressCoordinator,
             initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                 ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1038,6 +1067,7 @@ class ReaderActivity : AppCompatActivity() {
             bookmarkSyncPort = bookmarkSyncPort,
             bookmarkSyncTarget = bookmarkSyncTarget,
             externalLinkHandler = ::openExternalLink,
+            onUnhandledTap = ::routeReaderTap,
             presentationNamespaceKey = namespaceKey,
             publishProgressUpdate = (application as ErmaoLibraryApplication)
                 .readerProgressPresentationCenter::publish,
@@ -1158,11 +1188,12 @@ class ReaderActivity : AppCompatActivity() {
                 .putExtra(EXTRA_PAGE_COUNT, pageCount ?: -1)
         }
 
-        fun createServerIntent(context: Context, profileId: String, resourceId: String): Intent {
+        fun createServerIntent(context: Context, profileId: String, resourceId: String, initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null): Intent {
             require(profileId.isNotBlank() && resourceId.isNotBlank())
             return Intent(context, ReaderActivity::class.java)
                 .putExtra(EXTRA_SERVER_PROFILE_ID, profileId)
                 .putExtra(EXTRA_SERVER_RESOURCE_ID, resourceId)
+                .putExtra("reader.initialTarget", initialTarget?.let { com.ermao.library.shared.modules.reader.encodeReaderLaunchTarget(it) })
                 .addFlags(if (context is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
@@ -1228,7 +1259,7 @@ class ReaderActivity : AppCompatActivity() {
         private fun Intent.serverReaderRequestOrNull(): ServerReaderRequest? {
             val profileId = getStringExtra(EXTRA_SERVER_PROFILE_ID) ?: return null
             val resourceId = getStringExtra(EXTRA_SERVER_RESOURCE_ID) ?: return null
-            return ServerReaderRequest(profileId, resourceId)
+            return ServerReaderRequest(profileId, resourceId, com.ermao.library.shared.modules.reader.decodeReaderLaunchTarget(getStringExtra("reader.initialTarget")))
         }
 
 
@@ -1247,7 +1278,7 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private data class ServerReaderRequest(val profileId: String, val resourceId: String)
+    private data class ServerReaderRequest(val profileId: String, val resourceId: String, val initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null)
     private data class ManagedDownloadReaderRequest(
         val profileId: String,
         val bookId: String,

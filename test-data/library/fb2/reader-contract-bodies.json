@@ -1,0 +1,4 @@
+{
+  "fb2/section-0001.xhtml": "<section id=\"fb2-node-000001\"><h1>第一章 Chapter One</h1><p id=\"fb2-node-000003\">开头 <em>emphasis</em> &amp; <strong>bold</strong> 结尾。</p><p><a href=\"section-0002.xhtml#fb2-node-000004\">脚注 Note</a> external text</p><img src=\"images/498cc84b29cb560e15b4.png\" alt=\"\"/><table><tr><th>表头</th><td>A &lt; B</td></tr></table><section id=\"fb2-node-000002\"><h2>子章节</h2><blockquote><div class=\"stanza\"><p>诗行</p><p>Second line</p></div></blockquote></section></section>",
+  "fb2/section-0002.xhtml": "<section id=\"fb2-node-000004\"><h1>注释 Notes</h1><p>脚注正文 <a href=\"section-0001.xhtml#fb2-node-000003\">返回</a></p></section>"
+}

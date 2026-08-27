@@ -12,3 +12,11 @@
 
 The file is kept byte-for-byte identical to upstream. It is imported through the
 normal filesystem scan queue and is never inserted into the catalog database directly.
+
+## `reader-contract.fb2` and `reader-contract-bodies.json`
+
+- Original project test content, available under the repository license. No external book text.
+- Exercises bilingual metadata, nested sections, mixed inline content, CDATA, PNG, tables, poetry, notes and return links.
+- SHA-256: `e3dd86210fb2da80aaa5393a32a5e9959a9ef2ca49e6fbcecc713c3ffc66165d`.
+- The body golden was generated with the existing server `shuku-fb2-publication-v1` adapter. Android and iOS must produce these exact bodies and hrefs before platform head-only security decoration.
+- Both files are shared test inputs, not derived Reader artifacts. Production persists only the original FB2.

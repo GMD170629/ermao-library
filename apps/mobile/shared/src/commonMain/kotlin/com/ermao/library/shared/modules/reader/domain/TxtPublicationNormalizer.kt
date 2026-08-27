@@ -18,6 +18,7 @@ const val TXT_PUBLICATION_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
 
 /** Deterministic TXT -> in-memory Readium publication resources shared by every platform. */
 class TxtPublicationNormalizer {
+    @Throws(IllegalArgumentException::class)
     fun normalize(decodedText: String, publicationTitle: String): NormalizedTxtPublication {
         require(publicationTitle.isNotBlank()) { "TXT publication title is blank" }
         require('\u0000' !in decodedText) { "TXT publication contains NUL" }

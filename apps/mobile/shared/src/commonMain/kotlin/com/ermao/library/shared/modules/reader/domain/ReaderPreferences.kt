@@ -314,6 +314,7 @@ data class ReaderCapabilities(
     val supportsPdfFit: Boolean = false,
     val supportsPdfRotation: Boolean = false,
     val supportsPdfCropMargins: Boolean = false,
+    val supportsPublisherStyles: Boolean = false,
 ) {
     companion object {
         fun epub(supportsVolumeKeys: Boolean, supportsCustomFonts: Boolean = true) = ReaderCapabilities(
@@ -341,10 +342,11 @@ data class ReaderCapabilities(
             supportsKeepAwake = true,
             supportsTapZones = true,
             supportsSwipeToggle = false,
-            supportsPageTurnAnimation = false,
+            supportsPageTurnAnimation = true,
             supportsSmartOptimization = false,
             supportsKeyboardPageTurn = true,
             supportsVolumeKeyPageTurn = supportsVolumeKeys,
+            supportsPublisherStyles = true,
         )
 
         val Epub: ReaderCapabilities = epub(supportsVolumeKeys = false)

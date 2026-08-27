@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:xlink="http://www.w3.org/1999/xlink">
+<description><title-info><book-title>阅读 &amp; Reading</book-title><lang>zh-CN</lang></title-info></description>
+<body><section id="chapter"><title><p>第一章 Chapter One</p></title>
+<p id="opening">开头 <emphasis>emphasis</emphasis> &amp; <strong>bold</strong> 结尾。</p>
+<p><a l:href="#note">脚注 Note</a> <a l:href="https://example.invalid">external text</a></p>
+<image l:href="#illustration"/><table><tr><th>表头</th><td><![CDATA[A < B]]></td></tr></table>
+<section id="nested"><title><p>子章节</p></title><poem><stanza><v>诗行</v><v>Second line</v></stanza></poem></section>
+</section></body>
+<body name="notes"><section id="note"><title><p>注释 Notes</p></title><p>脚注正文 <a l:href="#opening">返回</a></p></section></body>
+<binary id="illustration" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAaX2RUAAAAAASUVORK5CYII=</binary>
+</FictionBook>

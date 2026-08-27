@@ -46,6 +46,7 @@ android {
     }
 
     sourceSets.named("androidTest") {
+        assets.directories.add(layout.buildDirectory.dir("generated/reader-test-assets").get().asFile.absolutePath)
         assets.directories.add(
             rootProject.layout.projectDirectory.dir("../../test-data/library/epub").asFile.absolutePath,
         )
@@ -103,10 +104,18 @@ val syncReaderAssets by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/reader-assets/fonts/reader"))
 }
 
+val syncReaderTestFb2Assets by tasks.registering(Sync::class) {
+    from(rootProject.layout.projectDirectory.dir("../../test-data/library/fb2")) {
+        into("fb2")
+    }
+    into(layout.buildDirectory.dir("generated/reader-test-assets"))
+}
+
 tasks.named("preBuild") {
     dependsOn(rootProject.tasks.named("generateDesignTokens"))
     dependsOn(syncBrandAsset)
     dependsOn(syncReaderAssets)
+    dependsOn(syncReaderTestFb2Assets)
 }
 
 dependencies {
@@ -131,6 +140,7 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.kotlinx.coroutines.core)

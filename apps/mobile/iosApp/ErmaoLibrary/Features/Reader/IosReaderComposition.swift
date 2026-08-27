@@ -10,19 +10,22 @@ struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
     let resourceID: String
     let displayTitle: String
     let managedDownloadRecordID: String?
+    let initialTargetPayload: String?
 
     init(
         context: ContentRequestContext,
         bookID: String,
         resourceID: String,
         displayTitle: String,
-        managedDownloadRecordID: String? = nil
+        managedDownloadRecordID: String? = nil,
+        initialTargetPayload: String? = nil
     ) {
         self.context = context
         self.bookID = bookID
         self.resourceID = resourceID
         self.displayTitle = displayTitle
         self.managedDownloadRecordID = managedDownloadRecordID
+        self.initialTargetPayload = initialTargetPayload
     }
 
     var id: String { "\(context.namespaceKey)|\(resourceID)" }
@@ -532,6 +535,7 @@ final class IosReaderComposition: ObservableObject {
                 progressStore: progressStore,
                 progressCoordination: progressCoordination,
                 remoteSnapshot: sessionRemoteSnapshot,
+                initialTarget: ErmaoShared.PublicKt.decodeReaderLaunchTarget(payload: request.initialTargetPayload),
                 namespaceKey: request.context.namespaceKey,
                 bookID: request.bookID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
@@ -572,6 +576,7 @@ final class IosReaderComposition: ObservableObject {
                 progressStore: progressStore,
                 progressCoordination: progressCoordination,
                 remoteSnapshot: sessionRemoteSnapshot,
+                initialTarget: ErmaoShared.PublicKt.decodeReaderLaunchTarget(payload: request.initialTargetPayload),
                 namespaceKey: request.context.namespaceKey,
                 bookID: request.bookID,
                 publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
@@ -604,6 +609,7 @@ final class IosReaderComposition: ObservableObject {
                 resourceId: source.resourceId
             ),
             remoteSnapshot: sessionRemoteSnapshot,
+                initialTarget: ErmaoShared.PublicKt.decodeReaderLaunchTarget(payload: request.initialTargetPayload),
             namespaceKey: request.context.namespaceKey,
             bookID: request.bookID,
             publishProgressUpdate: { ReaderProgressPresentationCenter.shared.publish($0) },
@@ -815,7 +821,8 @@ final class IosReaderBootstrapHost: ObservableObject {
                 context: request.context,
                 bookID: request.bookID,
                 resourceID: request.resourceID,
-                displayTitle: request.displayTitle
+                displayTitle: request.displayTitle,
+                initialTargetPayload: request.initialTargetPayload
             )))
             started = true
         } catch let failure as IosReaderFailure {

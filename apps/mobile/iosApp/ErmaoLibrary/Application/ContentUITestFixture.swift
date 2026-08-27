@@ -231,7 +231,8 @@ private struct FixtureContentClient: ContentClient {
             chapters: book.id == "the-left-hand-of-darkness" ? [] : [
                 BookChapter(id: "chapter-1", title: "Chapter 1", progress: book.progress, isCurrent: true),
                 BookChapter(id: "chapter-2", title: "Chapter 2", progress: nil, isCurrent: false),
-            ]
+            ],
+            continueResourceID: "resource-1"
         )
     }
 
@@ -243,6 +244,18 @@ private struct FixtureContentClient: ContentClient {
         page: Int,
         pageSize: Int
     ) async throws -> BookContentsPage {
+        if bookID != "the-left-hand-of-darkness" {
+            let book = books.first { $0.id == bookID } ?? books[0]
+            let resource = fixtureContentEntry(
+                id: "resource-node-1", title: book.title, kind: "FILE",
+                hasChildren: false, resourceID: "resource-1"
+            )
+            return BookContentsPage(
+                bookID: bookID, currentSourceNodeID: nil, currentResourceID: "resource-1",
+                currentNode: resource, currentResourceIDs: ["resource-1"], parentSourceNodeID: nil,
+                breadcrumbs: [], entries: [resource], page: 1, pageSize: pageSize, total: 1, totalPages: 1
+            )
+        }
         let root = fixtureContentEntry(
             id: "fixture-root",
             title: "The Left Hand of Darkness",

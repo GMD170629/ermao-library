@@ -1,4 +1,4 @@
-﻿import CryptoKit
+import CryptoKit
 import Foundation
 import SQLite3
 import XCTest
@@ -55,6 +55,58 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(first.load(), changed)
         XCTAssertEqual(anotherUser.load(), IosReaderPreferences())
         XCTAssertEqual(first.reset(), IosReaderPreferences())
+    }
+
+    @MainActor
+    func testPreferenceWriterCoalescesAndRollsBackFailure() async {
+        var stored: [IosReaderPreferences] = []
+        var shouldFail = false
+        let writer = IosReaderPreferenceEditor(preferences: IosReaderPreferences()) { requested in
+            await Task.yield()
+            if shouldFail { return false }
+            stored.append(requested)
+            return true
+        }
+        writer.change { $0.fontSize = 20 }
+        writer.change { $0.fontSize = 24 }
+        writer.change { $0.lineHeight = 2.2 }
+        await writer.flush()
+        XCTAssertEqual(stored.last?.fontSize, 24)
+        XCTAssertEqual(stored.last?.lineHeight, 2.2)
+        XCTAssertEqual(stored.count, 1)
+        shouldFail = true
+        writer.change { $0.fontSize = 30 }
+        await writer.flush()
+        XCTAssertTrue(writer.applyFailed)
+        XCTAssertEqual(writer.draft.fontSize, 24)
+        XCTAssertEqual(stored.count, 1)
+    }
+
+    func testScopedResetPreservesOtherReaderPreferences() {
+        var preferences = IosReaderPreferences()
+        preferences.fontSize = 24
+        preferences.comicPageGap = 16
+        preferences.pdfRotation = 90
+        preferences.theme = .night
+        let text = preferences.reset(for: .reflowable)
+        XCTAssertEqual(text.fontSize, 18)
+        XCTAssertEqual(text.comicPageGap, 16)
+        XCTAssertEqual(text.pdfRotation, 90)
+        XCTAssertEqual(text.theme, .warm)
+        XCTAssertEqual(preferences.reset(for: .comic).fontSize, 24)
+        XCTAssertEqual(preferences.reset(for: .pdf).comicPageGap, 16)
+    }
+
+    func testEveryReflowCallbackAndFlushRemainSuppressedUntilUserNavigation() {
+        var gate = IosReaderPersistenceGate()
+        gate.beginUserNavigation()
+        gate.suppressPreferenceReflow()
+        for position in 1 ... 5 {
+            XCTAssertFalse(gate.observeLocationChange(.init(href: "chapter.xhtml", progression: Double(position) / 10, totalProgression: nil, position: position)))
+        }
+        XCTAssertFalse(gate.canPersistCurrentLocation)
+        gate.beginUserNavigation()
+        XCTAssertTrue(gate.canPersistCurrentLocation)
     }
 
     func testPreferenceReflowObservationDoesNotBecomeUserNavigation() {

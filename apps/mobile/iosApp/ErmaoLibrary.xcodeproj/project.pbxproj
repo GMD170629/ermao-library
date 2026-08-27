@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C01100000000000000000004 /* IosReaderControlAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000004 /* IosReaderControlAdapters.swift */; };
+		C01100000000000000000003 /* IosReaderControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000003 /* IosReaderControlSheets.swift */; };
+		C01100000000000000000002 /* IosReaderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000002 /* IosReaderControls.swift */; };
+		C01100000000000000000001 /* IosReaderControlSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000001 /* IosReaderControlSession.swift */; };
+		B2A100000000000000000004 /* ShelfCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000004 /* ShelfCatalogTests.swift */; };
+		B2A100000000000000000005 /* ShelfCatalogUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000005 /* ShelfCatalogUITests.swift */; };
+		B2A100000000000000000000 /* ShelfCatalogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000000 /* ShelfCatalogModels.swift */; };
+		B2A100000000000000000001 /* SharedShelfCatalogClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000001 /* SharedShelfCatalogClient.swift */; };
+		B2A100000000000000000002 /* ShelfCatalogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000002 /* ShelfCatalogStore.swift */; };
+		B2A100000000000000000003 /* ShelfCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A100000000000000000003 /* ShelfCatalogView.swift */; };
 		B00100000000000000000001 /* ErmaoLibraryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000001 /* ErmaoLibraryApp.swift */; };
 		B00200000000000000000002 /* MobileRuntimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00200000000000000000002 /* MobileRuntimeClient.swift */; };
 		B00300000000000000000003 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00300000000000000000003 /* SessionStore.swift */; };
@@ -35,6 +45,7 @@
 		B04600000000000000000046 /* FacetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04600000000000000000046 /* FacetView.swift */; };
 		B04700000000000000000047 /* WorkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04700000000000000000047 /* WorkDetailView.swift */; };
 		B04710000000000000000047 /* MultiDownloadSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04710000000000000000047 /* MultiDownloadSheet.swift */; };
+		B04720000000000000000047 /* BookDetailScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04720000000000000000047 /* BookDetailScrollView.swift */; };
 		BA0100000000000000000001 /* WorkManagementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0100000000000000000001 /* WorkManagementStore.swift */; };
 		BA0200000000000000000002 /* WorkManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0200000000000000000002 /* WorkManagementView.swift */; };
 		B04800000000000000000048 /* SharedContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000048 /* SharedContentClient.swift */; };
@@ -153,6 +164,9 @@
 		A17700000000000000000177 /* ManagedDownloadStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17700000000000000000177 /* ManagedDownloadStore.swift */; };
 		A17800000000000000000178 /* SharedManagedDownloadTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */; };
 		A13800000000000000000138 /* DownloadStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13800000000000000000138 /* DownloadStoreTests.swift */; };
+		C21000000000000000000210 /* reader-contract.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21000000000000000000210; };
+		C21100000000000000000211 /* reader-contract-bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = D21100000000000000000211; };
+		C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21200000000000000000212; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -173,6 +187,16 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C01200000000000000000004 /* IosReaderControlAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlAdapters.swift; sourceTree = "<group>"; };
+		C01200000000000000000003 /* IosReaderControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlSheets.swift; sourceTree = "<group>"; };
+		C01200000000000000000002 /* IosReaderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControls.swift; sourceTree = "<group>"; };
+		C01200000000000000000001 /* IosReaderControlSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlSession.swift; sourceTree = "<group>"; };
+		F2A100000000000000000004 /* ShelfCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCatalogTests.swift; sourceTree = "<group>"; };
+		F2A100000000000000000005 /* ShelfCatalogUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCatalogUITests.swift; sourceTree = "<group>"; };
+		F2A100000000000000000000 /* ShelfCatalogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCatalogModels.swift; sourceTree = "<group>"; };
+		F2A100000000000000000001 /* SharedShelfCatalogClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedShelfCatalogClient.swift; sourceTree = "<group>"; };
+		F2A100000000000000000002 /* ShelfCatalogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCatalogStore.swift; sourceTree = "<group>"; };
+		F2A100000000000000000003 /* ShelfCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfCatalogView.swift; sourceTree = "<group>"; };
 		F00100000000000000000001 /* ErmaoLibraryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErmaoLibraryApp.swift; sourceTree = "<group>"; };
 		F00200000000000000000002 /* MobileRuntimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileRuntimeClient.swift; sourceTree = "<group>"; };
 		F00300000000000000000003 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
@@ -201,6 +225,7 @@
 		F04600000000000000000046 /* FacetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacetView.swift; sourceTree = "<group>"; };
 		F04700000000000000000047 /* WorkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailView.swift; sourceTree = "<group>"; };
 		F04710000000000000000047 /* MultiDownloadSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiDownloadSheet.swift; sourceTree = "<group>"; };
+		F04720000000000000000047 /* BookDetailScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookDetailScrollView.swift; sourceTree = "<group>"; };
 		FA0100000000000000000001 /* WorkManagementStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementStore.swift; sourceTree = "<group>"; };
 		FA0200000000000000000002 /* WorkManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementView.swift; sourceTree = "<group>"; };
 		F04800000000000000000048 /* SharedContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentClient.swift; sourceTree = "<group>"; };
@@ -316,6 +341,9 @@
 		E17700000000000000000177 /* ManagedDownloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagedDownloadStore.swift; sourceTree = "<group>"; };
 		E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedManagedDownloadTransfer.swift; sourceTree = "<group>"; };
 		E13800000000000000000138 /* DownloadStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStoreTests.swift; sourceTree = "<group>"; };
+		D21000000000000000000210 /* reader-contract.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract.fb2"; path = "../../../test-data/library/fb2/reader-contract.fb2"; sourceTree = SOURCE_ROOT; };
+		D21100000000000000000211 /* reader-contract-bodies.json */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract-bodies.json"; path = "../../../test-data/library/fb2/reader-contract-bodies.json"; sourceTree = SOURCE_ROOT; };
+		D21200000000000000000212 /* source_test_book_fb2.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "source_test_book_fb2.fb2"; path = "../../../test-data/library/fb2/source_test_book_fb2.fb2"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -367,6 +395,17 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C2A100000000000000000000 /* Shelves */ = {
+			isa = PBXGroup;
+			children = (
+				F2A100000000000000000000 /* ShelfCatalogModels.swift */,
+				F2A100000000000000000001 /* SharedShelfCatalogClient.swift */,
+				F2A100000000000000000002 /* ShelfCatalogStore.swift */,
+				F2A100000000000000000003 /* ShelfCatalogView.swift */,
+			);
+			path = Shelves;
+			sourceTree = "<group>";
+		};
 		G00000000000000000000000 = {
 			isa = PBXGroup;
 			children = (
@@ -399,6 +438,7 @@
 				F03200000000000000000032 /* LocalizationTests.swift */,
 				F03300000000000000000033 /* NavigationThemeTests.swift */,
 				F03400000000000000000034 /* ContentStoreTests.swift */,
+				F2A100000000000000000004 /* ShelfCatalogTests.swift */,
 				F03600000000000000000036 /* MeSettingsTests.swift */,
 				F03700000000000000000037 /* AdministrativeSettingsTests.swift */,
 				F08100000000000000000081 /* ReaderProgressContractTests.swift */,
@@ -442,6 +482,7 @@
 			isa = PBXGroup;
 			children = (
 				F03500000000000000000035 /* ContentDiscoveryUITests.swift */,
+				F2A100000000000000000005 /* ShelfCatalogUITests.swift */,
 			);
 			path = ErmaoLibraryUITests;
 			sourceTree = "<group>";
@@ -483,6 +524,7 @@
 				G11700000000000000000117 /* Shell */,
 				G11800000000000000000118 /* Home */,
 				G11900000000000000000119 /* Library */,
+				C2A100000000000000000000 /* Shelves */,
 				G12000000000000000000120 /* Work */,
 				G12100000000000000000121 /* Me */,
 				G12200000000000000000122 /* AdministrativeSettings */,
@@ -565,6 +607,7 @@
 			children = (
 				F04700000000000000000047 /* WorkDetailView.swift */,
 				F04710000000000000000047 /* MultiDownloadSheet.swift */,
+				F04720000000000000000047 /* BookDetailScrollView.swift */,
 				FA0100000000000000000001 /* WorkManagementStore.swift */,
 				FA0200000000000000000002 /* WorkManagementView.swift */,
 			);
@@ -619,6 +662,10 @@
 				F07800000000000000000078 /* IosReadiumRuntime.swift */,
 				F07900000000000000000079 /* IosEpubReaderSession.swift */,
 				F08000000000000000000080 /* IosEpubReaderView.swift */,
+				C01200000000000000000004 /* IosReaderControlAdapters.swift */,
+				C01200000000000000000003 /* IosReaderControlSheets.swift */,
+				C01200000000000000000002 /* IosReaderControls.swift */,
+				C01200000000000000000001 /* IosReaderControlSession.swift */,
 				F08400000000000000000084 /* IosReaderLocalDatabase.swift */,
 				F08500000000000000000085 /* IosPublicationDownloadSink.swift */,
 				F08600000000000000000086 /* IosReaderComposition.swift */,
@@ -807,6 +854,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */,
+				C21100000000000000000211 /* reader-contract-bodies.json in Resources */,
+				C21000000000000000000210 /* reader-contract.fb2 in Resources */,
 				B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */,
 				B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */,
 				B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */,
@@ -901,10 +951,15 @@
 				B04600000000000000000046 /* FacetView.swift in Sources */,
 				B04700000000000000000047 /* WorkDetailView.swift in Sources */,
 				B04710000000000000000047 /* MultiDownloadSheet.swift in Sources */,
+				B04720000000000000000047 /* BookDetailScrollView.swift in Sources */,
 				BA0100000000000000000001 /* WorkManagementStore.swift in Sources */,
 				BA0200000000000000000002 /* WorkManagementView.swift in Sources */,
 				B04800000000000000000048 /* SharedContentClient.swift in Sources */,
 				B04800000000000000000049 /* SharedShelfClient.swift in Sources */,
+				B2A100000000000000000000 /* ShelfCatalogModels.swift in Sources */,
+				B2A100000000000000000001 /* SharedShelfCatalogClient.swift in Sources */,
+				B2A100000000000000000002 /* ShelfCatalogStore.swift in Sources */,
+				B2A100000000000000000003 /* ShelfCatalogView.swift in Sources */,
 				B04900000000000000000049 /* ContentUITestFixture.swift in Sources */,
 				B05000000000000000000050 /* SettingsModels.swift in Sources */,
 				B05100000000000000000051 /* AvatarImageProcessor.swift in Sources */,
@@ -937,6 +992,10 @@
 				B07800000000000000000078 /* IosReadiumRuntime.swift in Sources */,
 				B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */,
 				B08000000000000000000080 /* IosEpubReaderView.swift in Sources */,
+				C01100000000000000000004 /* IosReaderControlAdapters.swift in Sources */,
+				C01100000000000000000003 /* IosReaderControlSheets.swift in Sources */,
+				C01100000000000000000002 /* IosReaderControls.swift in Sources */,
+				C01100000000000000000001 /* IosReaderControlSession.swift in Sources */,
 				B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */,
 				B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */,
 				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
@@ -975,6 +1034,7 @@
 				B03200000000000000000032 /* LocalizationTests.swift in Sources */,
 				B03300000000000000000033 /* NavigationThemeTests.swift in Sources */,
 				B03400000000000000000034 /* ContentStoreTests.swift in Sources */,
+				B2A100000000000000000004 /* ShelfCatalogTests.swift in Sources */,
 				B03600000000000000000036 /* MeSettingsTests.swift in Sources */,
 				B03700000000000000000037 /* AdministrativeSettingsTests.swift in Sources */,
 				B08100000000000000000081 /* ReaderProgressContractTests.swift in Sources */,
@@ -993,6 +1053,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B03500000000000000000035 /* ContentDiscoveryUITests.swift in Sources */,
+				B2A100000000000000000005 /* ShelfCatalogUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -48,6 +48,8 @@ internal interface ReaderScreenController {
     val bookmarkSyncPending: StateFlow<Boolean>
     val tableOfContents: List<ReaderTocEntry>
 
+    fun unavailableControls(preferences: ReaderPreferences): Set<com.ermao.library.shared.modules.reader.ReaderControl> = emptySet()
+
     fun goPrevious(): Boolean
 
     fun goNext(): Boolean
@@ -82,12 +84,26 @@ internal interface ReaderScreenController {
 
     suspend fun applyPreferences(updated: ReaderPreferences): ReaderCommandResult {
         val previous = preferences.value
+        if (!canApplyPreferences(updated)) return ReaderCommandRejected("READER_CONTROL_UNAVAILABLE")
         return try {
             updatePreferences(updated)
             ReaderCommandCompleted
         } catch (_: RuntimeException) {
-            runCatching { updatePreferences(previous) }
-            ReaderCommandRejected("READER_PREFERENCES_APPLY_FAILED")
+            try {
+                updatePreferences(previous)
+                ReaderCommandRejected("READER_PREFERENCES_APPLY_FAILED")
+            } catch (_: RuntimeException) {
+                ReaderCommandRejected("READER_PREFERENCES_ROLLBACK_FAILED")
+            }
+        }
+    }
+
+    fun canApplyPreferences(updated: ReaderPreferences): Boolean {
+        if (updated == com.ermao.library.shared.modules.reader.resetReaderPreferences(preferences.value, morphology)) return true
+        return com.ermao.library.shared.modules.reader.changedReaderControls(preferences.value, updated).all { control ->
+            com.ermao.library.shared.modules.reader.resolveReaderControl(
+                control, morphology, capabilities, preferences.value, true, unavailableControls(preferences.value),
+            ) == com.ermao.library.shared.modules.reader.ReaderControlAvailability.Available
         }
     }
 
@@ -111,12 +127,12 @@ private const val NAVIGATION_VERIFICATION_TIMEOUT_MILLIS = 3_000L
 private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
     return when (target) {
     is ReaderNavigationTargetReflowable -> {
-        val current = (this as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)?.resourceKey
-            ?: return false
-        val expectedResource = target.href.substringBefore('#').removePrefix("./")
-        val currentResource = current.substringBefore('#').removePrefix("./")
-        currentResource == expectedResource &&
-            ('#' !in target.href || current.substringAfter('#', "") == target.href.substringAfter('#'))
+        val reflow = this as? com.ermao.library.shared.modules.reader.ReflowReaderLocation ?: return false
+        val current = reflow.resourceKey ?: return false
+        val anchor = com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope.from(reflow)?.exactAnchorOrNull()
+        com.ermao.library.shared.modules.reader.matchesReaderNavigationHref(
+            current, target.href, anchor?.fragments.orEmpty(), anchor?.cssSelector,
+        )
     }
     is ReaderNavigationTargetPdf ->
         (this as? com.ermao.library.shared.modules.reader.PdfReaderLocation)?.pageIndex == target.pageIndex

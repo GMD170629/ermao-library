@@ -104,6 +104,7 @@ class ReaderEpubInstrumentedTest {
                         epub = ReaderEpubPreferences(
                             fontSize = 25,
                             lineHeight = 1.6,
+                            fontFamily = com.ermao.library.shared.modules.reader.ReaderFontFamily.Songti,
                         ),
                     ),
                 )
@@ -130,6 +131,8 @@ class ReaderEpubInstrumentedTest {
                             window.innerWidth < 600 &&
                             Math.abs(fontSize - 25) < 0.6 &&
                             Math.abs(lineHeight / fontSize - 1.6) < 0.05 &&
+                            paragraphStyle.fontFamily.includes('Shuku Songti') &&
+                            [...document.fonts].some(font => font.family.includes('Shuku Songti') && font.status === 'loaded') &&
                             paragraphStyle.color === 'rgb(226, 232, 240)' &&
                             rootStyle.backgroundColor === 'rgb(15, 23, 42)';
                         })()

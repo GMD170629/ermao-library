@@ -203,9 +203,21 @@ struct ReaderHandoff: Hashable, Sendable {
     let format: String
     let readerType: ManagedDownloadReaderType
     let source: ReaderHandoffSource
+    var initialTargetPayload: String? = nil
 }
 
 enum ManagedReaderAccessPolicy {
+    /// Library resources expose KINDLE as a family; Reader bootstrap resolves the exact original.
+    /// Verified offline artifacts must still have an exact format.
+    static func supportsNativeHandoff(_ handoff: ReaderHandoff) -> Bool {
+        if case .remoteStream = handoff.source,
+           handoff.readerType == .reflowable,
+           handoff.format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "KINDLE" {
+            return true
+        }
+        return supportsNativeReader(readerType: handoff.readerType, format: handoff.format)
+    }
+
     static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
         let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         return switch readerType {

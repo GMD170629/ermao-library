@@ -6,6 +6,66 @@ final class ContentDiscoveryUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testDirectoryResourcePushAndBackRestoresParentContext() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchEnvironment["ERMAO_UI_TEST_INITIAL_WORK_ID"] = "the-left-hand-of-darkness"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+
+        let scroll = app.scrollViews["work.detail.screen"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["work.reader.action"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["work.book.readingResource"].exists)
+        let folder = app.buttons["work.contents.folder.winter-cycle"]
+        XCTAssertTrue(app.otherElements["work.book.identity"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.otherElements["work.resource.identity"].exists)
+        XCTAssertFalse(app.staticTexts["Reading progress"].exists)
+        XCTAssertFalse(app.buttons["work.directory.moreMenu"].exists)
+        XCTAssertTrue(app.buttons["work.download.action"].isHittable)
+        XCTAssertTrue(app.buttons["work.readingStatus.action"].isHittable)
+        XCTAssertTrue(app.buttons["work.shelf.action"].isHittable)
+        app.buttons["work.book.moreMenu"].tap()
+        XCTAssertTrue(app.buttons["Edit"].waitForExistence(timeout: 2))
+        app.tap()
+        attachScreenshot(named: "content-book-root-restored-header", app: app)
+        for _ in 0..<5 where !folder.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(folder.isHittable)
+        XCTAssertTrue(app.buttons["work.contents.sort"].isHittable)
+        XCTAssertTrue(app.buttons["work.contents.layout"].isHittable)
+        folder.tap()
+
+        let resource = app.buttons["work.resource.resource-2"]
+        XCTAssertTrue(resource.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["work.shelf.action"].exists)
+        XCTAssertTrue(resource.isHittable)
+        XCTAssertFalse(app.buttons["work.readingStatus.action"].exists)
+        XCTAssertFalse(app.otherElements["work.book.identity"].exists)
+        XCTAssertFalse(app.otherElements["work.resource.identity"].exists)
+        app.buttons["work.directory.moreMenu"].tap()
+        XCTAssertTrue(app.buttons["work.directory.download"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["work.directory.shelf"].exists)
+        XCTAssertFalse(app.buttons["Edit"].exists)
+        app.tap()
+        resource.tap()
+        XCTAssertTrue(app.buttons["work.reader.action"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["work.readingStatus.action"].isHittable)
+        XCTAssertFalse(app.buttons["work.directory.moreMenu"].exists)
+        XCTAssertFalse(app.buttons["work.shelf.action"].exists)
+        attachScreenshot(named: "content-resource-detail", app: app)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(resource.waitForExistence(timeout: 10))
+        XCTAssertTrue(resource.isHittable)
+        XCTAssertFalse(app.buttons["work.reader.action"].exists)
+        attachScreenshot(named: "content-directory-restored", app: app)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(folder.waitForExistence(timeout: 10))
+        XCTAssertTrue(folder.isHittable)
+        attachScreenshot(named: "content-root-restored", app: app)
+    }
+
     func testWorkDetailQuickActionsOpenStableInteractionSurfaces() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
@@ -123,22 +183,26 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(work.waitForExistence(timeout: 10))
         work.tap()
 
-        XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Book Contents"].waitForExistence(timeout: 5))
+        let scroll = app.scrollViews["work.detail.screen"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Book Contents"].exists)
+        XCTAssertTrue(app.otherElements["work.book.identity"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.otherElements["work.resource.identity"].exists)
+        let folder = app.buttons["work.contents.folder.winter-cycle"]
+        for _ in 0..<5 where !folder.isHittable { scroll.swipeUp() }
         XCTAssertEqual(app.buttons.matching(identifier: "work.contents.breadcrumb.root").count, 1)
         XCTAssertTrue(app.staticTexts["The Left Hand of Darkness I"].exists)
         XCTAssertFalse(app.staticTexts["The Left Hand of Darkness I.cbz"].exists)
         XCTAssertFalse(app.staticTexts["Folder"].exists)
-        let resourceOne = app.otherElements["work.resource.resource-1"]
+        let resourceOne = app.buttons["work.resource.resource-1"]
         XCTAssertTrue(resourceOne.waitForExistence(timeout: 5))
-        let folder = app.buttons["work.contents.folder.winter-cycle"]
         XCTAssertTrue(folder.exists)
         folder.tap()
 
-        let resourceTwo = app.otherElements["work.resource.resource-2"]
+        let resourceTwo = app.buttons["work.resource.resource-2"]
         XCTAssertTrue(resourceTwo.waitForExistence(timeout: 5))
         XCTAssertTrue(resourceTwo.exists)
-        XCTAssertTrue(app.otherElements["work.resource.resource-3"].exists)
+        XCTAssertTrue(app.buttons["work.resource.resource-3"].exists)
 
         attachScreenshot(named: "work-detail-hierarchical-contents", app: app)
     }
@@ -293,6 +357,12 @@ final class ContentDiscoveryUITests: XCTestCase {
         screenID: String,
         expectsWebContent: Bool
     ) throws {
+        let interruptionToken = addUIInterruptionMonitor(withDescription: "Reader test notification banner") { interruption in
+            guard interruption.identifier == "NotificationShortLookView" else { return false }
+            interruption.swipeUp()
+            return true
+        }
+        defer { removeUIInterruptionMonitor(interruptionToken) }
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_LIVE_INITIAL_WORK_ID"] = bookID
         if let resourceID { app.launchEnvironment["ERMAO_UI_TEST_LIVE_INITIAL_RESOURCE_ID"] = resourceID }
@@ -304,7 +374,14 @@ final class ContentDiscoveryUITests: XCTestCase {
         readerAction.tap()
 
         let readerScreen = app.otherElements[screenID]
-        XCTAssertTrue(readerScreen.waitForExistence(timeout: 45), "\(format) Reader screen")
+        guard readerScreen.waitForExistence(timeout: 45) else {
+            attachScreenshot(named: "live-reader-\(format.lowercased())-open-failed", app: app)
+            let failure = app.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "reader.bootstrap.failure.")
+            ).firstMatch
+            XCTFail("\(format) Reader screen; \(failure.exists ? failure.identifier : "bootstrap not shown")")
+            return
+        }
         if expectsWebContent {
             XCTAssertGreaterThan(app.webViews.count, 0, "\(format) must render publication content")
         }
@@ -312,8 +389,45 @@ final class ContentDiscoveryUITests: XCTestCase {
         let closeReader = app.buttons["reader.close"]
         XCTAssertTrue(closeReader.waitForExistence(timeout: 20), "\(format) controls")
         XCTAssertFalse(app.staticTexts["无法打开图书"].exists, "\(format) must not show an error")
+        assertNoMarkupError(app: app)
         XCTAssertTrue(app.buttons["reader.next"].waitForExistence(timeout: 10), "\(format) next action")
         attachScreenshot(named: "live-reader-\(format.lowercased())-online", app: app)
+        let appearance = app.buttons["reader.appearance"]
+        XCTAssertTrue(appearance.exists, "\(format) shared appearance entry")
+        appearance.tap()
+        let done = app.buttons["reader.panel.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "\(format) shared sheet")
+        if expectsWebContent {
+            let fontSize = app.sliders["reader.setting.fontSize"]
+            XCTAssertTrue(fontSize.waitForExistence(timeout: 5), "\(format) native font control")
+            XCTAssertTrue(fontSize.isEnabled)
+            fontSize.adjust(toNormalizedSliderPosition: 0.625)
+            XCTAssertTrue(app.progressIndicators["reader.preferences.applying"].waitForNonExistence(timeout: 10))
+            XCTAssertFalse(app.staticTexts["reader.preferences.failure"].exists, "Native preferences must apply and persist")
+        } else {
+            XCTAssertFalse(app.sliders["reader.setting.fontSize"].exists, "Fixed layouts must not expose text typography")
+        }
+        attachScreenshot(named: "live-reader-\(format.lowercased())-appearance", app: app)
+        dismissReaderNotificationBanner()
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Shared panel must finish dismissing")
+        XCTAssertFalse(app.staticTexts["Unable to apply reading settings. Try again."].exists)
+        XCTAssertFalse(app.staticTexts["阅读设置应用失败，请重试"].exists)
+        XCTAssertTrue(app.buttons["reader.settings"].exists, "\(format) shared settings entry")
+        app.buttons["reader.settings"].tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        attachScreenshot(named: "live-reader-\(format.lowercased())-settings", app: app)
+        dismissReaderNotificationBanner()
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5), "Shared panel must finish dismissing")
+
+        if format == "PDF" {
+            let center = readerScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            center.tap()
+            XCTAssertTrue(closeReader.waitForNonExistence(timeout: 5), "PDF center hides controls once")
+            center.tap()
+            XCTAssertTrue(closeReader.waitForExistence(timeout: 5), "PDF selectable text must not trap controls")
+        }
         app.buttons["reader.next"].tap()
         app.swipeLeft()
         revealReaderControlsIfNeeded(app: app, readerScreen: readerScreen)
@@ -328,7 +442,9 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertNotEqual(savedValue, startValue, "\(format) precise location must change")
         attachScreenshot(named: "live-reader-\(format.lowercased())-progress-jump", app: app)
 
+        dismissReaderNotificationBanner()
         app.buttons["reader.close"].tap()
+        XCTAssertTrue(readerScreen.waitForNonExistence(timeout: 15), "\(format) Reader must finish closing")
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10), "\(format) return")
 
         readerAction.tap()
@@ -340,15 +456,40 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertFalse((restoredProgress.value as? String ?? "").isEmpty, "\(format) restored location value")
         XCTAssertFalse(app.staticTexts["Unable to Open Book"].exists)
         XCTAssertFalse(app.staticTexts["无法打开图书"].exists)
+        assertNoMarkupError(app: app)
         attachScreenshot(named: "live-reader-\(format.lowercased())-restored", app: app)
+        dismissReaderNotificationBanner()
         app.buttons["reader.close"].tap()
+        XCTAssertTrue(restoredScreen.waitForNonExistence(timeout: 15), "\(format) restored Reader must finish closing")
         XCTAssertTrue(app.scrollViews["work.detail.screen"].waitForExistence(timeout: 10), "\(format) restored return")
     }
 
+    private func dismissReaderNotificationBanner() {
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = system.descendants(matching: .any)["NotificationShortLookView"]
+        if banner.exists {
+            // A banner may disappear between queries. Use a drag coordinate rather than
+            // resolving the short-lived accessibility element a second time.
+            let start = system.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10))
+            let end = system.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.01))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+    }
+
     private func revealReaderControlsIfNeeded(app: XCUIApplication, readerScreen: XCUIElement) {
-        if !app.buttons["reader.close"].exists {
+        // The screen container exists while its native engine is still opening. Do not
+        // tap during that transition and accidentally hide the newly presented controls.
+        if !app.buttons["reader.close"].waitForExistence(timeout: 5) {
             readerScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
+        XCTAssertTrue(app.buttons["reader.close"].waitForExistence(timeout: 10))
+    }
+
+    private func assertNoMarkupError(app: XCUIApplication) {
+        let parserError = app.webViews.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "This page contains the following errors", "Below is a rendering of the page up to the first error")
+        )
+        XCTAssertEqual(parserError.count, 0, "Native publication content must not render WebKit's XML error document")
     }
 
     private func downloadSingleOriginal(_ publication: LivePublication) throws {

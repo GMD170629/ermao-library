@@ -1,7 +1,7 @@
 import SwiftUI
 @preconcurrency import ErmaoShared
 
-enum TabPresentation: Equatable, Sendable {
+enum TabPresentation: String, Codable, Equatable, Sendable {
     case home
     case library
     case shelves
@@ -66,27 +66,36 @@ enum RootTabContract {
 
 enum AppRoute: Hashable, Sendable {
     case work(bookID: String)
+    case bookContent(bookID: String, destination: BookContentDestination)
     case downloads
     case reader(ReaderHandoff)
     case facet(kind: FacetKind, facetID: String)
     case collection(HomeCollectionKind)
+    case shelf(shelfID: String)
     case settings(SettingsRoute)
     case administrative(AdministrativeSettingsRoute)
+
+    var contentDestination: BookContentDestination {
+        if case .bookContent(_, let destination) = self { return destination }
+        return .root
+    }
 
     var identityKey: String {
         switch self {
         case .work(let bookID): "work:\(bookID)"
+        case .bookContent(let bookID, let destination): "book-content:\(bookID):\(destination)"
         case .downloads: "downloads"
         case .reader(let handoff): "reader:\(handoff.resourceID):\(handoff.source)"
         case .facet(let kind, let facetID): "facet:\(kind.rawValue):\(facetID)"
         case .collection(let kind): "collection:\(kind.rawValue)"
+        case .shelf(let shelfID): "shelf:\(shelfID)"
         case .settings(let route): "settings:\(route.rawValue)"
         case .administrative(let route): "administrative:\(route.identityKey)"
         }
     }
 }
 
-struct RootTabPaths {
+struct RootTabPaths: Equatable {
     private var home: [AppRoute] = []
     private var library: [AppRoute] = []
     private var shelves: [AppRoute] = []
@@ -130,6 +139,7 @@ struct MainTabView: View {
     @ObservedObject var downloads: DownloadCenterStore
     let contentClient: any ContentClient
     let shelfClient: any ShelfClient
+    var shelfCatalogClient: any ShelfCatalogClient = ShelfCatalogComposition.makeClient()
     let cache: AuthenticatedCoverCache
     var settingsViewModel: SettingsViewModel? = nil
     var administrativeSettingsStore: AdministrativeSettingsStore? = nil
@@ -139,7 +149,7 @@ struct MainTabView: View {
 
     @State private var selectedTabID = RootTabContract.orderedIDs.first ?? ""
     @State private var paths = RootTabPaths()
-    @State private var expandedLibraryWorkID: String?
+    @State private var restoredNavigationNamespace: String?
     @State private var readerLaunch: IosReaderLaunchRequest?
     @State private var readerPreparation: ReaderPreparationRequest?
     @State private var didOpenUITestRoute = false
@@ -174,6 +184,7 @@ struct MainTabView: View {
                             .tag(tab.id)
                     }
                 }
+                .id(context.namespaceKey)
             } else {
                 ProgressView().accessibilityLabel(Text("common.loading"))
             }
@@ -192,9 +203,24 @@ struct MainTabView: View {
                 readerComposition: readerComposition
             )
         }
+        .onChange(of: selectedTabID) { _, value in
+            guard let namespace = restoredNavigationNamespace else { return }
+            UserDefaults.standard.set(value, forKey: "book-content.tab.\(namespace)")
+        }
+        .onChange(of: paths) { _, value in
+            guard let namespace = restoredNavigationNamespace else { return }
+            persistContentPaths(value, namespace: namespace)
+        }
         .task(id: contentContext?.namespaceKey) {
             if let contentContext {
                 downloads.activate(context: contentContext)
+                if restoredNavigationNamespace != contentContext.namespaceKey {
+                    restoredNavigationNamespace = contentContext.namespaceKey
+                    paths = restoreContentPaths(namespace: contentContext.namespaceKey)
+                    if let tab = UserDefaults.standard.string(forKey: "book-content.tab.\(contentContext.namespaceKey)") {
+                        selectedTabID = RootTabContract.normalizedID(tab)
+                    }
+                }
                 openInitialUITestRouteIfNeeded()
             }
         }
@@ -239,119 +265,107 @@ struct MainTabView: View {
               !bookID.isEmpty
         else { return }
         didOpenUITestRoute = true
-        open(.work(bookID: bookID), in: .home)
+        // The explicit test destination takes precedence over a restored selected tab.
+        selectedTabID = rootTabs.first(where: { $0.presentation == .home })?.id ?? "home"
+        if let resourceID = environment["ERMAO_UI_TEST_LIVE_INITIAL_RESOURCE_ID"], !resourceID.isEmpty {
+            open(.bookContent(bookID: bookID, destination: .resource(resourceID: resourceID)), in: .home)
+        } else {
+            open(.work(bookID: bookID), in: .home)
+        }
         #endif
     }
 
     private func tabRoot(presentation: TabPresentation, context: ContentRequestContext) -> some View {
-        NavigationStack(path: path(for: presentation)) {
-            Group {
-                switch presentation {
-                case .home:
-                    HomeView(
-                        context: context,
-                        client: contentClient,
-                        cache: cache,
-                        onUnauthorized: store.refreshForForeground,
-                        openWork: { open(.work(bookID: $0), in: .home) },
-                        openCollection: { open(.collection($0), in: .home) }
-                    )
-                    .id(context.namespaceKey)
-                case .library:
-                    libraryRoot(context: context)
-                    .id(context.namespaceKey)
-                case .me:
-                    if let settingsViewModel {
-                        MeRootView(
-                            viewModel: settingsViewModel,
-                            onOpenRoute: { open(.settings($0), in: .me) },
-                            onOpenDownloads: openDownloadsCenter,
-                            canOpenAdministration: administrativeSettingsStore?.permissions.isAdmin == true ||
-                                administrativeSettingsStore?.permissions.canManageSystem == true,
-                            onOpenEmailAndKindle: {
-                                open(.administrative(.emailAndKindle), in: .me)
-                            },
-                            onOpenKindleQueue: {
-                                open(.administrative(.kindleQueue), in: .me)
-                            },
-                            onOpenAdministration: {
-                                open(.administrative(.management), in: .me)
-                            }
+        HStack(spacing: 0) {
+            if presentation == .library && horizontalSizeClass == .regular {
+                libraryList(context: context)
+                    .frame(minWidth: 320, idealWidth: 400, maxWidth: 480)
+                Divider()
+            }
+            NavigationStack(path: path(for: presentation)) {
+                Group {
+                    switch presentation {
+                    case .home:
+                        HomeView(
+                            context: context,
+                            client: contentClient,
+                            cache: cache,
+                            onUnauthorized: store.refreshForForeground,
+                            openWork: { open(.work(bookID: $0), in: .home) },
+                            openCollection: { open(.collection($0), in: .home) }
                         )
-                    } else {
-                        Color.clear
-                            .navigationTitle("tab.me")
-                            .appCanvas()
+                        .id(context.namespaceKey)
+                    case .library:
+                        libraryRoot(context: context)
+                        .id(context.namespaceKey)
+                    case .me:
+                        if let settingsViewModel {
+                            MeRootView(
+                                viewModel: settingsViewModel,
+                                onOpenRoute: { open(.settings($0), in: .me) },
+                                onOpenDownloads: openDownloadsCenter,
+                                canOpenAdministration: administrativeSettingsStore?.permissions.isAdmin == true ||
+                                    administrativeSettingsStore?.permissions.canManageSystem == true,
+                                onOpenEmailAndKindle: {
+                                    open(.administrative(.emailAndKindle), in: .me)
+                                },
+                                onOpenKindleQueue: {
+                                    open(.administrative(.kindleQueue), in: .me)
+                                },
+                                onOpenAdministration: {
+                                    open(.administrative(.management), in: .me)
+                                }
+                            )
+                        } else {
+                            Color.clear
+                                .navigationTitle("tab.me")
+                                .appCanvas()
+                        }
+                    case .shelves:
+                        ShelfCatalogView(
+                            context: context, client: shelfCatalogClient, contentClient: contentClient, cache: cache,
+                            onUnauthorized: store.refreshForForeground,
+                            openShelf: { open(.shelf(shelfID: $0), in: .shelves) },
+                            openBook: { open(.work(bookID: $0), in: .shelves) }
+                        )
+                        .id(context.namespaceKey)
                     }
-                case .shelves:
-                    Color.clear
-                        .navigationTitle(presentation.title)
-                        .appCanvas()
                 }
+                .navigationDestination(for: AppRoute.self) { route in
+                    destination(route, presentation: presentation, context: context)
+                }
+                .administrativeNavigation { route in
+                    open(.administrative(route), in: .me)
+                }
+                .environment(
+                    \.administrativeCopy,
+                    administrativeSettingsStore?.copy ?? AdministrativeCopyCatalog(locale: .enUS)
+                )
             }
-            .navigationDestination(for: AppRoute.self) { route in
-                destination(route, presentation: presentation, context: context)
-            }
-            .administrativeNavigation { route in
-                open(.administrative(route), in: .me)
-            }
-            .environment(
-                \.administrativeCopy,
-                administrativeSettingsStore?.copy ?? AdministrativeCopyCatalog(locale: .enUS)
-            )
         }
     }
 
-    @ViewBuilder
-    private func libraryRoot(context: ContentRequestContext) -> some View {
-        let library = LibraryView(
+    private func libraryList(context: ContentRequestContext) -> some View {
+        LibraryView(
             context: context,
             client: contentClient,
             cache: cache,
             onUnauthorized: store.refreshForForeground,
-            openWork: { bookID in
-                if horizontalSizeClass == .regular {
-                    expandedLibraryWorkID = bookID
-                } else {
-                    open(.work(bookID: bookID), in: .library)
-                }
-            },
+            openWork: { open(.work(bookID: $0), in: .library) },
             openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) }
         )
+    }
+
+    @ViewBuilder
+    private func libraryRoot(context: ContentRequestContext) -> some View {
         if horizontalSizeClass == .regular {
-            HStack(spacing: 0) {
-                library
-                    .frame(minWidth: 360, idealWidth: 460, maxWidth: 520)
-                Divider()
-                Group {
-                    if let bookID = expandedLibraryWorkID {
-                        WorkDetailView(
-                            context: context,
-                            client: contentClient,
-                            shelfClient: shelfClient,
-                            cache: cache,
-                            downloads: downloads,
-                            managementRepository: workManagementRepository,
-                            canManageSystem: store.snapshot.authorization?.canManageSystem == true,
-                            bookID: bookID,
-                            onUnauthorized: store.refreshForForeground,
-                            openFacet: { open(.facet(kind: $0, facetID: $1), in: .library) },
-                            openDownloads: openDownloadsCenter,
-                            openReader: { openReader($0, context: context, fallbackTab: .library) }
-                        )
-                        .id(bookID)
-                    } else {
-                        ContentStatusView(
-                            systemImage: "book.closed",
-                            title: "library.expanded.empty.title",
-                            message: "library.expanded.empty.message"
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            ContentStatusView(
+                systemImage: "book.closed",
+                title: "library.expanded.empty.title",
+                message: "library.expanded.empty.message"
+            )
         } else {
-            library
+            libraryList(context: context)
         }
     }
 
@@ -362,7 +376,7 @@ struct MainTabView: View {
         context: ContentRequestContext
     ) -> some View {
         switch route {
-        case .work(let bookID):
+        case .work(let bookID), .bookContent(let bookID, _):
             WorkDetailView(
                 context: context,
                 client: contentClient,
@@ -372,6 +386,8 @@ struct MainTabView: View {
                 managementRepository: workManagementRepository,
                 canManageSystem: store.snapshot.authorization?.canManageSystem == true,
                 bookID: bookID,
+                destination: route.contentDestination,
+                openContent: { target in openBookContent(bookID: bookID, target: target, in: presentation) },
                 onUnauthorized: store.refreshForForeground,
                 openFacet: { open(.facet(kind: $0, facetID: $1), in: presentation) },
                 openDownloads: openDownloadsCenter,
@@ -402,6 +418,13 @@ struct MainTabView: View {
                 kind: kind,
                 onUnauthorized: store.refreshForForeground,
                 openWork: { open(.work(bookID: $0), in: presentation) }
+            )
+        case .shelf(let shelfID):
+            ShelfCatalogView(
+                context: context, client: shelfCatalogClient, contentClient: contentClient, cache: cache, shelfID: shelfID,
+                onUnauthorized: store.refreshForForeground,
+                openShelf: { open(.shelf(shelfID: $0), in: presentation) },
+                openBook: { open(.work(bookID: $0), in: presentation) }
             )
         case .settings(let route):
             if let settingsViewModel {
@@ -442,6 +465,14 @@ struct MainTabView: View {
         paths.open(route, in: tab)
     }
 
+    private func openBookContent(bookID: String, target: BookContentDestination, in tab: TabPresentation) {
+        if target == .root {
+            open(.work(bookID: bookID), in: tab)
+        } else {
+            open(.bookContent(bookID: bookID, destination: target), in: tab)
+        }
+    }
+
     private func closeCurrentRoute(in tab: TabPresentation) {
         var path = paths.path(for: tab)
         _ = path.popLast()
@@ -451,7 +482,8 @@ struct MainTabView: View {
     private func openReader(
         _ selection: WorkReaderSelection,
         context: ContentRequestContext,
-        managedDownloadRecordID: String? = nil
+        managedDownloadRecordID: String? = nil,
+        initialTargetPayload: String? = nil
     ) {
         guard readerComposition != nil else { return }
         readerLaunch = IosReaderLaunchRequest(
@@ -459,7 +491,8 @@ struct MainTabView: View {
             bookID: selection.bookID,
             resourceID: selection.resourceID,
             displayTitle: selection.displayTitle,
-            managedDownloadRecordID: managedDownloadRecordID
+            managedDownloadRecordID: managedDownloadRecordID,
+            initialTargetPayload: initialTargetPayload
         )
     }
 
@@ -468,10 +501,7 @@ struct MainTabView: View {
         context: ContentRequestContext,
         fallbackTab: TabPresentation
     ) {
-        if ManagedReaderAccessPolicy.supportsNativeReader(
-               readerType: handoff.readerType,
-               format: handoff.format
-           ),
+        if ManagedReaderAccessPolicy.supportsNativeHandoff(handoff),
            readerComposition != nil {
             let recordID: String?
             if case .verifiedLocal(let value) = handoff.source {
@@ -486,7 +516,8 @@ struct MainTabView: View {
                     displayTitle: handoff.title
                 ),
                 context: context,
-                managedDownloadRecordID: recordID
+                managedDownloadRecordID: recordID,
+                initialTargetPayload: handoff.initialTargetPayload
             )
         } else {
             open(.reader(handoff), in: fallbackTab)
@@ -542,4 +573,49 @@ private extension ServerDirectoryPurpose {
         case .scanDirectory: "scan"
         }
     }
+}
+
+private struct ContentRouteRecord: Codable {
+    let tab: TabPresentation
+    let bookID: String
+    let destination: BookContentDestination
+    var shelfID: String? = nil
+}
+
+/// IDs only; restored destinations always reload and authorize against the server.
+private func persistContentPaths(_ paths: RootTabPaths, namespace: String) {
+    let records = [TabPresentation.home, .library, .shelves, .me].flatMap { tab in
+        paths.path(for: tab).compactMap { route -> ContentRouteRecord? in
+            switch route {
+            case .work(let id): ContentRouteRecord(tab: tab, bookID: id, destination: .root)
+            case .bookContent(let id, let destination): ContentRouteRecord(tab: tab, bookID: id, destination: destination)
+            case .shelf(let id): ContentRouteRecord(tab: tab, bookID: "", destination: .root, shelfID: id)
+            default: nil
+            }
+        }
+    }
+    guard records.count <= 64, let payload = try? JSONEncoder().encode(records) else { return }
+    UserDefaults.standard.set(payload, forKey: "book-content.paths.\(namespace)")
+}
+
+private func restoreContentPaths(namespace: String) -> RootTabPaths {
+    var result = RootTabPaths()
+    guard let payload = UserDefaults.standard.data(forKey: "book-content.paths.\(namespace)"),
+          payload.count <= 65536,
+          let records = try? JSONDecoder().decode([ContentRouteRecord].self, from: payload),
+          records.count <= 64
+    else { return result }
+    for record in records {
+        if let shelfID = record.shelfID,
+           !shelfID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, shelfID.count <= 512 {
+            result.open(.shelf(shelfID: shelfID), in: record.tab)
+            continue
+        }
+        guard !record.bookID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              record.bookID.count <= 512, record.destination.isValid else { continue }
+        let route: AppRoute = record.destination == .root
+            ? .work(bookID: record.bookID) : .bookContent(bookID: record.bookID, destination: record.destination)
+        result.open(route, in: record.tab)
+    }
+    return result
 }

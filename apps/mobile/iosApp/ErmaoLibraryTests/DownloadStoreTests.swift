@@ -1,7 +1,9 @@
 import CryptoKit
 import Foundation
 import XCTest
+import UIKit
 @preconcurrency import ErmaoShared
+@preconcurrency import ReadiumShared
 @testable import ErmaoLibrary
 
 @MainActor
@@ -10,7 +12,18 @@ final class DownloadStoreTests: XCTestCase {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = ManagedDownloadStore(rootDirectory: root)
-        let page = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01])
+        let pageSize = CGSize(width: 320, height: 480)
+        let rendererFormat = UIGraphicsImageRendererFormat()
+        rendererFormat.scale = 1
+        let pages = [UIColor.systemBlue, UIColor.systemOrange].enumerated().map { index, color in
+            UIGraphicsImageRenderer(size: pageSize, format: rendererFormat).pngData { context in
+                color.setFill()
+                context.fill(CGRect(origin: .zero, size: pageSize))
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 40, y: 80, width: 80 + index * 80, height: 200))
+            }
+        }
+        let totalBytes = pages.reduce(0) { $0 + $1.count }
         let record = try await store.enqueue(
             namespace: namespace,
             book: BookCard(id: "book", title: "Book", author: "Author", cover: nil, progress: nil),
@@ -20,23 +33,24 @@ final class DownloadStoreTests: XCTestCase {
             ),
             assetID: "page-set:image-resource",
             readerType: .comic,
-            expectedBytes: Int64(page.count),
+            expectedBytes: Int64(totalBytes),
             artifactKind: .originalPageSet
         )
         let destination = try await store.destination(for: record)
         try FileManager.default.createDirectory(at: destination.partialFileURL, withIntermediateDirectories: true)
-        let fileName = "000000-page.png"
-        try page.write(to: destination.partialFileURL.appendingPathComponent(fileName))
+        for (index, page) in pages.enumerated() {
+            try page.write(to: destination.partialFileURL.appendingPathComponent("page-\(index).png"))
+        }
         let manifest: [String: Any] = [
             "contractVersion": 4,
             "artifactKind": "OriginalPageSet",
             "resourceId": "image-resource",
             "artifactId": "page-set:image-resource",
-            "totalBytes": page.count,
-            "members": [[
-                "assetId": "page-1", "sequenceIndex": 0, "mimeType": "image/png",
-                "sizeBytes": page.count, "fileName": fileName,
-            ]],
+            "totalBytes": totalBytes,
+            "members": pages.enumerated().map { index, page -> [String: Any] in [
+                "assetId": "page-\(index)", "sequenceIndex": index, "mimeType": "image/png",
+                "sizeBytes": page.count, "fileName": "page-\(index).png",
+            ] },
         ]
         try JSONSerialization.data(withJSONObject: manifest).write(
             to: destination.partialFileURL.appendingPathComponent("bundle.json")
@@ -45,7 +59,7 @@ final class DownloadStoreTests: XCTestCase {
         let completed = try await store.publish(
             record: record,
             destination: destination,
-            receipt: ManagedDownloadReceipt(receivedBytes: Int64(page.count), expectedBytes: Int64(page.count))
+            receipt: ManagedDownloadReceipt(receivedBytes: Int64(totalBytes), expectedBytes: Int64(totalBytes))
         )
         let resolvedLocalURL = await store.fileURL(for: completed)
         let localURL = try XCTUnwrap(resolvedLocalURL)
@@ -53,7 +67,25 @@ final class DownloadStoreTests: XCTestCase {
 
         XCTAssertTrue(completed.isVerifiedOfflineCopy)
         XCTAssertTrue((try localURL.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true)
-        XCTAssertEqual(bundle.pages.map(\.resourceHref), ["pages/0"])
+        XCTAssertEqual(bundle.pages.map(\.resourceHref), ["pages/0", "pages/1"])
+        let managed = IosManagedPublication(
+            resourceID: "image-resource", displayTitle: "Pages", fileURL: localURL,
+            byteCount: Int64(totalBytes), bookID: "book", assetID: "page-set:image-resource",
+            namespace: namespace, sourceFormat: .imagedir
+        )
+        let opened = try IosImageDirectoryPublicationFactory().open(managed, pageTitleHints: bundle.pages)
+        for (index, link) in opened.publication.readingOrder.enumerated() {
+            let resource = try XCTUnwrap(opened.publication.get(link))
+            let bytes = try await resource.read().get()
+            XCTAssertEqual(bytes, pages[index], "Reader must return each original PAGE in order")
+            let image = try XCTUnwrap(UIImage(data: bytes))
+            XCTAssertEqual(image.size, pageSize)
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "original-image-directory-page-\(index)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        await opened.close()
     }
 
     func testManifestV3RecordMigratesToV4WithoutDeletingCompletedFile() async throws {
@@ -93,7 +125,7 @@ final class DownloadStoreTests: XCTestCase {
             serverIdentity: "server_d25920669ac94839b6ee9a7054d4dc00",
             userID: "py_48e39b93790f4057995840a18f4302a3",
             authorizationVersion: 1,
-            baseURL: "http://192.168.18.228:8000",
+            baseURL: "http://192.168.18.228:3000",
             acceptsInsecureTLS: false
         )
         let cookieStore = KeychainCookiePayloadStore()
@@ -171,7 +203,7 @@ final class DownloadStoreTests: XCTestCase {
             serverIdentity: "server_d25920669ac94839b6ee9a7054d4dc00",
             userID: "py_48e39b93790f4057995840a18f4302a3",
             authorizationVersion: 1,
-            baseURL: "http://192.168.18.228:8000",
+            baseURL: "http://192.168.18.228:3000",
             acceptsInsecureTLS: false
         )
         let cookieStore = KeychainCookiePayloadStore()
@@ -574,6 +606,20 @@ final class DownloadStoreTests: XCTestCase {
                 "Expected native comic support for \(format)"
             )
         }
+    }
+
+    func testKindleLibraryFamilyEntersBootstrapButNeverIdentifiesAnOfflineArtifact() {
+        func handoff(_ source: ReaderHandoffSource, readerType: ManagedDownloadReaderType = .reflowable) -> ReaderHandoff {
+            ReaderHandoff(
+                bookID: "book", resourceID: "resource", assetID: nil,
+                title: "Book", resourceTitle: "Resource", format: " kindle ",
+                readerType: readerType, source: source
+            )
+        }
+        XCTAssertTrue(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream)))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.verifiedLocal(recordID: "record"))))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream, readerType: .audio)))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream, readerType: .comic)))
     }
 
     private func waitUntil(

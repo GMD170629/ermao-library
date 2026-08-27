@@ -16,7 +16,7 @@ struct IosTxtPublicationFactory: Sendable {
         else { throw IosTxtPublicationError.invalidEncoding }
 
         // Chapter boundaries, hrefs, block IDs, escaping and CSS are owned by KMP.
-        let normalized = ErmaoShared.TxtPublicationNormalizer().normalize(
+        let normalized = try ErmaoShared.TxtPublicationNormalizer().normalize(
             decodedText: decoded,
             publicationTitle: managed.displayTitle
         )

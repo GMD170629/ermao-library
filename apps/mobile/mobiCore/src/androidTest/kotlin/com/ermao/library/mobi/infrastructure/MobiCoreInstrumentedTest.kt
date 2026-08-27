@@ -13,6 +13,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.readium.r2.shared.publication.services.positions
+import org.readium.r2.shared.util.Try
+import org.readium.r2.shared.util.resource.TransformingContainer
+import org.readium.r2.shared.util.resource.TransformingResource
 
 @RunWith(AndroidJUnit4::class)
 class MobiCoreInstrumentedTest {
@@ -119,6 +123,25 @@ class MobiCoreInstrumentedTest {
     }
 
     @Test
+    fun progressIndexDoesNotReadOrDecorateEveryPublicationBody() = runBlocking {
+        var transformations = 0
+        val opened = MobiReadiumPublicationFactory().open(copyAsset("07-complex-toc.azw3")) { container ->
+            TransformingContainer(container) { _, resource ->
+                TransformingResource(resource) { bytes ->
+                    transformations += 1
+                    Try.success(bytes)
+                }
+            }
+        }
+        try {
+            assertTrue(opened.publication.positions().isNotEmpty())
+            assertEquals(0, transformations)
+        } finally {
+            opened.close()
+        }
+    }
+
+    @Test
     fun productionPublicationKeepsOneLazyHandleAndSupportsBoundedRanges() = runBlocking {
         val opened = MobiReadiumPublicationFactory().open(copyAsset("10-long-chapter.azw3"))
         try {
@@ -126,6 +149,10 @@ class MobiCoreInstrumentedTest {
             val resource = requireNotNull(opened.publication.get(link))
             val length = requireNotNull(resource.length().getOrNull())
             assertTrue(length > MOBI_CORE_MAX_READ_BYTES)
+
+            val positions = opened.publication.positions()
+            assertTrue(positions.size > 1)
+            assertTrue(positions.last().locations.totalProgression != null)
 
             val boundaryRange =
                 (MOBI_CORE_MAX_READ_BYTES - 31L)..(MOBI_CORE_MAX_READ_BYTES + 31L)

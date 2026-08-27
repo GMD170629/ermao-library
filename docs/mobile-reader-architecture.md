@@ -246,6 +246,37 @@ the format adapter creates its Publication and do not
 preflight the complete reading order. Redirect, traversal, symlink, empty-body,
 overflow, truncation, cancellation, and oversized-error cases fail closed.
 
+FB2 uses `shuku-fb2-parser-v1 / shuku-fb2-publication-v1` on every client.
+The native platform XML parsers feed a shared bounded mixed-content decoder.
+It preserves the server's `fb2/section-NNNN.xhtml` resources, six-digit
+`fb2-node-NNNNNN` anchors, nested TOC, inline formatting, tables, poems,
+embedded images and internal note/return links. The server body golden in
+`test-data/library/fb2/reader-contract-bodies.json` is verified by Android,
+iOS and backend tests. FB2 binary resources are validated by encoding, MIME
+signature and size and stay in memory. DTD/entity declarations and undeclared
+prefixes fail closed; the documented `l:href`/`xmlns:xlink` repair only affects
+the parser input, never the original file.
+
+Direct native Readium Publications need an explicit positions service as well
+as a reading order. Android TXT, FB2 and MOBI-family adapters register
+`EpubPositionsService`; iOS uses `EPUBPositionsService`. These logical positions
+support explicit scrubber navigation only: percentage is still never an exact
+restoration or upload identity. Parser validation exceptions crossing KMP into
+Swift must be declared with `@Throws` and mapped to a stable Reader error,
+including blank/invalid TXT input.
+
+Library's `KINDLE` resource family is accepted only at the online Reader entry.
+Reader bootstrap resolves the exact MOBI/AZW/AZW3/PRC original before opening.
+It is not an offline artifact format or a reason to relax parser validation.
+
+Pinned libmobi's legacy MOBI6 HTML can omit the XHTML default namespace and the
+`mbp` prefix declaration. Native adapters bind these on the root element before
+the security decorator, otherwise WebKit can render an XML error document.
+`MobiMarkupEnvelope` changes only the XML envelope in memory; original bytes,
+resource hrefs, body markup and locator projection stay unchanged. Existing
+namespace declarations are preserved. This is not a conversion artifact or a
+change to the parser/locator identity.
+
 Reader v4 bootstrap is also the authoritative Download Center catalog source. A completed
 artifact persists the real `book.id`, `resource.id`, selected `asset.id`, server-completed
 hint, and the resource's display/sort order. The stable local hierarchy is
@@ -319,8 +350,9 @@ The enabled theme set is Day `#F7F7F4/#1E293B`, Warm
 `#0F172A/#E2E8F0`, and Black `#000000/#F8FAFC`; system mode resolves to Day
 or Night. Readium public preferences own colors, size/weight ratios, line and
 paragraph layout, positive letter spacing, margins, scroll mode, and column
-count. Unsupported controls remain present but disabled, with no explanatory
-copy. These include annotations, animation and swipe toggles, phone page width,
+count. Unsupported controls remain present but disabled. Font aliases and retained
+legacy negative spacing explicitly distinguish saved choices from effective rendering.
+Unsupported controls include annotations, gesture-animation and swipe toggles, phone page width,
 negative letter spacing, independent publisher-style parts, and smart/safe
 optimization. iOS volume-key turning is disabled; Android enables it.
 
@@ -328,11 +360,40 @@ optimization. iOS volume-key turning is disabled; Android enables it.
 Han Sans serves PingFang/Heiti/YaHei, Source Han Serif serves Songti, and LXGW
 WenKai serves Kaiti. The files add approximately 35 MB uncompressed. iOS
 Readium declares these bundled WOFF2 files through its public custom-font API.
-Readium Kotlin 3.3 does not expose the equivalent public declaration API, so
-Android packages the assets for forward compatibility but keeps the font-family
-control disabled; reflection and private scripts are prohibited. Security
+Readium Kotlin 3.3.0 also exposes `Configuration.addFontFamilyDeclaration()`;
+Android registers these same assets and serves only the `fonts/reader/` prefix.
+No toolkit upgrade, reflection or private script is required. Security
 adaptation may modify only the document head as defined above; body mutation or
 re-serialization is prohibited.
+
+### Shared native controls (2026-08-27)
+
+Each platform has one native toolbar and modal-container implementation for
+reflowable, comic and PDF sessions. Shared `ReaderPanel`, `ReaderControl` and
+`ReaderControlAvailability` contracts distinguish available, temporarily
+unavailable, not implemented and not applicable controls. Adapters ask the
+public Readium preferences editor about publication/layout/language-dependent
+effectiveness; format extensions are not capability checks.
+
+The publisher-style option maps to the native overall `publisherStyles` flag.
+Typography that the editor reports ineffective is disabled, retaining saved
+custom values. Continuous scrolling disables columns without discarding the
+pagination column preference. Command animation controls public navigation
+options for buttons, keys and tap zones; it does not control native swipe
+animation. Reset replaces shared settings and only the current morphology's
+settings. Comic/PDF options without engine implementations remain disabled.
+
+The pinned Swift SDK buffers decorated HTML across pagination reloads. The iOS
+Reader adapter applies native text preferences by creating a fresh public
+Navigator over the same Publication and exact Locator, then verifies restoration
+before persistence. Failure restores the prior navigator. This adapter owns the
+workaround; removal requires an authorized SDK update and passing physical render
+regressions (see the acceptance record). It never accesses the private cache or
+modifies publication content.
+
+Capability and runtime evidence is recorded in
+`docs/testing/mobile-reader-controls-2026-08-27.md`; compilation and mapping
+tests alone are not proof of rendering effectiveness.
 
 Bookmarks use the existing Reader v4 collection wire schema. Local state is
 isolated by `serverIdentity + userId + resourceId + assetId + contentFingerprint`, retains

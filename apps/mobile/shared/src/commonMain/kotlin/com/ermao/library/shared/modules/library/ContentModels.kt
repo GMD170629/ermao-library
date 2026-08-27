@@ -8,6 +8,7 @@ import com.ermao.library.shared.modules.library.domain.FacetKind
 import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
+import kotlinx.serialization.Serializable
 
 enum class LibraryScope { Books, Series, Authors }
 
@@ -109,6 +110,7 @@ data class BookResourcePage(
     val hasNext: Boolean get() = page < totalPages
 }
 
+@Serializable
 enum class BookContentSort(
     val sortWireValue: String,
     val directionWireValue: String,
@@ -123,26 +125,27 @@ enum class BookContentSort(
 
 enum class BookDetailPresentation { ContentBrowser, ResourceDetail }
 
-data class BookDetailSelection(
-    val presentation: BookDetailPresentation,
-    val resourceId: String?,
-)
+/** Navigation identities are supplied by the server, never inferred from resource counts. */
+@Serializable
+sealed interface BookContentTarget {
+    @Serializable
+    data object Root : BookContentTarget
 
-/** Shared Web-parity rule used by both native clients when entering Work Detail. */
-fun selectBookDetailPresentation(
-    resources: List<Resource>,
-    requestedResourceId: String? = null,
-): BookDetailSelection {
-    val readableResources = resources.filter { it.readable && !it.hidden }
-    val requestedResource = requestedResourceId
-        ?.takeIf(String::isNotBlank)
-        ?.let { requestedId -> readableResources.firstOrNull { it.id == requestedId } }
-    val detailResource = requestedResource ?: readableResources.singleOrNull()
-    return if (detailResource != null) {
-        BookDetailSelection(BookDetailPresentation.ResourceDetail, detailResource.id)
-    } else {
-        BookDetailSelection(BookDetailPresentation.ContentBrowser, null)
+    @Serializable
+    data class Directory(val sourceNodeId: String) : BookContentTarget {
+        init { require(sourceNodeId.isNotBlank()) }
     }
+
+    @Serializable
+    data class ResourceDetail(val resourceId: String) : BookContentTarget {
+        init { require(resourceId.isNotBlank()) }
+    }
+}
+
+fun bookContentTarget(node: BookContentEntry): BookContentTarget? = when {
+    node.isDirectResource -> node.resourceId?.let(BookContentTarget::ResourceDetail)
+    node.isSourceFolder -> BookContentTarget.Directory(node.sourceNodeId)
+    else -> null
 }
 
 data class BookContentsQuery(

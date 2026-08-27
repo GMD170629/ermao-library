@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,24 @@ from app.modules.publications.domain.model import (
     PublicationResourceNotFoundError,
 )
 from app.modules.publications.infrastructure.fb2_adapter import Fb2PublicationAdapter
+
+
+def test_fb2_body_contract_matches_native_shared_fixture() -> None:
+    corpus = Path(__file__).resolve().parents[6] / "test-data/library/fb2"
+    path = corpus / "reader-contract.fb2"
+    original = path.read_bytes()
+    adapter = Fb2PublicationAdapter(corpus)
+    source = _source(path)
+    publication = adapter.open(source)
+    expected = json.loads((corpus / "reader-contract-bodies.json").read_text())
+
+    assert [link.href for link in publication.reading_order] == list(expected)
+    for link in publication.reading_order:
+        markup = adapter.read_resource(source, link.href).content.decode()
+        assert (
+            markup.split("<body>", 1)[1].split("</body>", 1)[0] == expected[link.href]
+        )
+    assert path.read_bytes() == original
 
 
 def _source(path: Path) -> PublicationSource:

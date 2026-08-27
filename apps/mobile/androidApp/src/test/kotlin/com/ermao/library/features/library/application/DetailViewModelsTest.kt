@@ -63,7 +63,12 @@ class DetailViewModelsTest {
             updated.readingUnits.map(ReadingUnitContent::readingState),
         )
         assertEquals(listOf(null, 42, null), updated.readingUnits.map(ReadingUnitContent::progressPercent))
-        assertEquals(content, content.applying(update, selectedResourceId = "resource-2"))
+        val parentDirectory = content.applying(update, selectedResourceId = null)
+        assertEquals(content.book, parentDirectory.book)
+        assertEquals(content.readingUnits, parentDirectory.readingUnits)
+        assertEquals(42, parentDirectory.resources.single().progressPercent)
+        assertEquals("resource-1", parentDirectory.continueResourceId)
+        assertEquals(42, parentDirectory.continueResource?.progressPercent)
     }
 
     private fun contentWithChapters(vararg chapters: ReadingUnitContent): BookDetailContent = BookDetailContent(

@@ -18,6 +18,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     @Published private(set) var restoreWarning: IosReaderFailureCode?
     @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     @Published var controlsVisible = false
+    @Published var activeControlPanel: IosReaderPanel?
     @Published private(set) var preferences: IosReaderPreferences
 
     let resourceID: String
@@ -27,6 +28,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private let managedStore: IosManagedPublicationStore
     private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
     private let progressCoordination: IosReaderProgressSessionCoordination?
+    private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
     private let bookID: String
@@ -53,6 +55,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
         remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
+        initialTarget: (any ErmaoShared.ReaderNavigationTarget)? = nil,
         namespaceKey: String,
         bookID: String,
         publishProgressUpdate: @escaping @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void,
@@ -69,6 +72,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         self.progressStore = progressStore
         self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
+        self.initialTarget = initialTarget
         self.namespaceKey = namespaceKey
         self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
@@ -122,7 +126,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                 )
             }
             let local = try? await progressStore.load(sourceId: resourceID)
-            let initialPage = restorePage(
+            let initialPage = try restorePage(
                 local: local,
                 remote: remoteSnapshot,
                 openedSource: openedSource
@@ -162,6 +166,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     func goNext() async { _ = await navigator?.goForward(options: .animated) }
 
     func applyPreferences(_ updated: IosReaderPreferences) async -> Bool {
+        guard canApplyControlPreferences(updated) else { return false }
+        guard updated == preferences.reset(for: .comic) || (updated.comicFlow == preferences.comicFlow && updated.comicSpread == preferences.comicSpread && updated.comicDirection == preferences.comicDirection && updated.comicPageGap == preferences.comicPageGap && updated.comicCoverSingle == preferences.comicCoverSingle && updated.comicZoom == preferences.comicZoom) else { return false }
         guard preferencesStore.save(updated) else { return false }
         preferences = updated
         return true
@@ -255,7 +261,14 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         local: ErmaoShared.ReaderProgress?,
         remote: ErmaoShared.ReaderProgressSnapshotV4?,
         openedSource: ErmaoShared.ReaderSource
-    ) -> IosCbzPage? {
+    ) throws -> IosCbzPage? {
+        if let initialTarget {
+            guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetComic,
+                  let page = pages.first(where: { $0.pageIndex == Int(target.pageIndex) && $0.resourceHref == target.resourceHref })
+            else { throw IosReaderFailure(code: .locationRestoreFailed) }
+            expectedRestoredPage = page
+            return page
+        }
         let decision = ErmaoShared.PublicKt.decideReaderResume(
             localProgress: local,
             remoteSnapshot: remote,
@@ -383,12 +396,16 @@ extension IosComicReaderSession: CBZNavigatorDelegate {
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
         let width = max(1, self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width)
-        switch point.x / width {
-        case ..<0.3: Task { await goPrevious() }
-        case 0.7...: Task { await goNext() }
-        default: controlsVisible.toggle()
+        routeControlTap(fraction: point.x / width)
+    }
+    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
+        if event.key == .escape { activeControlPanel = nil; controlsVisible = true; return }
+        guard activeControlPanel == nil, preferences.keyboardPageTurn else { return }
+        switch event.key {
+        case .arrowLeft, .pageUp: Task { await goPrevious() }
+        case .arrowRight, .pageDown, .space: Task { await goNext() }
+        default: break
         }
     }
-    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {}
     func navigator(_ navigator: VisualNavigator, didReleaseKey event: KeyEvent) {}
 }

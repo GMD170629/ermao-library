@@ -56,6 +56,7 @@ internal class ReadiumComicSession(
     private val readium: AndroidReadiumRuntime,
     private val comicPageServer: ComicPageServerPort? = null,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
+    private val initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
     private val progressCoordinator: ReaderProgressSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
@@ -168,14 +169,19 @@ internal class ReadiumComicSession(
             throw ReaderOpenFailure(ReaderError(code), cause = error)
         }
         publication = opened
-        val localProgress = loadProgressSafely()
-        val resumeDecision = decideReaderResume(localProgress, remoteSnapshot, source)
+        val localProgress = if (initialTarget == null) loadProgressSafely() else null
+        val resumeDecision = decideReaderResume(localProgress, remoteSnapshot.takeIf { initialTarget == null }, source)
         val restorePlan = planReaderProgressRestore(
             resumeDecision.selected?.localProgress,
             resumeDecision.selected?.remoteSnapshot,
             source,
         )
-        val restorePage = restorePlan.candidates.firstNotNullOfOrNull { candidate ->
+        val explicitPage = initialTarget?.let { target ->
+            val comic = target as? com.ermao.library.shared.modules.reader.ReaderNavigationTargetComic
+            canonicalPages.firstOrNull { it.pageIndex == comic?.pageIndex && it.resourceHref == comic.resourceHref }
+                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
+        }
+        val restorePage = explicitPage ?: restorePlan.candidates.firstNotNullOfOrNull { candidate ->
             when (candidate) {
                 is ReaderRestoreComicPage -> canonicalPage(candidate.resourceHref, candidate.pageIndex)
                 is ReaderRestoreExactLocalLocation -> (candidate.location as? ComicReaderLocation)?.let {

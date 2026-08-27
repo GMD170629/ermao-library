@@ -56,10 +56,15 @@ data class ReaderTocEntry(
     }
 }
 
+@kotlinx.serialization.Serializable
 sealed interface ReaderNavigationTarget {
+    @kotlinx.serialization.Serializable
     data class Reflowable(val href: String) : ReaderNavigationTarget
+    @kotlinx.serialization.Serializable
     data class Pdf(val pageIndex: Int) : ReaderNavigationTarget
+    @kotlinx.serialization.Serializable
     data class Comic(val pageIndex: Int, val resourceHref: String) : ReaderNavigationTarget
+    @kotlinx.serialization.Serializable
     data class Invalid(val reasonCode: String = "READER_NAVIGATION_TARGET_INVALID") : ReaderNavigationTarget
 
     companion object {

@@ -7,6 +7,17 @@ import org.junit.Test
 
 class EpubContentSecurityPolicyTest {
     @Test
+    fun legacyMobiNamespacesAreBoundBeforeStrictXmlValidation() {
+        val body = "<p id=\"one\">原文</p><mbp:pagebreak/><p id=\"two\">Next</p>"
+        val source = "<html><head></head><body>$body</body></html>"
+        val decorated = EpubContentSecurityPolicy.decorateMobiHtml(source.encodeToByteArray()).decodeToString()
+        assertEquals(body, decorated.substringAfter("<body>").substringBefore("</body>"))
+        assertTrue(decorated.contains("xmlns=\"http://www.w3.org/1999/xhtml\""))
+        assertTrue(decorated.contains("xmlns:mbp="))
+        assertEquals("Next", EpubContentSecurityPolicy.locatorBodyProjection(decorated.encodeToByteArray()).last()["text"])
+    }
+
+    @Test
     fun locatorProjectionMatchesV2GoldenSemantics() {
         val markup = """<?xml version="1.0" encoding="utf-8"?>
             <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Projection</title></head>

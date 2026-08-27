@@ -8,6 +8,13 @@ import com.ermao.library.shared.modules.reader.domain.toMutation
 import com.ermao.library.shared.modules.reader.domain.exactPublicationLocation
 import com.ermao.library.shared.modules.reader.domain.compareExactProgressLocations
 
+typealias Fb2PublicationDecoder = com.ermao.library.shared.modules.reader.infrastructure.Fb2PublicationDecoder
+typealias MobiMarkupEnvelope = com.ermao.library.shared.modules.reader.infrastructure.MobiMarkupEnvelope
+typealias Fb2XmlPolicy = com.ermao.library.shared.modules.reader.infrastructure.Fb2XmlPolicy
+typealias Fb2ImageLink = com.ermao.library.shared.modules.reader.infrastructure.Fb2ImageLink
+typealias Fb2PublicationDocument = com.ermao.library.shared.modules.reader.infrastructure.Fb2PublicationDocument
+typealias Fb2NavigationEntry = com.ermao.library.shared.modules.reader.infrastructure.Fb2NavigationEntry
+
 typealias ComicReaderLocation = com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
 typealias AudioReaderLocation = com.ermao.library.shared.modules.reader.domain.AudioReaderLocation
 typealias PublicationLocation = com.ermao.library.shared.modules.reader.domain.PublicationLocation
@@ -25,6 +32,47 @@ typealias ReaderEnginePlatform = com.ermao.library.shared.modules.reader.domain.
 typealias LocalReaderSource = com.ermao.library.shared.modules.reader.domain.LocalReaderSource
 typealias PdfReaderLocation = com.ermao.library.shared.modules.reader.domain.PdfReaderLocation
 typealias ReaderCapabilities = com.ermao.library.shared.modules.reader.domain.ReaderCapabilities
+typealias ReaderPanel = com.ermao.library.shared.modules.reader.domain.ReaderPanel
+typealias ReaderControl = com.ermao.library.shared.modules.reader.domain.ReaderControl
+typealias ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.ReaderControlAvailability
+typealias ReaderControlState = com.ermao.library.shared.modules.reader.domain.ReaderControlState
+
+fun resolveReaderControlContext(
+    control: ReaderControl, morphology: ReaderMorphology, capabilities: ReaderCapabilities,
+    ready: Boolean, scrolling: Boolean, publisherStyles: Boolean, nativeUnavailable: Set<ReaderControl>,
+): ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.resolveReaderControlContext(
+    control, morphology, capabilities, ready, scrolling, publisherStyles, nativeUnavailable,
+)
+
+fun resolveReaderControl(
+    control: ReaderControl,
+    morphology: ReaderMorphology,
+    capabilities: ReaderCapabilities,
+    preferences: ReaderPreferences,
+    ready: Boolean,
+    nativeUnavailable: Set<ReaderControl> = emptySet(),
+): ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.resolveReaderControl(
+    control, morphology, capabilities, preferences, ready, nativeUnavailable,
+)
+
+fun resetReaderPreferences(preferences: ReaderPreferences, morphology: ReaderMorphology): ReaderPreferences =
+    com.ermao.library.shared.modules.reader.domain.resetReaderPreferences(preferences, morphology)
+
+fun readerPlatformCapabilities(
+    morphology: ReaderMorphology,
+    volumeKeys: Boolean,
+    pdfFit: Boolean,
+): ReaderCapabilities {
+    val reflowable = ReaderCapabilities.epub(supportsVolumeKeys = volumeKeys)
+    if (morphology == ReaderMorphology.Reflowable) return reflowable
+    return reflowable.copy(
+        supportsBookmarks = false, supportsFontSize = false, supportsFontFamily = false,
+        supportsFontWeight = false, supportsLineHeight = false, supportsPositiveLetterSpacing = false,
+        supportsPageMargins = false, supportsReadingMode = false, supportsSpreadMode = false,
+        supportsParagraphLayout = false, supportsPublisherStyles = false,
+        supportsPageTurnAnimation = false, supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
+    )
+}
 typealias ReaderError = com.ermao.library.shared.modules.reader.domain.ReaderError
 typealias ReaderErrorCode = com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 fun readerErrorCodeForFailure(failureCode: String, recoverable: Boolean): ReaderErrorCode =
@@ -179,6 +227,9 @@ typealias PendingVsServerDecision =
     com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
 typealias ReaderTocEntry = com.ermao.library.shared.modules.reader.application.ReaderTocEntry
 typealias ReaderNavigationTarget = com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget
+
+fun matchesReaderNavigationHref(currentHref: String, expectedHref: String, fragments: Set<String>, cssSelector: String?): Boolean =
+    com.ermao.library.shared.modules.reader.domain.matchesReaderNavigationHref(currentHref, expectedHref, fragments, cssSelector)
 typealias ReaderNavigationResult = com.ermao.library.shared.modules.reader.application.ReaderNavigationResult
 typealias ReaderNavigationTargetReflowable =
     com.ermao.library.shared.modules.reader.application.ReaderNavigationTarget.Reflowable
@@ -367,3 +418,18 @@ fun resolveReaderChapterStatesFromLocation(
         location,
         progressPercent,
     )
+
+fun readingUnitLaunchTarget(readerType: String, href: String?, pageNumber: Int?): ReaderNavigationTarget =
+    com.ermao.library.shared.modules.reader.application.readingUnitLaunchTarget(readerType, href, pageNumber)
+
+fun encodeReaderLaunchTarget(target: ReaderNavigationTarget): String =
+    com.ermao.library.shared.modules.reader.application.encodeReaderLaunchTarget(target)
+
+fun decodeReaderLaunchTarget(payload: String?): ReaderNavigationTarget? =
+    com.ermao.library.shared.modules.reader.application.decodeReaderLaunchTarget(payload)
+
+fun mergeReaderPreferenceChanges(base: ReaderPreferences, requested: ReaderPreferences, current: ReaderPreferences): ReaderPreferences =
+    com.ermao.library.shared.modules.reader.domain.mergeReaderPreferenceChanges(base, requested, current)
+
+fun changedReaderControls(before: ReaderPreferences, after: ReaderPreferences): Set<ReaderControl> =
+    com.ermao.library.shared.modules.reader.domain.changedReaderControls(before, after)

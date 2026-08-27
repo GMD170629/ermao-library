@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="shelves_all">All</string>
+    <string name="shelves_collections">Collections</string>
+    <string name="shelves_scope">Filter shelves</string>
+    <string name="shelves_search">Search shelves or collections</string>
+    <string name="shelves_search_collection">Search shelves in this collection</string>
+    <string name="shelves_create">Create</string>
+    <string name="shelves_name">Name</string>
+    <string name="shelves_description">Description (optional)</string>
+    <string name="shelves_choose_members">Include shelves</string>
+    <string name="shelves_create_failed">Couldn’t create. Check the name and connection before trying again.</string>
+    <string name="shelves_count_books">Books: %1$s</string>
+    <string name="shelves_count_smart">Smart shelf · Books: %1$s</string>
+    <string name="shelves_count_collection">Collection · Shelves: %1$s</string>
+    <string name="shelves_smart_hint">Automatically updated by rules</string>
+    <string name="shelves_rules_unsupported">Some rules require the Web app</string>
+    <string name="shelves_empty">No shelves yet</string>
+    <string name="shelves_empty_message">Create a shelf or collection to organize your books.</string>
+    <string name="shelves_no_results">No matching shelves</string>
+    <string name="shelves_no_results_message">Try another name or clear the search.</string>
+    <string name="shelves_empty_books">No books in this shelf</string>
+    <string name="shelves_empty_books_message">Add books from their detail pages. Smart shelves update automatically.</string>
+    <string name="shelves_error">Couldn’t load shelves</string>
+    <string name="shelves_error_message">Check your connection and try again.</string>
+    <string name="shelves_inaccessible">Shelf unavailable</string>
+    <string name="shelves_load_more">Load more books</string>
+    <string name="shelves_load_more_retry">Couldn’t load more. Retry</string>
+    <string name="shelves_back">Back</string>
+    <string name="shelves_refresh">Refresh</string>
     <string name="app_name">Ermao Library</string>
 
     <string name="server_screen_description">Add a self-hosted server to start reading.</string>
@@ -153,7 +181,6 @@
     <string name="work_detail_loading_message">Loading work details and media.</string>
     <string name="work_unavailable_title">Content unavailable</string>
     <string name="work_unavailable_message">This work doesn’t exist or you no longer have access.</string>
-    <string name="work_reader_next_phase_message">Reader and audio playback will be enabled in the next phase.</string>
     <string name="work_no_readable_resources">No readable resources are available for this media type.</string>
     <string name="work_resources_title">Media types</string>
     <string name="work_detail_title">Book Details</string>
@@ -209,6 +236,7 @@
     <string name="multi_download_partial">Started: %1$d · Failed: %2$d</string>
     <string name="work_quick_remove_download">Remove downloaded resource</string>
     <string name="work_quick_reading_unread">Unread</string>
+    <string name="work_quick_reading_in_progress">Reading</string>
     <string name="work_quick_reading_read">Read</string>
     <string name="work_quick_add">Add</string>
     <string name="work_quick_more">More</string>
@@ -242,6 +270,9 @@
     <string name="work_primary_start_read_action">Start Reading</string>
     <string name="work_primary_listen_action">Continue Listening</string>
     <string name="work_primary_start_listen_action">Start Listening</string>
+    <string name="work_book_reading">Reading · %1$s</string>
+    <string name="work_book_download_count">Downloaded (%1$d)</string>
+    <string name="work_book_listening">Listening · %1$s</string>
     <string name="cancel_action">Cancel</string>
 
     <string name="server_center_title">Servers</string>
@@ -398,6 +429,8 @@
     <string name="reader_font_family">Font</string>
     <string name="reader_font_weight">Font weight</string>
     <string name="reader_letter_spacing">Letter spacing</string>
+    <string name="reader_font_mapping">PingFang, Heiti and YaHei use Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai.</string>
+    <string name="reader_negative_spacing_retained">Saved negative spacing is retained but unsupported. Effective spacing is 0.</string>
     <string name="reader_page_margin">Page margins</string>
     <string name="reader_font_pingfang">PingFang</string>
     <string name="reader_font_heiti">Heiti</string>
@@ -417,7 +450,15 @@
     <string name="reader_show_clock">Always show clock</string>
     <string name="reader_keep_awake">Keep screen awake</string>
     <string name="reader_page_turn_settings">Page turning</string>
-    <string name="reader_page_turn_animation">Animation</string>
+    <string name="reader_page_turn_animation">Button and key navigation animation</string>
+    <string name="reader_publisher_styles">Publisher styles</string>
+    <string name="reader_gesture_animation">Swipe gesture animation</string>
+    <string name="reader_publisher_colors">Publisher colors independently</string>
+    <string name="reader_publisher_fonts">Publisher fonts independently</string>
+    <string name="reader_page_width">Maximum page width</string>
+    <string name="reader_smart_optimization">Smart paragraph formatting</string>
+    <string name="reader_deduplicate_indent">Remove duplicate indentation</string>
+    <string name="reader_indent_unindented">Indent unindented paragraphs</string>
     <string name="reader_animation_slide">Slide</string>
     <string name="reader_animation_off">Off</string>
     <string name="reader_tap_zones">Tap zones</string>
@@ -558,7 +599,6 @@
     <string name="management_delete">Delete book</string>
     <string name="management_delete_message">Type “%1$s” to permanently delete the book, source files, resources, and reading history.</string>
     <string name="work_no_readable_resources_message">No online-readable resource is available for this book.</string>
-    <string name="work_contents_title">Book contents</string>
     <plurals name="work_contents_count">
         <item quantity="one">%1$d item</item>
         <item quantity="other">%1$d items</item>
@@ -578,7 +618,6 @@
     <string name="work_sort_updated_asc">Oldest updated</string>
     <string name="work_sort_type_asc">Content type</string>
     <string name="work_sort_size_desc">Content size</string>
-    <string name="work_back_to_contents">Back to book contents</string>
     <string name="work_resource_chapters_title">Chapters</string>
     <string name="work_resource_pages_title">Pages</string>
     <string name="work_resource_tracks_title">Tracks</string>
@@ -586,7 +625,6 @@
         <item quantity="one">%1$d item</item>
         <item quantity="other">%1$d items</item>
     </plurals>
-    <string name="work_open_reader">Open reader</string>
     <string name="work_open_player">Open player</string>
     <string name="work_resource_importing">This resource is still importing. %1$s</string>
     <string name="work_resource_import_failed">Import failed. %1$s</string>
@@ -600,4 +638,5 @@
     <string name="work_chapter_current">Reading</string>
     <string name="work_pagination">Page %1$d of %2$d</string>
     <string name="download_bootstrap_invalid">The offline download information is invalid (DOWNLOAD_BOOTSTRAP_INVALID). Online reading is still available.</string>
+    <string name="work_contents_open_children">Browse child content</string>
 </resources>

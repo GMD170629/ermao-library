@@ -106,6 +106,21 @@ enum class ExactBlockMatch {
     AnchorMismatch,
 }
 
+/** A resource match alone cannot confirm a table-of-contents fragment jump. */
+fun matchesReaderNavigationHref(
+    currentHref: String,
+    expectedHref: String,
+    fragments: Set<String>,
+    cssSelector: String?,
+): Boolean {
+    if (currentHref.substringBefore('#').removePrefix("./") !=
+        expectedHref.substringBefore('#').removePrefix("./")) return false
+    val fragment = expectedHref.substringAfter('#', "")
+    if (fragment.isEmpty()) return true
+    return currentHref.substringAfter('#', "") == fragment || fragment in fragments ||
+        cssSelector == "#$fragment" || cssSelector?.startsWith("#$fragment > ") == true
+}
+
 /**
  * Compares the expected remote Locator with the Locator recaptured after
  * navigation. A successful Navigator `go` call alone is never exact evidence.

@@ -98,14 +98,11 @@ actor SharedContentClient: ContentClient {
             query: ErmaoShared.BookDetailQuery(bookId: query.bookID, resourceId: query.resourceID)
         )
         let value: ErmaoShared.BookDetailSummary = try contentValue(result)
-        let selection = ErmaoShared.PublicKt.selectBookDetail(
-            resources: value.resources,
-            requestedResourceId: query.resourceID
-        )
-        let selectedResourceID = selection.resourceId
-        let resources = value.resources.map { mapResource($0, selectedResourceID: selectedResourceID) }
+        let selectedResourceID = query.resourceID
+        let resources = value.resources.filter { !$0.hidden && $0.bookId == value.id }
+            .map { mapResource($0, selectedResourceID: selectedResourceID) }
         let selectedProgress = value.continueResourceProgress > 0 ? value.continueResourceProgress : nil
-        let readingStatus: LibraryReadingStatus = if value.completed { .finished } else if selectedProgress != nil { .reading } else { .unread }
+        let readingStatus: LibraryReadingStatus = if value.completed { .finished } else if resources.contains(where: { ($0.progress ?? 0) > 0 }) { .reading } else { .unread }
         return BookDetailContent(
             book: BookCard(
                 id: value.id,
@@ -122,7 +119,9 @@ actor SharedContentClient: ContentClient {
             resources: resources,
             selectedResourceID: selectedResourceID,
             readingStatus: readingStatus,
-            chapters: []
+            chapters: [],
+            rootSourceNodeID: value.sourceNodeId,
+            continueResourceID: value.continueResourceId
         )
     }
 
@@ -133,7 +132,8 @@ actor SharedContentClient: ContentClient {
         )
         let value: ErmaoShared.BookResourcePage = try contentValue(result)
         return BookResourcePage(
-            resources: value.resources.map { mapResource($0, selectedResourceID: nil) },
+            resources: value.resources.filter { !$0.hidden && $0.bookId == bookID }
+                .map { mapResource($0, selectedResourceID: nil) },
             page: Int(value.page),
             total: Int(value.total),
             totalPages: Int(value.totalPages)
@@ -384,7 +384,8 @@ actor SharedContentClient: ContentClient {
                     sizeBytes: asset.sizeBytes, displaySize: asset.displaySize,
                     sortOrder: asset.sortOrder?.intValue, url: asset.url, downloadURL: asset.downloadUrl
                 )
-            }
+            },
+            importStatus: value.importStatus
         )
     }
 

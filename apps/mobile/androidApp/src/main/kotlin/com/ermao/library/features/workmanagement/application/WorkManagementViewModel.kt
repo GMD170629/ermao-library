@@ -60,6 +60,10 @@ class WorkManagementViewModel(
         repository.setBookReadingStatus(context, bookId, status)
     }
 
+    fun setResourceReadingStatus(resourceId: String, status: ManagedReadingStatus) = run(WorkManagementCompletion.ReadingStatusUpdated) {
+        repository.setReadingStatus(context, resourceId, status)
+    }
+
     fun updateBook(draft: BookMetadataDraft) = run(WorkManagementCompletion.WorkUpdated) {
         repository.updateBook(context, bookId, draft)
     }

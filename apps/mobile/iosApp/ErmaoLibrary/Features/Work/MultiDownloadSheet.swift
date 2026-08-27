@@ -23,16 +23,19 @@ final class MultiDownloadTreeStore: ObservableObject {
     private let context: ContentRequestContext
     private let client: any ContentClient
     private let bookID: String
+    private let requestedRootSourceNodeID: String?
 
     init(
         context: ContentRequestContext,
         client: any ContentClient,
         bookID: String,
-        initialResources: [BookResource]
+        initialResources: [BookResource],
+        rootSourceNodeID: String? = nil
     ) {
         self.context = context
         self.client = client
         self.bookID = bookID
+        requestedRootSourceNodeID = rootSourceNodeID
         resourcesByID = Dictionary(uniqueKeysWithValues: initialResources.map { ($0.id, $0) })
     }
 
@@ -45,7 +48,7 @@ final class MultiDownloadTreeStore: ObservableObject {
         guard isLoading else { return }
         Task {
             do {
-                async let root = loadFolder(sourceNodeID: nil)
+                async let root = loadFolder(sourceNodeID: requestedRootSourceNodeID)
                 async let resources = loadAllResources()
                 let (page, loadedResources) = try await (root, resources)
                 apply(page)
@@ -190,6 +193,7 @@ struct MultiDownloadSheet: View {
         context: ContentRequestContext,
         client: any ContentClient,
         detail: BookDetailContent,
+        rootSourceNodeID: String? = nil,
         downloads: DownloadCenterStore,
         openReader: @escaping (ReaderHandoff) -> Void,
         onDismiss: @escaping () -> Void,
@@ -205,7 +209,8 @@ struct MultiDownloadSheet: View {
                 context: context,
                 client: client,
                 bookID: detail.book.id,
-                initialResources: detail.resources
+                initialResources: detail.resources,
+                rootSourceNodeID: rootSourceNodeID
             )
         )
     }

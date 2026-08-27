@@ -142,7 +142,9 @@ data class BookDetailContent(
     val selectedResourceId: String?,
     val completed: Boolean = false,
     val readingUnits: List<ReadingUnitContent> = emptyList(),
+    val continueResourceId: String? = null,
 ) {
+    val continueResource: ResourceContent? get() = resources.firstOrNull { it.id == continueResourceId }
     val hasDescription: Boolean get() = !description.isNullOrBlank()
     val showsResourcePicker: Boolean get() = resources.size > 1
     fun supportsChapterDirectory(resourceId: String?): Boolean =

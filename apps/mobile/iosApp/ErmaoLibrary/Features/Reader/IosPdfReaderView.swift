@@ -7,19 +7,13 @@ struct IosPdfReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosPdfReaderSession
     var onRetry: () -> Void = {}
-    @State private var sliderPage = 0.0
-    @State private var sliderIsEditing = false
-    @State private var showsTableOfContents = false
-    @State private var showsSettings = false
-    @State private var pendingPageID: String?
-    @State private var navigationFailed = false
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             content
-            if session.controlsVisible, session.phase == .reading || session.phase == .background {
-                controls
+            if session.phase == .reading || session.phase == .background {
+                IosReaderControls(session: session, onClose: close)
             }
             if session.restoreWarning != nil {
                 VStack {
@@ -54,12 +48,10 @@ struct IosPdfReaderView: View {
         .task {
             await session.open()
             await session.verifyRestoredLocationAfterPresentation()
-            sliderPage = Double(session.pageIndex)
+            UIApplication.shared.isIdleTimerDisabled = session.preferences.keepScreenAwake
         }
-        .onChange(of: session.pageIndex) { value in
-            if !sliderIsEditing { sliderPage = Double(value) }
-        }
-        .onChange(of: scenePhase) { phase in
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onChange(of: scenePhase) { _, phase in
             Task {
                 switch phase {
                 case .background: await session.enterBackground()
@@ -68,49 +60,6 @@ struct IosPdfReaderView: View {
                 }
             }
         }
-        .sheet(isPresented: $showsTableOfContents) {
-            NavigationStack {
-                Group {
-                    if session.tableOfContents.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "list.bullet").font(.largeTitle)
-                            Text("reader.toc.empty").multilineTextAlignment(.center)
-                        }
-                        .padding(24)
-                    } else {
-                        List {
-                            if navigationFailed { Text("reader.navigation.failed").foregroundStyle(.red) }
-                            ForEach(session.tableOfContents) { entry in
-                            Button {
-                                Task {
-                                    pendingPageID = entry.id
-                                    navigationFailed = false
-                                    if await session.goToTOCEntry(entry) { showsTableOfContents = false }
-                                    else { navigationFailed = true }
-                                    pendingPageID = nil
-                                }
-                            } label: {
-                                HStack {
-                                    Text(entry.title).padding(.leading, CGFloat(entry.depth) * 16)
-                                    Spacer()
-                                    if pendingPageID == entry.id { ProgressView() }
-                                }
-                            }
-                            .disabled(pendingPageID != nil)
-                            }
-                        }
-                    }
-                }
-                .navigationTitle("reader.toc")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("common.done") { showsTableOfContents = false }
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-        }
-        .sheet(isPresented: $showsSettings) { IosPdfReaderSettingsSheet(session: session) }
         .alert(
             String(localized: "reader.error.title"),
             isPresented: Binding(
@@ -144,114 +93,11 @@ struct IosPdfReaderView: View {
         }
     }
 
-    private var controls: some View {
-        VStack {
-            HStack {
-                Button(action: close) { Image(systemName: "chevron.backward").frame(width: 44, height: 44) }
-                    .accessibilityLabel(Text("reader.close"))
-                    .accessibilityIdentifier("reader.close")
-                Text(session.displayTitle).font(.headline).lineLimit(1).frame(maxWidth: .infinity)
-                Button { showsTableOfContents = true } label: {
-                    Image(systemName: "list.bullet").frame(width: 44, height: 44)
-                }.accessibilityLabel(Text("reader.toc"))
-                    .accessibilityIdentifier("reader.toc")
-                Button { showsSettings = true } label: { Image(systemName: "gearshape").frame(width: 44, height: 44) }
-                    .accessibilityLabel(Text("reader.settings"))
-                Button { session.zoomOut() } label: { Image(systemName: "minus.magnifyingglass").frame(width: 44, height: 44) }
-                    .accessibilityLabel(Text("reader.pdf.zoom.out"))
-                Button { session.zoomToFit() } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 44, height: 44) }
-                    .accessibilityLabel(Text("reader.pdf.zoom.fit"))
-                Button { session.zoomIn() } label: { Image(systemName: "plus.magnifyingglass").frame(width: 44, height: 44) }
-                    .accessibilityLabel(Text("reader.pdf.zoom.in"))
-            }
-            .padding(.horizontal, 8).background(.regularMaterial)
-            Spacer()
-            VStack(spacing: 8) {
-                HStack {
-                    Button { Task { await session.goPrevious() } } label: {
-                        Image(systemName: "chevron.backward").frame(width: 44, height: 44)
-                    }.accessibilityLabel(Text("reader.previous"))
-                        .accessibilityIdentifier("reader.previous")
-                    Slider(
-                        value: $sliderPage,
-                        in: 0 ... Double(max(0, session.canonicalPageCount - 1)),
-                        step: 1
-                    ) { editing in
-                        sliderIsEditing = editing
-                        if !editing { Task { _ = await session.goToPage(Int(sliderPage.rounded())) } }
-                    }
-                    .accessibilityLabel(Text("reader.progress"))
-                    .accessibilityValue(Text(session.pageLabel))
-                    .accessibilityIdentifier("reader.progress")
-                    Button { Task { await session.goNext() } } label: {
-                        Image(systemName: "chevron.forward").frame(width: 44, height: 44)
-                    }.accessibilityLabel(Text("reader.next"))
-                        .accessibilityIdentifier("reader.next")
-                }
-                Text(session.pageLabel).font(.caption.monospacedDigit())
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8).background(.regularMaterial)
-        }
-        .foregroundStyle(.primary)
-    }
-
     private func close() {
         Task {
             try? await session.close()
             dismiss()
         }
-    }
-}
-
-private struct IosPdfReaderSettingsSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var session: IosPdfReaderSession
-    @State private var draft: IosReaderPreferences
-    @State private var applyFailed = false
-
-    init(session: IosPdfReaderSession) {
-        self.session = session
-        _draft = State(initialValue: session.preferences)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                if applyFailed { Text("reader.preferences.apply.failed").foregroundStyle(.red) }
-                Section("reader.settings.layout") {
-                    ReaderValueSlider(
-                        title: "reader.settings.pdfZoom",
-                        value: $draft.pdfZoom,
-                        range: 0.6 ... 2.4,
-                        step: 0.1,
-                        valueText: draft.pdfZoom.formatted(.percent.precision(.fractionLength(0)))
-                    )
-                    Picker("reader.settings.pdfFit", selection: $draft.pdfFit) {
-                        Text("reader.settings.pdfFit.page").tag(IosPdfFit.page)
-                        Text("reader.settings.pdfFit.width").tag(IosPdfFit.width)
-                    }
-                    Picker("reader.settings.pdfRotation", selection: $draft.pdfRotation) {
-                        ForEach([0, 90, 180, 270], id: \.self) { Text("\($0)°").tag($0) }
-                    }
-                    Picker("reader.settings.pdfCrop", selection: $draft.pdfCropMargins) {
-                        Text("reader.settings.pdfCrop.off").tag(IosPdfCropMargins.off)
-                        Text("reader.settings.pdfCrop.auto").tag(IosPdfCropMargins.auto)
-                    }
-                }
-            }
-            .navigationTitle("reader.settings")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("common.done") {
-                        Task {
-                            if await session.applyPreferences(draft) { dismiss() }
-                            else { applyFailed = true }
-                        }
-                    }
-                }
-            }
-        }.presentationDetents([.medium, .large])
     }
 }
 

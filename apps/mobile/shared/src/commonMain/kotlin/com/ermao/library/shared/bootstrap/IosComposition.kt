@@ -75,6 +75,13 @@ fun createIosShelfRepository(
     ApiClientFactory(SerializedCookieVault(cookieStore)),
 )
 
+fun createIosShelfCatalogRepository(
+    cookieStore: SecureCookiePayloadStore,
+): com.ermao.library.shared.modules.shelf.ShelfCatalogRepository =
+    com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfCatalogRepository(
+        ApiClientFactory(SerializedCookieVault(cookieStore)),
+    )
+
 fun createIosWorkManagementRepository(
     cookieStore: SecureCookiePayloadStore,
 ): WorkManagementRepository = KtorWorkManagementRepository(

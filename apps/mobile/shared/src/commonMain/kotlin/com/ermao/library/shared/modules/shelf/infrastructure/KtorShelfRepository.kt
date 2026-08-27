@@ -53,6 +53,10 @@ class KtorShelfRepository(
                 }
                 val details = listedShelves.map { (id, name, kind) ->
                     async {
+                        // Collections own shelves and have no bookIds field.
+                        if (kind == ShelfKind.Collection) {
+                            return@async ShelfResult.Content(ShelfSummary(id, name, kind, false))
+                        }
                         when (val detail = request(context) { client ->
                             client.execute(
                                 ApiRequest(
@@ -152,7 +156,7 @@ private fun String.toShelfKind(): ShelfKind? = when (this) {
     else -> null
 }
 
-private fun AppError.toShelfError(): ShelfError = ShelfError(
+internal fun AppError.toShelfError(): ShelfError = ShelfError(
     kind = when (kind) {
         AppErrorKind.Unauthorized -> ShelfErrorKind.Unauthorized
         AppErrorKind.NetworkUnavailable, AppErrorKind.Timeout, AppErrorKind.TlsFailure -> ShelfErrorKind.Offline
@@ -164,5 +168,5 @@ private fun AppError.toShelfError(): ShelfError = ShelfError(
     code = code,
 )
 
-private fun <T> protocolFailure(code: String): ShelfResult<T> =
+internal fun <T> protocolFailure(code: String): ShelfResult<T> =
     ShelfResult.Failure(ShelfError(ShelfErrorKind.Protocol, code))

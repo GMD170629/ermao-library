@@ -196,6 +196,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
     let metadataSource: String?
     let kindleSendAvailable: Bool
     let assets: [ResourceAsset]
+    let importStatus: String?
 
     init(
         id: String,
@@ -221,7 +222,8 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         pageCount: Int? = nil,
         metadataSource: String? = nil,
         kindleSendAvailable: Bool = false,
-        assets: [ResourceAsset] = []
+        assets: [ResourceAsset] = [],
+        importStatus: String? = nil
     ) {
         self.id = id
         self.bookID = bookID
@@ -247,6 +249,7 @@ struct BookResource: Identifiable, Codable, Equatable, Sendable {
         self.metadataSource = metadataSource
         self.kindleSendAvailable = kindleSendAvailable
         self.assets = assets
+        self.importStatus = importStatus
     }
 
     func displayIndex(position: Int) -> String {
@@ -308,6 +311,44 @@ struct BookContentEntry: Identifiable, Equatable, Sendable {
     var id: String { sourceNodeID }
     var isDirectResource: Bool { resourceID?.isEmpty == false }
     var isSourceFolder: Bool { kind == "FOLDER" && !isDirectResource }
+
+    var destination: BookContentDestination? {
+        if let resourceID, !resourceID.isEmpty { return .resource(resourceID: resourceID) }
+        if isSourceFolder { return .directory(sourceNodeID: sourceNodeID) }
+        return nil
+    }
+}
+
+enum BookContentDestination: Hashable, Codable, Sendable {
+    case root
+    case directory(sourceNodeID: String)
+    case resource(resourceID: String)
+
+    var isValid: Bool {
+        switch self {
+        case .root: true
+        case .directory(let id), .resource(let id):
+            !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && id.utf8.count <= 512
+        }
+    }
+
+    var restorationKey: String {
+        switch self {
+        case .root: "root"
+        case .directory(let id): "directory:\(id)"
+        case .resource(let id): "resource:\(id)"
+        }
+    }
+
+    var resourceID: String? {
+        if case .resource(let id) = self { return id }
+        return nil
+    }
+
+    var sourceNodeID: String? {
+        if case .directory(let id) = self { return id }
+        return nil
+    }
 }
 
 struct BookContentsPage: Equatable, Sendable {
@@ -325,7 +366,7 @@ struct BookContentsPage: Equatable, Sendable {
     let totalPages: Int
 }
 
-enum BookContentSort: String, CaseIterable, Equatable, Sendable {
+enum BookContentSort: String, CaseIterable, Codable, Equatable, Sendable {
     case nameAscending
     case nameDescending
     case updatedDescending
@@ -334,9 +375,18 @@ enum BookContentSort: String, CaseIterable, Equatable, Sendable {
     case sizeDescending
 }
 
-enum BookContentLayout: String, CaseIterable, Equatable, Sendable {
+enum BookContentLayout: String, CaseIterable, Codable, Equatable, Sendable {
     case grid
     case list
+}
+
+struct BookContentViewState: Codable, Equatable {
+    var sort: BookContentSort = .nameAscending
+    var layout: BookContentLayout = .grid
+    var page = 1
+    var readingUnitsPage = 1
+
+    var isValid: Bool { page > 0 && readingUnitsPage > 0 }
 }
 
 enum ChapterReadingState: String, Codable, Equatable, Sendable {
@@ -415,6 +465,7 @@ struct BookResourceDetailPage: Equatable, Sendable {
 }
 
 struct BookDetailContent: Codable, Equatable, Sendable {
+    let rootSourceNodeID: String?
     let book: BookCard
     let description: String?
     let tags: [String]
@@ -425,6 +476,18 @@ struct BookDetailContent: Codable, Equatable, Sendable {
     let selectedResourceID: String?
     let readingStatus: LibraryReadingStatus?
     let chapters: [BookChapter]
+    let continueResourceID: String?
+
+    var continueResource: BookResource? {
+        resources.first { $0.id == continueResourceID && $0.bookID == book.id }
+    }
+
+    func readingResource(isBookRoot: Bool, selectedResourceID: String?) -> BookResource? {
+        let scope = ErmaoShared.PublicKt.resolveBookDetailActionScope(
+            isBookRoot: isBookRoot, bookId: book.id, selectedResourceId: selectedResourceID, continueResourceId: continueResourceID
+        )
+        return resources.first { $0.id == scope?.readingResourceId && $0.bookID == book.id }
+    }
 
     init(
         book: BookCard,
@@ -436,9 +499,12 @@ struct BookDetailContent: Codable, Equatable, Sendable {
         resources: [BookResource],
         selectedResourceID: String?,
         readingStatus: LibraryReadingStatus?,
-        chapters: [BookChapter]
+        chapters: [BookChapter],
+        rootSourceNodeID: String? = nil,
+        continueResourceID: String? = nil
     ) {
         self.book = book
+        self.rootSourceNodeID = rootSourceNodeID
         self.description = description
         self.tags = tags
         self.seriesFacet = seriesFacet
@@ -448,6 +514,7 @@ struct BookDetailContent: Codable, Equatable, Sendable {
         self.selectedResourceID = selectedResourceID
         self.readingStatus = readingStatus
         self.chapters = chapters
+        self.continueResourceID = continueResourceID
     }
 }
 

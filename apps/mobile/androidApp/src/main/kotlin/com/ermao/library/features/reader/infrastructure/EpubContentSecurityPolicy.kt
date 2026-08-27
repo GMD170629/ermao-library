@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.MobiMarkupEnvelope
 import java.io.StringReader
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -35,11 +36,21 @@ internal object EpubContentSecurityPolicy {
             "input,button,select,textarea{pointer-events:none!important;}"
 
     fun apply(container: Container<Resource>): Container<Resource> =
+        transformMarkup(container, ::decorateHtml)
+
+    fun applyMobi(container: Container<Resource>): Container<Resource> =
+        transformMarkup(container, ::decorateMobiHtml)
+
+    internal fun decorateMobiHtml(bytes: ByteArray): ByteArray = decorateHtml(
+        MobiMarkupEnvelope().prepare(bytes.decodeToString(throwOnInvalidSequence = true)).encodeToByteArray(),
+    )
+
+    private fun transformMarkup(container: Container<Resource>, decorate: (ByteArray) -> ByteArray): Container<Resource> =
         TransformingContainer(container) { url, resource ->
             if (url.path?.substringAfterLast('.', missingDelimiterValue = "")?.lowercase() in HTML_EXTENSIONS) {
                 TransformingResource(resource) { bytes ->
                     try {
-                        Try.success(decorateHtml(bytes))
+                        Try.success(decorate(bytes))
                     } catch (error: Exception) {
                         Try.failure(ReadError.Decoding(error))
                     }

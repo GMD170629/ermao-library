@@ -65,6 +65,11 @@ fun createAndroidShelfRepository(context: Context): ShelfRepository =
         ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
     )
 
+fun createAndroidShelfCatalogRepository(context: Context): com.ermao.library.shared.modules.shelf.ShelfCatalogRepository =
+    com.ermao.library.shared.modules.shelf.infrastructure.KtorShelfCatalogRepository(
+        ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+    )
+
 fun createAndroidWorkManagementRepository(context: Context): WorkManagementRepository =
     KtorWorkManagementRepository(
         ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),

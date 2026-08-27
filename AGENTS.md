@@ -425,15 +425,19 @@ not be connected to Reader bootstrap, delivery, download, cache, or progress.
 
 ### Mobile Work Detail single source of truth
 
-Mobile Work Detail behavior must follow the current Web implementation in
+Mobile Book content navigation must follow `docs/mobile-book-content-navigation.md`.
+Book entry and child navigation resolve the server-provided node identity: a directory
+opens a directory page and a resource opens its independent resource detail, without
+auto-starting Reader. Resource counts never select the page type. This explicitly
+supersedes the former single-resource and same-page Mobile presentation rules.
+Backend contracts, node classification, data structures and Web behavior must not change.
+Content, cover, sort and permission contracts continue to follow the Web implementation in
 `apps/web/features/books/book-detail-page.tsx`,
 `apps/web/features/books/ui/book-content-browser.tsx`, and
-`apps/web/features/books/ui/resource-detail-view.tsx`. A single readable resource opens
-its resource detail without auto-starting the Reader; multiple resources open the real
-server content browser with breadcrumbs, folders, pagination, view modes, and the same six
-sort orders as Web. Reading and listening are online-first and never require a prior
-download. Offline download remains a separate optional action. Phase documents and visual
-artifacts may adapt this behavior to native controls, but must not redefine it.
+`apps/web/features/books/ui/resource-detail-view.tsx`. Directories retain breadcrumbs,
+folders, pagination, view modes and the six Web sort orders. Reading is online-first;
+offline download is a separate optional action. Audio playback remains explicitly
+unavailable in this navigation-only iteration.
 
 ### Android Physical-Device-Default Development
 

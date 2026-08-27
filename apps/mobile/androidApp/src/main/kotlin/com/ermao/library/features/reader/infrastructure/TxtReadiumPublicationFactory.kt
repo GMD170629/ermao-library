@@ -1,5 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
+import org.readium.r2.streamer.parser.epub.EpubPositionsService
+
 import com.ermao.library.shared.modules.reader.TxtPublicationNormalizer
 import java.io.File
 import java.nio.ByteBuffer
@@ -25,6 +27,7 @@ internal class TxtReadiumPublicationFactory(
     private val normalizer: TxtPublicationNormalizer = TxtPublicationNormalizer(),
 ) {
     fun open(file: File, title: String): Publication {
+        require(file.length() in 1..64L * 1024 * 1024) { "TXT source exceeds the size limit" }
         val bytes = file.readBytes()
         val decoded = StrictTxtDecoder.decode(bytes)
         val normalized = normalizer.normalize(decoded, title)
@@ -66,6 +69,9 @@ internal class TxtReadiumPublicationFactory(
                 tableOfContents = readingOrder,
             ),
             container = CompositeContainer(containers),
+            servicesBuilder = Publication.ServicesBuilder(
+                positions = EpubPositionsService.createFactory(),
+            ),
         )
     }
 }

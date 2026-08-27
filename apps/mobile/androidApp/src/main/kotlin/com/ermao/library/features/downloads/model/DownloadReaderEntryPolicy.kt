@@ -37,6 +37,8 @@ fun isSupportedNativeDownloadReader(readerType: String, format: String): Boolean
 
 fun isSupportedNativeReaderEntry(readerType: String, format: String): Boolean =
     isSupportedNativeReflowable(readerType, format) ||
+        // Library KINDLE is a family, resolved to an exact original by Reader bootstrap.
+        (readerType.equals("reflowable", ignoreCase = true) && format.trim().equals("KINDLE", ignoreCase = true)) ||
         readerType.equals("comic", ignoreCase = true) ||
         readerType.equals("pdf", ignoreCase = true)
 

@@ -4,7 +4,6 @@ import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.modules.library.domain.BookDetail
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.shared.modules.library.domain.BookSummary
-import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.library.infrastructure.BookDetailPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookPayloadWire
 import com.ermao.library.shared.modules.library.infrastructure.BookSummaryWire
@@ -55,8 +54,35 @@ fun createLibraryFilters(
     readingStatus = readingStatus,
 )
 
-/** Swift-friendly access to the shared Web-parity Work Detail selection policy. */
-fun selectBookDetail(
-    resources: List<Resource>,
-    requestedResourceId: String?,
-): BookDetailSelection = selectBookDetailPresentation(resources, requestedResourceId)
+/** Swift-friendly server-node navigation boundary. */
+fun resolveBookContentTarget(node: BookContentEntry): BookContentTarget? = bookContentTarget(node)
+
+typealias BookContentSnapshot = com.ermao.library.shared.modules.library.application.BookContentSnapshot
+
+typealias BookDetailActionScope = com.ermao.library.shared.modules.library.domain.BookDetailActionScope
+typealias BookDetailObjectKind = com.ermao.library.shared.modules.library.domain.BookDetailObjectKind
+typealias BookDetailDownloadState = com.ermao.library.shared.modules.library.domain.BookDetailDownloadState
+typealias BookDetailDownloadSummary = com.ermao.library.shared.modules.library.domain.BookDetailDownloadSummary
+
+fun summarizeBookDetailDownloads(states: List<BookDetailDownloadState>): BookDetailDownloadSummary =
+    com.ermao.library.shared.modules.library.domain.bookDetailDownloadSummary(states)
+
+fun resolveBookDetailActionScope(
+    isBookRoot: Boolean,
+    bookId: String,
+    selectedResourceId: String?,
+    continueResourceId: String?,
+): BookDetailActionScope? = com.ermao.library.shared.modules.library.domain.bookDetailActionScope(
+    isBookRoot, bookId, selectedResourceId, continueResourceId,
+)
+
+suspend fun loadBookContentPage(
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    bookId: String,
+    target: BookContentTarget,
+    sort: BookContentSort,
+    page: Int,
+): ContentResult<BookContentSnapshot> = com.ermao.library.shared.modules.library.application.loadBookContent(
+    repository, context, bookId, target, sort, page,
+)

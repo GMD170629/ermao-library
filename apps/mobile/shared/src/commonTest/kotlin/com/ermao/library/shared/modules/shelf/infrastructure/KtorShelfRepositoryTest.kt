@@ -26,7 +26,6 @@ class KtorShelfRepositoryTest {
             SHELVES,
             STATIC_DETAIL,
             SMART_DETAIL,
-            COLLECTION_DETAIL,
         )
 
         val result = assertIs<ShelfResult.Content<*>>(
@@ -38,9 +37,11 @@ class KtorShelfRepositoryTest {
         assertEquals(true, shelf.containsBook)
         assertEquals(listOf("Favorites", "Smart", "Collection"), result.filterIsInstance<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>().map { it.name })
         assertEquals(
-            listOf("/base/api/shelves", "/base/api/shelves/shelf-1", "/base/api/shelves/smart-1", "/base/api/shelves/collection-1"),
+            listOf("/base/api/shelves", "/base/api/shelves/shelf-1", "/base/api/shelves/smart-1"),
             harness.requests.map(Request::path),
         )
+        val collection = result.filterIsInstance<com.ermao.library.shared.modules.shelf.domain.ShelfSummary>().last()
+        assertEquals(false, collection.containsBook)
     }
 
     @Test
@@ -102,6 +103,5 @@ class KtorShelfRepositoryTest {
         const val SHELVES = """{"ok":true,"data":{"shelves":[{"id":"shelf-1","name":"Favorites","kind":"STATIC"},{"id":"smart-1","name":"Smart","kind":"SMART"},{"id":"collection-1","name":"Collection","kind":"COLLECTION"}]}}"""
         const val STATIC_DETAIL = """{"ok":true,"data":{"shelf":{"id":"shelf-1","name":"Favorites","kind":"STATIC","bookIds":["book-1"]}}}"""
         const val SMART_DETAIL = """{"ok":true,"data":{"shelf":{"id":"smart-1","name":"Smart","kind":"SMART","bookIds":[]}}}"""
-        const val COLLECTION_DETAIL = """{"ok":true,"data":{"shelf":{"id":"collection-1","name":"Collection","kind":"COLLECTION","bookIds":["book-1"]}}}"""
     }
 }

@@ -5,7 +5,10 @@ import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import com.ermao.library.features.downloads.model.DownloadReaderEntryAction
 import com.ermao.library.features.downloads.model.downloadReaderEntryAction
+import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
+import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import org.junit.Test
 
 class DownloadReaderEntryPolicyTest {
@@ -45,11 +48,20 @@ class DownloadReaderEntryPolicyTest {
     }
 
     @Test
-    fun legacyGenericKindleFormatIsNotAdvertisedAsReadable() {
+    fun kindleLibraryFamilyUsesBootstrapButNeverOpensAnAmbiguousLocalArtifact() {
         assertEquals(
-            DownloadReaderEntryAction.ValidateUnsupportedAccess,
+            DownloadReaderEntryAction.OpenServerReader,
             downloadReaderEntryAction("reflowable", "KINDLE", null) { false },
         )
+        assertEquals(
+            DownloadReaderEntryAction.OpenServerReader,
+            downloadReaderEntryAction("reflowable", " kindle ", completedRecord("KINDLE")) {
+                error("A generic family cannot identify a verified local artifact")
+            },
+        )
+        assertFalse(isSupportedNativeDownloadReader("reflowable", "KINDLE"))
+        assertFalse(isSupportedNativeReaderEntry("audio", "KINDLE"))
+        assertFalse(isSupportedNativeReaderEntry("reflowable", "KFX"))
     }
 
     private fun completedRecord(format: String = "EPUB") = AndroidDownloadRecord(
