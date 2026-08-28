@@ -118,7 +118,8 @@ private fun ReaderBookmark.record(): AndroidReaderBookmarkRecord = AndroidReader
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumEpubSession(
-    private val source: LocalReaderSource,
+    private val source: com.ermao.library.shared.modules.reader.ReaderSource,
+    private val onlinePublication: com.ermao.library.shared.modules.reader.OnlinePublicationSession? = null,
     private val canonicalUnits: List<ReaderNavigationUnit> = emptyList(),
     private val publicationStore: AndroidReaderPublicationStore,
     private val progressStore: ReaderProgressStore,
@@ -166,6 +167,9 @@ internal class ReadiumEpubSession(
     private val _bookmarkSyncPending = MutableStateFlow(false)
     override val bookmarkSyncPending: StateFlow<Boolean> = _bookmarkSyncPending.asStateFlow()
 
+    private val _contentError = MutableStateFlow<ReaderError?>(null)
+    override val contentError: StateFlow<ReaderError?> = _contentError.asStateFlow()
+
     private val saveMutex = Mutex()
     private val bookmarkSyncMutex = Mutex()
     private var bookmarkRecords: List<AndroidReaderBookmarkRecord> = emptyList()
@@ -191,17 +195,15 @@ internal class ReadiumEpubSession(
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
         private set
 
-    override suspend fun prepare(classLoader: ClassLoader): EpubNavigatorFragment {
-        check(!prepared) { "Reader session is already prepared" }
-        prepared = true
+    private suspend fun openLocalPublication(): Publication {
         val file = try {
-            publicationStore.resolve(source)
+            publicationStore.resolve(requireNotNull(source as? LocalReaderSource))
         } catch (error: IllegalArgumentException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         }
-        val openedPublication = if (source.sourceFormat == ReaderSourceFormat.Fb2) {
+        return if (source.sourceFormat == ReaderSourceFormat.Fb2) {
             try {
                 Fb2ReadiumPublicationFactory().open(file, source.displayTitle)
             } catch (error: IllegalArgumentException) {
@@ -240,6 +242,16 @@ internal class ReadiumEpubSession(
                     diagnostic = ReadiumOpeningDiagnostic.PublicationOpening(error),
                 )
             }
+        }
+    }
+
+    override suspend fun prepare(classLoader: ClassLoader): EpubNavigatorFragment {
+        check(!prepared) { "Reader session is already prepared" }
+        prepared = true
+        val openedPublication = if (onlinePublication != null) {
+            RemoteReflowableReadiumPublicationFactory(onlinePublication) { _contentError.value = ReaderError(it) }.open()
+        } else {
+            openLocalPublication()
         }
         if (openedPublication.isRestricted) {
             openedPublication.close()
@@ -703,6 +715,7 @@ internal class ReadiumEpubSession(
     }
 
     override fun release() {
+        onlinePublication?.close()
         locationJob?.cancel()
         locationJob = null
         bookmarkScope = null

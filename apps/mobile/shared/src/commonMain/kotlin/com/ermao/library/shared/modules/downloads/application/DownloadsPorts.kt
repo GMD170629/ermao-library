@@ -19,12 +19,21 @@ data class DownloadRequestContext(
 }
 
 interface DownloadCatalogRepository {
+    @Throws(Exception::class)
     suspend fun listArtifacts(namespace: DownloadNamespace): List<CompletedDownloadArtifact>
-    suspend fun saveArtifact(artifact: CompletedDownloadArtifact)
+    @Throws(Exception::class)
     suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity)
+    @Throws(Exception::class)
     suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask>
+    @Throws(Exception::class)
+    suspend fun findTask(descriptor: DownloadDescriptor): DownloadTask? = listTasks(descriptor.identity.namespace)
+        .firstOrNull { it.matchesDescriptor(descriptor) }
+    @Throws(Exception::class)
+    /** Atomically persists the task and its optional completed artifact in one catalog record. */
     suspend fun saveTask(task: DownloadTask)
+    @Throws(Exception::class)
     suspend fun deleteTask(namespace: DownloadNamespace, taskId: String)
+    @Throws(Exception::class)
     suspend fun clearNamespace(namespace: DownloadNamespace)
 }
 
@@ -35,24 +44,37 @@ data class DownloadSinkRequest(
     val assetId: String,
     val expectedTotalBytes: Long,
     val resumeFromBytes: Long,
+    val artifactKind: DownloadArtifactKind = DownloadArtifactKind.SingleOriginalAsset,
 ) {
     init {
         require(taskId.isNotBlank())
         require(resourceId.isNotBlank())
         require(assetId.isNotBlank())
         require(expectedTotalBytes > 0)
-        require(resumeFromBytes in 0 until expectedTotalBytes)
+        require(resumeFromBytes in 0..expectedTotalBytes)
     }
 }
 
+data class DownloadStoredBytes(val partialBytes: Long, val completedReference: String? = null) {
+    init { require(partialBytes >= 0); require(completedReference == null || completedReference.isNotBlank()) }
+}
+
 interface DownloadByteSink {
+    /** Reconcile durable bytes after interruption, including publication before catalog commit. */
+    @Throws(Exception::class)
+    suspend fun inspect(request: DownloadSinkRequest): DownloadStoredBytes = DownloadStoredBytes(request.resumeFromBytes)
+    @Throws(Exception::class)
     suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession
 }
 
 interface DownloadByteSinkSession {
+    @Throws(Exception::class)
     suspend fun write(bytes: ByteArray)
+    @Throws(Exception::class)
     suspend fun commit(expectedTotalBytes: Long): String
+    @Throws(Exception::class)
     suspend fun abort()
+    @Throws(Exception::class)
     suspend fun pause() = abort()
 }
 
@@ -90,12 +112,16 @@ data class DownloadBundleMemberSinkRequest(
 }
 
 interface DownloadBundleByteSink {
+    @Throws(Exception::class)
     suspend fun beginBundle(request: DownloadBundleSinkRequest): DownloadBundleByteSinkSession
 }
 
 interface DownloadBundleByteSinkSession {
+    @Throws(Exception::class)
     suspend fun beginMember(request: DownloadBundleMemberSinkRequest): DownloadByteSinkSession
+    @Throws(Exception::class)
     suspend fun commit(): String
+    @Throws(Exception::class)
     suspend fun abort()
 }
 
@@ -119,7 +145,6 @@ data class DownloadTransferRequest(
     val taskId: String,
     val descriptor: DownloadDescriptor,
     val resumeFromBytes: Long = 0,
-    val ifRangeValidator: String? = null,
     val preservePartialOnCancellation: Boolean = false,
 ) {
     init {

@@ -1,6 +1,7 @@
 package com.ermao.library.platform.persistence
 
 import android.content.Context
+import com.ermao.library.shared.modules.library.smallCoverRequestPath
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
@@ -44,7 +45,7 @@ object AndroidCoverCache {
                 return@withContext bytes
             }
         }
-        when (val result = repository.loadCover(requestContext, apiPath)) {
+        when (val result = repository.loadCover(requestContext, smallCoverRequestPath(apiPath))) {
             is ContentResult.Content -> result.value.bytes.takeIf(ByteArray::isNotEmpty)?.also { bytes ->
                 directory.mkdirs()
                 val temporary = File(directory, "$key.tmp")
@@ -110,7 +111,7 @@ object AndroidCoverCache {
     }
 
     private fun cacheKey(context: ContentRequestContext, apiPath: String): String =
-        sha256("${namespaceKey(context)}|$apiPath")
+        sha256("${namespaceKey(context)}|${smallCoverRequestPath(apiPath)}")
 
     private fun namespaceKey(context: ContentRequestContext): String = sha256(
         listOf(

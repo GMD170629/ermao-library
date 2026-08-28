@@ -1,5 +1,9 @@
 """Composition root for normalized publication use cases."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from fastapi import Request
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings
@@ -44,9 +48,25 @@ from app.modules.publications.infrastructure.uow import (
 )
 
 
-def _publication_adapter_and_profiles(
-    settings: Settings,
-) -> tuple[CompositePublicationAdapter, ConfiguredPublicationParserProfiles]:
+@dataclass(frozen=True)
+class PublicationRuntime:
+    adapter: CompositePublicationAdapter
+    profiles: ConfiguredPublicationParserProfiles
+    close_adapters: tuple[Callable[[], None], ...]
+
+    def close(self) -> None:
+        for close in self.close_adapters:
+            close()
+
+
+def publication_runtime(request: Request) -> PublicationRuntime:
+    runtime: object = request.app.state.publication_runtime
+    if not isinstance(runtime, PublicationRuntime):
+        raise TypeError("publication runtime is unavailable")
+    return runtime
+
+
+def build_publication_runtime(settings: Settings) -> PublicationRuntime:
     epub = EpubPublicationAdapter(settings.resolved_storage_root)
     fb2 = Fb2PublicationAdapter(settings.resolved_storage_root)
     mobi_core = load_mobi_core()
@@ -79,7 +99,7 @@ def _publication_adapter_and_profiles(
                 "prc": mobi_profile,
             }
         )
-    return (
+    return PublicationRuntime(
         CompositePublicationAdapter(
             {
                 "epub": epub,
@@ -92,22 +112,21 @@ def _publication_adapter_and_profiles(
             }
         ),
         ConfiguredPublicationParserProfiles(profiles),
+        (epub.close, fb2.close, mobi.close, txt.close),
     )
 
 
-def open_publication(db: Session, settings: Settings) -> OpenPublication:
-    adapter, _profiles = _publication_adapter_and_profiles(settings)
+def open_publication(db: Session, runtime: PublicationRuntime) -> OpenPublication:
     return OpenPublication(
         SqlAlchemyPublicationSourceRepository(db),
-        adapter,
+        runtime.adapter,
     )
 
 
 def ensure_publication_navigation(
     session_factory: sessionmaker[Session],
-    settings: Settings,
+    runtime: PublicationRuntime,
 ) -> EnsurePublicationNavigation:
-    adapter, profiles = _publication_adapter_and_profiles(settings)
 
     def lookup_unit_of_work() -> PublicationNavigationLookupUnitOfWork:
         return SqlAlchemyPublicationNavigationLookupUnitOfWork(
@@ -124,13 +143,16 @@ def ensure_publication_navigation(
 
     return EnsurePublicationNavigation(
         lookup_unit_of_work_factory=lookup_unit_of_work,
-        publication_adapter=adapter,
-        profile_resolver=profiles,
+        publication_adapter=runtime.adapter,
+        profile_resolver=runtime.profiles,
         unit_of_work_factory=unit_of_work,
     )
 
 
 __all__ = [
+    "PublicationRuntime",
+    "build_publication_runtime",
     "ensure_publication_navigation",
     "open_publication",
+    "publication_runtime",
 ]

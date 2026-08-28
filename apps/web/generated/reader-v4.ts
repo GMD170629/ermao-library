@@ -159,13 +159,6 @@ export type ReaderCapabilities = {
   supportsSpreads: boolean;
 };
 
-export type ReaderComicDownloadArtifact = {
-  url: string;
-  sourceFormat: "cbz" | "zip" | "cbr" | "rar";
-  mimeType: string;
-  sizeBytes: number;
-};
-
 export type ReaderComicManifestData = {
   schemaVersion?: 1;
   kind?: "comic";
@@ -266,7 +259,6 @@ export type ReaderPublicationAccess = {
   positionsUrl?: string | null;
   pageUrlTemplate?: string | null;
   imageVariants?: Array<"original" | "data-saver">;
-  downloadArtifact?: ReaderComicDownloadArtifact | null;
 };
 
 export type ReaderReadingStatusData = {

@@ -51,18 +51,6 @@ class DownloadCenterViewModel(
 
     fun retry() = observe()
 
-    fun remove(taskId: String, removeLocalReference: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                catalog.remove(namespace, taskId)?.localReference?.let(removeLocalReference)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                mutableUiState.update { it.copy(errorCode = "DOWNLOAD_REMOVE_FAILED") }
-            }
-        }
-    }
-
     private fun observe() {
         observation?.cancel()
         mutableUiState.update { it.copy(isLoading = true, errorCode = null) }

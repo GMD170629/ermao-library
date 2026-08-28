@@ -32,5 +32,11 @@
   },
   "devDependencies": {
     "turbo": "^2.1.3"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@readium/navigator@2.8.2": "patches/@readium__navigator@2.8.2.patch",
+      "pdfjs-dist@6.1.200": "patches/pdfjs-dist@6.1.200.patch"
+    }
   }
 }

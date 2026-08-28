@@ -95,12 +95,6 @@ function readOpeningContext(resourceId: string): OpeningContext | null {
   }
 }
 
-function formatDownloadedBytes(value: number, formatNumber: (input: number, options?: Intl.NumberFormatOptions) => string) {
-  if (value < 1024) return `${formatNumber(value)} B`;
-  if (value < 1024 * 1024) return `${formatNumber(value / 1024, { maximumFractionDigits: 1 })} KB`;
-  return `${formatNumber(value / (1024 * 1024), { maximumFractionDigits: 1 })} MB`;
-}
-
 function remoteProgressLabel(
   bootstrap: ReaderBootstrap,
   notice: RemoteProgressNotice,
@@ -120,16 +114,15 @@ function remoteProgressLabel(
   return chapter?.title ?? `${formatNumber(notice.displayPercent, { maximumFractionDigits: 1 })}%`;
 }
 
-function OpeningCover({ context, ready, background, color, indexProgress, downloadProgress, onCancel }: {
+function OpeningCover({ context, ready, background, color, indexProgress, onCancel }: {
   context: OpeningContext | null;
   ready: boolean;
   background: string;
   color: string;
   indexProgress: { completed: number; total: number; percent: number } | null;
-  downloadProgress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null;
   onCancel: () => void;
 }) {
-  const { t: i18nAttribute, formatNumber } = useAttributeI18n();
+  const { t: i18nAttribute } = useAttributeI18n();
   const [visible, setVisible] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -183,35 +176,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, downlo
       <div className="absolute inset-x-6 bottom-[calc(4rem+var(--shuku-safe-area-bottom))] text-center">
         <div className="line-clamp-2 text-lg font-semibold">{context?.title ?? i18nAttribute("正在打开阅读器")}</div>
         {context?.author ? <div className="mt-1 text-sm opacity-65">{context.author}</div> : null}
-        {downloadProgress ? (
-          <div className="mx-auto mt-5 w-full max-w-sm">
-            <div className="text-sm font-medium"><I18nText>首次下载书籍</I18nText></div>
-            <div
-              className="mt-3 h-2 overflow-hidden rounded-full bg-current/15"
-              role="progressbar"
-              aria-label={i18nAttribute('书籍下载进度')}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={downloadProgress.percent === null ? undefined : Math.round(downloadProgress.percent)}
-            >
-              <div
-                className={`h-full rounded-full bg-current ${downloadProgress.percent === null ? 'w-1/3 animate-pulse motion-reduce:animate-none' : 'transition-[width] duration-150'}`}
-                style={downloadProgress.percent === null ? undefined : { width: `${downloadProgress.percent}%` }}
-              />
-            </div>
-            <div className="mt-2 text-xs tabular-nums opacity-65">
-              {downloadProgress.totalBytes
-                ? i18nAttribute('已下载 {value0} / {value1} · {value2}%', {
-                  value0: formatDownloadedBytes(downloadProgress.loadedBytes, formatNumber),
-                  value1: formatDownloadedBytes(downloadProgress.totalBytes, formatNumber),
-                  value2: Math.round(downloadProgress.percent ?? 0)
-                })
-                : i18nAttribute('已下载 {value0}', { value0: formatDownloadedBytes(downloadProgress.loadedBytes, formatNumber) })}
-            </div>
-            <div className="mt-1 text-xs opacity-55"><I18nText>首次打开需要下载一次，之后将直接进入阅读。</I18nText></div>
-            <button type="button" onClick={onCancel} className="mt-4 min-h-11 rounded-xl bg-current/10 px-4 text-sm transition hover:bg-current/15"><I18nText>取消并返回书库</I18nText></button>
-          </div>
-        ) : indexProgress ? (
+        {indexProgress ? (
           <div className="mx-auto mt-5 w-full max-w-sm">
             <div className="text-sm font-medium"><I18nText>正在建立全书位置索引</I18nText></div>
             <div
@@ -250,7 +215,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const [retry, setRetry] = useState(0);
   const [readerReady, setReaderReady] = useState(false);
   const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number; percent: number } | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{ loadedBytes: number; totalBytes: number | null; percent: number | null } | null>(null);
   const [storageError, setStorageError] = useState('');
   const [remoteNotice, setRemoteNotice] = useState<RemoteProgressNotice | null>(null);
   const [externalNavigation, setExternalNavigation] = useState<{ id: number; location: ReaderLocation } | null>(null);
@@ -302,7 +266,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     const controller = new AbortController();
     setReaderReady(false);
     setIndexProgress(null);
-    setDownloadProgress(null);
     setStorageError('');
     startupRemoteAcceptanceRef.current = null;
     setRemoteNotice(null);
@@ -689,10 +652,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
           onRetry={() => setRetry((value) => value + 1)}
           onSelectResource={(nextResourceId, pageIndex) => router.push(readerHref(nextResourceId, pageIndex))}
           onIndexProgress={setIndexProgress}
-          onDownloadProgress={setDownloadProgress}
           onReady={() => setReaderReady(true)}
-          resourceCache={runtime.storage}
-          pdfRangeCache={runtime.storage}
           onStorageWarning={setStorageError}
           externalNavigation={externalNavigation}
           onExternalNavigationResult={handleExternalNavigationResult}
@@ -732,7 +692,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         background={activeSurface.background}
         color={activeSurface.color}
         indexProgress={indexProgress}
-        downloadProgress={downloadProgress}
         onCancel={() => router.push('/library')}
       />
     </>

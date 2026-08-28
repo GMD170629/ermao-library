@@ -7,6 +7,23 @@ import org.junit.Test
 
 class AndroidReaderPublicationStoreTest {
     @Test
+    fun removesOnlyAttributedAutomaticReplicaAndPartial() {
+        val root = Files.createTempDirectory("reader-auto-migration").toFile()
+        try {
+            val stem = sha256("resource\u0000asset")
+            val replica = root.resolve("$stem.epub").apply { writeText("automatic") }
+            val partial = root.resolve(".$stem.epub.123.download").apply { writeText("partial") }
+            val imported = root.resolve("imported.epub").apply { writeText("local") }
+            val another = root.resolve("another.epub").apply { writeText("another account") }
+            removeAutomaticReaderReplica(root, "resource", "asset")
+            assertFalse(replica.exists())
+            assertFalse(partial.exists())
+            assertTrue(imported.exists())
+            assertTrue(another.exists())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun comicArchivePathValidationAllowsStandardDirectoryEntries() {
         assertTrue(isSafeComicArchiveEntryPath("chapter 01/", isDirectory = true))
         assertTrue(isSafeComicArchiveEntryPath("chapter 01/001.jpg", isDirectory = false))

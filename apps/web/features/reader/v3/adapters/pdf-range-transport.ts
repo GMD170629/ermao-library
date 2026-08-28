@@ -3,20 +3,17 @@ import {
   PDF_RANGE_MAX_CONCURRENT_REQUESTS,
   PDF_RANGE_MAX_REQUEST_BYTES,
   PDF_RANGE_MEMORY_CACHE_BYTES,
-  pdfRangeChunkKey,
-  type PdfRangeCacheIdentity,
   type PdfReaderErrorCode
 } from '@shuku/reader-core';
 import type { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import type { PdfRangeCache } from '../../../../lib/reader/pdf-range-cache';
+import { readBoundedResponse } from '../../../../shared/api/bounded-response';
+import { requestReaderResource } from '../../api/client';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
 export type PdfRangeAccess = Readonly<{
   url: string;
   length: number;
-  identity: PdfRangeCacheIdentity;
-  cache: PdfRangeCache;
 }>;
 
 export type PdfRangeMetrics = Readonly<{
@@ -65,10 +62,13 @@ export class PdfRangeByteSource {
   private cacheHits = 0;
   private cacheMisses = 0;
   private firstByteAt: number | null = null;
+  private activePage: number | null = null;
+  private revision: string | null = null;
+  private ifRange: string | null = null;
 
   constructor(
     private readonly access: PdfRangeAccess,
-    private readonly fetcher: typeof globalThis.fetch = globalThis.fetch.bind(globalThis)
+    private readonly fetcher: typeof globalThis.fetch = requestReaderResource
   ) {
     if (!Number.isSafeInteger(access.length) || access.length <= 0) {
       throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF 文件大小无效');
@@ -89,7 +89,7 @@ export class PdfRangeByteSource {
 
   async read(begin: number, end: number, signal: AbortSignal = this.abortController.signal): Promise<Uint8Array> {
     if (!Number.isSafeInteger(begin) || !Number.isSafeInteger(end)
-      || begin < 0 || end <= begin || end > this.access.length) {
+      || begin < 0 || end <= begin || end > this.access.length || end - begin > PDF_RANGE_MAX_REQUEST_BYTES) {
       throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF 字节区间无效');
     }
     this.assertNotAborted(signal);
@@ -117,8 +117,18 @@ export class PdfRangeByteSource {
     return result;
   }
 
+  async activateUnit(pageIndex: number): Promise<void> {
+    if (this.activePage === pageIndex) return;
+    this.activePage = pageIndex;
+    // Complete the existing bounded responses before releasing their cache ownership.
+    await Promise.allSettled([...this.inFlight.values()]);
+    this.memory.clear();
+  }
+
   abort() {
     this.abortController.abort();
+    this.memory.clear();
+    this.inFlight.clear();
   }
 
   metrics(): PdfRangeMetrics {
@@ -138,7 +148,7 @@ export class PdfRangeByteSource {
         method: 'HEAD',
         credentials: 'same-origin',
         cache: 'no-store',
-        signal
+        signal: AbortSignal.any([signal, this.abortController.signal])
       });
     } catch (cause) {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
@@ -147,6 +157,8 @@ export class PdfRangeByteSource {
     if (!response.headers.get('Accept-Ranges')?.toLowerCase().split(',').map((value) => value.trim()).includes('bytes')) {
       throw new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器不支持 PDF 字节 Range');
     }
+    this.revision = response.headers.get('ETag');
+    this.ifRange = this.revision && !this.revision.startsWith('W/') ? this.revision : response.headers.get('Last-Modified');
     const length = Number(response.headers.get('Content-Length'));
     if (!Number.isSafeInteger(length) || length !== this.access.length) {
       throw new PdfRangeError('PDF_RESOURCE_CHANGED', 'PDF 文件大小已经变化');
@@ -160,18 +172,8 @@ export class PdfRangeByteSource {
       this.touchMemory(index, existing.bytes);
       return true;
     }
-    try {
-      const cached = await this.access.cache.getPdfRangeChunk(this.access.identity, index);
-      if (!cached) {
-        this.cacheMisses += 1;
-        return false;
-      }
-      this.cacheHits += 1;
-      this.touchMemory(index, cached.bytes);
-      return true;
-    } catch (cause) {
-      throw new PdfRangeError('PDF_CACHE_IO', 'PDF 分块缓存读取失败', { cause });
-    }
+    this.cacheMisses += 1;
+    return false;
   }
 
   private async fetchMissingChunks(indices: number[], signal: AbortSignal) {
@@ -183,18 +185,19 @@ export class PdfRangeByteSource {
     });
     const maxChunks = PDF_RANGE_MAX_REQUEST_BYTES / PDF_RANGE_CHUNK_BYTES;
     for (let offset = 0; offset < fresh.length;) {
-      const group = [fresh[offset]!];
+      const first = fresh[offset];
+      if (first === undefined) break;
+      const group = [first];
       offset += 1;
       while (offset < fresh.length && group.length < maxChunks
-        && fresh[offset] === group[group.length - 1]! + 1) {
-        group.push(fresh[offset]!);
+        && fresh[offset] === first + group.length) {
+        group.push(first + group.length);
         offset += 1;
       }
-      const request = this.scheduler.run(() => this.fetchChunkGroup(group, signal));
+      const request = this.scheduler.run(() => this.fetchChunkGroup(group, signal)).finally(() => {
+        group.forEach((index) => { if (this.inFlight.get(index) === request) this.inFlight.delete(index); });
+      });
       group.forEach((index) => this.inFlight.set(index, request));
-      void request.finally(() => group.forEach((index) => {
-        if (this.inFlight.get(index) === request) this.inFlight.delete(index);
-      })).catch(() => undefined);
       waiting.add(request);
     }
     await Promise.all(waiting);
@@ -202,30 +205,38 @@ export class PdfRangeByteSource {
 
   private async fetchChunkGroup(indices: number[], signal: AbortSignal) {
     this.assertNotAborted(signal);
-    const begin = indices[0]! * PDF_RANGE_CHUNK_BYTES;
-    const end = Math.min(this.access.length, (indices[indices.length - 1]! + 1) * PDF_RANGE_CHUNK_BYTES);
+    const first = indices[0];
+    const last = indices.at(-1);
+    if (first === undefined || last === undefined) return;
+    const begin = first * PDF_RANGE_CHUNK_BYTES;
+    const end = Math.min(this.access.length, (last + 1) * PDF_RANGE_CHUNK_BYTES);
     let response: Response;
     this.requestCount += 1;
     try {
       response = await this.fetcher(this.access.url, {
         credentials: 'same-origin',
         cache: 'no-store',
-        headers: { Range: `bytes=${begin}-${end - 1}` },
-        signal
+        headers: { Range: `bytes=${begin}-${end - 1}`, ...(this.ifRange ? { 'If-Range': this.ifRange } : {}) },
+        signal: AbortSignal.any([signal, this.abortController.signal])
       });
     } catch (cause) {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
     }
-    if (response.status === 200) {
-      throw new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器未返回 PDF Range 响应');
+    let rejection: PdfRangeError | null = null;
+    if (response.status === 200) rejection = new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器未返回 PDF Range 响应');
+    else if (response.status === 416) rejection = new PdfRangeError('PDF_RANGE_INVALID', '服务器拒绝了 PDF 字节区间');
+    else if (response.status !== 206) rejection = new PdfRangeError('NETWORK_UNAVAILABLE', `PDF Range 请求失败 (${response.status})`);
+    else if (response.headers.get('Content-Range') !== `bytes ${begin}-${end - 1}/${this.access.length}`) {
+      rejection = new PdfRangeError('PDF_RANGE_INVALID', 'PDF Content-Range 与请求不一致');
     }
-    if (response.status === 416) throw new PdfRangeError('PDF_RANGE_INVALID', '服务器拒绝了 PDF 字节区间');
-    if (response.status !== 206) throw new PdfRangeError('NETWORK_UNAVAILABLE', `PDF Range 请求失败 (${response.status})`);
-    if (response.headers.get('Content-Range') !== `bytes ${begin}-${end - 1}/${this.access.length}`) {
-      throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF Content-Range 与请求不一致');
+    if (!rejection && this.revision && response.headers.get('ETag') !== this.revision) {
+      rejection = new PdfRangeError('PDF_RESOURCE_CHANGED', 'PDF 文件大小已经变化');
     }
-    const payload = new Uint8Array(await response.arrayBuffer());
-    if (payload.byteLength !== end - begin) throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF Range 长度与请求不一致');
+    if (rejection) { await response.body?.cancel(rejection); throw rejection; }
+    let payload: Uint8Array;
+    try { payload = await readBoundedResponse(response, PDF_RANGE_MAX_REQUEST_BYTES, end - begin); }
+    catch (cause) { throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF Range 长度与请求不一致', { cause }); }
+    this.assertNotAborted(signal);
     this.transferredBytes += payload.byteLength;
     this.firstByteAt ??= Date.now();
     for (const index of indices) {
@@ -233,16 +244,7 @@ export class PdfRangeByteSource {
       const chunkEnd = Math.min(payload.byteLength, chunkBegin + PDF_RANGE_CHUNK_BYTES);
       const bytes = payload.slice(chunkBegin, chunkEnd);
       this.touchMemory(index, bytes);
-      try {
-        await this.access.cache.putPdfRangeChunk(
-          this.access.identity,
-          index,
-          bytes,
-          [...this.memory.keys()].map((chunkIndex) => pdfRangeChunkKey(this.access.identity, chunkIndex))
-        );
-      } catch (cause) {
-        throw new PdfRangeError('PDF_CACHE_IO', 'PDF 分块缓存写入失败', { cause });
-      }
+
     }
   }
 

@@ -26,7 +26,6 @@ export type ReaderSessionState = {
   location: ReaderLocation | null;
   percent: number;
   phase: string | null;
-  downloadProgress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null;
   paginationProgress: { completed: number; total: number; percent: number } | null;
   error: ReaderError | null;
 };
@@ -72,7 +71,6 @@ export function createReaderSessionState(sessionId: string, preferences: ReaderP
     location: null,
     percent: 0,
     phase: null,
-    downloadProgress: null,
     paginationProgress: null,
     error: null
   };
@@ -103,7 +101,6 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
         ...state,
         lifecycle: operation.kind === 'bootstrap' ? 'loading' : state.lifecycle,
         error: operation.kind === 'bootstrap' ? null : state.error,
-        downloadProgress: operation.kind === 'bootstrap' ? null : state.downloadProgress,
         paginationProgress: operation.kind === 'bootstrap' ? null : state.paginationProgress,
         operations: { ...state.operations, [operation.kind]: operation.sequence }
       };
@@ -114,14 +111,14 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
       return isCurrentOperation(state, action.operation) ? { ...state, preferences: action.preferences } : state;
     case 'session/fail':
       return isCurrentOperation(state, action.operation)
-        ? { ...state, lifecycle: 'error', error: action.error, phase: null, downloadProgress: null, paginationProgress: null }
+        ? { ...state, lifecycle: 'error', error: action.error, phase: null, paginationProgress: null }
         : state;
     case 'adapter/event': {
       const { event } = action;
       if (event.sessionId !== state.sessionId || !isCurrentOperation(state, event.operation)) return state;
       switch (event.type) {
         case 'ready':
-          return { ...state, lifecycle: 'ready', capabilities: event.capabilities, location: event.location, error: null, phase: null, downloadProgress: null, paginationProgress: null };
+          return { ...state, lifecycle: 'ready', capabilities: event.capabilities, location: event.location, error: null, phase: null, paginationProgress: null };
         case 'capabilities-changed':
           return { ...state, capabilities: event.capabilities };
         case 'metadata-changed':
@@ -134,17 +131,7 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
           return {
             ...state,
             phase: event.phase,
-            downloadProgress: event.phase === 'downloading-content' ? state.downloadProgress : null,
             paginationProgress: event.phase === 'generating-pagination' ? state.paginationProgress : null
-          };
-        case 'download-progress':
-          return {
-            ...state,
-            downloadProgress: {
-              loadedBytes: Math.max(0, Math.round(event.loadedBytes)),
-              totalBytes: event.totalBytes === null ? null : Math.max(0, Math.round(event.totalBytes)),
-              percent: event.percent === null ? null : clampPercent(event.percent)
-            }
           };
         case 'pagination-progress':
           return {
@@ -156,12 +143,12 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
             }
           };
         case 'error':
-          return { ...state, lifecycle: 'error', error: event.error, phase: null, downloadProgress: null, paginationProgress: null };
+          return { ...state, lifecycle: 'error', error: event.error, phase: null, paginationProgress: null };
         default:
           return state;
       }
     }
     case 'session/dispose':
-      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, navigationItems: [], navigationReady: false, phase: null, downloadProgress: null, paginationProgress: null };
+      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, navigationItems: [], navigationReady: false, phase: null, paginationProgress: null };
   }
 }

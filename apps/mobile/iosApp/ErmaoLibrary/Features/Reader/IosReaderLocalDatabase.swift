@@ -323,7 +323,6 @@ private actor IosReaderLocalDatabaseWorker {
             do {
                 progress = try decodeProgress(payload, expectedSourceID: resourceID)
             } catch {
-                try discardCurrentContractState()
                 return SendableOptionalReaderProgress(value: nil)
             }
             try requireIdentity(progress)
@@ -485,7 +484,7 @@ private actor IosReaderLocalDatabaseWorker {
                 )
                 """
             )
-            try discardIncompatibleReaderStateIfNeeded()
+            try recordReaderContractVersionIfNeeded()
             try fileManager.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: databaseURL.path
@@ -498,7 +497,7 @@ private actor IosReaderLocalDatabaseWorker {
         }
     }
 
-    private func discardIncompatibleReaderStateIfNeeded() throws {
+    private func recordReaderContractVersionIfNeeded() throws {
         try execute(
             """
             CREATE TABLE IF NOT EXISTS reader_contract_metadata (
@@ -511,14 +510,10 @@ private actor IosReaderLocalDatabaseWorker {
             "SELECT CAST(contract_version AS TEXT) FROM reader_contract_metadata WHERE singleton = 1",
             bindings: []
         )
-        // Contract 7 is the destructive Book/Resource/Asset boundary. The
-        // previous Work/Version/Volume owner keys cannot be migrated safely.
+        // Record the current codec without deleting user progress. Unknown older
+        // identity keys remain isolated and available for explicit recovery.
         guard version != "7" else { return }
         try withTransaction {
-            try execute("DELETE FROM reader_local_exact")
-            try execute("DELETE FROM reader_progress_sync_v4")
-            try execute("DROP TABLE IF EXISTS reader_progress")
-            try discardObsoleteSyncTables()
             try run(
                 """
                 INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 7)
@@ -571,7 +566,6 @@ private actor IosReaderLocalDatabaseWorker {
             try requireDocumentSize(payload)
             return syncCodec.decode(payload: payload)
         } catch {
-            try discardCurrentContractState()
             return ErmaoShared.ReaderProgressDurableState(
                 confirmedRevision: 0,
                 pending: nil,
@@ -592,23 +586,8 @@ private actor IosReaderLocalDatabaseWorker {
         )
     }
 
-    private func discardObsoleteSyncTables() throws {
-        try execute("DROP TABLE IF EXISTS reader_outbox")
-        try execute("DROP TABLE IF EXISTS reader_sequence_counters")
-    }
-
-    private func discardCurrentContractState() throws {
-        try run(
-            "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-            bindings: [.text(ownerKey), .text(resourceID)]
-        )
-        try run(
-            "DELETE FROM reader_progress_sync_v4 WHERE owner_key = ?",
-            bindings: [.text(ownerKey)]
-        )
-    }
-
-    /// The pre-union file namespace is deliberately discarded, never imported.
+    /// These old files have no trustworthy account identity. Preserve them, but
+    /// never attach their position to whichever account happens to open a resource.
     private func migrateLegacyProgressFile(resourceID: String) throws -> ErmaoShared.ReaderProgress? {
         let legacyURL = legacyProgressURL(resourceID)
         guard fileManager.fileExists(atPath: legacyURL.path) else { return nil }
@@ -620,7 +599,6 @@ private actor IosReaderLocalDatabaseWorker {
               values.isSymbolicLink != true,
               (values.fileSize ?? 0) <= Self.maximumDocumentBytes
         else { throw IosReaderFailure(code: .persistenceFailed) }
-        try fileManager.removeItem(at: legacyURL)
         return nil
     }
 

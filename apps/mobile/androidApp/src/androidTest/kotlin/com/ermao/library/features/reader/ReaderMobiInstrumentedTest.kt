@@ -99,7 +99,7 @@ class ReaderMobiInstrumentedTest {
                             ?.settings
                             ?.value
                             ?.fontSize
-                            ?.let { abs(it - (24.0 / 18.0)) < 0.01 } == true,
+                            ?.let { abs(it - (24.0 / 16.0)) < 0.01 } == true,
                     )
                 }
                 if (applied.get()) return@use

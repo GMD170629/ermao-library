@@ -7,6 +7,15 @@ import org.junit.Test
 
 class EpubContentSecurityPolicyTest {
     @Test
+    fun permitsOnlyBundledReaderFontsAtTheReadiumAssetOrigin() {
+        val decorated = EpubContentSecurityPolicy.decorateHtml(
+            "<html><head></head><body><p>Text</p></body></html>".encodeToByteArray(),
+        ).decodeToString()
+        assertTrue(decorated.contains("https://readium_assets/fonts/reader/"))
+        assertTrue(!decorated.contains("font-src *"))
+    }
+
+    @Test
     fun legacyMobiNamespacesAreBoundBeforeStrictXmlValidation() {
         val body = "<p id=\"one\">原文</p><mbp:pagebreak/><p id=\"two\">Next</p>"
         val source = "<html><head></head><body>$body</body></html>"

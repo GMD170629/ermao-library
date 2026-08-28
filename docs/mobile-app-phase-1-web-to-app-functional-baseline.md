@@ -12,7 +12,7 @@
 
 > v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
 
-> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。页面按绑定节点类型展示，详见上述导航修订。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。本修订覆盖本文中所有旧的卷册轨道、隐藏目录和下载后阅读描述。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。页面按绑定节点类型展示，详见上述导航修订。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。
 
 ## 1. 基线目的
 
@@ -115,14 +115,14 @@ P0 必须形成以下连续闭环：
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
 | Reader bootstrap | `/reader/[resourceId]`；`GET /api/reader/v4/resources/{resourceId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot、Book、Resource、Assets 与 publication | P0 | 只使用 `resourceId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
-| 可重排电子书 | Reader v4 + `GET/HEAD /api/assets/{assetId}` 或 resource asset | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；完整工件、fingerprint、下载失败和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线章节优先，离线使用缓存章节并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
+| 可重排电子书 | Reader v4 + Publication manifest/positions/resources | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；按需原章节、精确定位、响应限额和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线按需获取完整原章节，离线仅使用 Downloads 已完成文件并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
 | 漫画 | Reader v4 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 在线默认按页流式阅读，原生图片管线只做有限预取，禁止一次加载全部页；有完整本地工件时可离线打开，不要求在线阅读前下载整包 |
 | PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
 | 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
 | 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `bookId + resourceId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；Asset 或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
 | 音频书 | `/listen/[resourceId]` 仅为瞬时深链；bootstrap + Asset API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 本地下载内容 | App 私有下载目录 + Reader bootstrap + 媒体 Range API；Web SW 仅为参考 | 服务端没有设备下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、Book/Resource/Asset 身份和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按图书聚合任务与完整工件，并直接搜索本地已下载书名、作者和资源名；只承诺显式完成的 Resource，不把普通缓存或服务器任务冒充下载事实；不得宣称全量本地书库 |
+| 本地下载内容 | App 私有下载目录 + Library Resource/Asset 描述 + 原文件媒体 API；Web SW 仅为参考 | 服务端没有设备下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、Book/Resource/Asset 身份和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按图书聚合任务与完整工件，并直接搜索本地已下载书名、作者和资源名；只承诺显式完成的 Resource，不把普通缓存或服务器任务冒充下载事实；不得宣称全量本地书库 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有下载工件是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示本地副本和文件导出 |
 
 ### 4.4 导入、发送与系统管理
@@ -268,7 +268,7 @@ Reader 进度只实现 [`mobile-reader-architecture.md`](mobile-reader-architect
 
 ### 7.3 本地下载工件边界
 
-格式访问策略固定为：阅读和离线下载是两个独立用户意图。受支持的可重排格式、PDF 和漫画在线且缺少已验证本地工件时直接进入 Reader bootstrap，不得创建下载任务或要求先下载；同一命名空间和 Resource/Asset 存在 completed 本地工件时可直接打开本地原文件，网络不可用且无已验证工件时为不可用。只有用户明确触发的下载动作可创建下载任务。Reader 打开不比较 fingerprint、版本、声明长度或服务端页数；下载任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
+格式访问策略固定为：阅读和离线下载是两个独立用户意图。受支持的可重排格式、PDF 和漫画在线且缺少已验证本地工件时直接进入 Reader bootstrap，不得创建下载任务或要求先下载；同一命名空间和 Resource/Asset 存在 completed 本地工件时可直接打开本地原文件，网络不可用且无已验证工件时为不可用。只有用户明确触发的下载动作可创建下载任务。精确进度身份不以 fingerprint、声明长度或页数作为等价替代；在线内容传输必须验证原文件版本、响应长度和范围，资源变化时重新打开会话；下载任务首次进入 completed 前仍必须完成临时 sink、传输完整性检查和原子提交。取消、空间不足、短响应或进程中断不得留下伪 completed。
 
 第一阶段可以承诺：
 

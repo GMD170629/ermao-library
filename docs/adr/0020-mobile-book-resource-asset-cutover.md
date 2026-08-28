@@ -71,18 +71,13 @@ Mobile 切换建立一个不可与旧客户端混用的新握手代际：
 
 ## 4. 本地数据处理
 
-旧 Work/Version/Volume/File ID 没有可靠到 Book/Resource/Asset 的映射，禁止猜测、按值
-复用或请求服务端 alias。Mobile 采用明确的破坏性本地契约替换：
+当前流式阅读迁移不改变 Book/Resource/Asset 身份、进度含义或书签合同。
+保留用户主动下载、本地导入、书签、精确进度及待同步变更。已有下载清单在原位置
+验证并升级结构，不重复复制原文件，不清空损坏清单来伪装成功。
 
-- Android managed-download catalog 升至 schema 3；
-- Android Reader SQLite 升至 version 6；
-- Android Reader navigation、bookmark、publication 和相关缓存使用新命名空间；
-- iOS managed-download manifest/root 升至 contract 3；
-- iOS Reader SQLite 升至 contract 7；
-- 旧下载、partial、publication、导航、书签、进度和 pending mutation 被清理，不迁移；
-- server/user/authorization 变化与显式 logout 必须清理不再授权的私有 Reader/下载状态。
-
-凭据、服务器 profile 和账户偏好不属于旧内容身份，可以保留。
+旧自动在线副本与未完成临时文件只有在元数据能确认其来源时才能清理；来源不明的
+文件必须保留。用户显式退出账号时仍按既有授权边界清除该账号私有数据。
+凭据、服务器 profile 和账户偏好不受本次阅读迁移影响。
 
 ## 5. 保留的下载边界
 
@@ -91,34 +86,33 @@ Mobile 切换建立一个不可与旧客户端混用的新握手代际：
 页面快照，也不提供独立授权；明确 logout、身份或授权 namespace 变化时必须清理。下载
 与 Reader 访问遵守以下边界：
 
-1. 从 Reader bootstrap 的 `assets/resourceUrl` 选择原始授权媒体；
+1. 从 Library Resource/Asset 公开合同取得原文件下载描述，不启动 Reader；
 2. 只接受 `/api/assets/{assetId}` 或 `/api/resources/{resourceId}/asset`；
 3. 流式写入 app-private staging；
 4. 校验声明长度、实际长度、MIME/格式和非空响应；
-5. 原子发布后才写 completed catalog；
+5. 原子发布后，将 completed 任务与文件引用在同一 catalog 记录中原子登记；发布后中断可通过实际文件恢复登记；
 6. 取消、截断、越界、重定向异常和空间不足不得留下可读 completed 工件；
-7. Reader 优先使用同一 namespace、Book、Resource 和 Asset 的已验证本地工件。
+7. 在线 Reader 只使用 Publication、漫画分页或 PDF Range；离线入口通过 Downloads 公开接口读取同一 namespace 的已验证工件，既不复制原文件，也不补下载。
 
 只有通过完整性和格式验证并已原子发布的工件可以标记为 completed。partial、取消、长度
 不符、格式不符、缺失或发布失败的文件均不可读。弱 ETag 不得充当 `If-Range` 验证器；在
-没有经过验证的 Last-Modified 或强校验和契约前，中断后重新开始完整传输是正确行为。
+续传前必须核对原文件版本、实际 partial 长度及 Range 响应；版本变化创建独立任务，保留已有 completed 文件。
 
 Download Center 是 completed 本地下载、活动任务和失败任务的唯一发现入口，按 Book
 组织并可搜索本地 Book、作者与 Resource 元数据。Library 不提供 downloaded-only 筛选，
 不得通过网络 Library 列表推断设备清单。
 
-Shared KMP 拥有任务状态机、Reader 本地工件选择策略、bootstrap 映射、鉴权分块传输契约
-与 catalog port。Android/iOS 拥有 app-private 文件、staging、原子 manifest 持久化、平台
+Shared KMP 的 `DownloadResourceRuntime` 是唯一下载业务入口，拥有任务创建、去重、暂停恢复、重试、鉴权传输、校验和完成登记。
+单项、批量与下载中心都调用同一入口；IMAGE_DIR 的各页复用同一传输机制，仅资源组织不同。Android/iOS 拥有 app-private 文件、staging、原子 manifest 持久化、平台
 生命周期协调、原生导航和破坏性确认。后台继续下载只有在 Cookie、base path、TLS、进程
 终止和锁屏行为通过对应物理设备验收后才能作为发布能力。
 
-目录型 Resource 若服务端没有单一可下载原始工件，保持不可下载，不在客户端合成 ZIP、
-EPUB 或其他派生出版物。
+IMAGE_DIR 将原图作为有序页面集原子保存，不合成 ZIP、EPUB 或其他派生出版物。
 
 ## 6. 后果与验收
 
 - Mobile 与 protocol v2 服务端不兼容；旧客户端与 protocol v3 服务端不兼容；
-- 第一次升级到本契约会丢弃旧离线内容和旧本地阅读状态；
+- 流式阅读迁移必须保留主动下载与既有精确阅读状态；
 - 测试 fixture 不得继续出现生产 `/api/works`、`/versions`、`/volumes`、`/files` 路由；
 - Android 最终验收必须构建 APK、对精确物理设备执行保留数据 replace-install、冷启动并
   验证真实 Book → Resource → Asset → Reader/下载流程；

@@ -124,6 +124,7 @@ struct BookCard: Identifiable, Codable, Equatable, Hashable, Sendable {
     let author: String?
     let cover: CoverReference?
     let progress: Double?
+    var completed: Bool? = nil
 }
 
 struct ContinueReadingItem: Codable, Equatable, Sendable {

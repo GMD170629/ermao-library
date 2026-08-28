@@ -2,14 +2,9 @@ package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
 import com.ermao.library.shared.modules.reader.LocalReaderSource
-import com.ermao.library.shared.modules.reader.LocalReaderSourceResolver
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
-import com.ermao.library.shared.modules.reader.ReaderSource
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
-import com.ermao.library.shared.modules.reader.PublicationDownloadSink
-import com.ermao.library.shared.modules.reader.PublicationDownloadSinkFactory
-import com.ermao.library.shared.modules.reader.ReaderPublicationDownload
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -24,7 +19,10 @@ import kotlinx.coroutines.withContext
 internal class AndroidReaderPublicationStore(
     context: Context,
     namespace: ReaderSyncNamespace? = null,
+    private val completedPublication: AndroidCompletedPublication? = null,
 ) {
+    private val obsoleteRangeCache = File(context.cacheDir, "reader/pdf-range-v3")
+    private val cacheRoot = context.cacheDir.canonicalFile
     private val publicationRoot = namespace?.let { value ->
         File(
             File(File(context.filesDir, PUBLICATION_DIRECTORY), sha256(readerAccountStorageKey(value))),
@@ -34,6 +32,25 @@ internal class AndroidReaderPublicationStore(
 
     init {
         removeLegacyHashedPublicationArtifacts(publicationRoot)
+    }
+
+    /** Removes only a server/asset-attributed automatic replica, never Downloads or local imports. */
+    suspend fun removeAutomaticReplica(resourceId: String, assetId: String) = withContext(Dispatchers.IO) {
+        removeAutomaticReaderReplica(publicationRoot, resourceId, assetId)
+        if (obsoleteRangeCache.exists()) {
+            require(obsoleteRangeCache.canonicalFile.toPath().startsWith(cacheRoot.toPath()))
+            Files.walkFileTree(obsoleteRangeCache.toPath(), object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                override fun visitFile(path: java.nio.file.Path, attributes: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
+                    Files.delete(path)
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+                override fun postVisitDirectory(path: java.nio.file.Path, error: java.io.IOException?): java.nio.file.FileVisitResult {
+                    if (error != null) throw error
+                    Files.delete(path)
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+            })
+        }
     }
 
     suspend fun publishLocalEpub(
@@ -100,36 +117,8 @@ internal class AndroidReaderPublicationStore(
         )
     }
 
-    fun downloadSinkFactory(): PublicationDownloadSinkFactory = PublicationDownloadSinkFactory { download ->
-        withContext(Dispatchers.IO) {
-            require(download.sourceFormat.acceptsMimeType(download.mimeType)) { "Reader publication MIME type is invalid" }
-            require(download.expectedSizeBytes in 1..MAX_PUBLICATION_BYTES) {
-                "Reader publication declared size is invalid"
-            }
-            publicationRoot.mkdirs()
-            require(publicationRoot.isDirectory) { "Reader publication root is unavailable" }
-            val target = targetFile(download.resourceId, download.assetId, download.sourceFormat)
-            val temporary = File(publicationRoot, ".${target.name}.${System.nanoTime()}.download")
-            DownloadSink(download, temporary, target)
-        }
-    }
-
-    fun localSourceResolver(): LocalReaderSourceResolver = LocalReaderSourceResolver { download ->
-        val source = LocalReaderSource(
-            resourceId = download.resourceId,
-            displayTitle = download.displayTitle,
-            format = download.sourceFormat.readerFormat,
-            bookId = download.bookId,
-            assetId = download.assetId,
-            sourceFormat = download.sourceFormat,
-        )
-        runCatching {
-            resolve(source)
-            source
-        }.getOrNull()
-    }
-
     fun resolve(source: LocalReaderSource): File {
+        completedPublication?.takeIf { it.source == source }?.let { return it.file }
         require(source.format in SUPPORTED_LOCAL_FORMATS) { "Unsupported Reader source" }
         val sourceFormat = source.sourceFormat ?: when (source.format) {
             ReaderFormat.Epub -> ReaderSourceFormat.Epub
@@ -171,62 +160,6 @@ internal class AndroidReaderPublicationStore(
             )
         } catch (_: AtomicMoveNotSupportedException) {
             Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-        }
-    }
-
-    private inner class DownloadSink(
-        private val download: ReaderPublicationDownload,
-        private val temporary: File,
-        private val target: File,
-    ) : PublicationDownloadSink {
-        private var output: FileOutputStream? = FileOutputStream(temporary)
-        private var writtenBytes = 0L
-        private var completed = false
-
-        override suspend fun write(bytes: ByteArray, count: Int) = withContext(Dispatchers.IO) {
-            check(!completed) { "Reader publication sink is closed" }
-            require(count in 1..bytes.size) { "Reader publication chunk is invalid" }
-            val nextSize = writtenBytes + count
-            require(nextSize <= MAX_PUBLICATION_BYTES) { "Reader publication exceeds the size limit" }
-            checkNotNull(output).write(bytes, 0, count)
-            writtenBytes = nextSize
-        }
-
-        override suspend fun commit(): ReaderSource = withContext(Dispatchers.IO) {
-            check(!completed) { "Reader publication sink is closed" }
-            completed = true
-            try {
-                checkNotNull(output).apply {
-                    fd.sync()
-                    close()
-                }
-                output = null
-                require(writtenBytes == download.expectedSizeBytes) {
-                    "Reader publication length does not match the launch contract"
-                }
-                validatePublication(temporary, download.sourceFormat)
-                atomicReplace(temporary, target)
-                LocalReaderSource(
-                    resourceId = download.resourceId,
-                    displayTitle = download.displayTitle,
-                    format = download.sourceFormat.readerFormat,
-                    bookId = download.bookId,
-                    assetId = download.assetId,
-                    sourceFormat = download.sourceFormat,
-                )
-            } finally {
-                output?.close()
-                output = null
-                temporary.delete()
-            }
-        }
-
-        override suspend fun abort(): Unit = withContext(Dispatchers.IO) {
-            if (completed) return@withContext
-            completed = true
-            output?.close()
-            output = null
-            temporary.delete()
         }
     }
 
@@ -300,8 +233,6 @@ internal class AndroidReaderPublicationStore(
     companion object {
         const val EPUB_PARSER_VERSION = "epub-package:1"
         const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v2"
-        @Deprecated("Use EPUB_PARSER_VERSION")
-        const val READIUM_PARSER_VERSION = EPUB_PARSER_VERSION
         private const val PUBLICATION_DIRECTORY = "reader-publications-v3"
         private const val COPY_BUFFER_BYTES = 64 * 1024
         private const val MAX_RESOURCE_ID_LENGTH = 256
@@ -341,4 +272,22 @@ internal fun isSafeComicArchiveEntryPath(name: String, isDirectory: Boolean): Bo
     if (name.isBlank() || name.startsWith('/') || '\\' in name) return false
     val path = if (isDirectory) name.removeSuffix("/") else name
     return path.isNotBlank() && path.split('/').none { it.isBlank() || it == "." || it == ".." }
+}
+
+internal data class AndroidCompletedPublication(val source: LocalReaderSource, val file: File)
+
+internal fun removeAutomaticReaderReplica(root: File, resourceId: String, assetId: String) {
+    require(resourceId.isNotBlank() && assetId.isNotBlank())
+    if (!root.exists() || root.name == "unscoped") return
+    require(!Files.isSymbolicLink(root.toPath()))
+    val stem = sha256("$resourceId\u0000$assetId")
+    val targets = ReaderSourceFormat.entries.map { "$stem.${it.wireValue}" }.toSet()
+    root.listFiles()?.forEach { file ->
+        val isReplica = file.name in targets
+        val isPartial = file.name.endsWith(".download") && targets.any { file.name.startsWith(".$it.") }
+        if (isReplica || isPartial) {
+            require(file.canonicalFile.parentFile == root.canonicalFile && !Files.isSymbolicLink(file.toPath()))
+            Files.deleteIfExists(file.toPath())
+        }
+    }
 }

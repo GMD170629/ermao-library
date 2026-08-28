@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -153,7 +154,7 @@ class LibraryFilterSheetTest {
             }
         }
 
-        compose.onNodeWithText("Finished").assertIsDisplayed()
+        compose.onNodeWithText("Finished").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("library-filter-apply")
             .assertIsDisplayed()
     }

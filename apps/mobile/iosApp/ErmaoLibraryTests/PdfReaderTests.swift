@@ -35,50 +35,42 @@ final class PdfReaderTests: XCTestCase {
         XCTAssertNil(store.load(resourceID: "another-resource"))
     }
 
-    func testRangePolicyAlignsMergesAndCapsRequests() throws {
-        let chunk = IosPdfRangePolicy.chunkBytes
-        let ranges = try IosPdfRangePolicy.alignedRanges(
-            offset: 17,
-            length: 6 * chunk - 17,
-            resourceLength: 8 * chunk,
-            isChunkCached: { $0 == 2 }
-        )
-
-        XCTAssertEqual(ranges, [0 ..< 2 * chunk, 3 * chunk ..< 6 * chunk])
-        XCTAssertTrue(ranges.allSatisfy { Int64($0.count) <= IosPdfRangePolicy.maximumRequestBytes })
+    func testChangingReadingUnitReleasesPreviousBodyBytes() throws {
+        let cache = ErmaoShared.PdfRangeMemory()
+        let source = try remoteSource()
+        let identity = ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId)
+        cache.activateUnit(pageIndex: 0)
+        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: KotlinByteArray(size: 32))
+        cache.activateUnit(pageIndex: 1)
+        XCTAssertNil(cache.readCached(identity: identity, offset: 0, count: 1))
     }
 
     func testRangeCacheReadsOnlyCompleteCachedBytes() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PdfReaderTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let cache = try IosPdfRangeCache(root: root)
+        let cache = ErmaoShared.PdfRangeMemory()
         let source = try remoteSource()
-        let identity = IosPdfRangeCacheIdentity(source: source)
-        let chunk = Data(repeating: 7, count: Int(IosPdfRangePolicy.chunkBytes))
+        let identity = ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId)
+        let chunk = KotlinByteArray(size: Int32(Int64(256 * 1024)))
+        for index in 0 ..< chunk.size { chunk.set(index: index, value: 7) }
 
-        try cache.writeAlignedRange(identity: identity, offset: 0, bytes: chunk)
+        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: chunk)
 
-        XCTAssertEqual(cache.readCached(identity: identity, offset: 11, length: 16), Data(repeating: 7, count: 16))
+        XCTAssertEqual(cache.readCached(identity: identity, offset: 11, count: 16)?.foundationData(), Data(repeating: 7, count: 16))
         XCTAssertNil(cache.readCached(
             identity: identity,
-            offset: IosPdfRangePolicy.chunkBytes,
-            length: 1
+            offset: Int64(256 * 1024),
+            count: 1
         ))
     }
 
     func testRangeCacheRemovesPreviousAuthorizationNamespace() throws {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PdfReaderAuthzTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let cache = try IosPdfRangeCache(root: root)
-        let previous = IosPdfRangeCacheIdentity(source: try remoteSource(authorizationVersion: 1))
-        let current = IosPdfRangeCacheIdentity(source: try remoteSource(authorizationVersion: 2))
-        try cache.writeAlignedRange(identity: previous, offset: 0, bytes: Data(repeating: 1, count: 32))
+        let cache = ErmaoShared.PdfRangeMemory()
+        let previous = ErmaoShared.PdfRangeCacheIdentity(namespace: try remoteSource(authorizationVersion: 1).namespace_, resourceId: "resource-pdf")
+        let current = ErmaoShared.PdfRangeCacheIdentity(namespace: try remoteSource(authorizationVersion: 2).namespace_, resourceId: "resource-pdf")
+        try cache.writeAlignedRange(identity: previous, begin: 0, bytes: KotlinByteArray(size: 32))
 
-        try cache.activateNamespace(current)
+        cache.activateNamespace(namespace: current.namespace_)
 
-        XCTAssertNil(cache.readCached(identity: previous, offset: 0, length: 1))
+        XCTAssertNil(cache.readCached(identity: previous, offset: 0, count: 1))
     }
 
     private func remoteSource(authorizationVersion: Int64 = 2) throws -> ErmaoShared.RemoteByteRangeReaderSource {
@@ -94,7 +86,7 @@ final class PdfReaderTests: XCTestCase {
             assetId: "asset-pdf",
             namespace: namespace,
             apiPath: "/api/assets/asset-pdf",
-            expectedSizeBytes: 2 * IosPdfRangePolicy.chunkBytes
+            expectedSizeBytes: 2 * Int64(256 * 1024)
         )
     }
 }

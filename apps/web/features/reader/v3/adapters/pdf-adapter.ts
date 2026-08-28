@@ -235,7 +235,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       const pdfjs = await this.loadPdfJs();
       this.assertActive(generation, context.signal);
       this.pdfjs = pdfjs;
-      pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/vendor/pdfjs/pdf.worker.legacy.min.mjs?v=6.1.200');
+      pdfjs.GlobalWorkerOptions.workerSrc = withBasePath('/vendor/pdfjs/pdf.worker.legacy.mjs?v=6.1.200-streaming-1');
       const rangeSource = new PdfRangeByteSource(this.rangeAccess, this.fetcher);
       this.rangeSource = rangeSource;
       const initialData = await rangeSource.prepare(context.signal);
@@ -445,10 +445,16 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.viewListeners.clear();
   }
 
+  private async activateReadingWindow() {
+    await this.rangeSource?.activateUnit(this.pageNumber - 1);
+    await this.document?.setReadingWindow(this.pageNumber - 1);
+  }
+
   private async renderCurrentAndNeighbor(generation: number, signal: AbortSignal, force = false) {
     this.assertActive(generation, signal);
     const epoch = ++this.renderEpoch;
     this.cancelPendingRenders();
+    await this.activateReadingWindow();
     const neighbor = this.neighborPage();
     const keep = new Set([this.pageNumber, neighbor].filter((page): page is number => Boolean(page)));
     Array.from(this.renderedPages.keys()).forEach((page) => {
@@ -488,6 +494,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.assertActive(generation, signal);
     const epoch = ++this.renderEpoch;
     this.cancelPendingRenders();
+    await this.activateReadingWindow();
     const hadSlots = this.continuousSlots.size > 0;
     this.ensureContinuousSlots();
     const anchor = this.captureContinuousAnchor();

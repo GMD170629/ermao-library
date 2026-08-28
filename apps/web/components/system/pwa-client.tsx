@@ -15,10 +15,10 @@ import {
   resolveApplicationOnline
 } from '../../lib/pwa/network-availability';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
-import { activateReaderUser, clearPrivateReaderData, currentReaderServerIdentity, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
+import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
-import { clearCurrentUserNamespace, currentAuthorizationVersion, currentUserId, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
+import { clearCurrentUserNamespace, currentUserId, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
 import { useAppSession } from '../layout/app-session-context';
 import { cn } from '../ui/cn';
 import { I18nText } from '@/i18n/provider';
@@ -144,15 +144,6 @@ export function PwaClient() {
     const userId = session?.user?.id;
     if (!userId) return;
     const authzVersion = Number(session.authorization?.authzVersion ?? 1);
-    const previousUserId = currentUserId();
-    const previousAuthzVersion = currentAuthorizationVersion(previousUserId);
-    if (previousUserId === userId && previousAuthzVersion !== authzVersion) {
-      void getReaderRuntime().storage.deletePdfRangeNamespace({
-        serverIdentity: currentReaderServerIdentity(),
-        userId,
-        authorizationVersion: previousAuthzVersion
-      });
-    }
     activateReaderUser(userId);
     setCurrentUserNamespace(userId, authzVersion);
     navigator.serviceWorker?.controller?.postMessage({

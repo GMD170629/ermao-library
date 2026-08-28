@@ -3,8 +3,6 @@ package com.ermao.library.shared.modules.reader.domain
 const val PDF_RANGE_CHUNK_BYTES: Int = 256 * 1024
 const val PDF_RANGE_MAX_REQUEST_BYTES: Int = 1024 * 1024
 const val PDF_RANGE_MAX_CONCURRENT_REQUESTS: Int = 2
-const val PDF_RANGE_DOCUMENT_CACHE_BYTES: Long = 64L * 1024L * 1024L
-const val PDF_RANGE_NAMESPACE_CACHE_BYTES: Long = 512L * 1024L * 1024L
 const val PDF_RANGE_MEMORY_CACHE_BYTES: Int = 8 * 1024 * 1024
 
 typealias PdfReaderErrorCode = ReaderErrorCode

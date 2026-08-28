@@ -7,7 +7,7 @@ import {
 } from '@shuku/reader-core';
 
 export const READER_PROGRESS_DB_NAME = 'shuku-reader-v4';
-export const READER_DB_SCHEMA_VERSION = 5;
+export const READER_DB_SCHEMA_VERSION = 6;
 export const READER_PROGRESS_DEBOUNCE_MS = 500;
 
 export type AudioProgressLocation = Readonly<{ kind: 'audio'; resourceId: string; assetId: string; chapterId: string | null; positionMs: number }>;

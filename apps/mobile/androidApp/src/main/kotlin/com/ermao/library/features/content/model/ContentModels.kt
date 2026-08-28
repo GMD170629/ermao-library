@@ -31,6 +31,7 @@ data class BookCard(
     val author: String,
     val coverUrl: String,
     val progressPercent: Int?,
+    val completed: Boolean? = null,
 )
 
 @Immutable

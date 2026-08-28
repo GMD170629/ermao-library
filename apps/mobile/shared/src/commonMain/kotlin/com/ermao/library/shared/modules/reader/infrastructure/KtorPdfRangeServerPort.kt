@@ -10,25 +10,27 @@ import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.request.head
+import io.ktor.client.request.prepareHead
 import io.ktor.client.request.headers
-import io.ktor.client.request.request
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpMethod
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 
 class KtorPdfRangeServerPort internal constructor(
     private val profile: ServerProfile,
     private val createClient: (ServerProfile) -> ApiClient,
 ) : PdfRangeServerPort {
     constructor(profile: ServerProfile, clients: ApiClientFactory) : this(profile, clients::create)
+    private data class Revision(val source: RemoteByteRangeReaderSource, val etag: String, val ifRange: String?)
+    private val revision = MutableStateFlow<Revision?>(null)
 
     override suspend fun probe(source: RemoteByteRangeReaderSource): PdfRangeProbeResult = withClient { client ->
         try {
-            val response = client.authenticatedHttpClient().head(client.resolveAuthenticatedApiPath(source.apiPath))
-            when {
+            client.authenticatedHttpClient().prepareHead(client.resolveAuthenticatedApiPath(source.apiPath)).execute { response ->
+            val result = when {
                 response.status.value !in 200..299 -> PdfRangeProbeResult.Failure(
                     PdfReaderErrorCode.NetworkUnavailable,
                     recoverable = true,
@@ -38,7 +40,16 @@ class KtorPdfRangeServerPort internal constructor(
                     PdfRangeProbeResult.Failure(PdfReaderErrorCode.RangeUnsupported, recoverable = false)
                 response.headers[HttpHeaders.ContentLength]?.toLongOrNull() != source.expectedSizeBytes ->
                     PdfRangeProbeResult.Failure(PdfReaderErrorCode.ResourceChanged, recoverable = false)
-                else -> PdfRangeProbeResult.Available
+                else -> {
+                    revision.value = response.headers[HttpHeaders.ETag]?.let { etag ->
+                        Revision(source, etag, etag.takeUnless { it.startsWith("W/") }
+                            ?: response.headers[HttpHeaders.LastModified])
+                    }
+                    PdfRangeProbeResult.Available
+                }
+            }
+            response.bodyAsChannel().cancel(null)
+            result
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -55,12 +66,13 @@ class KtorPdfRangeServerPort internal constructor(
     ): PdfRangeReadResult = withClient { client ->
         try {
             require(range.endExclusive <= source.expectedSizeBytes)
-            val response = client.authenticatedHttpClient().request(client.resolveAuthenticatedApiPath(source.apiPath)) {
-                method = HttpMethod.Get
+            require(range.endExclusive - range.begin <= 1024L * 1024)
+            client.authenticatedHttpClient().prepareGet(client.resolveAuthenticatedApiPath(source.apiPath)) {
                 headers {
                     append(HttpHeaders.Range, "bytes=${range.begin}-${range.endExclusive - 1}")
+                    revision.value?.takeIf { it.source == source }?.ifRange?.let { append(HttpHeaders.IfRange, it) }
                 }
-            }
+            }.execute { response ->
             when (response.status.value) {
                 200 -> {
                     response.bodyAsChannel().cancel(null)
@@ -79,6 +91,7 @@ class KtorPdfRangeServerPort internal constructor(
                     PdfRangeReadResult.Failure(PdfReaderErrorCode.NetworkUnavailable, recoverable = true)
                 }
             }
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: HttpRequestTimeoutException) {
@@ -93,6 +106,11 @@ class KtorPdfRangeServerPort internal constructor(
         range: PdfByteRange,
         response: io.ktor.client.statement.HttpResponse,
     ): PdfRangeReadResult {
+        val expected = revision.value?.takeIf { it.source == source }
+        if (expected != null && response.headers[HttpHeaders.ETag] != expected.etag) {
+            response.bodyAsChannel().cancel(null)
+            return PdfRangeReadResult.Failure(PdfReaderErrorCode.ResourceChanged, false)
+        }
         val expectedLength = (range.endExclusive - range.begin).toInt()
         val expectedContentRange = "bytes ${range.begin}-${range.endExclusive - 1}/${source.expectedSizeBytes}"
         if (response.headers[HttpHeaders.ContentRange] != expectedContentRange ||

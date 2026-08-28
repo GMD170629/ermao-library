@@ -10,6 +10,7 @@ struct ShelfCatalogView: View {
     @StateObject private var store: ShelfCatalogStore
     @State private var presentsCreate = false
     @State private var action: Task<Void, Never>?
+    @Environment(\.managementRevision) private var managementRevision
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -48,7 +49,8 @@ struct ShelfCatalogView: View {
                 ShelfCreateView(store: store) { id in presentsCreate = false; openShelf(id) }
             }
             .appCanvas()
-            .task { await store.loadIfNeeded() }
+            .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; Task { await store.refresh() } }
+        .task { await store.loadIfNeeded() }
             .onDisappear { action?.cancel(); action = nil }
     }
 
@@ -120,7 +122,7 @@ struct ShelfCatalogView: View {
                 ForEach(detail.shelf.books) { book in
                     Button { openBook(book.id) } label: {
                         HStack(spacing: .space2) {
-                            cover(book).frame(width: 64).accessibilityHidden(true)
+                            cover(book, manage: true).frame(width: 64).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
                                 Text(book.title).appTextStyle(.headline).foregroundStyle(theme.textPrimary).lineLimit(3)
                                 if let author = book.author {
@@ -129,7 +131,7 @@ struct ShelfCatalogView: View {
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             chevron
                         }.padding(.vertical, .space2).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).bookManagementMenu(.book(book.id, book.title))
                     Divider().overlay(theme.divider)
                 }
                 if detail.page < detail.totalPages {
@@ -175,8 +177,8 @@ struct ShelfCatalogView: View {
         Image(systemName: "chevron.right").font(.callout).foregroundStyle(theme.textSecondary).accessibilityHidden(true)
     }
 
-    private func cover(_ book: ShelfPreview) -> some View {
-        BookCoverView(reference: book.cover, title: book.title, context: context, client: contentClient, cache: cache)
+    private func cover(_ book: ShelfPreview, manage: Bool = false) -> some View {
+        BookCoverView(reference: book.cover, title: book.title, context: context, client: contentClient, cache: cache, managementTarget: manage ? .book(book.id, book.title) : nil)
             .id("\(context.namespaceKey)|\(book.id)|\(book.cover?.path ?? "")")
     }
 

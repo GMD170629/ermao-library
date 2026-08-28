@@ -7,7 +7,8 @@ import UIKit
 @MainActor
 func makeIosReflowableNavigator(publication: Publication, preferences: EPUBPreferences, location: Locator?) throws -> EPUBNavigatorViewController {
     var configuration = EPUBNavigatorViewController.Configuration(
-        preferences: preferences, editingActions: [], fontFamilyDeclarations: try iosReaderFontDeclarations()
+        preferences: preferences, editingActions: [], preloadPreviousPositionCount: 1, preloadNextPositionCount: 1,
+        fontFamilyDeclarations: try iosReaderFontDeclarations()
     )
     configuration.disablePageTurnsWhileScrolling = true
     return try EPUBNavigatorViewController(publication: publication, initialLocation: location, config: configuration)

@@ -12,10 +12,6 @@ import { useReaderSession } from './use-reader-session';
 import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './adapters/reader-interaction';
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
-import type { ReaderResourceCache } from '../../../lib/reader/resource-cache';
-import { currentReaderServerIdentity } from '../../../lib/reader/model';
-import type { PdfRangeCache } from '../../../lib/reader/pdf-range-cache';
-import { currentAuthorizationVersion } from '../../../lib/user-preferences';
 import { projectReadiumEffectivePreferences } from './adapters/readium-presentation';
 
 type ReaderEngineRuntimeProps = {
@@ -29,10 +25,7 @@ type ReaderEngineRuntimeProps = {
   onRetry: () => void;
   onSelectResource: (resourceId: string, pageIndex?: number) => void;
   onIndexProgress: (progress: { completed: number; total: number; percent: number } | null) => void;
-  onDownloadProgress: (progress: { loadedBytes: number; totalBytes: number | null; percent: number | null } | null) => void;
   onReady: () => void;
-  resourceCache: ReaderResourceCache;
-  pdfRangeCache: PdfRangeCache;
   onStorageWarning: (message: string) => void;
   externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
   onExternalNavigationResult?: (id: number, accepted: boolean) => void;
@@ -63,7 +56,12 @@ function bootstrapNavigationItems(bootstrap: ReaderBootstrap): ReaderNavigationI
   }));
 }
 
-function novelErrorMessage(code: string | undefined, translate: (source: string) => string) {
+function readerErrorMessage(code: string | undefined, translate: (source: string) => string) {
+  if (code === 'PUBLICATION_CHANGED' || code === 'PUBLICATION_RESOURCE_CHANGED') return translate('出版物已更新，请重新打开。');
+  if (code === 'PUBLICATION_RESOURCE_TOO_LARGE' || code === 'RESPONSE_TOO_LARGE') return translate('当前章节超过在线阅读的安全上限，无法打开。');
+  if (code === 'RESPONSE_LENGTH_INVALID' || code === 'RESPONSE_STREAM_MISSING') return translate('章节响应无效，请重试。');
+  if (code === 'PUBLICATION_RESOURCE_UNAVAILABLE') return translate('章节资源无法读取，请检查网络后重试。');
+  if (code === 'READIUM_PUBLICATION_SECURITY_PROFILE_MISSING') return translate('文件包含不安全的内容，已停止打开。');
   if (code === 'READER_EXACT_RESTORE_UNVERIFIED') return translate('无法精确恢复到另一设备的位置');
   if (code === 'READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE') return translate('服务器尚未提供 Readium Publication，无法打开此书。');
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
@@ -76,7 +74,7 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
   if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
   if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
   if (code === 'PDF_INVALID') return translate('PDF 文件已损坏或格式无效。');
-  if (code === 'PDF_RANGE_UNSUPPORTED') return translate('服务器不支持 PDF 按需读取，请先下载后离线阅读。');
+  if (code === 'PDF_RANGE_UNSUPPORTED') return translate('服务器不支持 PDF 按需读取，无法在线打开。');
   if (code === 'PDF_RANGE_INVALID') return translate('PDF 字节区间响应无效，请重试。');
   if (code === 'PDF_RESOURCE_CHANGED') return translate('PDF 文件已更新，请重新打开。');
   if (code === 'NETWORK_UNAVAILABLE') return translate('网络不可用，无法加载 PDF 页面。');
@@ -89,7 +87,6 @@ function novelErrorMessage(code: string | undefined, translate: (source: string)
 }
 
 function phaseLabel(phase: string | null, kind: ReaderBootstrap['readerType']) {
-  if (phase === 'downloading-content') return '首次下载书籍';
   if (phase === 'generating-pagination') return '正在建立全书位置索引';
   if (phase === 'loading-font') return '正在准备阅读字体';
   if (phase === 'rendering') return kind === 'pdf' ? '正在渲染 PDF' : '正在排版正文';
@@ -107,10 +104,7 @@ export function ReaderEngineRuntime({
   onRetry,
   onSelectResource,
   onIndexProgress,
-  onDownloadProgress,
   onReady,
-  resourceCache,
-  pdfRangeCache,
   onStorageWarning,
   externalNavigation = null,
   onExternalNavigationResult
@@ -197,14 +191,7 @@ export function ReaderEngineRuntime({
           rangeAccess: {
             url: pdfAsset.url,
             length: pdfAsset.sizeBytes,
-            identity: {
-              serverIdentity: currentReaderServerIdentity(),
-              userId: bootstrap.userId,
-              authorizationVersion: currentAuthorizationVersion(bootstrap.userId),
-              resourceId: bootstrap.resource.id,
-              assetId: pdfAsset.id
-            },
-            cache: pdfRangeCache
+
           }
         });
       }
@@ -225,7 +212,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [resourceCache, bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onStorageWarning, pdfRangeCache]);
+  }, [bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,
@@ -278,11 +265,7 @@ export function ReaderEngineRuntime({
       : null);
   }, [onIndexProgress, session.state.paginationProgress, session.state.phase]);
 
-  useEffect(() => {
-    onDownloadProgress(session.state.phase === 'downloading-content'
-      ? session.state.downloadProgress ?? { loadedBytes: 0, totalBytes: null, percent: null }
-      : null);
-  }, [onDownloadProgress, session.state.downloadProgress, session.state.phase]);
+
 
   const totalHint = bootstrap.readerType === 'reflowable'
     ? null
@@ -509,7 +492,7 @@ export function ReaderEngineRuntime({
                 <div className="w-full max-w-sm rounded-2xl bg-slate-950/90 p-5 text-white shadow-2xl">
                   <div className="text-base font-semibold"><I18nText>阅读器加载失败</I18nText></div>
                   <p className="mt-2 text-sm text-slate-300">{
-                    novelErrorMessage(session.state.error?.code, i18nAttribute)
+                    readerErrorMessage(session.state.error?.code, i18nAttribute)
                       || adapterLoadError
                       || session.state.error?.message
                       || i18nAttribute("请检查网络或文件是否仍然存在。")

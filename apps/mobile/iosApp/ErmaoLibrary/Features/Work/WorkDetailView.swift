@@ -121,13 +121,11 @@ private struct WorkControlAction: Identifiable {
 private enum WorkDetailSheet: Identifiable {
     case shelves
     case downloads
-    case management(WorkManagementTask)
 
     var id: String {
         switch self {
         case .shelves: "shelves"
         case .downloads: "downloads"
-        case .management(let task): "management-\(task.id)"
         }
     }
 }
@@ -168,23 +166,17 @@ struct WorkDetailView: View {
     @State private var unavailableFeature: UnavailableWorkFeature?
     @State private var readerAccessErrorCode: String?
     @StateObject private var managementHolder: WorkManagementStoreHolder
-    @State private var managedResourceID: String?
     @State private var pendingReadingStatusTarget: WorkControlTarget?
     @State private var feedback: WorkDetailFeedback?
     @State private var coverRefreshToken = 0
     @State private var downloadMenuRecord: ManagedDownloadRecord?
     @State private var pendingDownloadRemoval: ManagedDownloadRecord?
-    @State private var controlTarget: WorkControlTarget?
-    @State private var controlAnchor = CGPoint(x: 260, y: 220)
-    @State private var latestPointerLocation = CGPoint(x: 260, y: 220)
+    @Environment(\.managementRevision) private var managementRevision
+    @Environment(\.managementChange) private var managementChange
     @Environment(\.appTheme) private var theme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
-    @State private var confirmsCoverRegeneration = false
-    @State private var confirmsRescan = false
-    @State private var confirmsDeletion = false
-    @State private var deletionConfirmation = ""
 
     init(
         context: ContentRequestContext,
@@ -304,10 +296,6 @@ struct WorkDetailView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
                 }
-            case .management(let task):
-                NavigationStack { managementPage(task: task) }
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -334,16 +322,8 @@ struct WorkDetailView: View {
         }
     }
 
-    private var coverDialogScreen: some View {
-        availabilityDialogScreen
-        .confirmationDialog("management.regenerateCoverConfirmTitle", isPresented: $confirmsCoverRegeneration) {
-            Button("management.regenerateCover") { regenerateBookCover() }
-            Button("common.cancel", role: .cancel) {}
-        } message: { Text("management.regenerateCoverConfirmMessage") }
-    }
-
     private var downloadDialogScreen: some View {
-        coverDialogScreen
+        availabilityDialogScreen
         .confirmationDialog(
             "work.download.manage",
             isPresented: downloadMenuIsPresented,
@@ -378,25 +358,16 @@ struct WorkDetailView: View {
         }
     }
 
-    private var managementDialogScreen: some View {
-        downloadDialogScreen
-        .confirmationDialog("management.rescanConfirmTitle", isPresented: $confirmsRescan) {
-            Button("management.rescan") { rescanBook() }
-            Button("common.cancel", role: .cancel) {}
-        } message: { Text("management.rescanConfirmMessage") }
-        .alert("management.deleteConfirmTitle", isPresented: $confirmsDeletion) {
-            TextField("management.deleteConfirmPlaceholder", text: $deletionConfirmation)
-            Button("management.delete", role: .destructive) { deleteBook() }
-                .disabled(deletionConfirmation != currentDetail?.book.title)
-            Button("common.cancel", role: .cancel) { deletionConfirmation = "" }
-        } message: { Text("management.deleteConfirmMessage") }
-    }
-
     private var observedScreen: some View {
-        managementDialogScreen
-        .overlay { controlMenuOverlay }
+        downloadDialogScreen
         .overlay(alignment: .bottom) { feedbackBanner }
         .appCanvas()
+        .onChange(of: managementRevision, initial: true) { _, _ in
+            guard let change = managementChange, change.bookID == store.bookIDValue else { return }
+            if change.deleted, let resourceID = change.resourceID, resourceID == store.selectedResourceID { dismiss() }
+            else if change.readingStatusChanged { store.refreshAfterBookReadingStatusChange() }
+            else { store.refreshIfLoaded() }
+        }
         .task {
             if savedPageState.utf8.count < 4096,
                let restored = try? JSONDecoder().decode(BookContentViewState.self, from: Data(savedPageState.utf8)) {
@@ -567,6 +538,32 @@ struct WorkDetailView: View {
         }
     }
 
+    private func pageManagementTarget(_ detail: BookDetailContent) -> NativeManagementTarget {
+        if store.isBookRoot {
+            var target = NativeManagementTarget.book(detail.book.id, currentDetail?.book.title ?? detail.book.title)
+            target.completed = currentDetail?.readingStatus == .finished
+            return target
+        }
+        let resource = detail.resources.first { $0.id == store.selectedResourceID }
+        return NativeManagementTarget(kind: .resource, bookID: detail.book.id, id: store.selectedResourceID ?? detail.book.id,
+            title: resource?.title ?? detail.book.title, kindleEligible: resource?.kindleSendAvailable == true)
+    }
+
+    private func nodeManagementTarget(_ item: WorkContentItemPresentation) -> NativeManagementTarget? {
+        guard let detail = currentDetail else { return nil }
+        if item.entry.isSourceFolder {
+            return NativeManagementTarget(kind: .directory, bookID: detail.book.id, id: item.entry.sourceNodeID,
+                title: item.title, hasRepresentative: item.entry.representativeResourceID != nil)
+        }
+        if let resourceID = item.entry.resourceID {
+            return NativeManagementTarget(kind: .resource, bookID: detail.book.id, id: resourceID, title: item.title,
+                kindleEligible: item.resource?.kindleSendAvailable == true)
+        }
+        guard item.entry.isSourceFolder else { return nil }
+        return NativeManagementTarget(kind: .directory, bookID: detail.book.id, id: item.entry.sourceNodeID,
+            title: item.title, hasRepresentative: item.entry.representativeResourceID != nil)
+    }
+
     private func cover(_ detail: BookDetailContent) -> some View {
         BookCoverView(
             reference: detail.book.cover,
@@ -574,7 +571,8 @@ struct WorkDetailView: View {
             context: context,
             client: client,
             cache: cache,
-            cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
+            cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero),
+            managementTarget: pageManagementTarget(detail)
         )
         .id("work-cover-\(coverRefreshToken)")
     }
@@ -786,20 +784,16 @@ struct WorkDetailView: View {
     }
 
     private func bookControlMenu(_ detail: BookDetailContent, target: WorkControlTarget = .book) -> some View {
-        let actions = controlActions(target: target, detail: detail)
-        return Menu {
-            controlMenuButtons(actions)
-        } label: {
-            quickActionLabel("common.more", systemImage: "ellipsis")
-        }
-        .menuOrder(.fixed)
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier(target == .book ? "work.book.moreMenu" : "work.resource.moreMenu")
+        NativeManagementMore(target: pageManagementTarget(detail))
+            .accessibilityIdentifier(target == .book ? "work.book.moreMenu" : "work.resource.moreMenu")
     }
 
     private func directoryControlMenu() -> some View {
         Menu {
+            if let node = store.contentsPage?.currentNode, node.isSourceFolder {
+                NativeManagementMenu(target: NativeManagementTarget(kind: .directory, bookID: store.bookIDValue,
+                    id: node.sourceNodeID, title: node.title, hasRepresentative: node.representativeResourceID != nil))
+            }
             Button { activeSheet = .downloads } label: {
                 Label("work.action.download", systemImage: "arrow.down")
             }
@@ -1014,7 +1008,8 @@ struct WorkDetailView: View {
                             title: item.title,
                             context: context,
                             client: client,
-                            cache: cache
+                            cache: cache,
+                            managementTarget: nodeManagementTarget(item)
                         )
                         .frame(width: BookCoverLayout.horizontalCardWidth)
                         .overlay(alignment: .bottom) {
@@ -1123,7 +1118,8 @@ struct WorkDetailView: View {
                     title: item.title,
                     context: context,
                     client: client,
-                    cache: cache
+                    cache: cache,
+                            managementTarget: nodeManagementTarget(item)
                 )
                 .frame(width: 40)
                 VStack(alignment: .leading, spacing: .spaceHalf) {
@@ -1164,7 +1160,8 @@ struct WorkDetailView: View {
                     title: item.title,
                     context: context,
                     client: client,
-                    cache: cache
+                    cache: cache,
+                            managementTarget: nodeManagementTarget(item)
                 )
                 .frame(width: 40)
                 VStack(alignment: .leading, spacing: .spaceHalf) {
@@ -1208,7 +1205,8 @@ struct WorkDetailView: View {
                         title: resource.title,
                         context: context,
                         client: client,
-                        cache: cache
+                        cache: cache,
+                        managementTarget: NativeManagementTarget(kind: .resource, bookID: resource.bookID, id: resource.id, title: resource.title, kindleEligible: resource.kindleSendAvailable)
                     )
                     .frame(width: 40)
                     .overlay(alignment: .bottom) {
@@ -1564,7 +1562,8 @@ struct WorkDetailView: View {
                         title: resource.title,
                         context: context,
                         client: client,
-                        cache: cache
+                        cache: cache,
+                        managementTarget: NativeManagementTarget(kind: .resource, bookID: resource.bookID, id: resource.id, title: resource.title, kindleEligible: resource.kindleSendAvailable)
                     )
                     .opacity(resource.isReadable == false ? 0.5 : 1)
                     .overlay {
@@ -1590,18 +1589,8 @@ struct WorkDetailView: View {
                 .accessibilityLabel(Text(resourceAccessibilityLabel(resource, index: index)))
                 .accessibilityValue(resourceAccessibilityValue(resource))
                 .accessibilityAddTraits(resource.isSelected ? .isSelected : [])
-                .onLongPressGesture {
-                    controlAnchor = latestPointerLocation
-                    controlTarget = .resource(resource.id)
-                }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                        .onChanged { latestPointerLocation = $0.location }
-                )
-                .accessibilityAction(named: Text("management.volume")) {
-                    controlAnchor = latestPointerLocation
-                    controlTarget = .resource(resource.id)
-                }
+                .bookManagementMenu(NativeManagementTarget(kind: .resource, bookID: detail.book.id,
+                    id: resource.id, title: resource.title, kindleEligible: resource.kindleSendAvailable))
 
                 Text(index)
                     .appTextStyle(.caption)
@@ -1813,262 +1802,6 @@ struct WorkDetailView: View {
     }
 
     @ViewBuilder
-    private var controlMenuOverlay: some View {
-        if let controlTarget, let detail = currentDetail {
-            GeometryReader { geometry in
-                let menuWidth = min(224, geometry.size.width - 24)
-                let estimatedHeight = min(
-                    CGFloat(controlActions(target: controlTarget, detail: detail).count * 48 + 72),
-                    geometry.size.height - 24
-                )
-                let overlayFrame = geometry.frame(in: .global)
-                let localAnchor = CGPoint(
-                    x: controlAnchor.x - overlayFrame.minX,
-                    y: controlAnchor.y - overlayFrame.minY
-                )
-                let proposedX = localAnchor.x + menuWidth <= geometry.size.width - 12
-                    ? localAnchor.x : localAnchor.x - menuWidth
-                let proposedY = localAnchor.y + estimatedHeight <= geometry.size.height - 12
-                    ? localAnchor.y : localAnchor.y - estimatedHeight
-                let originX = min(max(12, proposedX), geometry.size.width - menuWidth - 12)
-                let originY = min(max(12, proposedY), geometry.size.height - estimatedHeight - 12)
-                ZStack(alignment: .topLeading) {
-                    Color.black.opacity(0.30)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture { self.controlTarget = nil }
-
-                    controlMenuCard(target: controlTarget, detail: detail)
-                        .frame(width: menuWidth)
-                        .frame(maxHeight: estimatedHeight)
-                        .offset(x: originX, y: originY)
-                }
-            }
-            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
-            .zIndex(20)
-        }
-    }
-
-    private func controlMenuCard(target: WorkControlTarget, detail: BookDetailContent) -> some View {
-        let actions = controlActions(target: target, detail: detail)
-        let destructive = actions.first(where: \.destructive)
-        let regular = actions.filter { !$0.destructive }
-        return VStack(spacing: 0) {
-            controlMenuHeader(target: target, detail: detail)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            Divider().overlay(theme.divider.opacity(0.72))
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(regular) { action in
-                        controlMenuRow(action)
-                        if action.id != regular.last?.id {
-                            Divider().overlay(theme.divider.opacity(0.60))
-                        }
-                    }
-                }
-            }
-            if let destructive {
-                Divider().overlay(theme.divider.opacity(0.72))
-                controlMenuRow(destructive)
-            }
-        }
-        .background(.ultraThinMaterial)
-        .background(theme.surfaceRaised.opacity(0.88))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(theme.divider.opacity(0.72), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 9)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(target == .book ? "work.book.controlMenu" : "work.resource.controlMenu")
-    }
-
-    private func controlMenuRow(_ action: WorkControlAction) -> some View {
-        Button(role: action.destructive ? .destructive : nil, action: action.perform) {
-            HStack(spacing: .space1) {
-                Text(action.title)
-                    .appTextStyle(.callout)
-                    .foregroundStyle(action.destructive ? Color.red : theme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: action.systemImage)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(action.destructive ? Color.red : theme.textSecondary)
-                    .frame(width: 20, height: 20)
-            }
-            .frame(minHeight: .iosMinimumTouchTarget)
-            .padding(.horizontal, 14)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!action.enabled)
-        .opacity(action.enabled ? 1 : 0.45)
-    }
-
-    private func controlMenuHeader(target: WorkControlTarget, detail: BookDetailContent) -> some View {
-        let resource = controlResource(target: target, detail: detail)
-        return HStack(spacing: .space1) {
-            Group {
-                if let resource {
-                    BookCoverView(
-                        reference: resource.cover,
-                        title: resource.title,
-                        context: context,
-                        client: client,
-                        cache: cache
-                    )
-                } else {
-                    cover(detail)
-                }
-            }
-            .frame(width: 38)
-            VStack(alignment: .leading, spacing: .spaceHalf) {
-                Text(target == .book ? detail.book.title : (resource?.title ?? detail.book.title))
-                    .appTextStyle(.body)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(theme.textPrimary)
-                    .lineLimit(1)
-                if let resource {
-                    Text("\(resource.title) · \(resource.formatLabel)")
-                        .appTextStyle(.caption)
-                        .foregroundStyle(theme.textSecondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func controlActions(
-        target: WorkControlTarget,
-        detail: BookDetailContent
-    ) -> [WorkControlAction] {
-        let resource = controlResource(target: target, detail: detail)
-        let download = resource.flatMap { downloads.record(for: $0.id) }
-        let activeDownload = download.map { record in
-            [.queued, .downloading].contains(record.state)
-        } ?? false
-        let downloadTitle: LocalizedStringKey = download?.isVerifiedOfflineCopy == true
-            ? "downloads.remove.action"
-            : activeDownload ? "work.download.pause" : "work.action.download"
-        let downloadIcon = activeDownload ? "pause.circle" : "icloud.and.arrow.down"
-        let kindleEligible = resource?.assets.contains(where: kindleAsset) == true
-        func action(
-            _ id: String,
-            _ title: LocalizedStringKey,
-            _ icon: String,
-            enabled: Bool = true,
-            destructive: Bool = false,
-            perform: @escaping () -> Void
-        ) -> WorkControlAction {
-            WorkControlAction(
-                id: id,
-                title: title,
-                systemImage: icon,
-                enabled: enabled,
-                destructive: destructive,
-                perform: perform
-            )
-        }
-        var actions: [WorkControlAction] = []
-        if target == .book {
-            if canManageSystem {
-                let managementAvailable = managementStore != nil
-                actions.append(action("edit", "work.control.edit", "pencil", enabled: managementAvailable) { openManagement(.editWork, resourceID: nil) })
-                actions.append(action("regenerateCover", "management.regenerateCover", "photo.badge.arrow.down", enabled: managementAvailable) {
-                    openManagement(.cover, resourceID: resource?.id)
-                })
-                actions.append(action("recognize", "work.control.recognize", "text.magnifyingglass", enabled: managementAvailable) { openManagement(.recognize, resourceID: nil) })
-                actions.append(action("rescan", "management.rescan", "arrow.clockwise", enabled: managementAvailable) { controlTarget = nil; confirmsRescan = true })
-                actions.append(action("delete", "management.delete", "trash", enabled: managementAvailable, destructive: true) { controlTarget = nil; confirmsDeletion = true })
-            }
-        } else if let resource {
-            actions.append(action("unread", "work.control.markUnread", "bookmark") { markUnread(resource) })
-            actions.append(action("download", downloadTitle, downloadIcon) {
-                handleControlDownload(resource, detail: detail)
-            })
-            if managementStore != nil && canManageSystem {
-                actions.append(action("edit", "work.control.edit", "pencil") { openManagement(.editResource, resourceID: resource.id) })
-            }
-            if canManageSystem && kindleEligible {
-                actions.append(action("kindle", "management.kindle", "paperplane") { openManagement(.kindle, resourceID: resource.id) })
-            }
-        }
-        return actions
-    }
-
-    private func controlResource(target: WorkControlTarget, detail: BookDetailContent) -> BookResource? {
-        switch target {
-        case .book: selectedResource(detail)
-        case .resource(let id): detail.resources.first { $0.id == id }
-        }
-    }
-
-    private func openManagement(_ task: WorkManagementTask, resourceID: String?) {
-        guard task == .kindle || managementStore != nil else {
-            showFeedback(String(localized: "management.unavailable"), isError: true)
-            return
-        }
-        controlTarget = nil
-        managedResourceID = resourceID
-        activeSheet = .management(task)
-    }
-
-    private func markUnread(_ resource: BookResource?) {
-        controlTarget = nil
-        guard let resource, let managementStore else {
-            unavailableFeature = .readingStatus
-            return
-        }
-        pendingReadingStatusTarget = .resource(resource.id)
-        managementStore.setReadingStatus(resourceID: resource.id, status: .unread)
-    }
-
-    private func handleControlDownload(_ resource: BookResource?, detail: BookDetailContent) {
-        controlTarget = nil
-        guard let resource else { return }
-        if let record = downloads.record(for: resource.id), record.isVerifiedOfflineCopy {
-            downloadMenuRecord = record
-        } else {
-            handleDownload(resource, detail: detail)
-        }
-    }
-
-    @ViewBuilder
-    private func managementPage(task: WorkManagementTask) -> some View {
-        if (task == .kindle || managementStore != nil),
-           let managementStore,
-           let detail = currentDetail {
-            let resource = managedResourceID.flatMap { id in detail.resources.first { $0.id == id } }
-            WorkManagementView(
-                store: managementStore,
-                task: task,
-                detail: detail,
-                resource: resource,
-                workCover: AnyView(managementCover(detail: detail, resource: resource)),
-                downloadForResource: { downloads.record(for: $0) }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func managementCover(detail: BookDetailContent, resource: BookResource?) -> some View {
-        if let resource {
-            BookCoverView(
-                reference: resource.cover,
-                title: resource.title,
-                context: context,
-                client: client,
-                cache: cache,
-                cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
-            )
-            .id("management-cover-\(coverRefreshToken)")
-        } else {
-            cover(detail)
-        }
-    }
-
     private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
         guard action != nil, let managementStore else { return }
         if action == .bookDeleted {
@@ -2122,29 +1855,6 @@ struct WorkDetailView: View {
             pendingReadingStatusTarget = .resource(resource.id)
             managementStore.setReadingStatus(resourceID: resource.id, status: next == .finished ? .finished : .unread)
         }
-    }
-
-    private func regenerateBookCover() {
-        guard let resourceID = currentDetail.flatMap(selectedResource)?.id else {
-            showFeedback(String(localized: "management.missingSourceNode"), isError: true)
-            return
-        }
-        managementStore?.regenerateBookCover(anchoredResourceID: resourceID)
-    }
-
-    private func rescanBook() {
-        guard let sourceNodeID = currentDetail.flatMap(selectedResource)?.sourceNodeID,
-              !sourceNodeID.isEmpty else {
-            showFeedback(String(localized: "management.missingSourceNode"), isError: true)
-            return
-        }
-        managementStore?.rescanBook(sourceNodeID: sourceNodeID)
-    }
-
-    private func deleteBook() {
-        guard deletionConfirmation == currentDetail?.book.title else { return }
-        deletionConfirmation = ""
-        managementStore?.deleteBook()
     }
 
     private func openShelfPicker() {

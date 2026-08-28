@@ -105,6 +105,27 @@ class KtorPdfRangeServerPortTest {
         assertEquals(PdfReaderErrorCode.RangeInvalid, unsatisfiable.code)
     }
 
+    @Test
+    fun weakEtagUsesLastModifiedAndChangedRevisionIsRejectedBeforeBody() = runBlocking {
+        val etag = "W/\"version\""
+        val date = "Thu, 27 Aug 2026 00:00:00 GMT"
+        val gateway = port { request ->
+            if (request.method.value == "HEAD") respond(byteArrayOf(), HttpStatusCode.OK, headersOf(
+                HttpHeaders.AcceptRanges to listOf("bytes"), HttpHeaders.ContentLength to listOf(FILE_SIZE.toString()),
+                HttpHeaders.ETag to listOf(etag), HttpHeaders.LastModified to listOf(date),
+            )) else {
+                assertEquals(date, request.headers[HttpHeaders.IfRange])
+                respond(byteArrayOf(1, 2, 3, 4), HttpStatusCode.PartialContent, headersOf(
+                    HttpHeaders.ContentRange to listOf("bytes 4-7/$FILE_SIZE"), HttpHeaders.ContentLength to listOf("4"),
+                    HttpHeaders.ETag to listOf("W/\"changed\""),
+                ))
+            }
+        }
+        assertIs<PdfRangeProbeResult.Available>(gateway.probe(source()))
+        assertEquals(PdfReaderErrorCode.ResourceChanged,
+            assertIs<PdfRangeReadResult.Failure>(gateway.read(source(), PdfByteRange(4, 8))).code)
+    }
+
     private fun port(
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ) = KtorPdfRangeServerPort(

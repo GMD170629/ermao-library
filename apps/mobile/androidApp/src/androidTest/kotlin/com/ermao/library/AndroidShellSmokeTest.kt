@@ -10,6 +10,11 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -38,11 +43,94 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.ermao.library.shared.modules.library.BookContentsPage
+import com.ermao.library.shared.modules.library.BookContentsQuery
+import com.ermao.library.shared.modules.library.BookContentEntry
+import com.ermao.library.shared.modules.library.BookDetailQuery
+import com.ermao.library.shared.modules.library.BooksQuery
+import com.ermao.library.shared.modules.library.ContentRepository
+import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.shared.modules.library.ContentResult
+import com.ermao.library.shared.modules.library.HomeSnapshot
+import com.ermao.library.shared.modules.library.HomeSection
+import com.ermao.library.shared.modules.library.LibraryPage
+import com.ermao.library.shared.modules.library.domain.BookSummary
+import com.ermao.library.shared.modules.library.domain.BookDetailSummary
+import com.ermao.library.features.shelves.ui.ShelfCatalogScreen
+import com.ermao.library.features.shelves.application.ShelfCatalogUiState
+import com.ermao.library.features.shelves.application.ShelfLoadState
+import com.ermao.library.shared.modules.shelf.ShelfCatalogEntry
+import com.ermao.library.shared.modules.shelf.ShelfCatalogPage
+import com.ermao.library.shared.modules.shelf.ShelfKind
+import com.ermao.library.shared.modules.shelf.ShelfBookPreview
 
 @RunWith(AndroidJUnit4::class)
 class AndroidShellSmokeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun shelfRowsForwardEachBooksOwnIdentity() {
+        val application = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as ErmaoLibraryApplication
+        val session = authenticatedSession()
+        val opened = mutableListOf<String>()
+        val shelf = ShelfCatalogEntry(
+            "shelf-test", "Reading", null, ShelfKind.Static, 2,
+            listOf("Alpha", "Beta").map { ShelfBookPreview(it, "Navigation $it", null, "", 0.0) },
+            emptyList(), true,
+        )
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                ShelfCatalogScreen(
+                    state = ShelfCatalogUiState(content = ShelfLoadState.Ready(
+                        listOf(shelf), ShelfCatalogPage(shelf, emptyList(), 1, 1),
+                    )),
+                    isRoot = false, repository = CatalogNavigationRepository(application.contentRepository),
+                    context = ContentRequestContext(session.profile, session.identity.namespace),
+                    onSearch = {}, onScope = {}, onRefresh = {}, onLoadMore = {}, onBack = {},
+                    onOpenShelf = {}, onOpenBook = { opened.add(it) }, onCreate = { _, _ -> }, onClearSaveError = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("Navigation Alpha").performClick()
+        composeRule.onNodeWithText("Navigation Beta").performClick()
+        composeRule.runOnIdle { assertEquals(listOf("Alpha", "Beta"), opened) }
+    }
+
+    @Test
+    fun differentBooksAndSourceTabsNeverReuseThePreviousBookDetail() {
+        val application = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as ErmaoLibraryApplication
+        val repository = CatalogNavigationRepository(application.contentRepository)
+        val backLabel = application.getString(R.string.navigate_back)
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                MainShell(
+                    session = authenticatedSession(), contentRepository = repository,
+                    personalSettingsRepository = createAndroidPersonalSettingsRepository(application),
+                    administrativeSettingsRepository = createAndroidAdministrativeSettingsRepository(application),
+                    workManagementRepository = application.workManagementRepository,
+                    downloadCatalog = application.downloadCatalog, downloadFiles = application.downloadFiles,
+                    sharedDownloadCatalog = application.sharedDownloadCatalog,
+                    localeController = AndroidXAppLocaleController(), onSessionUnauthorized = {},
+                    onRefreshSession = {}, onPurgeCurrentNamespace = {}, onLogout = {},
+                )
+            }
+        }
+        composeRule.onNodeWithTag("tab-select-library").performClick()
+        listOf("Alpha", "Beta", "Alpha").forEach { name ->
+            composeRule.onNodeWithText("Navigation $name").performClick()
+            composeRule.onNode(hasText("Author $name") and hasAnyAncestor(hasTestTag("work-detail")))
+                .assertIsDisplayed()
+            composeRule.onNodeWithContentDescription(backLabel).performClick()
+            composeRule.onNodeWithTag("library-works-grid").assertIsDisplayed()
+        }
+        composeRule.onNodeWithText("Navigation Beta").performClick()
+        composeRule.onNodeWithTag("tab-select-home").performClick()
+        composeRule.onNodeWithText("Navigation Alpha").performClick()
+        composeRule.onNode(hasText("Author Alpha") and hasAnyAncestor(hasTestTag("work-detail"))).assertIsDisplayed()
+        composeRule.onNodeWithTag("tab-select-library").performClick()
+        composeRule.onNode(hasText("Author Beta") and hasAnyAncestor(hasTestTag("work-detail"))).assertIsDisplayed()
+    }
 
     @Test
     fun noProfileShowsInlineServerAndLoginFields() {
@@ -173,7 +261,7 @@ class AndroidShellSmokeTest {
             "home",
         ).forEach { tab ->
             composeRule.onNodeWithTag("tab-select-$tab").performClick()
-            composeRule.onNodeWithTag("tab-$tab").assertIsDisplayed()
+            composeRule.onNodeWithTag(if (tab == "shelves") "shelves-root" else "tab-$tab").assertIsDisplayed()
         }
     }
 
@@ -191,6 +279,41 @@ class AndroidShellSmokeTest {
         )
         assertEquals("Home", englishContext.getString(R.string.tab_home))
         assertEquals("首页", chineseContext.getString(R.string.tab_home))
+    }
+}
+
+/** Only catalog reads are replaced; the real Shell and native detail stacks run unchanged. */
+private class CatalogNavigationRepository(delegate: ContentRepository) : ContentRepository by delegate {
+    private val books = listOf("Alpha", "Beta").map { BookSummary(it, "Navigation $it", "Author $it", "", 0.0) }
+
+    override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = ContentResult.Content(
+        HomeSnapshot(HomeSection.Content(null), HomeSection.Content(emptyList()), HomeSection.Content(books)),
+    )
+
+    override suspend fun loadBooks(context: ContentRequestContext, query: BooksQuery): ContentResult<LibraryPage<BookSummary>> =
+        ContentResult.Content(LibraryPage(books, 1, 24, books.size, 1))
+
+    override suspend fun loadBookDetail(context: ContentRequestContext, query: BookDetailQuery): ContentResult<BookDetailSummary> {
+        val book = books.single { it.id == query.bookId }
+        return ContentResult.Content(BookDetailSummary(
+            id = book.id, sourceNodeId = "node-${book.id}", title = book.title, author = book.author,
+            description = null, tags = emptyList(), seriesName = null, seriesIndex = null,
+            coverStatus = "MISSING", coverUrl = "", continueResourceId = null,
+            continueResourceProgress = 0.0, completed = false, resources = emptyList(),
+        ))
+    }
+
+    override suspend fun loadBookContents(context: ContentRequestContext, query: BookContentsQuery): ContentResult<BookContentsPage> {
+        val node = BookContentEntry(
+            sourceNodeId = "node-${query.bookId}", parentSourceNodeId = null,
+            name = query.bookId, title = "Navigation ${query.bookId}", description = null,
+            kind = "FOLDER", physicalKind = "DIRECTORY", sizeBytes = null,
+            observedAt = "2026-08-27T00:00:00Z", hasChildren = false,
+            resourceId = null, representativeResourceId = null, coverUrl = null,
+        )
+        return ContentResult.Content(BookContentsPage(
+            query.bookId, node.sourceNodeId, null, node, emptyList(), null, emptyList(), emptyList(), 1, 100, 0, 1,
+        ))
     }
 }
 

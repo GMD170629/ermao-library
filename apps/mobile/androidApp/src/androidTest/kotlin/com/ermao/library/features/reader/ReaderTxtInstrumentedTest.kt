@@ -97,7 +97,7 @@ class ReaderTxtInstrumentedTest {
             }
             waitUntil(scenario, "TXT reader preferences") { activity ->
                 activity.navigatorOrNull()?.settings?.value?.fontSize?.let {
-                    abs(it - (23.0 / 18.0)) < 0.01
+                    abs(it - (23.0 / 16.0)) < 0.01
                 } == true
             }
         }

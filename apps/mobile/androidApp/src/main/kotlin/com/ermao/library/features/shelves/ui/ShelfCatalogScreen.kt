@@ -21,7 +21,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -61,6 +60,8 @@ import com.ermao.library.shared.modules.shelf.catalogPreview
 import com.ermao.library.ui.components.WarmPageNavigationAction
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageSearchField
+import com.ermao.library.ui.components.WarmPageCatalogHeader
+import com.ermao.library.ui.components.WarmPageCatalogTab
 import com.ermao.library.ui.components.WarmPageTopBarAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
@@ -101,31 +102,34 @@ fun ShelfCatalogScreen(
         } else WarmPageTopBarAction(Icons.Default.Refresh, stringResource(R.string.shelves_refresh), onClick = onRefresh)),
         modifier = Modifier.testTag(if (isRoot) "shelves-root" else "shelf-detail"),
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-            if (showsShelves) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (isRoot) {
+                WarmPageCatalogHeader(
+                    query = state.query,
+                    placeholder = stringResource(R.string.shelves_search),
+                    clearLabel = stringResource(R.string.clear_action),
+                    onQueryChanged = onSearch,
+                    onClearQuery = { onSearch("") },
+                    tabs = ShelfCatalogScope.entries.map { WarmPageCatalogTab(it, stringResource(it.label())) },
+                    selectedTab = state.scope,
+                    onSelectTab = onScope,
+                    searchModifier = Modifier.testTag("shelves-search"),
+                    tabsModifier = Modifier.semantics { contentDescription = scopeDescription },
+                )
+            } else if (showsShelves) {
                 WarmPageSearchField(
                     value = state.query, placeholder = stringResource(if (isRoot) R.string.shelves_search else R.string.shelves_search_collection),
                     onValueChange = onSearch, onClear = { onSearch("") }, clearLabel = stringResource(R.string.clear_action),
-                    modifier = Modifier.testTag("shelves-search"),
+                    modifier = Modifier.padding(horizontal = theme.components.page.compactGutter).testTag("shelves-search"),
                 )
             }
-            if (isRoot) Row(Modifier.fillMaxWidth().semantics { contentDescription = scopeDescription }, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ShelfCatalogScope.entries.forEach { scope ->
-                    FilterChip(
-                        selected = state.scope == scope, onClick = { onScope(scope) },
-                        label = { Text(stringResource(scope.label()), modifier = Modifier.padding(horizontal = 8.dp)) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = theme.colors.accentSoft,
-                            selectedLabelColor = theme.colors.actionAccent,
-                            containerColor = theme.colors.canvas,
-                        ), modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("shelves-scope-${scope.name}"),
-                    )
-                }
-            } else if (detail != null) {
-                Text(shelfCountText(detail), style = theme.typography.callout, color = theme.colors.textSecondary, modifier = Modifier.padding(vertical = 12.dp))
+            if (!isRoot && detail != null) {
+                Text(shelfCountText(detail), style = theme.typography.callout, color = theme.colors.textSecondary,
+                    modifier = Modifier.padding(horizontal = theme.components.page.compactGutter, vertical = theme.spacing.oneAndHalf))
             }
-            HorizontalDivider(color = theme.colors.divider)
-            PullToRefreshBox(isRefreshing = false, onRefresh = onRefresh, modifier = Modifier.weight(1f)) {
+            if (!isRoot) HorizontalDivider(color = theme.colors.divider, modifier = Modifier.padding(horizontal = theme.components.page.compactGutter))
+            PullToRefreshBox(isRefreshing = false, onRefresh = onRefresh,
+                modifier = Modifier.weight(1f).padding(horizontal = theme.components.page.compactGutter)) {
                 LazyColumn(Modifier.fillMaxSize()) {
                     when (val content = state.content) {
                         ShelfLoadState.Loading -> item {
@@ -209,7 +213,7 @@ private fun ShelfCatalogRow(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.clearAndSetSemantics {}) {
             catalogPreview(shelf, catalog).take(previewCount).forEach { book ->
-                CatalogBookCover(book.id, book.title, book.coverUrl, repository, context, Modifier.width(52.dp))
+                CatalogBookCover(book.id, book.title, book.coverUrl, repository, context, Modifier.width(52.dp), managementEnabled = false)
             }
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = theme.colors.textSecondary, modifier = Modifier.size(20.dp))

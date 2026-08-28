@@ -293,7 +293,7 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
         f"/api/reader/v4/resources/{resource.id}/publication/OEBPS/Text/chapter.xhtml"
     )
     assert resource_response.status_code == 200
-    assert resource_response.headers["cache-control"] == "private, no-cache"
+    assert resource_response.headers["cache-control"] == "private, no-store"
     assert "default-src 'none'" in resource_response.headers["content-security-policy"]
     with zipfile.ZipFile(source_path) as archive:
         assert resource_response.content == archive.read("OEBPS/Text/chapter.xhtml")
@@ -305,9 +305,7 @@ def test_epub_publication_exposes_stable_rwpm_and_private_resources(
     )
     assert head_response.status_code == 200
     assert head_response.content == b""
-    assert int(head_response.headers["content-length"]) == len(
-        resource_response.content
-    )
+    assert "content-length" not in head_response.headers
 
     positions_response = client.get(
         f"/api/reader/v4/resources/{resource.id}/publication/positions.json"
@@ -507,9 +505,41 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     )
     if runtime is None:
         pytest.skip("pinned libmobi test runtime is not built")
+    import ctypes
+    from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
+
+    from app.contracts.publication_sources import PublicationSource
+    from app.modules.publications.infrastructure.mobi_adapter import (
+        MobiPublicationAdapter,
+        _MobiCore,
+    )
+
+    class CountingCore(_MobiCore):
+        opens = 0
+        closes = 0
+
+        def open(self, path: Path) -> ctypes.c_void_p:
+            self.opens += 1
+            return super().open(path)
+
+        def close(self, book: ctypes.c_void_p) -> None:
+            self.closes += 1
+            super().close(book)
+
+    native_library = runtime
     monkeypatch.setenv("ERMAO_MOBI_CORE_LIBRARY", str(runtime))
     load_mobi_core.cache_clear()
     request.addfinalizer(load_mobi_core.cache_clear)
+    from typing import cast
+
+    from fastapi import FastAPI
+
+    from app.bootstrap.publications import build_publication_runtime
+
+    application = cast(FastAPI, client.app)
+    application.state.publication_runtime.close()
+    application.state.publication_runtime = build_publication_runtime(test_settings)
     fixture = (
         Path(__file__).parents[5] / "test-data" / "library" / "mobi" / "08-zh-hans.azw3"
     )
@@ -517,6 +547,33 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(fixture, target)
     source_hash_before = hashlib.sha256(target.read_bytes()).hexdigest()
+    counting_core = CountingCore(str(native_library))
+    adapter = MobiPublicationAdapter(test_settings.resolved_storage_root, counting_core)
+    source = PublicationSource(
+        "resource",
+        "asset",
+        "azw3",
+        str(target),
+        target.stat().st_size,
+        target.stat().st_mtime_ns // 1_000_000,
+        "First title",
+        None,
+    )
+
+    def read_alias(index: int) -> bytes:
+        alias = replace(source, title=f"Alias {index}")
+        publication = adapter.open(alias)
+        return adapter.read_resource(alias, publication.reading_order[0].href).content
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            bodies = list(workers.map(read_alias, range(8)))
+        assert all(body == bodies[0] and body for body in bodies)
+        assert counting_core.opens == 1
+    finally:
+        adapter.close()
+    assert counting_core.closes == 1
+
     _use_storage_root_as_library_root(db_session, test_settings)
     resource = _seed_resource(
         db_session,
@@ -666,6 +723,14 @@ def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(
         f"/api/reader/v4/resources/{resource.id}/publication/text/chapter-0002.xhtml"
     )
     assert resource_response.status_code == 200
+    revision = manifest_response.headers["X-Publication-Revision"]
+    assert resource_response.headers["X-Publication-Revision"] == revision
+    resource_head = client.head(
+        resource_response.request.url, headers={"X-Publication-Revision": revision}
+    )
+    assert resource_head.status_code == 200
+    assert resource_head.headers["X-Publication-Revision"] == revision
+    assert resource_head.content == b""
     assert resource_response.headers["content-type"].startswith("application/xhtml+xml")
     assert 'id="heading-000001"' in resource_response.text
     assert 'id="block-000001"' in resource_response.text

@@ -1,0 +1,447 @@
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.AndroidShellSmokeTest:
+INSTRUMENTATION_STATUS: test=loginCheckKeepsVisibleIndeterminateFeedbackAndPreventsAnotherSubmission
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=loginCheckKeepsVisibleIndeterminateFeedbackAndPreventsAnotherSubmission
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=eachRootTabOwnsAVisibleNavigationDestination
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=eachRootTabOwnsAVisibleNavigationDestination
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=noProfileShowsInlineServerAndLoginFields
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=noProfileShowsInlineServerAndLoginFields
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=authenticatedServerManagementReusesLoginEntryAndCanReturnToShell
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=authenticatedServerManagementReusesLoginEntryAndCanReturnToShell
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=lightDarkAndSupportedLocalesResolveFromResources
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=lightDarkAndSupportedLocalesResolveFromResources
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=startupServerProbeLeavesTheLoginFormUsable
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=startupServerProbeLeavesTheLoginFormUsable
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=differentBooksAndSourceTabsNeverReuseThePreviousBookDetail
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=differentBooksAndSourceTabsNeverReuseThePreviousBookDetail
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.ui.components.WarmPageSearchFieldTest:
+INSTRUMENTATION_STATUS: test=placeholderFitsInsideTheSearchFieldWithoutVerticalClipping
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=placeholderFitsInsideTheSearchFieldWithoutVerticalClipping
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=chineseCatalogTabsKeepNativeSelectionAndSearchHeight
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=chineseCatalogTabsKeepNativeSelectionAndSearchHeight
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.ui.components.WarmPageSearchFieldTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Failed to assert the following: (Text + EditableText = [])
+Semantics of the node:
+Node #1876 at (l=56.0, t=137.0, r=1384.0, b=333.0)px, Tag: 'catalog-search'
+ContentDataType = 'AndroidContentDataType(androidAutofillType=1)'
+EditableText = ''
+FillableData = 'androidx.compose.ui.autofill.AndroidFillableData@1f1620d'
+Focused = 'true'
+ImeAction = 'Search'
+InputText = ''
+IsEditable = 'true'
+Text = '[Search shelves or collections]'
+TextSelectionRange = 'TextRange(0, 0)'
+Actions = [ClearTextSubstitution, GetTextLayoutResult, InsertTextAtCursor, MagnifierPositionInRoot, OnClick, OnFillData, OnLongClick, PasteText, PerformImeAction, RequestFocus, SetSelection, SetText, SetTextSubstitution, ShowTextSubstitution]
+MergeDescendants = 'true'
+Has 1 sibling
+Selector used: (TestTag = 'catalog-search')
+
+	at androidx.compose.ui.test.AssertionsKt.assert(Assertions.kt:264)
+	at androidx.compose.ui.test.AssertionsKt.assert$default(Assertions.kt:254)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals(Assertions.kt:185)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals$default(Assertions.kt:181)
+	at com.ermao.library.ui.components.WarmPageSearchFieldTest.catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents(WarmPageSearchFieldTest.kt:53)
+
+INSTRUMENTATION_STATUS: stream=
+Error in catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents(com.ermao.library.ui.components.WarmPageSearchFieldTest):
+java.lang.AssertionError: Failed to assert the following: (Text + EditableText = [])
+Semantics of the node:
+Node #1876 at (l=56.0, t=137.0, r=1384.0, b=333.0)px, Tag: 'catalog-search'
+ContentDataType = 'AndroidContentDataType(androidAutofillType=1)'
+EditableText = ''
+FillableData = 'androidx.compose.ui.autofill.AndroidFillableData@1f1620d'
+Focused = 'true'
+ImeAction = 'Search'
+InputText = ''
+IsEditable = 'true'
+Text = '[Search shelves or collections]'
+TextSelectionRange = 'TextRange(0, 0)'
+Actions = [ClearTextSubstitution, GetTextLayoutResult, InsertTextAtCursor, MagnifierPositionInRoot, OnClick, OnFillData, OnLongClick, PasteText, PerformImeAction, RequestFocus, SetSelection, SetText, SetTextSubstitution, ShowTextSubstitution]
+MergeDescendants = 'true'
+Has 1 sibling
+Selector used: (TestTag = 'catalog-search')
+
+	at androidx.compose.ui.test.AssertionsKt.assert(Assertions.kt:264)
+	at androidx.compose.ui.test.AssertionsKt.assert$default(Assertions.kt:254)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals(Assertions.kt:185)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals$default(Assertions.kt:181)
+	at com.ermao.library.ui.components.WarmPageSearchFieldTest.catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents(WarmPageSearchFieldTest.kt:53)
+
+INSTRUMENTATION_STATUS: test=catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.library.ui.LibraryFilterSheetTest:
+INSTRUMENTATION_STATUS: test=englishOverrideIsCapturedBeforeModalComposition
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=englishOverrideIsCapturedBeforeModalComposition
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Finished' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.LibraryFilterSheetTest.narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions(LibraryFilterSheetTest.kt:156)
+
+INSTRUMENTATION_STATUS: stream=
+Error in narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions(com.ermao.library.features.library.ui.LibraryFilterSheetTest):
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Finished' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.LibraryFilterSheetTest.narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions(LibraryFilterSheetTest.kt:156)
+
+INSTRUMENTATION_STATUS: test=narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=compactNormalTextPinsApplyWhileAllFilterOptionsRemainReachable
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.LibraryFilterSheetTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=compactNormalTextPinsApplyWhileAllFilterOptionsRemainReachable
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.library.ui.DirectoryContentPresentationTest:
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=22
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=22
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=23
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=23
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=24
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=24
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=25
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=25
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=25
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 40.129
+There were 2 failures:
+1) catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents(com.ermao.library.ui.components.WarmPageSearchFieldTest)
+java.lang.AssertionError: Failed to assert the following: (Text + EditableText = [])
+Semantics of the node:
+Node #1876 at (l=56.0, t=137.0, r=1384.0, b=333.0)px, Tag: 'catalog-search'
+ContentDataType = 'AndroidContentDataType(androidAutofillType=1)'
+EditableText = ''
+FillableData = 'androidx.compose.ui.autofill.AndroidFillableData@1f1620d'
+Focused = 'true'
+ImeAction = 'Search'
+InputText = ''
+IsEditable = 'true'
+Text = '[Search shelves or collections]'
+TextSelectionRange = 'TextRange(0, 0)'
+Actions = [ClearTextSubstitution, GetTextLayoutResult, InsertTextAtCursor, MagnifierPositionInRoot, OnClick, OnFillData, OnLongClick, PasteText, PerformImeAction, RequestFocus, SetSelection, SetText, SetTextSubstitution, ShowTextSubstitution]
+MergeDescendants = 'true'
+Has 1 sibling
+Selector used: (TestTag = 'catalog-search')
+
+	at androidx.compose.ui.test.AssertionsKt.assert(Assertions.kt:264)
+	at androidx.compose.ui.test.AssertionsKt.assert$default(Assertions.kt:254)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals(Assertions.kt:185)
+	at androidx.compose.ui.test.AssertionsKt.assertTextEquals$default(Assertions.kt:181)
+	at com.ermao.library.ui.components.WarmPageSearchFieldTest.catalogSearchAndNativeTabsShareHeightAndPreserveSearchIntents(WarmPageSearchFieldTest.kt:53)
+2) narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions(com.ermao.library.features.library.ui.LibraryFilterSheetTest)
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Finished' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.LibraryFilterSheetTest.narrowLargeTextKeepsOneClickTargetPerControlAndCanReachTheFinalActions(LibraryFilterSheetTest.kt:156)
+
+FAILURES!!!
+Tests run: 25,  Failures: 2
+
+
+INSTRUMENTATION_CODE: -1

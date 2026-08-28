@@ -1,8 +1,9 @@
 export type PdfCropBox = Readonly<{ left: number; top: number; right: number; bottom: number }>;
 
 export function pdfContinuousWindowPages(pageNumber: number, pageCount: number) {
-  return Array.from({ length: Math.max(0, pageCount) }, (_, index) => index + 1)
-    .filter((page) => Math.abs(page - pageNumber) <= 2);
+  const begin = Math.max(1, pageNumber - 1);
+  const end = Math.min(pageCount, pageNumber + 1);
+  return Array.from({ length: Math.max(0, end - begin + 1) }, (_, index) => begin + index);
 }
 
 export function detectPdfCropBox(pixels: Uint8ClampedArray, width: number, height: number): PdfCropBox | null {

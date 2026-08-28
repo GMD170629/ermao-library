@@ -1,0 +1,54 @@
+
+> @shuku/web@1.0.0 i18n:check /home/liumianti/ermao-library/apps/web
+> node scripts/generate-i18n-catalog.mjs
+
+{
+  "missingSourceKeys": [
+    "服务器不支持 PDF 按需读取，无法在线打开。",
+    "管理员创建了用户",
+    "管理员更新了用户与权限",
+    "管理员永久删除了用户及其个人数据",
+    "管理员重置了用户密码并撤销会话"
+  ],
+  "missingEnglishKeys": [
+    "服务器不支持 PDF 按需读取，无法在线打开。",
+    "管理员创建了用户",
+    "管理员更新了用户与权限",
+    "管理员永久删除了用户及其个人数据",
+    "管理员重置了用户密码并撤销会话"
+  ],
+  "staleSourceKeys": [
+    "不能删除当前登录的管理员",
+    "不能停用或降级当前登录的管理员",
+    "服务器不支持 PDF 按需读取，请先下载后离线阅读。",
+    "仅管理员可以管理用户与权限",
+    "确认邮箱不匹配",
+    "首次打开需要下载一次，之后将直接进入阅读。",
+    "首次下载书籍",
+    "书籍下载进度",
+    "系统必须至少保留一个有效管理员",
+    "已下载 {value0}",
+    "已下载 {value0} / {value1} · {value2}%",
+    "用户不存在",
+    "PDF 分块缓存写入失败"
+  ],
+  "staleEnglishKeys": [
+    "不能删除当前登录的管理员",
+    "不能停用或降级当前登录的管理员",
+    "服务器不支持 PDF 按需读取，请先下载后离线阅读。",
+    "仅管理员可以管理用户与权限",
+    "确认邮箱不匹配",
+    "首次打开需要下载一次，之后将直接进入阅读。",
+    "首次下载书籍",
+    "书籍下载进度",
+    "系统必须至少保留一个有效管理员",
+    "已下载 {value0}",
+    "已下载 {value0} / {value1} · {value2}%",
+    "用户不存在",
+    "PDF 分块缓存写入失败"
+  ],
+  "mismatchedChineseValues": [],
+  "untranslatedEnglishValues": [],
+  "mismatchedPlaceholders": []
+}
+ ELIFECYCLE  Command failed with exit code 1.

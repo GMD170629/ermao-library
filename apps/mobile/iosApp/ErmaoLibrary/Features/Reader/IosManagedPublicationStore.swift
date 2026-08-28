@@ -18,6 +18,7 @@ actor IosManagedPublicationStore {
     static let normalizationVersion = "shuku-epub-locator-dom-v2"
     static let maximumPublicationBytes: Int64 = 512 * 1_024 * 1_024
 
+    private var completedPublication: IosManagedPublication?
     private let root: URL
     private let fileManager: FileManager
 
@@ -39,6 +40,31 @@ actor IosManagedPublicationStore {
             withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
+    }
+
+    /// Metadata proves ownership. Ambiguous files and local imports remain untouched.
+    func removeAutomaticReplica(resourceID: String, assetID: String, namespace: String) throws {
+        let caches = try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        let obsoleteRanges = caches.appendingPathComponent("reader/pdf-range-v1", isDirectory: true)
+        if fileManager.fileExists(atPath: obsoleteRanges.path) {
+            guard obsoleteRanges.resolvingSymlinksInPath().path.hasPrefix(caches.resolvingSymlinksInPath().path + "/") else {
+                throw IosReaderFailure(code: .persistenceFailed)
+            }
+            try fileManager.removeItem(at: obsoleteRanges)
+        }
+        let key = opaqueKey(resourceID)
+        let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
+        try requireContained(metadataURL)
+        guard fileManager.fileExists(atPath: metadataURL.path) else { return }
+        let metadata = try JSONDecoder().decode(Metadata.self, from: Data(contentsOf: metadataURL))
+        guard metadata.resourceID == resourceID, metadata.assetID == assetID,
+              metadata.namespace == namespace else { return }
+        let candidates = try fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        for candidate in candidates where candidate.lastPathComponent.hasPrefix(".\(key).") && candidate.pathExtension == "partial" {
+            try requireContained(candidate)
+            try fileManager.removeItem(at: candidate)
+        }
+        try remove(resourceID: resourceID, namespace: namespace)
     }
 
     func importEPUB(
@@ -214,95 +240,14 @@ actor IosManagedPublicationStore {
         )
     }
 
-    func prepareDownload(resourceID: String, expectedSize: Int64, namespace _: String? = nil) throws -> URL {
-        guard !resourceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw IosReaderFailure(code: .resourceMissing)
-        }
-        _ = expectedSize
-        let key = opaqueKey(resourceID)
-        let staging = root.appendingPathComponent(".\(key).\(UUID().uuidString).partial")
-        try requireContained(staging)
-        guard fileManager.createFile(
-            atPath: staging.path,
-            contents: nil,
-            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
-        ) else { throw IosReaderFailure(code: .persistenceFailed) }
-        return staging
-    }
-
-    func commitDownload(
-        staging: URL,
-        resourceID: String,
-        displayTitle: String,
-        byteCount: Int64,
-        expectedSize: Int64,
-        parserVersion: String,
-        normalizationVersion: String,
-        sourceFormat: ErmaoShared.ReaderSourceFormat,
-        bookID: String,
-        assetID: String,
-        namespace: String? = nil,
-        validateWithReaderParser: Bool = false
-    ) async throws -> IosManagedPublication {
-        try requireContained(staging)
-        guard byteCount > 0,
-              byteCount <= Self.maximumPublicationBytes
-        else { throw IosReaderFailure(code: .corruptFile) }
-        guard byteCount == expectedSize else { throw IosReaderFailure(code: .corruptFile) }
-        let stagingValues = try staging.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-        guard stagingValues.isRegularFile == true,
-              stagingValues.isSymbolicLink != true,
-              Int64(stagingValues.fileSize ?? -1) == byteCount
-        else { throw IosReaderFailure(code: .corruptFile) }
-        try await validatePublication(
-            at: staging,
-            sourceFormat: sourceFormat,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion,
-            validateWithReaderParser: validateWithReaderParser
-        )
-
-        let key = opaqueKey(resourceID)
-        let destination = root.appendingPathComponent(key)
-            .appendingPathExtension(Self.pathExtension(for: sourceFormat))
-        let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
-        try requireContained(destination)
-        try requireContained(metadataURL)
-        let metadata = Metadata(
-            resourceID: resourceID,
-            displayTitle: displayTitle,
-            byteCount: byteCount,
-            bookID: bookID,
-            assetID: assetID,
-            namespace: namespace,
-            sourceFormat: sourceFormat.wireValue
-        )
-        try installPublication(
-            staging: staging,
-            destination: destination,
-            metadata: try JSONEncoder().encode(metadata),
-            metadataURL: metadataURL
-        )
-        return IosManagedPublication(
-            resourceID: resourceID,
-            displayTitle: displayTitle,
-            fileURL: destination,
-            byteCount: byteCount,
-            bookID: bookID,
-            assetID: assetID,
-            namespace: namespace,
-            sourceFormat: sourceFormat
-        )
-    }
-
-    func abortDownload(staging: URL) throws {
-        try requireContained(staging)
-        if fileManager.fileExists(atPath: staging.path) {
-            try fileManager.removeItem(at: staging)
-        }
+    /// Binds the verified Downloads file without copying or publishing another original.
+    func bindCompleted(_ publication: IosManagedPublication) {
+        completedPublication = publication
     }
 
     func resolve(resourceID: String, namespace: String? = nil) throws -> IosManagedPublication {
+        if let completedPublication, completedPublication.resourceID == resourceID,
+           namespace == nil || completedPublication.namespace == namespace { return completedPublication }
         let key = opaqueKey(resourceID)
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         try requireContained(metadataURL)

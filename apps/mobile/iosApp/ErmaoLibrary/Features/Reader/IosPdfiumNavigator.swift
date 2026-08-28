@@ -11,7 +11,6 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private var renderTask: Task<Void, Never>?
-    private var prefetchTask: Task<Void, Never>?
 
     init(document: IosPdfiumDocument, initialPageIndex: Int) {
         self.document = document
@@ -86,7 +85,6 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
 
     func close() {
         renderTask?.cancel()
-        prefetchTask?.cancel()
         document.close()
     }
 
@@ -96,7 +94,6 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
         guard view.bounds.width > 0, view.bounds.height > 0 else { return }
         let requestedPage = pageIndex
         renderTask?.cancel()
-        prefetchTask?.cancel()
         renderTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -112,21 +109,16 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
                     requestedPage + 1,
                     document.pageCount
                 )
-                prefetchAdjacentPage(from: requestedPage)
             } catch is CancellationError {
                 return
             } catch let failure as IosReaderFailure {
+                guard !Task.isCancelled, requestedPage == pageIndex else { return }
                 onFailure?(failure.code)
             } catch {
+                guard !Task.isCancelled, requestedPage == pageIndex else { return }
                 onFailure?(.pdfRenderFailed)
             }
         }
-    }
-
-    private func prefetchAdjacentPage(from index: Int) {
-        let neighbor = index + 1 < document.pageCount ? index + 1 : index - 1
-        guard neighbor >= 0 else { return }
-        prefetchTask = Task { [document] in await document.prefetch(pageIndex: neighbor) }
     }
 
     private func installGestures() {

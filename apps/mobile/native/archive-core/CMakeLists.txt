@@ -61,9 +61,9 @@ if(ERMAO_ARCHIVE_BUILD_TESTS AND NOT ANDROID)
     add_test(
         NAME ermao_archive_host_tests
         COMMAND ermao_archive_host_tests
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../books/comics/山海邮差/01 青鸟来信.zip"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../books/comics/山海邮差/典藏版/终章/04 归山.cbr"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../books/comics/山海邮差/单行本/02 雨师借伞.rar"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../books/comics/山海邮差/单行本/支线故事/03 龙门夜话.cbz"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.zip"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.cbr"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.rar"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../../test-data/library/comics/reader-pages.cbz"
     )
 endif()

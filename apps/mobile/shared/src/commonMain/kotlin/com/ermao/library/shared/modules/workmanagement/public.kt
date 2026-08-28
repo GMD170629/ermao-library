@@ -113,3 +113,51 @@ fun workManagementCoverMutationOutcome(
     result: WorkManagementResult<CoverMutationOutcome>,
 ): CoverMutationOutcome? =
     (result as? com.ermao.library.shared.modules.workmanagement.domain.WorkManagementResult.Content)?.value
+
+typealias ManagementObject = com.ermao.library.shared.modules.workmanagement.domain.ManagementObject
+
+typealias ManagementTarget = com.ermao.library.shared.modules.workmanagement.domain.ManagementTarget
+
+typealias ManagementAction = com.ermao.library.shared.modules.workmanagement.domain.ManagementAction
+
+typealias ManagementMenuItem = com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuItem
+
+typealias ManagementField = com.ermao.library.shared.modules.workmanagement.domain.ManagementField
+
+typealias ManagementFieldValue = com.ermao.library.shared.modules.workmanagement.domain.ManagementFieldValue
+
+typealias ManagedBook = com.ermao.library.shared.modules.workmanagement.domain.ManagedBook
+
+typealias ManagedAsset = com.ermao.library.shared.modules.workmanagement.domain.ManagedAsset
+
+typealias ManagedResource = com.ermao.library.shared.modules.workmanagement.domain.ManagedResource
+
+typealias ManagedDirectory = com.ermao.library.shared.modules.workmanagement.domain.ManagedDirectory
+
+typealias ManagementSnapshot = com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
+
+typealias CoverEdit = com.ermao.library.shared.modules.workmanagement.domain.CoverEdit
+
+typealias RecognizedField = com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
+
+typealias MetadataApplyOutcome = com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
+
+typealias ManagementSaveStage = com.ermao.library.shared.modules.workmanagement.domain.ManagementSaveStage
+
+typealias ManagementChange = com.ermao.library.shared.modules.workmanagement.domain.ManagementChange
+
+typealias BookManagementSession = com.ermao.library.shared.modules.workmanagement.application.BookManagementSession
+
+typealias ManagementSessionState = com.ermao.library.shared.modules.workmanagement.application.ManagementSessionState
+
+typealias ManagementPhase = com.ermao.library.shared.modules.workmanagement.application.ManagementPhase
+
+typealias ManagementOperation = com.ermao.library.shared.modules.workmanagement.application.ManagementOperation
+
+fun managementCandidateValue(candidate: MetadataCandidate, field: ManagementField): String =
+    com.ermao.library.shared.modules.workmanagement.application.candidateValue(candidate, field)
+
+fun managementMenuItems(kind: ManagementObject, canManage: Boolean, kindleSendAvailable: Boolean, hasRepresentativeResource: Boolean): List<ManagementMenuItem> =
+    com.ermao.library.shared.modules.workmanagement.domain.managementActions(kind, canManage, kindleSendAvailable, hasRepresentativeResource)
+
+typealias ManagementMenuContext = com.ermao.library.shared.modules.workmanagement.domain.ManagementMenuContext

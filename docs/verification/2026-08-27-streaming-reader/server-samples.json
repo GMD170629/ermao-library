@@ -1,0 +1,50 @@
+{
+  "scope": "server adapter measurements; not client/network or physical-device acceptance",
+  "samples": [
+    {
+      "format": "epub",
+      "sample": "【多看版】《末日生存方案供应商》作者：_板面王仔（软校全本·L2）V1.0【书眸精制】.epub",
+      "originalBytes": 12870965,
+      "readingUnits": 1284,
+      "firstHref": "OEBPS/Text/Vol01-Chapter001.xhtml",
+      "serverParseMs": 139.9,
+      "serverFirstBodyAfterParseMs": 33.75,
+      "firstBodyBytes": 8185,
+      "serverPythonPeakBytes": 6742294,
+      "warmMetadataMs": 0.29,
+      "clientFirstReadableMs": null,
+      "networkTransferredBytes": null,
+      "clientCachePeakBytes": null
+    },
+    {
+      "format": "txt",
+      "sample": "independent-chapters.txt",
+      "originalBytes": 7628893,
+      "readingUnits": 1000,
+      "firstHref": "text/chapter-0001.xhtml",
+      "serverParseMs": 162.87,
+      "serverFirstBodyAfterParseMs": 0.36,
+      "firstBodyBytes": 8332,
+      "serverPythonPeakBytes": 30518000,
+      "warmMetadataMs": 0.15,
+      "clientFirstReadableMs": null,
+      "networkTransferredBytes": null,
+      "clientCachePeakBytes": null
+    },
+    {
+      "format": "txt",
+      "sample": "7--影子女孩.txt",
+      "originalBytes": 48,
+      "readingUnits": 1,
+      "firstHref": "text/chapter-0001.xhtml",
+      "serverParseMs": 0.78,
+      "serverFirstBodyAfterParseMs": 0.35,
+      "firstBodyBytes": 363,
+      "serverPythonPeakBytes": 7162,
+      "warmMetadataMs": 0.35,
+      "clientFirstReadableMs": null,
+      "networkTransferredBytes": null,
+      "clientCachePeakBytes": null
+    }
+  ]
+}

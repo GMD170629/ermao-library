@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import ErmaoShared
 
 struct ManagedDownloadBatchResult: Sendable {
     let succeededCount: Int
@@ -57,7 +58,11 @@ final class DownloadCenterStore: ObservableObject {
     func reload() {
         guard let context else { records = []; return }
         Task {
-            do { records = try await repository.records(namespace: context.namespaceKey); storageErrorCode = nil }
+            do {
+                let loaded = try await repository.records(namespace: context.namespaceKey)
+                guard self.context?.namespaceKey == context.namespaceKey else { return }
+                records = loaded; storageErrorCode = nil
+            }
             catch { storageErrorCode = "DOWNLOAD_MANIFEST_READ_FAILED" }
         }
     }
@@ -66,162 +71,72 @@ final class DownloadCenterStore: ObservableObject {
         records.first { $0.resourceID == resourceID && (assetID == nil || $0.assetID == assetID) }
     }
 
-    func enqueue(book: BookCard, resource: BookResource) {
-        guard let context else { return }
-        Task {
-            do {
-                let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
-                try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
-            } catch { recordPreparationError(error) }
-        }
-    }
+    func enqueue(book: BookCard, resource: BookResource) { start(resourceID: resource.id) }
 
-    func performBatch(
-        book: BookCard,
-        resources: [BookResource],
-        completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void
-    ) {
-        guard let context else {
-            completion(ManagedDownloadBatchResult(
-                succeededCount: 0,
-                failedResourceIDs: Set(resources.map(\.id))
-            ))
+    func performBatch(book: BookCard, resources: [BookResource],
+                      completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void) {
+        guard context != nil else {
+            completion(ManagedDownloadBatchResult(succeededCount: 0, failedResourceIDs: Set(resources.map(\.id))))
             return
         }
-        Task {
-            var succeeded = 0
-            var failed = Set<String>()
-            for resource in resources {
-                do {
-                    if let record = record(for: resource.id) {
-                        switch record.state {
-                        case .paused, .failedRetryable:
-                            start(record)
-                            succeeded += 1
-                        case .queued, .downloading, .completed:
-                            continue
-                        case .failedTerminal:
-                            failed.insert(resource.id)
-                        }
-                    } else {
-                        let bootstrap = try await transfer.prepare(
-                            context: context,
-                            resourceID: resource.id
-                        )
-                        try await enqueuePrepared(
-                            book: book,
-                            resource: resource,
-                            bootstrap: bootstrap,
-                            context: context
-                        )
-                        succeeded += 1
-                    }
-                } catch {
-                    failed.insert(resource.id)
-                    recordPreparationError(error)
-                }
-            }
-            completion(ManagedDownloadBatchResult(
-                succeededCount: succeeded,
-                failedResourceIDs: failed
-            ))
-        }
+        let result = DownloadBatchResult(results: Set(resources.map(\.id)).sorted().map { resourceID in
+            let record = record(for: resourceID)
+            return DownloadBatchPolicy.shared.decide(resourceId: resourceID, status: record?.state.sharedStatus,
+                failureCode: record?.stableErrorCode, active: runningTasks[resourceID] != nil)
+        })
+        result.requestedResourceIds.forEach { start(resourceID: $0) }
+        completion(ManagedDownloadBatchResult(succeededCount: Int(result.succeededCount), failedResourceIDs: result.failedResourceIds))
     }
 
-    @discardableResult
-    func requestReaderAccess(book: BookCard, resource: BookResource, completion: @escaping @MainActor (ManagedReaderAccessOutcome) -> Void) -> Task<Void, Never> {
-        guard let context else { completion(.unavailable("DOWNLOAD_CONTEXT_UNAVAILABLE")); return Task {} }
-        return Task {
-            do {
-                let bootstrap = try await transfer.prepare(context: context, resourceID: resource.id)
-                if let completed = record(for: resource.id, assetID: bootstrap.assetID),
-                   completed.isVerifiedOfflineCopy,
-                   completed.readerType == bootstrap.readerType,
-                   completed.format == bootstrap.sourceFormat,
-                   completed.mimeType == bootstrap.mimeType {
-                    completion(.open(ReaderHandoff(bookID: book.id, resourceID: resource.id, assetID: bootstrap.assetID, title: book.title, resourceTitle: resource.title, format: completed.format, readerType: completed.readerType, source: .verifiedLocal(recordID: completed.id))))
-                } else if bootstrap.readerType.requiresCompleteDownloadBeforeReading {
-                    if let stale = record(for: resource.id),
-                       stale.readerType != bootstrap.readerType ||
-                       stale.assetID != bootstrap.assetID ||
-                       stale.format != bootstrap.sourceFormat ||
-                       stale.mimeType != bootstrap.mimeType {
-                        await removeForReplacement(stale)
-                    }
-                    try await enqueuePrepared(book: book, resource: resource, bootstrap: bootstrap, context: context)
-                    guard let record = record(for: resource.id, assetID: bootstrap.assetID) else { completion(.unavailable("DOWNLOAD_MANIFEST_WRITE_FAILED")); return }
-                    completion(.needsDownload(recordID: record.id))
-                } else if bootstrap.readerType.supportsStreaming {
-                    completion(.open(ReaderHandoff(bookID: book.id, resourceID: resource.id, assetID: bootstrap.assetID, title: book.title, resourceTitle: resource.title, format: resource.format, readerType: bootstrap.readerType, source: .remoteStream)))
-                } else { completion(.unavailable("READER_TYPE_UNAVAILABLE")) }
-            } catch let error as ManagedDownloadTransferError { completion(.unavailable(error.stableCode)) }
-            catch { completion(.unavailable("DOWNLOAD_INVALID_RESPONSE")) }
-        }
-    }
-
-    private func removeForReplacement(_ record: ManagedDownloadRecord) async {
-        runningTasks[record.id]?.cancel(); runningTasks[record.id] = nil
-        try? await repository.remove(record)
-        records.removeAll { $0.id == record.id }
-    }
-
-    func pause(_ record: ManagedDownloadRecord) { runningTasks[record.id]?.cancel(); runningTasks[record.id] = nil; persist(record) { $0.state = .paused; $0.stableErrorCode = nil } }
-    func resume(_ record: ManagedDownloadRecord) { start(record) }
-    func retry(_ record: ManagedDownloadRecord) { start(record) }
+    func pause(_ record: ManagedDownloadRecord) { runningTasks[record.resourceID]?.cancel() }
+    func resume(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
+    func retry(_ record: ManagedDownloadRecord) { start(resourceID: record.resourceID) }
 
     func remove(_ record: ManagedDownloadRecord) {
-        runningTasks[record.id]?.cancel(); runningTasks[record.id] = nil
-        Task { do { try await repository.remove(record); records.removeAll { $0.id == record.id } } catch { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" } }
+        let active = runningTasks[record.resourceID]
+        active?.cancel()
+        Task {
+            await active?.value
+            do { try await repository.remove(record); records.removeAll { $0.id == record.id } }
+            catch { storageErrorCode = "DOWNLOAD_REMOVE_FAILED" }
+        }
     }
 
     func remove(resourceID: String) { if let record = record(for: resourceID) { remove(record) } }
     func remove(bookID: String) { records.filter { $0.bookID == bookID }.forEach(remove) }
     func localFileURL(for record: ManagedDownloadRecord) async -> URL? { await repository.fileURL(for: record) }
 
-    private func start(_ original: ManagedDownloadRecord) {
-        guard let context, runningTasks[original.id] == nil else { return }
-        var record = original; record.state = .downloading; record.verification = .pending; record.stableErrorCode = nil; record.updatedAt = Date(); replace(record)
-        let recordID = record.id
+    private func start(resourceID: String) {
+        guard let context, runningTasks[resourceID] == nil else { return }
         let task = Task { [weak self, repository, transfer] in
             guard let self else { return }
+            defer {
+                if self.context?.namespaceKey == context.namespaceKey { self.runningTasks[resourceID] = nil }
+            }
             do {
-                try await repository.update(record)
-                let destination = try await repository.destination(for: record)
-                let receipt = try await transfer.download(ManagedDownloadRequest(context: context, record: record, destination: destination)) { [weak self] progress in await self?.recordProgress(recordID: recordID, progress: progress) }
-                try Task.checkCancellation()
-                guard self.context?.namespaceKey == record.namespace, self.records.contains(where: { $0.id == record.id }) else { throw CancellationError() }
-                let completed = try await repository.publish(record: self.record(for: record.resourceID, assetID: record.assetID) ?? record, destination: destination, receipt: receipt)
-                self.replace(completed)
+                try await transfer.download(context: context, resourceID: resourceID, repository: repository) { [weak self] record in
+                    await self?.project(record)
+                }
             } catch is CancellationError {
-                if self.record(for: record.resourceID, assetID: record.assetID)?.state != .paused { self.persist(record) { $0.state = .paused } }
-            } catch let error as ManagedDownloadTransferError { self.fail(record, error: error) }
-            catch { self.fail(record, error: .invalidResponse) }
-            self.runningTasks[recordID] = nil
+                // The shared use case persists pause before returning cancellation.
+            } catch let error as ManagedDownloadTransferError {
+                guard !Task.isCancelled, self.context?.namespaceKey == context.namespaceKey else { return }
+                self.storageErrorCode = error.stableCode
+            } catch {
+                guard !Task.isCancelled, self.context?.namespaceKey == context.namespaceKey else { return }
+                self.storageErrorCode = "DOWNLOAD_MANIFEST_WRITE_FAILED"
+            }
         }
-        runningTasks[recordID] = task
+        runningTasks[resourceID] = task
     }
 
-    private func enqueuePrepared(book: BookCard, resource: BookResource, bootstrap: ManagedDownloadBootstrap, context: ContentRequestContext) async throws {
-        guard !bootstrap.bookID.isEmpty, bootstrap.bookID == book.id, bootstrap.resourceID == resource.id, !bootstrap.assetID.isEmpty else { throw ManagedDownloadTransferError.invalidResponse }
-        let record = try await repository.enqueue(
-            namespace: context.namespaceKey,
-            book: book,
-            resource: resource,
-            assetID: bootstrap.assetID,
-            sourceFormat: bootstrap.sourceFormat,
-            mimeType: bootstrap.mimeType,
-            readerType: bootstrap.readerType,
-            expectedBytes: bootstrap.expectedBytes,
-            artifactKind: bootstrap.artifactKind
-        )
-        replace(record); start(record)
+    private func project(_ record: ManagedDownloadRecord) {
+        guard context?.namespaceKey == record.namespace else { return }
+        if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
+        else { records.append(record) }
+        records.sort { $0.updatedAt > $1.updatedAt }
     }
 
-    private func recordPreparationError(_ error: Error) { storageErrorCode = (error as? ManagedDownloadTransferError)?.stableCode ?? "DOWNLOAD_MANIFEST_WRITE_FAILED" }
-    private func recordProgress(recordID: String, progress: ManagedDownloadProgress) { guard let index = records.firstIndex(where: { $0.id == recordID }) else { return }; records[index].receivedBytes = progress.receivedBytes; records[index].expectedBytes = progress.expectedBytes; records[index].updatedAt = Date() }
-    private func fail(_ original: ManagedDownloadRecord, error: ManagedDownloadTransferError) { persist(record(for: original.resourceID, assetID: original.assetID) ?? original) { $0.state = (error == .inaccessible || error == .invalidResponse) ? .failedTerminal : .failedRetryable; $0.verification = .invalid; $0.stableErrorCode = error.stableCode } }
-    private func persist(_ record: ManagedDownloadRecord, mutation: @escaping (inout ManagedDownloadRecord) -> Void) { var updated = record; mutation(&updated); updated.updatedAt = Date(); replace(updated); Task { do { try await repository.update(updated) } catch { storageErrorCode = "DOWNLOAD_MANIFEST_WRITE_FAILED" } } }
-    private func replace(_ record: ManagedDownloadRecord) { if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record } else { records.append(record) }; records.sort { $0.updatedAt > $1.updatedAt } }
 }
 
 struct CompositePrivateContentCache: PrivateContentCacheClearing {

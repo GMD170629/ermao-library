@@ -1,0 +1,281 @@
+diff --git a/legacy/build/pdf.mjs b/legacy/build/pdf.mjs
+index 2de88b83f9f6789ef18359514a1ecd9a639e1049..63bcb48eb83a08587e9eae9ad2d29c7e7a6aa083 100644
+--- a/legacy/build/pdf.mjs
++++ b/legacy/build/pdf.mjs
+@@ -19277,8 +19277,8 @@ class BasePDFStream {
+     assert(!this._fullReader, "BasePDFStream.getFullReader can only be called once.");
+     return this._fullReader = new this.#PDFStreamReader(this);
+   }
+-  getRangeReader(begin, end) {
+-    if (end <= this._progressiveDataLength) {
++  getRangeReader(begin, end, allowReRead = false) {
++    if (!allowReRead && end <= this._progressiveDataLength) {
+       return null;
+     }
+     const reader = new this.#PDFStreamRangeReader(this, begin, end);
+@@ -19780,7 +19780,8 @@ class PDFDataTransportStream extends BasePDFStream {
+     return reader;
+   }
+   getRangeReader(begin, end) {
+-    const reader = super.getRangeReader(begin, end);
++    // The reader can evict even initial bytes; every explicit request must be fulfilled.
++    const reader = super.getRangeReader(begin, end, true);
+     if (reader) {
+       reader.onDone = () => this._rangeReaders.delete(reader);
+       this._source.pdfDataRangeTransport.requestDataRange(begin, end);
+@@ -21658,6 +21659,12 @@ class PDFDocumentProxy {
+     this._pdfInfo = pdfInfo;
+     this._transport = transport;
+   }
++  setReadingWindow(pageIndex) {
++    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= this.numPages) {
++      return Promise.reject(new Error("PDF_READING_WINDOW_INVALID"));
++    }
++    return this._transport.messageHandler.sendWithPromise("SetReadingWindow", { pageIndex });
++  }
+   get pagesMapper() {
+     return this._transport.pagesMapper;
+   }
+diff --git a/legacy/build/pdf.worker.mjs b/legacy/build/pdf.worker.mjs
+index 13fe8874e92878ca77f64cb27cbd63ba6074209d..4fecc9a9a1e016a9d7d56e5a611f826d4136a6ee 100644
+--- a/legacy/build/pdf.worker.mjs
++++ b/legacy/build/pdf.worker.mjs
+@@ -8440,7 +8440,10 @@ class ChunkedStream extends Stream {
+   _lastSuccessfulEnsureByteChunk = -1;
+   _loadedChunks = new Set();
+   constructor(length, chunkSize, manager) {
+-    super(new Uint8Array(length), 0, length, null);
++    super(new Uint8Array(0), 0, length, null);
++    // Publication bytes stay sparse and bounded; never allocate the complete PDF.
++    this.rangeChunks = new Map();
++    this.maximumRangeCacheBytes = 8 * 1024 * 1024;
+     this.chunkSize = chunkSize;
+     this.numChunks = Math.ceil(length / chunkSize);
+     this.manager = manager;
+@@ -8466,27 +8469,52 @@ class ChunkedStream extends Stream {
+       throw new Error(`Bad begin offset: ${begin}`);
+     }
+     const end = begin + chunk.byteLength;
+-    if (end % chunkSize !== 0 && end !== this.bytes.length) {
++    if (end % chunkSize !== 0 && end !== this.end) {
+       throw new Error(`Bad end offset: ${end}`);
+     }
+-    this.bytes.set(new Uint8Array(chunk), begin);
+-    const beginChunk = Math.floor(begin / chunkSize);
+-    const endChunk = Math.floor((end - 1) / chunkSize) + 1;
+-    for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
+-      this._loadedChunks.add(curChunk);
++    const bytes = new Uint8Array(chunk);
++    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
++      const index = (begin + offset) / chunkSize;
++      this.rangeChunks.delete(index);
++      this.rangeChunks.set(index, bytes.slice(offset, offset + chunkSize));
++      this._loadedChunks.add(index);
++    }
++    while (this.rangeChunks.size * chunkSize > this.maximumRangeCacheBytes) {
++      const oldest = this.rangeChunks.keys().next().value;
++      this.rangeChunks.delete(oldest);
++      this._loadedChunks.delete(oldest);
+     }
+   }
+   onReceiveProgressiveData(data) {
+-    let position = this.progressiveDataLength;
+-    const beginChunk = Math.floor(position / this.chunkSize);
+-    this.bytes.set(new Uint8Array(data), position);
+-    position += data.byteLength;
+-    this.progressiveDataLength = position;
+-    const endChunk = position >= this.end ? this.numChunks : Math.floor(position / this.chunkSize);
+-    for (let curChunk = beginChunk; curChunk < endChunk; ++curChunk) {
+-      this._loadedChunks.add(curChunk);
++    // Only the explicit, bounded initial range is accepted. No streaming completion.
++    if (this.rangeChunks.size || data.byteLength > this.chunkSize) {
++      throw new FormatError("PDF_ONLINE_PROGRESSIVE_TRANSFER_FORBIDDEN");
++    }
++    this.onReceiveData(0, data);
++  }
++  rangeBytes(begin, end) {
++    if (end - begin > this.maximumRangeCacheBytes) {
++      throw new FormatError("PDF_ONLINE_OBJECT_TOO_LARGE");
++    }
++    this.ensureRange(begin, end);
++    const result = new Uint8Array(end - begin);
++    let cursor = begin;
++    while (cursor < end) {
++      const index = Math.floor(cursor / this.chunkSize);
++      const bytes = this.rangeChunks.get(index);
++      const offset = cursor % this.chunkSize;
++      const size = Math.min(bytes.length - offset, end - cursor);
++      result.set(bytes.subarray(offset, offset + size), cursor - begin);
++      this.rangeChunks.delete(index);
++      this.rangeChunks.set(index, bytes);
++      cursor += size;
+     }
++    return result;
+   }
++  clone() {
++    return this.makeSubStream(this.start, this.length, this.dict?.clone());
++  }
++
+   ensureByte(pos) {
+     if (pos < this.progressiveDataLength) {
+       return;
+@@ -8495,18 +8523,14 @@ class ChunkedStream extends Stream {
+     if (chunk > this.numChunks) {
+       return;
+     }
+-    if (chunk === this._lastSuccessfulEnsureByteChunk) {
+-      return;
+-    }
+     if (!this._loadedChunks.has(chunk)) {
+       throw new MissingDataException(pos, pos + 1);
+     }
+     this._lastSuccessfulEnsureByteChunk = chunk;
+   }
+   ensureRange(begin, end) {
+-    if (begin >= end) {
+-      return;
+-    }
++    if (begin >= end) return;
++    if (end - begin > this.maximumRangeCacheBytes) throw new FormatError("PDF_ONLINE_OBJECT_TOO_LARGE");
+     if (end <= this.progressiveDataLength) {
+       return;
+     }
+@@ -8542,7 +8566,11 @@ class ChunkedStream extends Stream {
+     if (pos >= this.progressiveDataLength) {
+       this.ensureByte(pos);
+     }
+-    return this.bytes[this.pos++];
++    const index = Math.floor(this.pos / this.chunkSize);
++    const bytes = this.rangeChunks.get(index);
++    this.rangeChunks.delete(index);
++    this.rangeChunks.set(index, bytes);
++    return bytes[this.pos++ % this.chunkSize];
+   }
+   getBytes(length) {
+     const pos = this.pos;
+@@ -8551,7 +8579,7 @@ class ChunkedStream extends Stream {
+       this.ensureRange(pos, endPos);
+     }
+     this.pos = endPos;
+-    return this.bytes.subarray(pos, endPos);
++    return this.rangeBytes(pos, endPos);
+   }
+   getByteRange(begin, end) {
+     if (begin < 0) {
+@@ -8563,7 +8591,7 @@ class ChunkedStream extends Stream {
+     if (end > this.progressiveDataLength) {
+       this.ensureRange(begin, end);
+     }
+-    return this.bytes.subarray(begin, end);
++    return this.rangeBytes(begin, end);
+   }
+   makeSubStream(start, length, dict = null) {
+     if (length) {
+@@ -8649,10 +8677,7 @@ class ChunkedStreamManager {
+     });
+   }
+   requestAllChunks(noFetch = false) {
+-    if (!noFetch) {
+-      const missingChunks = this.stream.getMissingChunks();
+-      this._requestChunks(missingChunks);
+-    }
++    if (!noFetch) return Promise.reject(new FormatError("PDF_ONLINE_COMPLETE_TRANSFER_FORBIDDEN"));
+     return this.#loadedStreamCapability.promise;
+   }
+   _requestChunks(chunks) {
+@@ -8665,6 +8690,7 @@ class ChunkedStreamManager {
+       }
+     }
+     if (chunksNeeded.size === 0) {
++      this._chunksNeededByRequest.delete(requestId);
+       return Promise.resolve();
+     }
+     const capability = Promise.withResolvers();
+@@ -8728,7 +8754,7 @@ class ChunkedStreamManager {
+       if (beginChunk < 0) {
+         beginChunk = chunk;
+       }
+-      if (prevChunk >= 0 && prevChunk + 1 !== chunk) {
++      if (prevChunk >= 0 && (prevChunk + 1 !== chunk || (chunk - beginChunk) * this.chunkSize >= 1024 * 1024)) {
+         groupedChunks.push({
+           beginChunk,
+           endChunk: prevChunk + 1
+@@ -8800,6 +8826,7 @@ class ChunkedStreamManager {
+     for (const requestId of loadedRequests) {
+       const capability = this._promisesByRequest.get(requestId);
+       this._promisesByRequest.delete(requestId);
++      this._chunksNeededByRequest.delete(requestId);
+       capability.resolve();
+     }
+     this.msgHandler.send("DocProgress", {
+@@ -8815,6 +8842,8 @@ class ChunkedStreamManager {
+   }
+   abort(reason) {
+     this.#aborted = true;
++    this.stream.rangeChunks.clear();
++    this.stream._loadedChunks.clear();
+     this.pdfStream?.cancelAllRequests(reason);
+     for (const capability of this._promisesByRequest.values()) {
+       capability.reject(reason);
+@@ -42834,7 +42863,7 @@ class PartialEvaluator {
+       hash.update(`${firstChar}-${lastChar}`);
+       if (toUnicode instanceof BaseStream) {
+         const stream = toUnicode.stream || toUnicode;
+-        const uint8array = stream.buffer ? new Uint8Array(stream.buffer.buffer, 0, stream.bufferLength) : new Uint8Array(stream.bytes.buffer, stream.start, stream.end - stream.start);
++        const uint8array = stream.buffer ? new Uint8Array(stream.buffer.buffer, 0, stream.bufferLength) : stream.getByteRange(stream.start, stream.end);
+         hash.update(uint8array);
+       } else if (toUnicode instanceof Name) {
+         hash.update(toUnicode.name);
+@@ -66015,6 +66044,20 @@ class PDFDocument {
+       return catalog.getPageDict(pageIndex);
+     }
+   }
++  setReadingWindow(pageIndex) {
++    if (this._readingWindowPageIndex === pageIndex) return;
++    this._readingWindowPageIndex = pageIndex;
++    for (const index of this.#pagePromises.keys()) {
++      if (Math.abs(index - pageIndex) > 1) this.#pagePromises.delete(index);
++    }
++    // XRef entries and page indexes are metadata; parsed object bodies are not.
++    this.xref._cacheMap.clear();
++    if (this.stream instanceof ChunkedStream) {
++      this.stream.rangeChunks.clear();
++      this.stream._loadedChunks.clear();
++      this.stream._lastSuccessfulEnsureByteChunk = -1;
++    }
++  }
+   getPage(pageIndex) {
+     const cachedPromise = this.#pagePromises.get(pageIndex);
+     if (cachedPromise) {
+@@ -70086,11 +70129,17 @@ class WorkerMessageHandler {
+         pdfManager = newPdfManager;
+         pdfManager.requestLoadedStream(true).then(stream => {
+           handler.send("DataLoaded", {
+-            length: stream.bytes.byteLength
++            length: stream.length
+           });
+         }, () => {});
+       }).then(pdfManagerReady, onFailure);
+     }
++    handler.on("SetReadingWindow", function ({ pageIndex }) {
++      if (!Number.isInteger(pageIndex) || pageIndex < 0) {
++        throw new Error("PDF_READING_WINDOW_INVALID");
++      }
++      pdfManager.pdfDocument.setReadingWindow(pageIndex);
++    });
+     handler.on("GetPage", function (data) {
+       return pdfManager.getPage(data.pageIndex).then(function (page) {
+         return Promise.all([pdfManager.ensure(page, "rotate"), pdfManager.ensure(page, "ref"), pdfManager.ensure(page, "userUnit"), pdfManager.ensure(page, "view")]).then(function ([rotate, ref, userUnit, view]) {
+diff --git a/types/src/display/api.d.ts b/types/src/display/api.d.ts
+index 509c99ff1ce41da3eead1e8c07f23dfca695abaa..9b4f14485e371da755ff25c54cdb0e5777ec1cb0 100644
+--- a/types/src/display/api.d.ts
++++ b/types/src/display/api.d.ts
+@@ -837,6 +837,8 @@ export class PDFDocumentLoadingTask {
+  * Proxy to a `PDFDocument` in the worker thread.
+  */
+ export class PDFDocumentProxy {
++    /** Release online body caches outside the active page window. */
++    setReadingWindow(pageIndex: number): Promise<void>;
+     constructor(pdfInfo: any, transport: any);
+     _pdfInfo: any;
+     _transport: any;

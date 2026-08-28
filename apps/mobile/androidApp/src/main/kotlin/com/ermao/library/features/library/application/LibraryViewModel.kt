@@ -183,6 +183,37 @@ class LibraryViewModel(
 
     fun retry() = loadScope(mutableUiState.value.selectedScope, reset = true)
 
+    fun refreshAfterManagement() {
+        mutableUiState.value.scopes.filterValues { it.loadedPage > 0 }.forEach { (scope, snapshot) ->
+            val token = discoveryRuntime.beginInitialRequest(scope.toDiscoveryScope())
+            val libraryId = mutableUiState.value.selectedLibraryId
+            updateScope(scope) { it.copy(isLoadingMore = true) }
+            viewModelScope.launch {
+                val pages = mutableListOf<LibraryPage<*>>()
+                for (page in 1..snapshot.loadedPage) {
+                    val result = if (scope == LibraryScope.Books) repository.loadBooks(context, snapshot.toBooksQuery(page, libraryId))
+                        else repository.loadGroupings(context, snapshot.toGroupingQuery(scope, page))
+                    when (result) {
+                        is ContentResult.Content -> {
+                            pages += result.value
+                            if (page >= result.value.totalPages) break
+                        }
+                        is ContentResult.Failure -> {
+                            if (discoveryRuntime.fail(token, result.error.code)) {
+                                updateScope(scope) { it.copy(isLoadingMore = false, paginationErrorCode = result.error.code) }
+                                if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                if (discoveryRuntime.acceptPage(token, pages.all { it.items.isEmpty() })) {
+                    pages.forEachIndexed { index, page -> applyPage(scope, page, reset = index == 0) }
+                }
+            }
+        }
+    }
+
     fun loadNextPage() {
         val scope = mutableUiState.value.selectedScope
         val current = mutableUiState.value.current

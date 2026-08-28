@@ -75,7 +75,39 @@ class FacetViewModel(
     private val mutableUiState = MutableStateFlow(FacetUiState())
     val uiState: StateFlow<FacetUiState> = mutableUiState.asStateFlow()
 
+    private var facetGeneration = 0
     init { load(reset = true) }
+
+    fun refreshAfterManagement() {
+        val token = ++facetGeneration
+        val lastPage = mutableUiState.value.page.coerceAtLeast(1)
+        mutableUiState.update { it.copy(isLoadingMore = true) }
+        viewModelScope.launch {
+            val books = mutableListOf<com.ermao.library.features.content.model.BookCard>()
+            for (page in 1..lastPage) {
+                val sort = if (kind == LibraryScope.Series) FacetSort.SeriesIndex else FacetSort.RecentlyRead
+                val result = repository.loadFacet(context, FacetQuery(kind.toFacetKind(), facetId, sort, page))
+                if (token != facetGeneration) return@launch
+                when (result) {
+                    is ContentResult.Content -> {
+                        books += result.value.books.items.map { it.toCard() }
+                        if (page == lastPage || page >= result.value.books.totalPages) {
+                            mutableUiState.update { it.copy(facetName = result.value.facet.name,
+                                books = books.distinctBy { book -> book.id }, total = result.value.books.total,
+                                page = result.value.books.page, totalPages = result.value.books.totalPages,
+                                isLoading = false, isLoadingMore = false, errorCode = null, paginationErrorCode = null) }
+                            break
+                        }
+                    }
+                    is ContentResult.Failure -> {
+                        if (result.error.kind == AppErrorKind.Unauthorized) onSessionUnauthorized()
+                        mutableUiState.update { it.copy(isLoadingMore = false, paginationErrorCode = result.error.code) }
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
 
     fun retry() = load(reset = true)
     fun loadNextPage() = load(reset = false)
@@ -83,6 +115,7 @@ class FacetViewModel(
     private fun load(reset: Boolean) {
         val current = mutableUiState.value
         if (current.isLoadingMore || (!reset && (current.isLoading || current.page >= current.totalPages))) return
+        val token = if (reset) ++facetGeneration else facetGeneration
         val nextPage = if (reset) 1 else current.page + 1
         mutableUiState.update {
             if (reset) it.copy(books = emptyList(), isLoading = true, errorCode = null)
@@ -94,6 +127,7 @@ class FacetViewModel(
                 val query = FacetQuery(kind.toFacetKind(), facetId, facetSort, nextPage)
                 when (val result = repository.loadFacet(context, query)) {
                     is ContentResult.Content -> {
+                        if (token != facetGeneration) return@launch
                         val books = result.value.books.items.map { it.toCard() }
                         mutableUiState.update { state ->
                             state.copy(

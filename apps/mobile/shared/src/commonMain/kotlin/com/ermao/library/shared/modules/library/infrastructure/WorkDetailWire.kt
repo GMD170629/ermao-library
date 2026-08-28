@@ -104,6 +104,7 @@ data class AssetWire(
     val sortOrder: Int? = null,
     val url: String? = null,
     val downloadUrl: String? = null,
+    val sourceFormat: String? = null,
 )
 
 fun BookPayloadWire.toDomain(): BookDetailSummary = book.toBookDetailSummary()
@@ -198,5 +199,6 @@ fun AssetWire.toDomain(): Asset {
         sortOrder = sortOrder,
         url = url,
         downloadUrl = downloadUrl,
+        sourceFormat = sourceFormat,
     )
 }

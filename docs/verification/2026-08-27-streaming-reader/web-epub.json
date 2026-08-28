@@ -1,0 +1,88 @@
+{
+  "scope": "Chrome UI/network observation; newly restarted server, HTTP cache disabled",
+  "serverProcess": 1642051,
+  "firstReadableObservedMs": 4082,
+  "blockedNonCurrentSpineResources": 1283,
+  "blockedWholeOriginal": true,
+  "originalRequests": 0,
+  "requestedChapterCount": 1,
+  "readerWireBytes": 2557800,
+  "wireByteScope": "Completed Reader responses; cancelled requests have no completed-byte counter",
+  "cachePeakBytes": null,
+  "eventsComplete": true,
+  "requests": [
+    {
+      "path": "/api/app-config",
+      "status": 200,
+      "wireBytes": 366,
+      "durationMs": 8
+    },
+    {
+      "path": "/api/auth/me",
+      "status": 200,
+      "wireBytes": 639,
+      "durationMs": 7
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/bootstrap",
+      "failed": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/bootstrap",
+      "status": 200,
+      "wireBytes": 532010,
+      "durationMs": 62
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/bookmarks",
+      "failed": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/bookmarks",
+      "status": 200,
+      "wireBytes": 221,
+      "durationMs": 9
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/manifest.json",
+      "status": 200,
+      "wireBytes": 210806,
+      "durationMs": 39
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/positions.json",
+      "status": 200,
+      "wireBytes": 207416,
+      "durationMs": 76
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/OEBPS/Text/Vol01-Chapter001.xhtml",
+      "status": 200,
+      "wireBytes": 8837,
+      "durationMs": 9
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/OEBPS/Styles/Style0001.css",
+      "status": 200,
+      "wireBytes": 77005,
+      "durationMs": 9
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/OEBPS/Images/logo.png",
+      "status": 200,
+      "wireBytes": 850769,
+      "durationMs": 11
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/publication/OEBPS/Images/jcbj.png",
+      "status": 200,
+      "wireBytes": 670736,
+      "durationMs": 35
+    },
+    {
+      "path": "/api/reader/v4/resources/py_c23513a29c074345b32538caf0d60b88/progress",
+      "status": 304,
+      "failed": "net::ERR_ABORTED"
+    }
+  ]
+}

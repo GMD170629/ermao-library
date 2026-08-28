@@ -43,7 +43,7 @@ class KtorDownloadsGatewayTest {
     @Test
     fun bootstrapMapsBookResourceAndPrimaryAsset() = runBlocking {
         val gateway = gateway { request ->
-            assertTrue(request.url.encodedPath.endsWith("/api/reader/v4/resources/resource/bootstrap"))
+            assertTrue(request.url.encodedPath.endsWith("/api/resources/resource"))
             respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
 
@@ -90,7 +90,6 @@ class KtorDownloadsGatewayTest {
     @Test
     fun genericBinaryMimeDoesNotBypassOriginalFormatOrSafePathChecks() = runBlocking {
         val unsupportedFormat = BOOTSTRAP
-            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"exe\"")
             .replace("\"format\":\"epub\"", "\"format\":\"exe\"")
             .replace("application/epub+zip", "application/octet-stream")
         val unsafePath = BOOTSTRAP
@@ -126,10 +125,7 @@ class KtorDownloadsGatewayTest {
             .replace("\"format\":\"cbz\"", "\"format\":\"image_dir\"")
             .replace("application/vnd.comicbook+zip", "image/png")
             .replace("\"role\":\"PRIMARY\"", "\"role\":\"PAGE\"")
-            .replace(
-                "\"imageVariants\":[\"original\",\"data-saver\"],\"downloadArtifact\":{\"url\":\"/api/reader/v4/resources/resource/comic/archive\",\"sourceFormat\":\"image_dir\",\"mimeType\":\"image/png\",\"sizeBytes\":12}",
-                "\"imageVariants\":[\"original\",\"data-saver\"]",
-            )
+
         val gateway = gateway {
             respond(imageDirectory, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
         }
@@ -147,20 +143,17 @@ class KtorDownloadsGatewayTest {
 
     @Test
     fun imageDirectoryTransfersEveryOriginalPageBeforeAtomicallyCommittingBundle() = runBlocking {
-        val firstAsset = """{"id":"page-a","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PAGE","mimeType":"image/png","sizeBytes":3,"sortOrder":0,"url":"/api/assets/page-a"}"""
-        val secondAsset = """{"id":"page-b","title":"Page 2","resourceId":"resource","sourceNodeId":"node","role":"PAGE","mimeType":"image/jpeg","sizeBytes":4,"sortOrder":1,"url":"/api/assets/page-b"}"""
-        val originalAsset = """{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}"""
+        val firstAsset = """{"id":"page-a","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PAGE","sourceFormat":"image_dir","mimeType":"image/png","sizeBytes":3,"sortOrder":0,"url":"/api/assets/page-a"}"""
+        val secondAsset = """{"id":"page-b","title":"Page 2","resourceId":"resource","sourceNodeId":"node","role":"PAGE","sourceFormat":"image_dir","mimeType":"image/jpeg","sizeBytes":4,"sortOrder":1,"url":"/api/assets/page-b"}"""
+        val originalAsset = """{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","sourceFormat":"image_dir","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}"""
         val imageDirectory = COMIC_BOOTSTRAP
             .replace("\"sourceFormat\":\"cbz\"", "\"sourceFormat\":\"image_dir\"")
             .replace("\"format\":\"cbz\"", "\"format\":\"image_dir\"")
             .replace(originalAsset, "$firstAsset,$secondAsset")
-            .replace(
-                "\"imageVariants\":[\"original\",\"data-saver\"],\"downloadArtifact\":{\"url\":\"/api/reader/v4/resources/resource/comic/archive\",\"sourceFormat\":\"image_dir\",\"mimeType\":\"application/vnd.comicbook+zip\",\"sizeBytes\":12}",
-                "\"imageVariants\":[\"original\",\"data-saver\"]",
-            )
+
         val gateway = gateway { request ->
             when (request.url.encodedPath) {
-                "/base/api/reader/v4/resources/resource/bootstrap" -> respond(
+                "/base/api/resources/resource" -> respond(
                     imageDirectory,
                     HttpStatusCode.OK,
                     headersOf(HttpHeaders.ContentType, "application/json"),
@@ -250,7 +243,6 @@ class KtorDownloadsGatewayTest {
                 respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
             } else {
                 assertEquals("bytes=2-", request.headers[HttpHeaders.Range])
-                assertEquals("\"revision-1\"", request.headers[HttpHeaders.IfRange])
                 respond(
                     "cdef",
                     HttpStatusCode.PartialContent,
@@ -265,10 +257,35 @@ class KtorDownloadsGatewayTest {
         val descriptor = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
         val result = gateway.transfer(
             context,
-            DownloadTransferRequest("task", descriptor, 2, ifRangeValidator = "\"revision-1\""),
+            DownloadTransferRequest("task", descriptor, 2),
             RecordingSink(),
         )
         assertIs<DownloadTransferResult.Success>(result)
+        Unit
+    }
+
+    @Test
+    fun changedAssetVersionRejectsResumeBeforeOpeningTheSink() = runBlocking {
+        var transferring = false
+        val gateway = gateway { request ->
+            if (!transferring) respond(BOOTSTRAP, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            else {
+                assertEquals("6:1000", request.headers["X-Asset-Version"])
+                respond("cdef", HttpStatusCode.PartialContent, headersOf(
+                    HttpHeaders.ContentType to listOf("application/epub+zip"),
+                    HttpHeaders.ContentLength to listOf("4"),
+                    HttpHeaders.ContentRange to listOf("bytes 2-5/6"),
+                    "X-Asset-Version" to listOf("6:2000"),
+                ))
+            }
+        }
+        val original = assertIs<DownloadBootstrapResult.Success>(gateway.load(context, "resource")).bootstrap.descriptor
+        val descriptor = original.copy(source = original.source.copy(sourceModifiedAtMillis = 1000))
+        transferring = true
+        val sink = RecordingSink()
+        assertIs<DownloadTransferResult.Failure>(gateway.transfer(context, DownloadTransferRequest("task", descriptor, 2), sink))
+        assertEquals(null, sink.request)
+        assertEquals(0, sink.commitCount)
         Unit
     }
 
@@ -318,7 +335,12 @@ class KtorDownloadsGatewayTest {
     private fun gateway(
         handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData,
     ): KtorDownloadsGateway =
-        KtorDownloadsGateway(ApiClient(profile, HttpClient(MockEngine(handler)), Json { ignoreUnknownKeys = false }))
+        KtorDownloadsGateway(ApiClient(profile, HttpClient(MockEngine { request ->
+            check(!request.url.encodedPath.contains("/reader/")) { "Downloads must not initialize Reader" }
+            if (request.url.encodedPath == "/base/api/books/book") {
+                respond(BOOK, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+            } else handler(request)
+        }), Json { ignoreUnknownKeys = false }))
 
     private val namespace = DownloadNamespace("server", "user", 1)
     private val profile = ServerProfile(
@@ -408,7 +430,8 @@ class KtorDownloadsGatewayTest {
     }
 
     private companion object {
-        const val BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"reflowable","sourceFormat":"epub","book":{"id":"book","title":"Book","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.5,"sortOrder":2,"format":"epub","readerType":"reflowable"},"availableResources":[],"assets":[{"id":"asset","title":"Resource","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/epub+zip","sizeBytes":6,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{}}}"""
-        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"schemaVersion":4,"userId":"user","readerType":"comic","sourceFormat":"cbz","book":{"id":"book","title":"Comic","author":"Author","coverUrl":"/api/books/book/cover"},"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"cbz","readerType":"comic"},"availableResources":[],"assets":[{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}],"units":[],"resourceUrl":"/api/resources/resource","capabilities":{},"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12}}}}"""
+        const val BOOK = """{"ok":true,"data":{"book":{"id":"book","libraryId":"library","sourceNodeId":"book-node","title":"Book","author":"Author","coverUrl":"/api/books/book/cover","visibilityState":"VISIBLE","curationState":"UNORGANIZED","publicationStatus":"UNKNOWN","trackingStatus":"UNKNOWN","metadataQuality":0,"coverStatus":"UNKNOWN"}}}"""
+        const val BOOTSTRAP = """{"ok":true,"data":{"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.5,"sortOrder":2,"format":"epub","readerType":"reflowable","assets":[{"id":"asset","title":"Resource","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","sourceFormat":"epub","mimeType":"application/epub+zip","sizeBytes":6,"sortOrder":0,"url":"/api/assets/asset"}]}}}"""
+        const val COMIC_BOOTSTRAP = """{"ok":true,"data":{"resource":{"id":"resource","bookId":"book","sourceNodeId":"node","title":"Resource","resourceIndex":1.0,"sortOrder":0,"format":"cbz","readerType":"comic","assets":[{"id":"asset","title":"Page 1","resourceId":"resource","sourceNodeId":"node","role":"PRIMARY","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":12,"sortOrder":0,"url":"/api/assets/asset"}]}}}"""
     }
 }

@@ -36,12 +36,14 @@ import com.ermao.library.features.reader.infrastructure.ReadiumReflowableSession
 import com.ermao.library.features.reader.infrastructure.ReadiumComicSession
 import com.ermao.library.features.reader.infrastructure.ReadiumPdfSession
 import com.ermao.library.features.reader.infrastructure.AndroidPdfiumFeatureFlags
-import com.ermao.library.features.reader.infrastructure.AndroidPdfRangeCache
+import com.ermao.library.shared.modules.reader.PdfRangeMemory
 import com.ermao.library.features.reader.infrastructure.AndroidRemotePdfiumSessionConfiguration
 import com.ermao.library.features.reader.infrastructure.ReadiumLocatorMapper
 import com.ermao.library.features.reader.infrastructure.ReadiumPreferencesMapper
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderSource
+import com.ermao.library.shared.modules.reader.RemoteReflowableReaderSource
+import com.ermao.library.shared.createAndroidOnlinePublicationSession
 import com.ermao.library.shared.modules.reader.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.reader.RemoteComicReaderSource
 import com.ermao.library.shared.modules.reader.ComicPageServerPort
@@ -74,12 +76,10 @@ import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapContent
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapFailure
-import com.ermao.library.shared.modules.reader.application.PublicationDownloadResult.Content as PublicationDownloadContent
-import com.ermao.library.shared.modules.reader.application.PublicationDownloadResult.Failure as PublicationDownloadFailure
 import com.ermao.library.ErmaoLibraryApplication
 import com.ermao.library.shared.createAndroidReaderProgressSyncPort
 import com.ermao.library.shared.createAndroidReaderBookmarkSyncPort
-import com.ermao.library.shared.createAndroidReaderServerGateway
+import com.ermao.library.shared.createAndroidReaderBootstrapGateway
 import com.ermao.library.shared.createAndroidPdfRangeServerPort
 import com.ermao.library.shared.createAndroidComicPageServerPort
 import com.ermao.library.shared.modules.auth.domain.AppSession
@@ -120,7 +120,6 @@ class ReaderActivity : AppCompatActivity() {
     private var navigatorBound = false
     private var closing = false
     private var openJob: Job? = null
-    private var pendingManagedRepair: PendingManagedRepair? = null
     private val navigationCache by lazy { AndroidReaderNavigationCache(applicationContext) }
     private var syncingProgressStore: ReaderProgressSyncingStore? = null
     private var progressCoordinator: ReaderProgressSyncCoordinator? = null
@@ -210,7 +209,7 @@ class ReaderActivity : AppCompatActivity() {
                 onPanelVisibilityChange = { readerPanelVisible = it },
                 onClose = ::closeReader,
                 onRetryOpen = when {
-                    managedRequest != null -> { { retryManagedDownload(managedRequest) } }
+                    managedRequest != null -> { { recreate() } }
                     serverRequest != null -> { { retryServerReader(serverRequest) } }
                     else -> null
                 },
@@ -218,11 +217,6 @@ class ReaderActivity : AppCompatActivity() {
                     {
                         startActivity(createServerIntent(this, request.profileId, request.resourceId))
                         finish()
-                    }
-                },
-                onDeleteDownload = managedRequest?.let { request ->
-                    {
-                        lifecycleScope.launch { deleteManagedDownloadAndClose(request) }
                     }
                 },
                 onNavigatorContainerReady = {
@@ -377,7 +371,6 @@ class ReaderActivity : AppCompatActivity() {
 
     private suspend fun openServerReader(
         request: ServerReaderRequest,
-        forceCompletePdfDownload: Boolean = false,
     ) {
         val runtime = (application as ErmaoLibraryApplication).mobileRuntime
         if (runtime.currentSession !is AppSession.Authenticated) runtime.start()
@@ -397,15 +390,8 @@ class ReaderActivity : AppCompatActivity() {
             namespace.serverIdentity,
             namespace.userId,
         )
-        val serverGateway = createAndroidReaderServerGateway(applicationContext)
-        val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace)
-        val bootstrapper = BootstrapReaderPublication(
-            bootstrapGateway = serverGateway,
-            downloadPort = serverGateway,
-            sinkFactory = publicationStore.downloadSinkFactory(),
-            nativePdfiumRangeV1 = AndroidPdfiumFeatureFlags.NATIVE_PDFIUM_RANGE_V1 &&
-                !forceCompletePdfDownload,
-        )
+        val serverGateway = createAndroidReaderBootstrapGateway(applicationContext)
+        val bootstrapper = BootstrapReaderPublication(bootstrapGateway = serverGateway)
         when (val result = bootstrapper.execute(
             ReaderBootstrapRequest(authenticated.profile, namespace, request.resourceId),
         )) {
@@ -418,6 +404,10 @@ class ReaderActivity : AppCompatActivity() {
                 showOpenError(result.readerErrorCode)
             }
             is ReaderPublicationBootstrapContent -> {
+                result.source.assetId?.let { assetId ->
+                    AndroidReaderPublicationStore(applicationContext, namespace)
+                        .removeAutomaticReplica(request.resourceId, assetId)
+                }
                 navigationCache.save(
                     namespace,
                     request.resourceId,
@@ -426,7 +416,8 @@ class ReaderActivity : AppCompatActivity() {
                 val source = result.source
                 if (source !is LocalReaderSource &&
                     source !is RemoteByteRangeReaderSource &&
-                    source !is RemoteComicReaderSource
+                    source !is RemoteComicReaderSource &&
+                    source !is RemoteReflowableReaderSource
                 ) {
                     showOpenError(ReaderErrorCode.UnsupportedFormat)
                     return
@@ -506,27 +497,22 @@ class ReaderActivity : AppCompatActivity() {
                     pdfPages = result.bootstrap.pdfPages,
                     pageCount = result.bootstrap.pageCount,
                     namespace = namespace,
+                    onlinePublication = (source as? RemoteReflowableReaderSource)?.let {
+                        createAndroidOnlinePublicationSession(applicationContext, authenticated.profile, it)
+                    },
                     comicPageServer = (source as? RemoteComicReaderSource)?.let {
                         createAndroidComicPageServerPort(applicationContext, authenticated.profile)
                     },
                     remotePdfium = (source as? RemoteByteRangeReaderSource)?.let {
-                        val rangeCache = AndroidPdfRangeCache(File(cacheDir, "reader/pdf-range-v3"))
+                        val rangeCache = PdfRangeMemory()
                         rangeCache.activateNamespace(it.namespace)
                         AndroidRemotePdfiumSessionConfiguration(
-                            scope = lifecycleScope,
                             cache = rangeCache,
                             server = createAndroidPdfRangeServerPort(applicationContext, authenticated.profile),
                         )
                     },
                 )
-                val prepared = prepareSession(checkNotNull(session))
-                if (!prepared && source is RemoteByteRangeReaderSource && !forceCompletePdfDownload) {
-                    clearProgressRuntime()
-                    session = null
-                    openError = null
-                    opening = true
-                    openServerReader(request, forceCompletePdfDownload = true)
-                }
+                prepareSession(checkNotNull(session))
             }
         }
     }
@@ -562,35 +548,11 @@ class ReaderActivity : AppCompatActivity() {
             showOpenError(ReaderErrorCode.ResourceMissing)
             return
         }
-        val publicationStore = AndroidReaderPublicationStore(
-            applicationContext,
-            ReaderSyncNamespace(
-                readerNamespace.serverIdentity,
-                readerNamespace.userId,
-                readerNamespace.authorizationVersion,
-            ),
+        val source = LocalReaderSource(
+            resourceId = request.resourceId, displayTitle = request.displayTitle,
+            format = exactSourceFormat.readerFormat, bookId = request.bookId,
+            assetId = request.assetId, sourceFormat = exactSourceFormat,
         )
-        val source = if (isOriginalPageSet) {
-            LocalReaderSource(
-                resourceId = request.resourceId,
-                displayTitle = request.displayTitle,
-                format = exactSourceFormat.readerFormat,
-                bookId = request.bookId,
-                assetId = request.assetId,
-                sourceFormat = exactSourceFormat,
-            )
-        } else {
-            localFile.inputStream().use { input ->
-                publicationStore.publishLocalPublication(
-                    resourceId = request.resourceId,
-                    displayTitle = request.displayTitle,
-                    input = input,
-                    sourceFormat = exactSourceFormat,
-                    bookId = request.bookId,
-                    assetId = request.assetId,
-                )
-            }
-        }
         val authenticated = activeSession.authenticated
         var progressStore: ReaderProgressStore = NonBlockingReaderProgressStore
         var bookmarkSyncPort: ReaderBookmarkSyncPort? = null
@@ -613,7 +575,7 @@ class ReaderActivity : AppCompatActivity() {
                 activeSession.identity.namespace.userId,
                 activeSession.identity.namespace.authorizationVersion,
             )
-            when (val bootstrap = createAndroidReaderServerGateway(applicationContext).load(
+            when (val bootstrap = createAndroidReaderBootstrapGateway(applicationContext).load(
                 ReaderBootstrapRequest(activeSession.profile, namespace, request.resourceId),
             )) {
                 is ReaderBootstrapContent -> {
@@ -726,6 +688,7 @@ class ReaderActivity : AppCompatActivity() {
             pdfPages = pdfPages,
             pageCount = pageCount,
             localPageSetDirectory = localFile.takeIf { isOriginalPageSet },
+            completedPublication = com.ermao.library.features.reader.infrastructure.AndroidCompletedPublication(source, localFile),
             namespace = ReaderSyncNamespace(
                 readerNamespace.serverIdentity,
                 readerNamespace.userId,
@@ -735,75 +698,6 @@ class ReaderActivity : AppCompatActivity() {
         prepareSession(checkNotNull(session))
     }
 
-    private fun retryManagedDownload(request: ManagedDownloadReaderRequest) {
-        if (openJob?.isActive == true) return
-        openError = null
-        opening = true
-        controller = null
-        pendingNavigator = null
-        navigatorBound = false
-        session?.release()
-        session = null
-        openJob = lifecycleScope.launch {
-            try {
-                val runtime = (application as ErmaoLibraryApplication).mobileRuntime
-                if (runtime.currentSession !is AppSession.Authenticated) runtime.start()
-                val authenticated = runtime.currentSession as? AppSession.Authenticated
-                    ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.NetworkUnavailable))
-                if (authenticated.profile.id != request.profileId) {
-                    throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing))
-                }
-                val privateNamespace = authenticated.identity.namespace
-                val namespace = ReaderSyncNamespace(
-                    privateNamespace.serverIdentity,
-                    privateNamespace.userId,
-                    privateNamespace.authorizationVersion,
-                )
-                val gateway = createAndroidReaderServerGateway(applicationContext)
-                val bootstrap = when (val result = gateway.load(
-                    ReaderBootstrapRequest(authenticated.profile, namespace, request.resourceId),
-                )) {
-                    is ReaderBootstrapContent -> result.value
-                    is ReaderBootstrapFailure -> throw ReaderOpenFailure(
-                        ReaderError(
-                            result.readerErrorCode,
-                        ),
-                    )
-                }
-                val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace)
-                val downloadableOriginal = bootstrap.downloadableOriginal
-                    ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing))
-                val refreshed = when (val result = gateway.download(
-                    downloadableOriginal,
-                    publicationStore.downloadSinkFactory(),
-                )) {
-                    is PublicationDownloadContent -> result.source as? LocalReaderSource
-                        ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError))
-                    is PublicationDownloadFailure -> throw ReaderOpenFailure(
-                        ReaderError(
-                            result.readerErrorCode,
-                        ),
-                    )
-                }
-                if (refreshed.sourceFormat?.wireValue.equals(request.sourceFormat, ignoreCase = true)) {
-                    pendingManagedRepair = PendingManagedRepair(
-                        localReference = request.localReference,
-                        parsedSource = publicationStore.resolve(refreshed),
-                    )
-                }
-                openServerReader(ServerReaderRequest(request.profileId, request.resourceId))
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (failure: ReaderOpenFailure) {
-                pendingManagedRepair = null
-                showOpenError(failure.readerError.code)
-            } catch (failure: Exception) {
-                pendingManagedRepair = null
-                LOGGER.log(Level.WARNING, "reader_managed_repair_failed", failure)
-                showOpenError(ReaderErrorCode.ReaderEngineError)
-            }
-        }
-    }
 
     private fun retryServerReader(request: ServerReaderRequest) {
         if (openJob?.isActive == true) return
@@ -826,24 +720,6 @@ class ReaderActivity : AppCompatActivity() {
                 showOpenError(ReaderErrorCode.ReaderEngineError)
             }
         }
-    }
-
-    private suspend fun deleteManagedDownloadAndClose(request: ManagedDownloadReaderRequest) {
-        val runtime = (application as ErmaoLibraryApplication).mobileRuntime
-        val namespace = when (val current = runtime.currentSession) {
-            is AppSession.Authenticated -> current.identity.namespace
-            else -> return
-        }
-        (application as ErmaoLibraryApplication).sharedDownloadCatalog.deleteArtifact(
-            namespace.toDownloadNamespace(),
-            com.ermao.library.shared.modules.downloads.DownloadIdentity(
-                namespace = namespace.toDownloadNamespace(),
-                bookId = request.bookId,
-                resourceId = request.resourceId,
-                assetId = request.assetId,
-            ),
-        )
-        closeReader()
     }
 
     private suspend fun createOfflineManagedProgressStore(
@@ -923,7 +799,6 @@ class ReaderActivity : AppCompatActivity() {
             return true
         } catch (failure: ReaderOpenFailure) {
             readerSession.release()
-            pendingManagedRepair = null
             opening = false
             openError = failure.readerError
             LOGGER.log(
@@ -934,7 +809,6 @@ class ReaderActivity : AppCompatActivity() {
             return false
         } catch (_: RuntimeException) {
             readerSession.release()
-            pendingManagedRepair = null
             showOpenError(ReaderErrorCode.ReaderEngineError)
             return false
         }
@@ -971,13 +845,15 @@ class ReaderActivity : AppCompatActivity() {
         comicPages: List<ReaderComicPage> = emptyList(),
         pdfPages: List<ReaderPdfPage> = emptyList(),
         pageCount: Int? = null,
+        onlinePublication: com.ermao.library.shared.modules.reader.OnlinePublicationSession? = null,
         comicPageServer: ComicPageServerPort? = null,
         remotePdfium: AndroidRemotePdfiumSessionConfiguration? = null,
         localPageSetDirectory: File? = null,
+        completedPublication: com.ermao.library.features.reader.infrastructure.AndroidCompletedPublication? = null,
         namespace: ReaderSyncNamespace? = null,
     ): AndroidReaderNavigatorSession {
         val sourceFormat = requireNotNull(source.sourceFormat) { "Reader source format is missing" }
-        if (!sourceFormat.isComic) {
+        if (source is LocalReaderSource && !sourceFormat.isComic) {
             try {
                 AndroidReaderCapabilities.registry.requireOpenable(sourceFormat)
             } catch (error: IllegalArgumentException) {
@@ -985,7 +861,7 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         if (sourceFormat.isComic) {
-            val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace)
+            val publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication)
             val readium = AndroidReadiumRuntime(applicationContext)
             val sessionPages = if (source is LocalReaderSource) {
                 if (source.sourceFormat == ReaderSourceFormat.ImageDir) {
@@ -1030,7 +906,7 @@ class ReaderActivity : AppCompatActivity() {
                 source = source,
                 expectedPageCount = pageCount,
                 canonicalPages = pdfPages,
-                publicationStore = AndroidReaderPublicationStore(applicationContext, namespace),
+                publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication),
                 progressStore = progressStore,
                 deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
                 readium = AndroidReadiumRuntime(applicationContext),
@@ -1046,12 +922,11 @@ class ReaderActivity : AppCompatActivity() {
                     .readerProgressPresentationCenter::publish,
             )
         }
-        val localSource = source as? LocalReaderSource
-            ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
         return ReadiumReflowableSession(
-            source = localSource,
+            source = source,
+            onlinePublication = onlinePublication,
             canonicalUnits = navigationUnits,
-            publicationStore = AndroidReaderPublicationStore(applicationContext, namespace),
+            publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication),
             progressStore = progressStore,
             deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
             readium = AndroidReadiumRuntime(applicationContext),
@@ -1109,19 +984,6 @@ class ReaderActivity : AppCompatActivity() {
         navigatorBound = true
         controller = session
         opening = false
-        pendingManagedRepair?.let { repair ->
-            pendingManagedRepair = null
-            lifecycleScope.launch {
-                runCatching {
-                    (application as ErmaoLibraryApplication).downloadFiles.replaceLocalArtifact(
-                        repair.localReference,
-                        repair.parsedSource,
-                    )
-                }.onFailure { failure ->
-                    LOGGER.log(Level.WARNING, "reader_managed_repair_publish_failed", failure)
-                }
-            }
-        }
         lifecycleScope.launch { recoverPendingProgressAndCheckRemote() }
     }
 
@@ -1295,7 +1157,6 @@ class ReaderActivity : AppCompatActivity() {
     )
 }
 
-private data class PendingManagedRepair(val localReference: String, val parsedSource: File)
 
 private fun String.isSupportedManagedSourceFormat(): Boolean =
     trim().uppercase() in setOf(

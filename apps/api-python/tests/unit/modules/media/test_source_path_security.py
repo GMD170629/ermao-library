@@ -97,3 +97,25 @@ def test_normal_source_file_and_range_still_resolve(tmp_path: Path) -> None:
 
     assert response.status_code == 206
     assert response.headers["content-range"] == "bytes 2-5/10"
+
+
+def test_version_precondition_rejects_stale_resume_before_streaming(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "book.epub"
+    source.write_bytes(b"0123456789")
+    probe = send_file(source, _request("HEAD"), "user-1", asset_id="asset-1")
+    version = probe.headers["x-asset-version"]
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/assets/asset-1",
+            "headers": [(b"range", b"bytes=2-5"), (b"x-asset-version", b"10:0")],
+            "query_string": b"",
+        }
+    )
+    rejected = send_file(source, request, "user-1", asset_id="asset-1")
+    assert rejected.status_code == 412
+    assert b"ASSET_VERSION_CHANGED" in rejected.body
+    assert version == f"10:{int(source.stat().st_mtime * 1000)}"

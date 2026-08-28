@@ -74,6 +74,7 @@ data class BookSummaryWire(
     val title: String,
     val author: String? = null,
     val coverUrl: String,
+    val completed: Boolean? = null,
     val resourceImportSummary: ResourceImportSummaryWire = ResourceImportSummaryWire(),
     val progress: Double,
 )
@@ -141,6 +142,7 @@ internal fun BookSummaryWire.toDomain(): BookSummary {
         author = author,
         coverUrl = coverUrl,
         progress = progress,
+        completed = completed,
     )
 }
 

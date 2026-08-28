@@ -5,7 +5,6 @@ import {
   PDF_RANGE_MAX_REQUEST_BYTES,
   planPdfByteRanges
 } from '@shuku/reader-core';
-import { MemoryReaderStorage } from '../../../../lib/reader/memory-storage';
 import { PdfRangeByteSource, PdfRangeError, type PdfRangeAccess } from './pdf-range-transport';
 
 const ETAG = 'W/"2097135-1786742400"';
@@ -21,14 +20,7 @@ function access(bytes: Uint8Array): PdfRangeAccess {
   return {
     url: '/api/assets/asset-1',
     length: bytes.byteLength,
-    identity: {
-      serverIdentity: 'https://reader.test',
-      userId: 'user-1',
-      authorizationVersion: 3,
-      resourceId: 'resource-1',
-      assetId: 'asset-1'
-    },
-    cache: new MemoryReaderStorage()
+
   };
 }
 
@@ -82,6 +74,22 @@ test('uses only validated 206 responses and reuses cached chunks', async () => {
   assert.ok(metrics.firstByteMilliseconds !== null && metrics.firstByteMilliseconds >= 0);
 });
 
+test('weak ETag never becomes an If-Range validator and oversized reads send no request', async () => {
+  const bytes = fixtureBytes();
+  let requests = 0;
+  const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
+    if (init?.method !== 'HEAD') {
+      requests += 1;
+      assert.equal(new Headers(init?.headers).get('If-Range'), null);
+    }
+    return rangeResponse(bytes, init);
+  });
+  await source.prepare(new AbortController().signal);
+  await assert.rejects(source.read(0, PDF_RANGE_MAX_REQUEST_BYTES + 1), { code: 'PDF_RANGE_INVALID' });
+  assert.equal(requests, 1);
+  source.abort();
+});
+
 test('rejects a silent full-file fallback with PDF_RANGE_UNSUPPORTED', async () => {
   const bytes = fixtureBytes(2);
   const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
@@ -115,4 +123,36 @@ test('limits concurrent network ranges to two requests', async () => {
     (index + 1) * PDF_RANGE_CHUNK_BYTES
   )));
   assert.equal(maximum, 2);
+});
+
+test('ignored Range cancels before reading a body that never completes', async () => {
+  const bytes = fixtureBytes();
+  let cancelled = false;
+  let pulls = 0;
+  const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
+    if (init?.method === 'HEAD') return rangeResponse(bytes, init);
+    return new Response(new ReadableStream({
+      pull() { pulls += 1; }, cancel() { cancelled = true; }
+    }, { highWaterMark: 0 }), { status: 200 });
+  });
+  await assert.rejects(source.prepare(new AbortController().signal), /服务器未返回 PDF Range 响应/);
+  assert.equal(pulls, 0);
+  assert.equal(cancelled, true);
+  assert.equal(source.metrics().transferredBytes, 0);
+});
+
+test('closing a session cancels access and reopening cannot use its body cache', async () => {
+  const bytes = fixtureBytes();
+  let requests = 0;
+  const fetcher: typeof fetch = async (_input, init) => {
+    if (init?.method !== 'HEAD') requests += 1;
+    return rangeResponse(bytes, init);
+  };
+  const source = new PdfRangeByteSource(access(bytes), fetcher);
+  await source.prepare(new AbortController().signal);
+  source.abort();
+  await assert.rejects(source.read(0, 8), { name: 'AbortError' });
+  const reopened = new PdfRangeByteSource(access(bytes), fetcher);
+  await reopened.prepare(new AbortController().signal);
+  assert.equal(requests, 2);
 });

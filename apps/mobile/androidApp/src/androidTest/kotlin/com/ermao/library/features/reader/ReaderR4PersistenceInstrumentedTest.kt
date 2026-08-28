@@ -63,6 +63,30 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
+    fun versionSixProgressMigratesAcrossAuthorizationWithoutCopyingPendingWrites() = runBlocking {
+        val namespace = ReaderSyncNamespace("server", "user", 4)
+        val oldKey = "${lengthPrefixed(namespace.serverIdentity, namespace.userId)}:4:${identity(namespace).stableKey}"
+        SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(databaseName), null).use { database ->
+            database.execSQL("CREATE TABLE reader_progress (resource_id TEXT PRIMARY KEY NOT NULL,document_json TEXT NOT NULL)")
+            database.execSQL("CREATE TABLE reader_progress_sync_v4 (owner_key TEXT PRIMARY KEY NOT NULL,document_json TEXT NOT NULL)")
+            database.insertOrThrow("reader_progress", null, ContentValues().apply {
+                put("resource_id", oldKey)
+                put("document_json", ReaderProgressJson().encode(progress(8_000)))
+            })
+            database.version = 6
+        }
+        val migrated = AndroidReaderProgressDatabase(context, identity(namespace.copy(authorizationVersion = 5)),
+            legacyProgressStore = null, databaseName = databaseName)
+        assertEquals(progress(8_000), migrated.load("volume-1"))
+        assertEquals(null, migrated.loadSyncState().pending)
+        migrated.close()
+        val reopened = AndroidReaderProgressDatabase(context, identity(namespace.copy(authorizationVersion = 6)),
+            legacyProgressStore = null, databaseName = databaseName)
+        assertEquals(progress(8_000), reopened.load("volume-1"))
+        reopened.close()
+    }
+
+    @Test
     fun pendingSurvivesProcessReconstructionAndNewerMutationRebasesAfterConflict() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 4)
         val target = ReaderProgressSyncTarget(namespace, "work-1", "volume-1", ReaderFormat.Epub)
@@ -109,7 +133,7 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
-    fun preUnionDatabaseUpgradeDiscardsExactAndRetiredSyncTables() = runBlocking {
+    fun preUnionDatabaseUpgradePreservesOpaqueDocumentsWithoutInterpretingThem() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 4)
         createV1Database(namespace, progress(7_000))
 
@@ -125,8 +149,12 @@ class ReaderR4PersistenceInstrumentedTest {
 
         val readable = SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READONLY)
         readable.use { database ->
-            assertFalse(tableExists(database, "reader_progress_sync"))
-            assertFalse(tableExists(database, "reader_progress_sequence"))
+            assertEquals(true, tableExists(database, "reader_progress_sync"))
+            assertEquals(true, tableExists(database, "reader_progress_sequence"))
+            database.query("reader_progress", arrayOf("document_json"), null, null, null, null, null).use {
+                assertEquals(true, it.moveToFirst())
+                assertEquals(ReaderProgressJson().encode(progress(7_000)), it.getString(0))
+            }
         }
     }
 
@@ -194,7 +222,7 @@ class ReaderR4PersistenceInstrumentedTest {
     }
 
     @Test
-    fun earlyV4KeyIsDiscardedAtThePublicationLocationBoundary() = runBlocking {
+    fun earlyV4KeyRemainsIsolatedAndNewExactProgressCanBeSaved() = runBlocking {
         val namespace = ReaderSyncNamespace("server", "user", 2)
         createEarlyV4Database(namespace, progress(5_000))
 
@@ -214,6 +242,8 @@ class ReaderR4PersistenceInstrumentedTest {
             databaseName = databaseName,
         )
         assertEquals(null, matching.load("volume-1"))
+        matching.save(progress(6_000))
+        assertEquals(progress(6_000), matching.load("volume-1"))
         matching.close()
     }
 

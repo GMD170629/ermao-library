@@ -10,10 +10,8 @@ import com.ermao.library.shared.core.network.mapTransportError
 import com.ermao.library.shared.core.storage.PlatformStorageException
 import com.ermao.library.shared.modules.downloads.application.CompletedTransfer
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrap
-import com.ermao.library.shared.modules.downloads.application.DownloadBootstrapGateway
 import com.ermao.library.shared.modules.downloads.application.DownloadBootstrapResult
 import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSink
-import com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSinkSession
 import com.ermao.library.shared.modules.downloads.application.DownloadBundleMemberSinkRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadByteSink
@@ -21,7 +19,6 @@ import com.ermao.library.shared.modules.downloads.application.DownloadByteSinkSe
 import com.ermao.library.shared.modules.downloads.application.DownloadProgressObserver
 import com.ermao.library.shared.modules.downloads.application.DownloadRequestContext
 import com.ermao.library.shared.modules.downloads.application.DownloadSinkRequest
-import com.ermao.library.shared.modules.downloads.application.DownloadTransferGateway
 import com.ermao.library.shared.modules.downloads.application.DownloadTransferRequest
 import com.ermao.library.shared.modules.downloads.application.DownloadTransferResult
 import com.ermao.library.shared.modules.downloads.application.DownloadsGateway
@@ -31,28 +28,18 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadBundleMember
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
-import com.ermao.library.shared.modules.downloads.domain.isSafeMediaApiPath
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 
-/** Foreground, app-owned download gateway backed by Reader resource bootstrap. */
+/** Original-asset transfers; metadata uses the Library contract without starting Reader. */
 class KtorDownloadsGateway(
     private val apiClient: ApiClient,
 ) : DownloadsGateway {
@@ -61,27 +48,24 @@ class KtorDownloadsGateway(
         resourceId: String,
     ): DownloadBootstrapResult {
         if (resourceId.isBlank()) return bootstrapFailure("DOWNLOAD_RESOURCE_ID_INVALID")
-        return when (val response = apiClient.execute(
-            ApiRequest(
-                method = ApiMethod.Get,
-                apiPath = "/api/reader/v4/resources/${resourceId.encodePathSegment()}/bootstrap",
-                responseDeserializer = JsonObject.serializer(),
-            ),
-        )) {
-            is ApiResult.Failure -> DownloadBootstrapResult.Failure(response.error)
-            is ApiResult.Success -> try {
-                DownloadBootstrapResult.Success(
-                    DownloadBootstrap(response.value.toBootstrapDescriptor(context, resourceId)),
-                )
-            } catch (error: IllegalArgumentException) {
-                DownloadBootstrapResult.Failure(
-                    AppError(
-                        AppErrorKind.ProtocolViolation,
-                        "DOWNLOAD_BOOTSTRAP_INVALID",
-                        error.message,
-                    ),
-                )
+        return try {
+            val resourceResponse = apiClient.execute(ApiRequest(ApiMethod.Get,
+                "/api/resources/${resourceId.encodePathSegment()}", JsonObject.serializer()))
+            val resource = when (resourceResponse) {
+                is ApiResult.Failure -> return DownloadBootstrapResult.Failure(resourceResponse.error)
+                is ApiResult.Success -> com.ermao.library.shared.modules.library.LibraryContract.resourcePayload(resourceResponse.value)
             }
+            require(resource.id == resourceId)
+            val bookResponse = apiClient.execute(ApiRequest(ApiMethod.Get,
+                "/api/books/${resource.bookId.encodePathSegment()}", JsonObject.serializer()))
+            val book = when (bookResponse) {
+                is ApiResult.Failure -> return DownloadBootstrapResult.Failure(bookResponse.error)
+                is ApiResult.Success -> com.ermao.library.shared.modules.library.LibraryContract.bookPayload(bookResponse.value)
+            }
+            require(book.id == resource.bookId)
+            DownloadBootstrapResult.Success(DownloadBootstrap(toDescriptor(context, resource, book)))
+        } catch (error: IllegalArgumentException) {
+            DownloadBootstrapResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_DESCRIPTOR_INVALID", error.message))
         }
     }
 
@@ -90,99 +74,32 @@ class KtorDownloadsGateway(
         request: DownloadTransferRequest,
         sink: DownloadByteSink,
         progressObserver: DownloadProgressObserver?,
-    ): DownloadTransferResult = when (request.descriptor.artifactKind) {
-        DownloadArtifactKind.SingleOriginalAsset -> transferSingle(context, request, sink, progressObserver)
-        DownloadArtifactKind.OriginalPageSet -> transferPageSet(context, request, sink, progressObserver)
-    }
-
-    private suspend fun transferSingle(
-        context: DownloadRequestContext,
-        request: DownloadTransferRequest,
-        sink: DownloadByteSink,
-        progressObserver: DownloadProgressObserver?,
     ): DownloadTransferResult {
-        var session: DownloadByteSinkSession? = null
+        require(context.namespace == request.descriptor.identity.namespace)
         return try {
-            val source = request.descriptor.source
-            val statement = apiClient.authenticatedHttpClient().prepareGet(
-                apiClient.resolveAuthenticatedApiPath(source.apiPath),
-            ) {
-                if (request.resumeFromBytes > 0) {
-                    header(HttpHeaders.Range, "bytes=${request.resumeFromBytes}-")
-                    request.ifRangeValidator?.takeIf(String::isNotBlank)?.let { header(HttpHeaders.IfRange, it) }
-                }
-            }
-            return statement.execute { response ->
-                if (response.status.value in REDIRECT_STATUS_CODES) {
-                    response.bodyAsText()
-                    return@execute transferFailure("DOWNLOAD_REDIRECT_REJECTED")
-                }
-                val responseContract = validateResponse(
-                    statusCode = response.status.value,
-                    contentLength = response.headers[HttpHeaders.ContentLength],
-                    contentRange = response.headers[HttpHeaders.ContentRange],
-                    contentType = response.headers[HttpHeaders.ContentType],
-                    expectedMimeType = source.mimeType,
-                    expectedTotalBytes = source.totalBytes,
+            val descriptor = request.descriptor
+            val completed = when (descriptor.artifactKind) {
+                DownloadArtifactKind.SingleOriginalAsset -> transferAsset(
+                    source = descriptor.source,
                     resumeFromBytes = request.resumeFromBytes,
-                ) ?: run {
-                    response.bodyAsChannel().cancel(null)
-                    return@execute transferFailure("DOWNLOAD_RESPONSE_INVALID")
-                }
-                session = sink.begin(
-                    DownloadSinkRequest(
-                        namespace = context.namespace,
-                        taskId = request.taskId,
-                        resourceId = request.descriptor.identity.resourceId,
-                        assetId = request.descriptor.identity.assetId,
-                        expectedTotalBytes = source.totalBytes,
-                        resumeFromBytes = request.resumeFromBytes,
-                    ),
+                    preservePartialOnCancellation = request.preservePartialOnCancellation,
+                    begin = { sink.begin(DownloadSinkRequest(context.namespace, request.taskId,
+                        descriptor.identity.resourceId, descriptor.identity.assetId, descriptor.totalBytes, request.resumeFromBytes)) },
+                    progress = { progressObserver?.onProgress(it, descriptor.totalBytes) },
                 )
-                val channel = response.bodyAsChannel()
-                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
-                var receivedBytes = 0L
-                while (true) {
-                    val read = channel.readAvailable(buffer, 0, buffer.size)
-                    if (read < 0) break
-                    if (read == 0) continue
-                    receivedBytes += read
-                    if (receivedBytes > responseContract.contentLength) {
-                        throw DownloadProtocolException("Response exceeded Content-Length")
-                    }
-                    session.write(buffer.copyOf(read))
-                    progressObserver?.onProgress(request.resumeFromBytes + receivedBytes, source.totalBytes)
-                }
-                if (receivedBytes != responseContract.contentLength) {
-                    throw DownloadProtocolException("Response ended before Content-Length")
-                }
-                val localReference = session.commit(source.totalBytes)
-                require(localReference.isNotBlank()) { "Sink returned an empty local reference" }
-                DownloadTransferResult.Success(
-                    CompletedTransfer(
-                        localReference = localReference,
-                        verifiedBytes = source.totalBytes,
-                        etag = response.headers[HttpHeaders.ETag],
-                        lastModified = response.headers[HttpHeaders.LastModified],
-                    ),
-                )
+                DownloadArtifactKind.OriginalPageSet -> transferPageSet(context, request, sink, progressObserver)
             }
+            DownloadTransferResult.Success(completed)
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) {
-                if (request.preservePartialOnCancellation) session?.pause() else session?.abort()
-            }
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
-            session?.abortSafely()
             DownloadTransferResult.Failure(AppError(AppErrorKind.Timeout, "DOWNLOAD_TIMEOUT", timeout.message))
         } catch (storage: PlatformStorageException) {
-            session?.abortSafely()
             DownloadTransferResult.Failure(AppError(AppErrorKind.StorageFailure, "DOWNLOAD_STORAGE_FAILURE", storage.message))
         } catch (protocol: DownloadProtocolException) {
-            session?.abortSafely()
             DownloadTransferResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_RESPONSE_INVALID", protocol.message))
         } catch (error: Throwable) {
-            session?.abortSafely()
+            // The transfer task is the transport containment boundary; the caller persists failure.
             DownloadTransferResult.Failure(mapTransportError(error))
         }
     }
@@ -192,131 +109,90 @@ class KtorDownloadsGateway(
         request: DownloadTransferRequest,
         sink: DownloadByteSink,
         progressObserver: DownloadProgressObserver?,
-    ): DownloadTransferResult {
+    ): CompletedTransfer {
         val bundleSink = sink as? DownloadBundleByteSink
-            ?: return transferFailure("DOWNLOAD_BUNDLE_SINK_REQUIRED")
+            ?: throw DownloadProtocolException("DOWNLOAD_BUNDLE_SINK_REQUIRED")
         val descriptor = request.descriptor
-        var bundle: DownloadBundleByteSinkSession? = null
-        return try {
-            bundle = bundleSink.beginBundle(
-                DownloadBundleSinkRequest(
-                    namespace = context.namespace,
-                    taskId = request.taskId,
-                    resourceId = descriptor.identity.resourceId,
-                    artifactId = descriptor.identity.assetId,
-                    artifactKind = descriptor.artifactKind,
-                    memberCount = descriptor.bundleMembers.size,
-                    expectedTotalBytes = descriptor.totalBytes,
-                ),
-            )
+        val bundle = bundleSink.beginBundle(DownloadBundleSinkRequest(
+            context.namespace, request.taskId, descriptor.identity.resourceId, descriptor.identity.assetId,
+            descriptor.artifactKind, descriptor.bundleMembers.size, descriptor.totalBytes,
+        ))
+        try {
             var transferred = 0L
             for (member in descriptor.bundleMembers) {
-                transferBundleMember(
-                    member = member,
-                    bundle = bundle,
-                    transferredBeforeMember = transferred,
-                    totalBytes = descriptor.totalBytes,
-                    progressObserver = progressObserver,
+                transferAsset(member.source, 0, false,
+                    begin = { bundle.beginMember(DownloadBundleMemberSinkRequest(
+                        member.assetId, member.sequenceIndex, member.source.mimeType, member.source.totalBytes,
+                    )) },
+                    progress = { progressObserver?.onProgress(transferred + it, descriptor.totalBytes) },
                 )
                 transferred += member.source.totalBytes
             }
-            require(transferred == descriptor.totalBytes) { "Bundle byte count is inconsistent" }
-            val localReference = bundle.commit()
-            require(localReference.isNotBlank()) { "Bundle sink returned an empty local reference" }
-            DownloadTransferResult.Success(
-                CompletedTransfer(
-                    localReference = localReference,
-                    verifiedBytes = transferred,
-                    etag = null,
-                    lastModified = null,
-                ),
-            )
-        } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { bundle?.abortSafely() }
-            throw cancelled
-        } catch (timeout: HttpRequestTimeoutException) {
-            bundle?.abortSafely()
-            DownloadTransferResult.Failure(AppError(AppErrorKind.Timeout, "DOWNLOAD_TIMEOUT", timeout.message))
-        } catch (storage: PlatformStorageException) {
-            bundle?.abortSafely()
-            DownloadTransferResult.Failure(AppError(AppErrorKind.StorageFailure, "DOWNLOAD_STORAGE_FAILURE", storage.message))
-        } catch (protocol: DownloadProtocolException) {
-            bundle?.abortSafely()
-            DownloadTransferResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_RESPONSE_INVALID", protocol.message))
+            return CompletedTransfer(bundle.commit(), transferred, null, null)
         } catch (error: Throwable) {
-            bundle?.abortSafely()
-            DownloadTransferResult.Failure(mapTransportError(error))
-        }
-    }
-
-    private suspend fun transferBundleMember(
-        member: DownloadBundleMember,
-        bundle: DownloadBundleByteSinkSession,
-        transferredBeforeMember: Long,
-        totalBytes: Long,
-        progressObserver: DownloadProgressObserver?,
-    ) {
-        var memberSession: DownloadByteSinkSession? = null
-        try {
-            apiClient.authenticatedHttpClient().prepareGet(
-                apiClient.resolveAuthenticatedApiPath(member.source.apiPath),
-            ).execute { response ->
-                if (response.status.value in REDIRECT_STATUS_CODES) {
-                    response.bodyAsText()
-                    throw DownloadProtocolException("Page asset redirected")
-                }
-                val contract = validateResponse(
-                    statusCode = response.status.value,
-                    contentLength = response.headers[HttpHeaders.ContentLength],
-                    contentRange = response.headers[HttpHeaders.ContentRange],
-                    contentType = response.headers[HttpHeaders.ContentType],
-                    expectedMimeType = member.source.mimeType,
-                    expectedTotalBytes = member.source.totalBytes,
-                    resumeFromBytes = 0,
-                ) ?: run {
-                    response.bodyAsChannel().cancel(null)
-                    throw DownloadProtocolException("Page asset response is inconsistent")
-                }
-                memberSession = bundle.beginMember(
-                    DownloadBundleMemberSinkRequest(
-                        assetId = member.assetId,
-                        sequenceIndex = member.sequenceIndex,
-                        mimeType = member.source.mimeType,
-                        expectedBytes = member.source.totalBytes,
-                    ),
-                )
-                val activeMemberSession = checkNotNull(memberSession)
-                val channel = response.bodyAsChannel()
-                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
-                var received = 0L
-                while (true) {
-                    val read = channel.readAvailable(buffer, 0, buffer.size)
-                    if (read < 0) break
-                    if (read == 0) continue
-                    received += read
-                    if (received > contract.contentLength) {
-                        throw DownloadProtocolException("Page asset exceeded Content-Length")
-                    }
-                    activeMemberSession.write(buffer.copyOf(read))
-                    progressObserver?.onProgress(transferredBeforeMember + received, totalBytes)
-                }
-                if (received != contract.contentLength) {
-                    throw DownloadProtocolException("Page asset ended before Content-Length")
-                }
-                activeMemberSession.commit(member.source.totalBytes)
+            withContext(NonCancellable) {
+                try { bundle.abort() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
             }
-        } catch (error: Throwable) {
-            memberSession?.abortSafely()
             throw error
         }
     }
 
-    private suspend fun DownloadBundleByteSinkSession.abortSafely() {
-        withContext(NonCancellable) { runCatching { abort() } }
-    }
-
-    private suspend fun DownloadByteSinkSession.abortSafely() {
-        withContext(NonCancellable) { runCatching { abort() } }
+    /** The only original-asset HTTP/body-copy implementation, including IMAGE_DIR members. */
+    private suspend fun transferAsset(
+        source: DownloadSource,
+        resumeFromBytes: Long,
+        preservePartialOnCancellation: Boolean,
+        begin: suspend () -> DownloadByteSinkSession,
+        progress: (Long) -> Unit,
+    ): CompletedTransfer {
+        var session: DownloadByteSinkSession? = null
+        val expectedVersion = source.sourceModifiedAtMillis?.let { "${source.totalBytes}:$it" }
+        try {
+            return apiClient.authenticatedHttpClient().prepareGet(
+                apiClient.resolveAuthenticatedApiPath(source.apiPath),
+            ) {
+                expectedVersion?.let { header("X-Asset-Version", it) }
+                if (resumeFromBytes > 0) {
+                    header(HttpHeaders.Range, "bytes=$resumeFromBytes-")
+                }
+            }.execute { response ->
+                if (expectedVersion != null && response.headers["X-Asset-Version"] != expectedVersion) {
+                    response.bodyAsChannel().cancel(null)
+                    throw DownloadProtocolException("ASSET_VERSION_CHANGED")
+                }
+                val contract = validateResponse(response.status.value,
+                    response.headers[HttpHeaders.ContentLength], response.headers[HttpHeaders.ContentRange],
+                    response.headers[HttpHeaders.ContentType], source.mimeType, source.totalBytes, resumeFromBytes,
+                ) ?: run {
+                    response.bodyAsChannel().cancel(null)
+                    throw DownloadProtocolException("Download response does not match the original asset contract")
+                }
+                val active = begin().also { session = it }
+                val channel = response.bodyAsChannel()
+                val buffer = ByteArray(TRANSFER_BUFFER_BYTES)
+                var received = 0L
+                while (true) {
+                    val count = channel.readAvailable(buffer, 0, buffer.size)
+                    if (count < 0) break
+                    if (count == 0) continue
+                    received += count
+                    if (received > contract.contentLength) throw DownloadProtocolException("Response exceeded Content-Length")
+                    active.write(buffer.copyOf(count))
+                    progress(resumeFromBytes + received)
+                }
+                if (received != contract.contentLength) throw DownloadProtocolException("Response ended before Content-Length")
+                val reference = active.commit(source.totalBytes)
+                require(reference.isNotBlank()) { "Sink returned an empty local reference" }
+                CompletedTransfer(reference, source.totalBytes, response.headers[HttpHeaders.ETag], response.headers[HttpHeaders.LastModified])
+            }
+        } catch (error: Throwable) {
+            withContext(NonCancellable) {
+                try {
+                    if (error is CancellationException && preservePartialOnCancellation) session?.pause() else session?.abort()
+                } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+            }
+            throw error
+        }
     }
 
     private data class ResponseContract(val contentLength: Long)
@@ -349,155 +225,36 @@ class KtorDownloadsGateway(
         }
     }
 
-    private fun JsonObject.toBootstrapDescriptor(
+    private fun toDescriptor(
         context: DownloadRequestContext,
-        expectedResourceId: String,
+        resource: com.ermao.library.shared.modules.library.domain.Resource,
+        book: com.ermao.library.shared.modules.library.domain.BookDetailSummary,
     ): DownloadDescriptor {
-        require(requiredLong("schemaVersion") == 4L) { "Unsupported Reader bootstrap schema" }
-        val userId = requiredString("userId")
-        require(userId == context.namespace.userId) { "Bootstrap user does not match download namespace" }
-        val book = requiredObject("book")
-        val resource = requiredObject("resource")
-        require(resource.requiredString("id") == expectedResourceId) { "Bootstrap resource does not match request" }
-        require(resource.requiredString("bookId") == book.requiredString("id")) {
-            "Bootstrap resource does not match book"
+        val readerType = parseDownloadReaderType(resource.readerType)
+        val assets = resource.assets.sortedWith(compareBy({ it.sortOrder ?: 0 }, { it.id }))
+        require(assets.isNotEmpty() && assets.all { it.resourceId == resource.id })
+        val primary = assets.firstOrNull { it.role.equals("PRIMARY", true) } ?: assets.first()
+        val format = requireNotNull(primary.sourceFormat).lowercase()
+        fun source(asset: com.ermao.library.shared.modules.library.domain.Asset): DownloadSource {
+            val mime = requireNotNull(asset.mimeType).substringBefore(';').lowercase()
+            require(mime in allowedMimeTypes(readerType) || (format == "image_dir" && mime in IMAGE_MIME_TYPES))
+            return DownloadSource(requireNotNull(asset.url), mime, asset.sizeBytes, asset.mtimeMillis)
         }
-        val readerType = parseDownloadReaderType(requiredString("readerType"))
-        require(parseDownloadReaderType(resource.requiredString("readerType")) == readerType) {
-            "Bootstrap reader type is inconsistent"
-        }
-        val resourceFormat = resource.requiredString("format").trim().lowercase()
-        require(requiredString("sourceFormat").equals(resourceFormat, ignoreCase = true)) {
-            "Bootstrap source format is inconsistent"
-        }
-        val assets = this["assets"] as? JsonArray ?: throw IllegalArgumentException("Bootstrap assets are missing")
-        val assetObjects = assets.map { it as? JsonObject ?: throw IllegalArgumentException("Bootstrap asset is invalid") }
-            .sortedWith(compareBy<JsonObject>({ it.requiredNonNegativeInt("sortOrder") }, { it.requiredString("id") }) )
-        val primaryAsset = assetObjects.firstOrNull { it.requiredString("role").equals("PRIMARY", ignoreCase = true) }
-            ?: assetObjects.firstOrNull()
-            ?: throw IllegalArgumentException("Bootstrap publication asset is missing")
-        require(primaryAsset.requiredString("resourceId") == expectedResourceId) {
-            "Bootstrap asset does not match resource"
-        }
-        // ReaderAssetSummary.title is a required server field even though downloads only need
-        // the asset identity. Validate it here so the download boundary cannot silently accept
-        // the retired asset shape.
-        primaryAsset.requiredString("title")
-        val primaryUrl = primaryAsset.requiredString("url")
-        require(primaryUrl.isSafeMediaApiPath()) { "Bootstrap asset URL is invalid" }
-        val comicArtifact = if (readerType == DownloadReaderType.Comic) {
-            val publication = requiredObject("publication")
-            require(publication.requiredString("kind") == "comic") { "Comic download contract is invalid" }
-            (publication["downloadArtifact"] as? JsonObject)?.also { artifact ->
-                require(artifact.requiredString("url") == "/api/reader/v4/resources/$expectedResourceId/comic/archive") {
-                    "Comic download artifact URL is invalid"
-                }
-                require(artifact.requiredString("sourceFormat").equals(resourceFormat, ignoreCase = true)) {
-                    "Comic download source format is inconsistent"
-                }
-            }.also { artifact ->
-                require(resourceFormat == "image_dir" || artifact != null) {
-                    "Comic download artifact is missing"
-                }
-                require(resourceFormat != "image_dir" || artifact == null) {
-                    "IMAGE_DIR must not expose a derived download artifact"
-                }
-            }
-        } else null
-        // Offline storage always downloads the original primary Asset. The comic archive
-        // URL is an online Reader capability only and must never become a local source.
-        val sourceApiPath = primaryUrl
-        require(sourceApiPath.isSafeMediaApiPath()) { "Bootstrap publication URL is invalid" }
-        val sourceSize = primaryAsset.requiredLong("sizeBytes")
-        val sourceMime = primaryAsset.requiredString("mimeType")
-            .lowercase()
-            .substringBefore(';')
-        require(sourceSize > 0)
-        require(
-            sourceMime in allowedMimeTypes(readerType) ||
-                (resourceFormat == "image_dir" && sourceMime in IMAGE_MIME_TYPES),
-        ) { "Bootstrap asset MIME type is inconsistent" }
-        val pageMembers = if (resourceFormat == "image_dir") {
-            assetObjects.filter { it.requiredString("role").equals("PAGE", ignoreCase = true) }
-                .mapIndexed { expectedIndex, asset ->
-                    require(asset.requiredString("resourceId") == expectedResourceId) {
-                        "IMAGE_DIR page belongs to another resource"
-                    }
-                    require(asset.requiredNonNegativeInt("sortOrder") == expectedIndex) {
-                        "IMAGE_DIR page sequence is not canonical"
-                    }
-                    asset.requiredString("title")
-                    val pageMime = asset.requiredString("mimeType").lowercase().substringBefore(';')
-                    require(pageMime in IMAGE_MIME_TYPES) { "IMAGE_DIR page MIME type is invalid" }
-                    DownloadBundleMember(
-                        assetId = asset.requiredString("id"),
-                        sequenceIndex = expectedIndex,
-                        source = DownloadSource(
-                            apiPath = asset.requiredString("url").also {
-                                require(it.isSafeMediaApiPath()) { "IMAGE_DIR page URL is invalid" }
-                            },
-                            mimeType = pageMime,
-                            totalBytes = asset.requiredLong("sizeBytes"),
-                        ),
-                    )
-                }
-                .also { require(it.isNotEmpty()) { "IMAGE_DIR has no original PAGE assets" } }
-        } else {
-            emptyList()
-        }
+        val pages = if (format == "image_dir") assets.filter { it.role.equals("PAGE", true) }.mapIndexed { index, asset ->
+            require(asset.sortOrder == index)
+            DownloadBundleMember(asset.id, index, source(asset))
+        } else emptyList()
+        require(format != "image_dir" || pages.isNotEmpty())
         return DownloadDescriptor(
-            identity = DownloadIdentity(
-                namespace = context.namespace,
-                bookId = book.requiredString("id"),
-                resourceId = expectedResourceId,
-                assetId = if (pageMembers.isEmpty()) primaryAsset.requiredString("id") else "page-set:$expectedResourceId",
-            ),
-            bookTitle = book.requiredString("title"),
-            bookAuthor = book.optionalString("author"),
-            coverApiPath = book.optionalString("coverUrl"),
-            resourceTitle = resource.requiredString("title"),
-            format = resourceFormat,
-            readerType = readerType,
-            source = DownloadSource(
-                apiPath = sourceApiPath,
-                mimeType = sourceMime,
-                totalBytes = sourceSize,
-            ),
-            resourceIndex = resource.optionalDouble("resourceIndex"),
-            resourceSortOrder = resource.requiredNonNegativeInt("sortOrder"),
-            isDownloadable = true,
-            artifactKind = if (pageMembers.isEmpty()) {
-                DownloadArtifactKind.SingleOriginalAsset
-            } else {
-                DownloadArtifactKind.OriginalPageSet
-            },
-            members = pageMembers,
+            identity = DownloadIdentity(context.namespace, book.id, resource.id,
+                if (format == "image_dir") "page-set:${resource.id}" else primary.id),
+            bookTitle = book.title, bookAuthor = book.author, coverApiPath = book.coverUrl.takeIf(String::isNotBlank),
+            resourceTitle = resource.title, format = format, readerType = readerType, source = source(primary),
+            resourceIndex = resource.resourceIndex, resourceSortOrder = resource.sortOrder,
+            artifactKind = if (pages.isEmpty()) DownloadArtifactKind.SingleOriginalAsset else DownloadArtifactKind.OriginalPageSet,
+            members = pages,
         )
     }
-
-    private fun JsonObject.requiredObject(name: String): JsonObject =
-        this[name] as? JsonObject ?: throw IllegalArgumentException("$name is missing")
-
-    private fun JsonObject.requiredString(name: String): String =
-        optionalString(name) ?: throw IllegalArgumentException("$name is missing")
-
-    private fun JsonObject.optionalString(name: String): String? =
-        (this[name] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
-
-    private fun JsonObject.requiredLong(name: String): Long =
-        this[name]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 }
-            ?: throw IllegalArgumentException("$name is missing")
-
-    private fun JsonObject.optionalDouble(name: String): Double? {
-        val value = this[name] ?: return null
-        if (value is kotlinx.serialization.json.JsonNull) return null
-        return value.jsonPrimitive.doubleOrNull?.takeIf(Double::isFinite)
-            ?: throw IllegalArgumentException("$name is invalid")
-    }
-
-    private fun JsonObject.requiredNonNegativeInt(name: String): Int =
-        this[name]?.jsonPrimitive?.intOrNull?.takeIf { it >= 0 }
-            ?: throw IllegalArgumentException("$name is missing")
 
     private fun String.encodePathSegment(): String = encodeToByteArray().joinToString("") { byte ->
         val character = (byte.toInt() and 0xff).toChar()
@@ -509,15 +266,10 @@ class KtorDownloadsGateway(
         AppError(AppErrorKind.Validation, code),
     )
 
-    private fun transferFailure(code: String) = DownloadTransferResult.Failure(
-        AppError(AppErrorKind.ProtocolViolation, code),
-    )
-
     private class DownloadProtocolException(message: String) : Exception(message)
 
     private companion object {
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
-        val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
         val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }

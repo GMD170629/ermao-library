@@ -14,6 +14,7 @@ fun BookSummary.toCard(): BookCard = BookCard(
     author = author.orEmpty(),
     coverUrl = coverUrl,
     progressPercent = progress.toInt().takeIf { it > 0 },
+    completed = completed,
 )
 
 fun HomeSnapshot.toUiContent(): HomeContent {
@@ -72,6 +73,7 @@ fun BookDetailSummary.toUiContent(): BookDetailContent {
             author = author.orEmpty(),
             coverUrl = coverUrl,
             progressPercent = continueResourceProgress.toInt().takeIf { it > 0 },
+            completed = completed,
         ),
         seriesId = seriesFacet?.id,
         seriesName = seriesFacet?.name ?: seriesName,

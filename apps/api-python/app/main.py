@@ -17,6 +17,7 @@ from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
 from app.bootstrap.opds import build_opds_router
 from app.bootstrap.prestart import verify_current_schema
+from app.bootstrap.publications import build_publication_runtime
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
@@ -166,6 +167,7 @@ def create_app(
             if kindle_send_queue_worker is not None:
                 kindle_send_queue_worker.stop()
             log_maintenance_worker.stop()
+            app.state.publication_runtime.close()
 
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan
@@ -180,6 +182,7 @@ def create_app(
         RequestValidationError,
         cast(ExceptionHandler, request_validation_error_handler),
     )
+    app.state.publication_runtime = build_publication_runtime(settings)
     app.state.session_factory = runtime_factory
     app.state.close_factory_sessions = True
     if session_factory is not None:

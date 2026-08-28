@@ -1,8 +1,6 @@
 export const PDF_RANGE_CHUNK_BYTES = 256 * 1024;
 export const PDF_RANGE_MAX_REQUEST_BYTES = 1024 * 1024;
 export const PDF_RANGE_MAX_CONCURRENT_REQUESTS = 2;
-export const PDF_RANGE_DOCUMENT_CACHE_BYTES = 64 * 1024 * 1024;
-export const PDF_RANGE_NAMESPACE_CACHE_BYTES = 512 * 1024 * 1024;
 export const PDF_RANGE_MEMORY_CACHE_BYTES = 8 * 1024 * 1024;
 
 export type PdfReaderErrorCode =
@@ -17,37 +15,7 @@ export type PdfReaderErrorCode =
   | 'PDF_RENDER_FAILED'
   | 'OUT_OF_MEMORY_RISK';
 
-export type PdfRangeCacheIdentity = Readonly<{
-  serverIdentity: string;
-  userId: string;
-  authorizationVersion: number;
-  resourceId: string;
-  assetId: string;
-}>;
-
 export type PdfByteRange = Readonly<{ begin: number; end: number }>;
-
-function lengthPrefixed(value: string) {
-  return `${value.length}:${value}`;
-}
-
-export function pdfRangeNamespaceKey(identity: Omit<PdfRangeCacheIdentity, 'resourceId' | 'assetId'>) {
-  return [identity.serverIdentity, identity.userId, String(identity.authorizationVersion)]
-    .map(lengthPrefixed).join('|');
-}
-
-export function pdfRangeDocumentKey(identity: PdfRangeCacheIdentity) {
-  return [
-    pdfRangeNamespaceKey(identity),
-    lengthPrefixed(identity.resourceId),
-    lengthPrefixed(identity.assetId)
-  ].join('|');
-}
-
-export function pdfRangeChunkKey(identity: PdfRangeCacheIdentity, chunkIndex: number) {
-  if (!Number.isInteger(chunkIndex) || chunkIndex < 0) throw new RangeError('PDF chunk index is invalid');
-  return `${pdfRangeDocumentKey(identity)}|${chunkIndex}`;
-}
 
 /** Returns aligned, end-exclusive requests capped at one MiB. */
 export function planPdfByteRanges(begin: number, end: number, length: number): PdfByteRange[] {

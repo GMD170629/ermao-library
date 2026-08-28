@@ -58,7 +58,9 @@ The original library file is immutable and is the only persisted Reader artifact
 Reader bootstrap, download, cache and recovery never create a derived EPUB, ZIP or
 unpacked publication directory. MOBI-family and TXT parsers expose bounded virtual
 Publication resources in memory. Web streams those resources through authenticated
-Publication routes; native clients parse the downloaded original file. Delivery may
+Publication routes; Android and iOS bind those same resources through the shared
+KMP OnlinePublicationSession. Explicit completed downloads and local imports use
+the original native parsers. Delivery may
 set CSP and apply the documented head-only security policy but does not rewrite the
 author body.
 
@@ -221,13 +223,13 @@ displayPercent are never silently adopted.
 
 ## 9. Local persistence
 
-Reader v4 was unreleased, so the cross-format union is a coordinated destructive
-replacement. Web clears the old exact/pending/conflict IndexedDB namespaces;
-native progress and sync codecs use document version 5 and reject version 4;
-the server data migration deletes old v4 progress and mutation receipts. No
-Foliate, legacy Reader v4, location, completion, or percentage migration exists.
+The streaming migration preserves existing exact progress, bookmarks, pending
+mutations, local imports and explicitly completed Downloads. It does not trigger
+an identity reset, delete a database, or reinterpret locator payloads. Cleanup
+only removes obsolete automatic online body replicas and partials whose origin
+can be established, never ambiguous files or user-created offline content.
 
-Publication download stores and verifies the original authorized file. Parser and
+Explicit Downloads stores and verifies the original authorized file. Online Reader never acquires a complete original. Parser and
 normalization identifiers remain diagnostics and never create a second persisted
 reading representation.
 
@@ -239,12 +241,27 @@ Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter until the toolkit exposes a public first-visible-block API;
 failure to read the frame fails closed and disables exact sync.
 
-Native publication downloads reuse authenticated cookie storage, download the original
-source format, stream into an app-private staging file, validate declared and actual
-size, MIME/publication type, and atomically install the result. They open Readium after
-the format adapter creates its Publication and do not
-preflight the complete reading order. Redirect, traversal, symlink, empty-body,
-overflow, truncation, cancellation, and oversized-error cases fail closed.
+Online reflowable opening resolves manifest and positions, then binds only requested
+original chapters/resources to native Readium. Metadata and HEAD requests never
+read chapter bodies. The shared transport validates headers before consuming its
+response stream, applies an 8 MiB chapter limit and a 32 MiB auxiliary-resource
+limit, and rejects excess bytes while reading. One session retains at most the
+current chapter and its immediate neighbors, with a total body budget of 64 MiB.
+Changing chapters drops unrelated ancillary resources; closing, switching books
+or ending the account session releases the body cache and cancels requests.
+
+PDF uses authenticated Range only, at most 1 MiB per request. A 200 response to a
+Range request is cancelled before reading its body. Native PDF renderers use
+shared PdfRangeLoader and session-only PdfRangeMemory; no persistent PDF body store is permitted.
+Comics use the existing page endpoint and a bounded current/adjacent-page window.
+
+The server parses its existing original source when needed; first opening may wait
+for necessary parsing. No prior import-index prerequisite is imposed. EPUB uses
+its original ZIP structure; TXT/FB2 defer XHTML generation until a chapter request;
+MOBI snapshots are coalesced and owned by an explicit bounded runtime, invalidated
+by original-file revision, and released on eviction or shutdown. Chapters remain
+whole. An oversized chapter is an explicit error, never a reason to split content
+or fetch the complete original. Exact href, body and locator contracts are retained.
 
 FB2 uses `shuku-fb2-parser-v1 / shuku-fb2-publication-v1` on every client.
 The native platform XML parsers feed a shared bounded mixed-content decoder.
@@ -257,9 +274,10 @@ signature and size and stay in memory. DTD/entity declarations and undeclared
 prefixes fail closed; the documented `l:href`/`xmlns:xlink` repair only affects
 the parser input, never the original file.
 
-Direct native Readium Publications need an explicit positions service as well
-as a reading order. Android TXT, FB2 and MOBI-family adapters register
-`EpubPositionsService`; iOS uses `EPUBPositionsService`. These logical positions
+Online native Publications bind the server-provided position list through an
+in-memory positions service without opening chapter bodies. Local imports and
+completed offline originals retain their parser-specific positions services.
+These logical positions
 support explicit scrubber navigation only: percentage is still never an exact
 restoration or upload identity. Parser validation exceptions crossing KMP into
 Swift must be declared with `@Throws` and mapped to a stable Reader error,
@@ -277,20 +295,24 @@ resource hrefs, body markup and locator projection stay unchanged. Existing
 namespace declarations are preserved. This is not a conversion artifact or a
 change to the parser/locator identity.
 
-Reader v4 bootstrap is also the authoritative Download Center catalog source. A completed
-artifact persists the real `book.id`, `resource.id`, selected `asset.id`, server-completed
-hint, and the resource's display/sort order. The stable local hierarchy is
-`book -> resource -> asset`; title, author, cover, format, and media kind decorate that
-topology and never replace its identifiers. Local manifests without this ADR 0020 identity
-are discarded. An online response with missing or contradictory Book/Resource/Asset
-ownership fails closed.
+Explicit offline downloads use Downloads' public DownloadResourceRuntime only.
+Its descriptor comes from Library Resource/Asset metadata, independently of Reader
+bootstrap. Android and iOS adapt storage, notifications and lifecycle; task creation,
+identity/version deduplication, pause, resume, retry, transfer validation, atomic
+publication and completion registration have one shared owner. Single files and
+IMAGE_DIR page sets share one transfer mechanism; only resource organization differs.
+Web uses the same original-asset download contract and lets the browser save it.
+The asset response carries `X-Asset-Version` (`sizeBytes:mtimeMillis`). Explicit
+Downloads sends the expected version on initial and resumed transfers. A mismatch
+returns `412 ASSET_VERSION_CHANGED` before streaming; the client rejects a missing
+or mismatched version header before opening a sink. This is independent of weak
+ETag cache validation and never falls back to a complete online Reader transfer.
 
-A shared foreground resource runtime exposes observable `Preparing`, `TaskCreated`,
-`Downloading`, `Progress`, `ReadyToOpen`, `Failed`, and `Cancelled` states. Reader
-navigation consumes `ReadyToOpen` only after byte verification, atomic file publication,
-and completed-artifact persistence. An already verified downloaded resource enters Reader
-directly; authenticated cover loading is a non-blocking visual transition and is never a
-publication-completion dependency.
+Reader can open completed original artifacts through Downloads' public contract.
+It cannot create or repair downloads. Online retries request the failed chapter,
+page or range again and never invoke an original-file transfer. Only obsolete
+online body caches/partials with identifiable provenance are removed; manual
+Downloads, local imports, bookmarks and progress are preserved by this migration.
 
 ## 11. Verification requirements
 
@@ -314,7 +336,15 @@ Automated contracts must cover:
 - process-death recovery for pending state and fresh session reconstruction from bootstrap.
 - Nav-to-NCX fallback, invalid navigation-node filtering, and body failure independence;
 - source bytes remaining unchanged and no Reader derivative directory being created;
-- MOBI/TXT virtual Publication href and Locator conformance across platforms.
+- MOBI/TXT in-memory Publication href and Locator conformance across platforms;
+- cold open while non-current chapters/pages are blocked, with no original-file request,
+  download task, complete-file artifact or continuing background transfer;
+- oversized/unstructured TXT chapters, ignored Range, malformed length, interrupted
+  responses, concurrent reads, cancellation, revision changes and account isolation;
+- explicit download deduplication, resume, cancellation, storage failure and recovery;
+- actual novel EPUB plus independent TXT measurements: server parse, first body,
+  first readable view, transferred bytes and peak body cache. Results must identify
+  platform/device and distinguish measured evidence from pending acceptance.
 
 Android acceptance includes building and deploying the debug APK to an explicitly selected physical Android device, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
 

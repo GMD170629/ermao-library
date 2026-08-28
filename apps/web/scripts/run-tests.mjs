@@ -18,12 +18,12 @@ async function findTests(directory) {
   return tests;
 }
 
-const tests = (await Promise.all([findTests("lib"), findTests("features")]))
+const tests = (await Promise.all([findTests("lib"), findTests("features"), findTests("shared")]))
   .flat()
   .sort();
 
 if (tests.length === 0) {
-  console.error("No test files found under lib or features.");
+  console.error("No test files found under lib, features or shared.");
   process.exit(1);
 }
 

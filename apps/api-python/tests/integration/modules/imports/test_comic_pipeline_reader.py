@@ -171,7 +171,13 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "comic"
     assert bootstrap["sourceFormat"] == "image_dir"
-    assert "downloadArtifact" not in bootstrap["publication"]
+    assert set(bootstrap["publication"]) == {
+        "kind",
+        "manifestUrl",
+        "positionsUrl",
+        "pageUrlTemplate",
+        "imageVariants",
+    }
 
     manifest_response = client.get(
         f"/api/reader/v4/resources/{resource.id}/comic/manifest"

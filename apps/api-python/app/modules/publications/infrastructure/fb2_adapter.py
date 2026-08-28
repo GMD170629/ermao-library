@@ -8,7 +8,6 @@ import hashlib
 import html
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree
@@ -30,6 +29,9 @@ from app.modules.publications.domain.model import (
 from app.modules.publications.infrastructure.locator_dom import (
     WEB_SECURITY_PROFILE,
     decorate_markup_head,
+)
+from app.modules.publications.infrastructure.snapshot_cache import (
+    PublicationSnapshotCache,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
@@ -79,7 +81,11 @@ class _Fb2Section:
 class _Fb2Snapshot:
     publication: NormalizedPublication
     source_mtime: float
-    resources_by_href: dict[str, tuple[str, bytes]]
+    resources_by_href: dict[str, tuple[str, bytes | str]]
+    sections_by_href: dict[str, _Fb2Section]
+    element_anchors: dict[ElementTree.Element, str]
+    original_targets: dict[str, str]
+    image_hrefs: dict[str, str]
 
 
 def _local_name(tag: str) -> str:
@@ -194,8 +200,8 @@ def _safe_resource_href(raw_href: str) -> str:
 
 def _binary_resources(
     root: ElementTree.Element,
-) -> tuple[dict[str, tuple[str, bytes]], dict[str, str]]:
-    resources: dict[str, tuple[str, bytes]] = {}
+) -> tuple[dict[str, tuple[str, bytes | str]], dict[str, str]]:
+    resources: dict[str, tuple[str, bytes | str]] = {}
     href_by_identifier: dict[str, str] = {}
     seen_identifiers: set[str] = set()
     total_size = 0
@@ -208,21 +214,22 @@ def _binary_resources(
         if identifier in seen_identifiers:
             raise PublicationCorruptError("FB2 contains duplicate binary identifiers")
         seen_identifiers.add(identifier)
-        try:
-            encoded = "".join("".join(binary.itertext()).split())
-            content = base64.b64decode(encoded, validate=True)
-        except (ValueError, binascii.Error) as error:
-            raise PublicationCorruptError("FB2 binary resource is invalid") from error
-        if len(content) > MAX_BINARY_RESOURCE_BYTES:
+        encoded = "".join("".join(binary.itertext()).split())
+        estimated_size = (len(encoded) // 4) * 3 - (
+            len(encoded) - len(encoded.rstrip("="))
+        )
+        if (
+            not encoded
+            or estimated_size < 1
+            or estimated_size > MAX_BINARY_RESOURCE_BYTES
+        ):
             raise PublicationCorruptError("FB2 binary resource exceeds the size limit")
-        if not _matches_image_type(content, media_type):
-            raise PublicationCorruptError("FB2 image resource content is invalid")
-        total_size += len(content)
+        total_size += estimated_size
         if total_size > MAX_TOTAL_BINARY_BYTES:
             raise PublicationCorruptError("FB2 binary resources exceed the size limit")
         safe_identifier = hashlib.sha256(identifier.encode()).hexdigest()[:20]
         href = f"fb2/images/{safe_identifier}.{extension}"
-        resources[href] = (media_type, content)
+        resources[href] = (media_type, encoded)
         href_by_identifier[identifier] = href
     return resources, href_by_identifier
 
@@ -450,7 +457,6 @@ def _toc_entry(section: _Fb2Section) -> PublicationTocEntry:
     )
 
 
-@lru_cache(maxsize=64)
 def _snapshot(
     source_path_value: str,
     source_size: int,
@@ -480,22 +486,12 @@ def _snapshot(
     sections, element_anchors, original_targets = _build_sections(root, title)
     if not sections:
         raise PublicationCorruptError("FB2 reading order is empty")
-    resources_by_href: dict[str, tuple[str, bytes]] = {
+    resources_by_href: dict[str, tuple[str, bytes | str]] = {
         _STYLESHEET_HREF: ("text/css", _STYLESHEET),
         **binary_resources,
     }
     reading_order: list[PublicationLink] = []
     for section in sections:
-        resources_by_href[section.resource_href] = (
-            "application/xhtml+xml",
-            _section_xhtml(
-                section,
-                language=language,
-                element_anchors=element_anchors,
-                original_targets=original_targets,
-                image_hrefs=image_hrefs,
-            ),
-        )
         reading_order.append(
             PublicationLink(
                 href=section.resource_href,
@@ -527,12 +523,17 @@ def _snapshot(
         publication=publication,
         source_mtime=source_path.stat().st_mtime,
         resources_by_href=resources_by_href,
+        sections_by_href={section.resource_href: section for section in sections},
+        element_anchors=element_anchors,
+        original_targets=original_targets,
+        image_hrefs=image_hrefs,
     )
 
 
 class Fb2PublicationAdapter(PublicationAdapter):
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root
+        self._cache: PublicationSnapshotCache[_Fb2Snapshot] = PublicationSnapshotCache()
 
     def open(self, source: PublicationSource) -> NormalizedPublication:
         return self._require_snapshot(source).publication
@@ -545,9 +546,33 @@ class Fb2PublicationAdapter(PublicationAdapter):
         snapshot = self._require_snapshot(source)
         safe_href = _safe_resource_href(href)
         indexed = snapshot.resources_by_href.get(safe_href)
-        if indexed is None:
+        section = snapshot.sections_by_href.get(safe_href)
+        if section is not None:
+            media_type = "application/xhtml+xml"
+            content = _section_xhtml(
+                section,
+                language=snapshot.publication.language,
+                element_anchors=snapshot.element_anchors,
+                original_targets=snapshot.original_targets,
+                image_hrefs=snapshot.image_hrefs,
+            )
+        elif indexed is not None:
+            media_type, payload = indexed
+            if isinstance(payload, str):
+                try:
+                    content = base64.b64decode(payload, validate=True)
+                except (ValueError, binascii.Error) as error:
+                    raise PublicationCorruptError(
+                        "FB2 binary resource is invalid"
+                    ) from error
+                if not _matches_image_type(content, media_type):
+                    raise PublicationCorruptError(
+                        "FB2 image resource content is invalid"
+                    )
+            else:
+                content = payload
+        else:
             raise PublicationResourceNotFoundError
-        media_type, content = indexed
         return PublicationResource(
             href=safe_href,
             media_type=media_type,
@@ -565,13 +590,19 @@ class Fb2PublicationAdapter(PublicationAdapter):
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_FB2_SOURCE_BYTES:
             raise PublicationCorruptError("FB2 source exceeds the size limit")
-        return _snapshot(
+        key = (
             str(source_path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
             source.title,
             source.author,
         )
+        return self._cache.get(
+            key, lambda: _snapshot(*key), max(1, stat_result.st_size * 8)
+        )
+
+    def close(self) -> None:
+        self._cache.close()
 
 
 __all__ = [

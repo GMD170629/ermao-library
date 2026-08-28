@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { detectPdfCropBox, pdfContinuousWindowPages } from './pdf-layout';
 
-test('PDF continuous mode keeps only the current page and two neighbors on each side', () => {
-  assert.deepEqual(pdfContinuousWindowPages(5, 20), [3, 4, 5, 6, 7]);
-  assert.deepEqual(pdfContinuousWindowPages(1, 20), [1, 2, 3]);
-  assert.deepEqual(pdfContinuousWindowPages(20, 20), [18, 19, 20]);
+test('PDF continuous mode keeps only the current page and one neighbor on each side', () => {
+  assert.deepEqual(pdfContinuousWindowPages(5, 20), [4, 5, 6]);
+  assert.deepEqual(pdfContinuousWindowPages(1, 20), [1, 2]);
+  assert.deepEqual(pdfContinuousWindowPages(20, 20), [19, 20]);
 });
 
 test('PDF crop analysis returns a normalized reliable content box', () => {

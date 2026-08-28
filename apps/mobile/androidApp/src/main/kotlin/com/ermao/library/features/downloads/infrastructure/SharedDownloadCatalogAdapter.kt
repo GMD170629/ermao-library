@@ -24,24 +24,9 @@ class SharedDownloadCatalogAdapter(
     override suspend fun listArtifacts(namespace: DownloadNamespace): List<CompletedDownloadArtifact> =
         catalog.records(namespace.toAndroid()).mapNotNull { record ->
             record.takeIf(AndroidDownloadRecord::isReadable)
-                ?.takeIf { files.hasLocalArtifact(it.localReference) }
+                ?.takeIf { files.hasLocalArtifact(it.localReference, it.expectedBytes) }
                 ?.toArtifact()
         }
-
-    override suspend fun saveArtifact(artifact: CompletedDownloadArtifact) {
-        val namespace = artifact.identity.namespace.toAndroid()
-        val existing = catalog.records(namespace).firstOrNull {
-            it.bookId == artifact.identity.bookId &&
-                it.resourceId == artifact.identity.resourceId &&
-                it.assetId == artifact.identity.assetId
-        }
-        replaceRecord(
-            artifact.toRecord(
-                taskId = existing?.taskId ?: "artifact-${artifact.identity.assetId}",
-                createdAtEpochMillis = existing?.createdAtEpochMillis ?: artifact.completedAtEpochMillis,
-            ),
-        )
-    }
 
     override suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
         catalog.records(namespace.toAndroid())
@@ -58,7 +43,12 @@ class SharedDownloadCatalogAdapter(
     }
 
     override suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask> =
-        catalog.records(namespace.toAndroid()).map(AndroidDownloadRecord::toTask)
+        catalog.records(namespace.toAndroid()).map { record ->
+            if (record.isReadable && !files.hasLocalArtifact(record.localReference, record.expectedBytes)) {
+                record.copy(status = AndroidDownloadStatus.FailedTerminal, verified = false,
+                    errorCode = "DOWNLOAD_LOCAL_FILE_INVALID").toTask()
+            } else record.toTask()
+        }
 
     override suspend fun saveTask(task: DownloadTask) {
         val namespace = task.descriptor.identity.namespace.toAndroid()
@@ -115,7 +105,7 @@ private fun AndroidDownloadRecord.descriptor() = DownloadDescriptor(
     resourceTitle = resourceTitle,
     format = format,
     readerType = downloadReaderType(readerType),
-    source = DownloadSource(sourceApiPath, sourceMimeType, sourceBytes ?: expectedBytes),
+    source = DownloadSource(sourceApiPath, sourceMimeType, sourceBytes ?: expectedBytes, sourceModifiedAtMillis),
     resourceIndex = resourceIndex,
     resourceSortOrder = resourceSortOrder,
     artifactKind = DownloadArtifactKind.valueOf(artifactKind),
@@ -127,6 +117,7 @@ private fun AndroidDownloadRecord.descriptor() = DownloadDescriptor(
                 member.sourceApiPath,
                 member.sourceMimeType,
                 member.expectedBytes,
+                member.sourceModifiedAtMillis,
             ),
         )
     },
@@ -156,6 +147,7 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
         assetId = descriptor.identity.assetId,
         sourceApiPath = descriptor.source.apiPath,
         sourceMimeType = descriptor.source.mimeType,
+        sourceModifiedAtMillis = descriptor.source.sourceModifiedAtMillis,
         expectedBytes = descriptor.totalBytes,
         sourceBytes = descriptor.source.totalBytes,
         artifactKind = descriptor.artifactKind.name,
@@ -165,6 +157,7 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
                 sequenceIndex = member.sequenceIndex,
                 sourceApiPath = member.source.apiPath,
                 sourceMimeType = member.source.mimeType,
+                sourceModifiedAtMillis = member.source.sourceModifiedAtMillis,
                 expectedBytes = member.source.totalBytes,
             )
         },
@@ -181,16 +174,7 @@ private fun DownloadTask.toRecord(createdAtEpochMillis: Long, updatedAtEpochMill
     )
 }
 
-private fun CompletedDownloadArtifact.toRecord(taskId: String, createdAtEpochMillis: Long): AndroidDownloadRecord =
-    DownloadTask(
-        id = taskId,
-        descriptor = descriptor,
-        status = DownloadTaskStatus.Completed,
-        transferredBytes = verifiedBytes,
-        artifact = this,
-    ).toRecord(createdAtEpochMillis, completedAtEpochMillis)
-
-private fun AndroidDownloadStatus.toShared(): DownloadTaskStatus = when (this) {
+internal fun AndroidDownloadStatus.toShared(): DownloadTaskStatus = when (this) {
     AndroidDownloadStatus.Queued -> DownloadTaskStatus.Queued
     AndroidDownloadStatus.Downloading, AndroidDownloadStatus.Verifying -> DownloadTaskStatus.Downloading
     AndroidDownloadStatus.Paused -> DownloadTaskStatus.Paused

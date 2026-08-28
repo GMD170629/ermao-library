@@ -39,8 +39,8 @@ class AndroidDownloadCatalog(
     suspend fun upsert(record: AndroidDownloadRecord): List<AndroidDownloadRecord> {
         var replaced = emptyList<AndroidDownloadRecord>()
         mutate(record.namespace) { records ->
-            replaced = records.filter { it.taskId == record.taskId || catalogKey(it) == catalogKey(record) }
-            records.filterNot { it.taskId == record.taskId || catalogKey(it) == catalogKey(record) } + record
+            replaced = records.filter { it.taskId == record.taskId }
+            records.filterNot { it.taskId == record.taskId } + record
         }
         return replaced
     }
@@ -86,53 +86,19 @@ class AndroidDownloadCatalog(
             }
             require(payload.records.all { it.namespace == namespace })
             require(payload.records.map(AndroidDownloadRecord::taskId).distinct().size == payload.records.size)
-            require(payload.records.map(::catalogKey).distinct().size == payload.records.size)
-            val legacyKindle = payload.records.filter { it.format.equals(LEGACY_GENERIC_KINDLE_FORMAT, true) }
-            val cleaned = payload.copy(records = payload.records - legacyKindle.toSet())
-            legacyKindle.forEach { removeLegacyKindleArtifacts(it) }
-            if (decoded.schemaVersion != cleaned.schemaVersion || cleaned.records.size != payload.records.size) {
-                writePayloadFile(namespace, cleaned)
-            }
-            cleaned
+            if (decoded.schemaVersion != payload.schemaVersion) writePayloadFile(namespace, payload)
+            payload
         } catch (error: SerializationException) {
-            resetInvalidCatalog(namespace, error)
+            invalidCatalog(error)
         } catch (error: IllegalArgumentException) {
-            resetInvalidCatalog(namespace, error)
+            invalidCatalog(error)
         }
     }
 
-    private fun resetInvalidCatalog(
-        namespace: AndroidDownloadNamespace,
+    private fun invalidCatalog(
         cause: Exception,
     ): CatalogPayload {
-        val directory = namespaceDirectory(namespace)
-        if (directory.exists() && !directory.deleteRecursively()) {
-            throw AndroidDownloadStorageException("Unable to remove invalid managed downloads", cause)
-        }
-        return CatalogPayload()
-    }
-
-    private fun removeLegacyKindleArtifacts(record: AndroidDownloadRecord) {
-        record.localReference?.let(::resolveManagedReference)?.deleteManagedArtifact()
-        val namespaceKey = sha256(
-            "${record.namespace.serverIdentity}|${record.namespace.userId}|${record.namespace.authorizationVersion}",
-        )
-        val artifactKey = sha256("${record.resourceId}:${record.assetId}")
-        val taskKey = sha256(record.taskId).take(16)
-        val artifacts = File(rootDirectory, "$namespaceKey/artifacts")
-        listOf(
-            File(artifacts, "$artifactKey.bin"),
-            File(artifacts, "$artifactKey.part"),
-            File(artifacts, "$artifactKey-$taskKey.bundle"),
-            File(artifacts, ".$artifactKey-$taskKey.bundle.part"),
-        ).forEach(File::deleteManagedArtifact)
-    }
-
-    private fun resolveManagedReference(reference: String): File? {
-        if (reference.isBlank() || reference.startsWith('/') || reference.contains('\\')) return null
-        val root = rootDirectory.canonicalFile
-        val candidate = File(root, reference).canonicalFile
-        return candidate.takeIf { it.path.startsWith(root.path + File.separator) }
+        throw AndroidDownloadStorageException("Managed download catalog is invalid; existing files were preserved", cause)
     }
 
     private suspend fun writePayload(namespace: AndroidDownloadNamespace, payload: CatalogPayload) = withContext(Dispatchers.IO) {

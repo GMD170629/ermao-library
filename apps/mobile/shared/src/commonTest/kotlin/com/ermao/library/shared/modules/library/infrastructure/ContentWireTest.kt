@@ -18,6 +18,14 @@ import kotlinx.serialization.json.Json
 class ContentWireTest {
     private val decoder = ApiEnvelopeDecoder(Json { ignoreUnknownKeys = false; explicitNulls = false })
 
+    @Test fun absentCompletedFlagRemainsUnknownRatherThanUnread() {
+        val decoded = decoder.decode(200,
+            """{"ok":true,"data":{"books":[{"id":"book","title":"Book","coverUrl":"/api/books/book/cover","progress":100}]}}""",
+            BooksWire.serializer())
+        val book = assertIs<ApiResult.Success<BooksWire>>(decoded).value.books.single().toDomain()
+        assertNull(book.completed)
+    }
+
     @Test
     fun decodesBookFacetPageWithStableIdentity() {
         val result = decoder.decode(

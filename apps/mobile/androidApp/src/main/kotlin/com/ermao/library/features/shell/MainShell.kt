@@ -1,5 +1,7 @@
 package com.ermao.library.features.shell
 
+import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -91,8 +93,6 @@ import com.ermao.library.features.downloads.application.DownloadActionsViewModel
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
 import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
-import com.ermao.library.features.downloads.model.isSupportedNativeDownloadReader
-import com.ermao.library.features.downloads.model.isSupportedNativeReaderEntry
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedBookScreen
 import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
@@ -373,6 +373,24 @@ fun MainShell(
             testTag = "tab-select-${tab.stableValue}",
         )
     }
+    com.ermao.library.features.workmanagement.BookManagementHost(
+        repository = workManagementRepository, context = contentContext,
+        canManage = session.authorization.canManageSystem,
+        onUnauthorized = onSessionUnauthorized, onRefreshAuthorization = onRefreshSession,
+        onChanged = { change ->
+            contentRepository.invalidate(contentContext.namespace)
+            libraryViewModel.refreshAfterManagement()
+            if (change.deleted && change.resourceId == null) {
+                listOf(homeBackStack, libraryBackStack, shelvesBackStack, meBackStack).forEach { stack ->
+                    val index = stack.indexOfFirst { it is BookDetailRoute && it.bookId == change.bookId }
+                    if (index >= 0) while (stack.size > index) stack.removeLastOrNull()
+                }
+                downloadActionsViewModel.removeBook(change.bookId)
+            }
+        },
+        onOpenKindleSettings = { selectedTabValue = TabId.Me.stableValue; meBackStack.add(AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle)) },
+        onOpenKindleQueue = { selectedTabValue = TabId.Me.stableValue; meBackStack.add(AdministrativeSettingsRoute.KindleQueue) },
+    ) {
     WarmPageNavigationSuite(
         items = navigationItems,
         selected = selectedTab,
@@ -394,7 +412,10 @@ fun MainShell(
                         key = "home-$contentKey",
                         factory = HomeViewModel.factory(contentRepository, contentContext, appContext, onSessionUnauthorized),
                     )
-                    val homeState by homeViewModel.uiState.collectAsState()
+                    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
+    val managementChange = com.ermao.library.features.workmanagement.managementChange()
+    androidx.compose.runtime.LaunchedEffect(managementRevision) { if (managementRevision > 0 && managementChange != null) homeViewModel.refreshAfterManagement(managementChange.bookId, managementChange.readingStatusChanged) }
+    val homeState by homeViewModel.uiState.collectAsState()
                     HomeScreen(
                         state = homeState,
                         repository = contentRepository,
@@ -511,7 +532,7 @@ fun MainShell(
                     val downloadsViewModel: DownloadCenterViewModel = viewModel(
                         key = "downloads-$contentKey",
                         factory = DownloadCenterViewModel.factory(downloadCatalog, downloadNamespace) { record ->
-                            downloadFiles.hasLocalArtifact(record.localReference)
+                            downloadFiles.hasLocalArtifact(record.localReference, record.expectedBytes)
                         },
                     )
                     val downloadsState by downloadsViewModel.uiState.collectAsStateWithLifecycle()
@@ -531,7 +552,7 @@ fun MainShell(
                     val downloadedBookViewModel: DownloadedBookViewModel = viewModel(
                         key = "downloaded-book-$contentKey-${route.bookId}",
                         factory = DownloadedBookViewModel.factory(downloadCatalog, downloadNamespace, route.bookId) { record ->
-                            downloadFiles.hasLocalArtifact(record.localReference)
+                            downloadFiles.hasLocalArtifact(record.localReference, record.expectedBytes)
                         },
                     )
                     val downloadedBookState by downloadedBookViewModel.uiState.collectAsStateWithLifecycle()
@@ -539,7 +560,7 @@ fun MainShell(
                         state = downloadedBookState,
                         onBack = { meBackStack.removeLastOrNull() },
                         onOpenResource = { record ->
-                            if (isSupportedNativeDownloadReader(record.readerType, record.format)) {
+                            if (ReaderFormatSupport.canReadOriginal(record.readerType, record.format)) {
                                 appContext.startActivity(
                                     ReaderActivity.createManagedDownloadIntent(
                                         context = appContext,
@@ -653,6 +674,7 @@ fun MainShell(
                             if (showMaster) libraryContent(Modifier.weight(0.44f))
                             Box(Modifier.weight(if (showMaster) 0.56f else 1f).fillMaxSize()) {
                                 BookContentNavigation(
+                                    sourceTab = selectedTab,
                                     bookId = route.bookId, repository = contentRepository, shelfRepository = shelfRepository,
                                     context = contentContext, managementRepository = workManagementRepository,
                                     downloads = downloadActionsViewModel, canManageSystem = session.authorization.canManageSystem,
@@ -679,7 +701,9 @@ fun MainShell(
                         key = "facet-$contentKey-${route.kind}-${route.facetId}",
                         factory = FacetViewModel.factory(contentRepository, contentContext, kind, route.facetId, onSessionUnauthorized),
                     )
-                    val facetState by facetViewModel.uiState.collectAsState()
+                    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
+    androidx.compose.runtime.LaunchedEffect(managementRevision) { if (managementRevision > 0) facetViewModel.refreshAfterManagement() }
+    val facetState by facetViewModel.uiState.collectAsState()
                     FacetScreen(
                         kind = kind,
                         state = facetState,
@@ -702,6 +726,7 @@ fun MainShell(
             },
         )
     }
+    }
 }
 
 private fun openResource(
@@ -711,7 +736,7 @@ private fun openResource(
     unit: com.ermao.library.shared.modules.library.domain.ReadingUnit? = null,
     onUnavailable: (ReaderUnavailableRoute) -> Unit,
 ) {
-    if (isSupportedNativeReaderEntry(resource.readerType, resource.format)) {
+    if (ReaderFormatSupport.canOpenOnline(resource.readerType, resource.format)) {
         context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id,
             unit?.let { com.ermao.library.shared.modules.reader.readingUnitLaunchTarget(resource.readerType, it.href, it.metadata.pageNumber) }))
     } else {
@@ -727,7 +752,7 @@ private fun openDownloadedResource(
 ) {
     val localReference = record.localReference
     if (!record.isReadable || localReference.isNullOrBlank()) return
-    if (isSupportedNativeDownloadReader(record.readerType, record.format)) {
+    if (ReaderFormatSupport.canReadOriginal(record.readerType, record.format)) {
         context.startActivity(
             ReaderActivity.createManagedDownloadIntent(
                 context = context,

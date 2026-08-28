@@ -56,4 +56,5 @@ data class Asset(
     val sortOrder: Int?,
     val url: String?,
     val downloadUrl: String?,
+    val sourceFormat: String? = null,
 )

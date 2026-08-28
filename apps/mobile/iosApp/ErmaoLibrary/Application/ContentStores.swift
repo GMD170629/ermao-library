@@ -65,7 +65,6 @@ final class HomeStore: ObservableObject {
     }
 
     private func loadContinueReading(generation: UUID) async {
-        continueReading = .loading
         do {
             let value = try await client.fetchContinueReading(context: context)
             guard continueGeneration == generation else { return }
@@ -83,7 +82,6 @@ final class HomeStore: ObservableObject {
     }
 
     private func loadRecentReading(generation: UUID) async {
-        recentReading = .loading
         do {
             let values = try await client.fetchRecentReading(context: context, limit: 12)
             guard recentReadingGeneration == generation else { return }
@@ -97,7 +95,6 @@ final class HomeStore: ObservableObject {
     }
 
     private func loadRecentAdded(generation: UUID) async {
-        recentAdded = .loading
         do {
             let values = try await client.fetchRecentAdded(context: context, limit: 12)
             guard recentAddedGeneration == generation else { return }
@@ -306,6 +303,36 @@ final class LibraryStore: ObservableObject {
 
     func refresh() {
         revalidate(selectedScope)
+    }
+
+    func refreshAfterManagement() {
+        for (scope, snapshot) in scopeStates where snapshot.loadedPage > 0 {
+            let token = discoveryRuntime.beginInitialRequest(scope: sharedScope(scope))
+            update(scope) { $0.isLoadingNextPage = true }
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    var pages: [PageResponse] = []
+                    for page in 1...snapshot.loadedPage {
+                        let response = try await fetch(scope: scope, state: snapshot, page: page)
+                        pages.append(response)
+                        let totalPages: Int
+                        switch response {
+                        case .books(let value): totalPages = value.totalPages
+                        case .groupings(let value): totalPages = value.totalPages
+                        }
+                        if page >= totalPages { break }
+                    }
+                    guard discoveryRuntime.acceptPage(token: token, isEmpty: pages.allSatisfy(\.isEmpty)) else { return }
+                    for (index, page) in pages.enumerated() { apply(page, scope: scope, page: index + 1) }
+                } catch {
+                    guard discoveryRuntime.fail(token: token, errorCode: "CONTENT_LOAD_FAILED") else { return }
+                    update(scope) { $0.isLoadingNextPage = false; $0.hasPaginationError = true }
+                    if case ContentClientError.unauthorized = error { onUnauthorized() }
+                    if case ContentClientError.inaccessible = error { update(scope) { $0.results = .inaccessible } }
+                }
+            }
+        }
     }
 
     private func revalidate(_ scope: LibraryScope) {
@@ -602,6 +629,33 @@ final class FacetStore: ObservableObject {
             Task { [weak self] in await self?.loadPage(page.page + 1, generation: generation) }
         } else {
             load()
+        }
+    }
+
+    func refreshAfterManagement() {
+        let lastPage: Int
+        if case .ready(let page) = state { lastPage = max(1, page.page) } else { lastPage = 1 }
+        let generation = UUID()
+        requestGeneration = generation
+        isLoadingNextPage = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                var pages: [FacetPage] = []
+                for page in 1...lastPage {
+                    let result = try await client.fetchFacet(context: context, query: FacetQuery(kind: kind,
+                        facetID: facetID, sort: kind == .series ? .seriesIndex : .recentRead, page: page, pageSize: 24))
+                    guard requestGeneration == generation else { return }
+                    pages.append(result)
+                    if page >= result.totalPages { break }
+                }
+                for (index, result) in pages.enumerated() { apply(result, appending: index > 0) }
+            } catch {
+                guard requestGeneration == generation else { return }
+                isLoadingNextPage = false; hasPaginationError = true
+                if case ContentClientError.unauthorized = error { onUnauthorized() }
+                if case ContentClientError.inaccessible = error { state = .inaccessible }
+            }
         }
     }
 

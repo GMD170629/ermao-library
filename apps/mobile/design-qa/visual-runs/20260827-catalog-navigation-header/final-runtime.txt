@@ -1,0 +1,4 @@
+    versionCode=1 minSdk=26 targetSdk=36
+    versionName=1.0.0
+    lastUpdateTime=2026-08-27 20:19:01
+    mResumedActivity: ActivityRecord{33aac1f u0 com.ermao.library/.MainActivity t1675}

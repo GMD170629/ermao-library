@@ -50,19 +50,20 @@ final class IosPdfiumDocument: @unchecked Sendable {
 
     static func open(
         source: ErmaoShared.RemoteByteRangeReaderSource,
-        cache: IosPdfRangeCache,
+        cache: ErmaoShared.PdfRangeMemory,
         server: any ErmaoShared.PdfRangeServerPort
     ) async throws -> IosPdfiumDocument {
         #if canImport(ShukuPdfium)
         guard IosPdfiumFeatureFlags.nativeLibraryMatchesLock else {
             throw IosReaderFailure(code: .engineError)
         }
-        let loader = IosPdfRangeLoader(source: source, cache: cache, server: server)
-        try await loader.ensureAvailable()
+        let loader = ErmaoShared.PdfRangeLoader(source: source,
+            identity: ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId), cache: cache, server: server)
+        try await loader.probe()
         let context = IosPdfiumByteSourceContext(
             loader: loader,
             cache: cache,
-            identity: IosPdfRangeCacheIdentity(source: source)
+            identity: ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId)
         )
         let retained = Unmanaged.passRetained(context)
         var byteSource = ShukuPdfiumByteSource(
@@ -73,12 +74,14 @@ final class IosPdfiumDocument: @unchecked Sendable {
             request_range: iosPdfiumRequestRange
         )
         guard shuku_pdfium_initialize() == SHUKU_PDFIUM_OK else {
+            loader.close()
             retained.release()
             throw IosReaderFailure(code: .engineError)
         }
         var document: OpaquePointer?
         let createStatus = shuku_pdfium_document_create(&byteSource, &document)
         guard createStatus == SHUKU_PDFIUM_OK, let document else {
+            loader.close()
             retained.release()
             shuku_pdfium_shutdown()
             throw IosReaderFailure(code: IosPdfiumDocument.failureCode(createStatus))
@@ -91,6 +94,7 @@ final class IosPdfiumDocument: @unchecked Sendable {
             guard count > 0 else { throw IosReaderFailure(code: .pdfInvalid) }
             return IosPdfiumDocument(native: document, context: context, pageCount: count)
         } catch {
+            loader.close()
             shuku_pdfium_document_close(document)
             retained.release()
             shuku_pdfium_shutdown()
@@ -175,16 +179,12 @@ final class IosPdfiumDocument: @unchecked Sendable {
         #endif
     }
 
-    func prefetch(pageIndex: Int) async {
-        guard pageIndex >= 0, pageIndex < pageCount else { return }
-        try? await ensurePage(pageIndex)
-    }
-
     func close() {
         #if canImport(ShukuPdfium)
         operationLock.withLock {
             guard !closed else { return }
             closed = true
+            context.loader.close()
             shuku_pdfium_document_close(native)
             Unmanaged.passUnretained(context).release()
             shuku_pdfium_shutdown()
@@ -199,8 +199,12 @@ final class IosPdfiumDocument: @unchecked Sendable {
         guard pageIndex >= 0, pageIndex < pageCount else {
             throw IosReaderFailure(code: .pdfRangeInvalid)
         }
+        context.loader.activateUnit(pageIndex: Int32(pageIndex))
         try await Self.advanceUntilAvailable(context: context) { [self] in
-            operationLock.withLock { shuku_pdfium_page_step(native, Int32(pageIndex)) }
+            try operationLock.withLock {
+                try requireOpen()
+                return shuku_pdfium_page_step(native, Int32(pageIndex))
+            }
         }
         #else
         throw IosReaderFailure(code: .engineError)
@@ -210,17 +214,16 @@ final class IosPdfiumDocument: @unchecked Sendable {
     #if canImport(ShukuPdfium)
     private static func advanceUntilAvailable(
         context: IosPdfiumByteSourceContext,
-        step: () -> ShukuPdfiumStatus
+        step: () throws -> ShukuPdfiumStatus
     ) async throws {
         for _ in 0 ..< 256 {
-            let status = step()
+            try Task.checkCancellation()
+            let status = try step()
             if status == SHUKU_PDFIUM_OK { return }
             guard status == SHUKU_PDFIUM_NEED_DATA else {
                 throw IosReaderFailure(code: failureCode(status))
             }
-            let hints = context.hints.takeAll()
-            guard !hints.isEmpty else { throw IosReaderFailure(code: .pdfRangeInvalid) }
-            try await context.loader.load(hints)
+            guard try await context.loader.drainRequested().boolValue else { throw IosReaderFailure(code: .pdfRangeInvalid) }
         }
         throw IosReaderFailure(code: .pdfRangeInvalid)
     }
@@ -244,15 +247,14 @@ final class IosPdfiumDocument: @unchecked Sendable {
 
 #if canImport(ShukuPdfium)
 private final class IosPdfiumByteSourceContext: @unchecked Sendable {
-    let loader: IosPdfRangeLoader
-    let cache: IosPdfRangeCache
-    let identity: IosPdfRangeCacheIdentity
-    let hints = IosPdfRangeHintQueue()
+    let loader: ErmaoShared.PdfRangeLoader
+    let cache: ErmaoShared.PdfRangeMemory
+    let identity: ErmaoShared.PdfRangeCacheIdentity
 
     init(
-        loader: IosPdfRangeLoader,
-        cache: IosPdfRangeCache,
-        identity: IosPdfRangeCacheIdentity
+        loader: ErmaoShared.PdfRangeLoader,
+        cache: ErmaoShared.PdfRangeMemory,
+        identity: ErmaoShared.PdfRangeCacheIdentity
     ) {
         self.loader = loader
         self.cache = cache
@@ -265,13 +267,11 @@ private func iosPdfiumIsRangeCached(
     _ offset: UInt64,
     _ size: UInt64
 ) -> Int32 {
-    guard let opaque, offset <= UInt64(Int64.max), size <= UInt64(Int.max) else { return 0 }
+    guard let opaque, offset <= UInt64(Int64.max), size <= UInt64(Int32.max) else { return 0 }
     let context = Unmanaged<IosPdfiumByteSourceContext>.fromOpaque(opaque).takeUnretainedValue()
-    return context.cache.readCached(
-        identity: context.identity,
-        offset: Int64(offset),
-        length: Int(size)
-    ) == nil ? 0 : 1
+    return context.cache.isCached(
+        identity: context.identity, offset: Int64(offset), count: Int32(size)
+    ) ? 1 : 0
 }
 
 private func iosPdfiumReadCachedBlock(
@@ -281,14 +281,15 @@ private func iosPdfiumReadCachedBlock(
     _ size: UInt64
 ) -> Int32 {
     guard let opaque, let destination,
-          offset <= UInt64(Int64.max), size <= UInt64(Int.max) else { return 0 }
+          offset <= UInt64(Int64.max), size <= UInt64(Int32.max) else { return 0 }
     let context = Unmanaged<IosPdfiumByteSourceContext>.fromOpaque(opaque).takeUnretainedValue()
     guard let bytes = context.cache.readCached(
         identity: context.identity,
         offset: Int64(offset),
-        length: Int(size)
+        count: Int32(size)
     ) else { return 0 }
-    bytes.copyBytes(to: destination.assumingMemoryBound(to: UInt8.self), count: bytes.count)
+    let data = bytes.foundationData()
+    data.copyBytes(to: destination.assumingMemoryBound(to: UInt8.self), count: data.count)
     return 1
 }
 
@@ -299,9 +300,9 @@ private func iosPdfiumRequestRange(
 ) {
     guard let opaque,
           offset <= UInt64(Int64.max), size <= UInt64(Int64.max) else { return }
-    Unmanaged<IosPdfiumByteSourceContext>.fromOpaque(opaque).takeUnretainedValue().hints.append(
+    Unmanaged<IosPdfiumByteSourceContext>.fromOpaque(opaque).takeUnretainedValue().loader.request(
         offset: Int64(offset),
-        length: Int64(size)
+        size: Int64(size)
     )
 }
 #endif

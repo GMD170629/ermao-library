@@ -1,0 +1,297 @@
+Calculating task graph as no cached configuration is available for tasks: :shared:testAndroidHostTest :androidApp:testDebugUnitTest :androidApp:lintDebug verifyDesignTokens verifyMobileOfflineContract
+> Task :shared:androidPreBuild UP-TO-DATE
+> Task :shared:preAndroidMainBuild UP-TO-DATE
+> Task :shared:processAndroidHostTestJavaRes NO-SOURCE
+> Task :shared:kmpPartiallyResolvedDependenciesChecker
+> Task :pdfiumNative:preBuild UP-TO-DATE
+> Task :mobiCore:preBuild UP-TO-DATE
+> Task :shared:androidJar UP-TO-DATE
+> Task :archiveCore:preBuild UP-TO-DATE
+> Task :androidApp:syncReaderAssets UP-TO-DATE
+> Task :archiveCore:preDebugBuild UP-TO-DATE
+> Task :androidApp:syncBrandAsset UP-TO-DATE
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :mobiCore:preDebugBuild UP-TO-DATE
+> Task :mobiCore:prepareLintJarForPublish UP-TO-DATE
+> Task :pdfiumNative:generateDebugAssets UP-TO-DATE
+> Task :pdfiumNative:preDebugBuild UP-TO-DATE
+> Task :shared:processAndroidMainManifest UP-TO-DATE
+> Task :shared:generateAndroidMainEmptyResourceFiles UP-TO-DATE
+> Task :pdfiumNative:prepareLintJarForPublish UP-TO-DATE
+> Task :shared:preAndroidHostTestBuild UP-TO-DATE
+> Task :shared:writeAndroidMainAarMetadata UP-TO-DATE
+> Task :androidApp:syncReaderTestFb2Assets UP-TO-DATE
+> Task :pdfiumNative:processDebugNavigationResources UP-TO-DATE
+> Task :shared:prepareLintJarForPublish UP-TO-DATE
+> Task :shared:checkAndroidMainAarMetadata UP-TO-DATE
+> Task :generateDesignTokens UP-TO-DATE
+> Task :archiveCore:generateDebugResources UP-TO-DATE
+> Task :pdfiumNative:javaPreCompileDebug UP-TO-DATE
+> Task :archiveCore:javaPreCompileDebug UP-TO-DATE
+> Task :archiveCore:processDebugNavigationResources UP-TO-DATE
+> Task :archiveCore:writeDebugAarMetadata UP-TO-DATE
+> Task :pdfiumNative:generateDebugResources UP-TO-DATE
+> Task :mobiCore:processDebugManifest UP-TO-DATE
+> Task :archiveCore:processDebugManifest UP-TO-DATE
+> Task :mobiCore:writeDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:extractDeepLinksDebug UP-TO-DATE
+> Task :mobiCore:generateDebugResources UP-TO-DATE
+> Task :pdfiumNative:processDebugManifest UP-TO-DATE
+> Task :mobiCore:processDebugNavigationResources UP-TO-DATE
+> Task :mobiCore:javaPreCompileDebug UP-TO-DATE
+> Task :mobiCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :pdfiumNative:extractDeepLinksDebug UP-TO-DATE
+> Task :pdfiumNative:mapDebugSourceSetPaths UP-TO-DATE
+> Task :pdfiumNative:packageDebugResources UP-TO-DATE
+> Task :pdfiumNative:writeDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:generateDebugAssets UP-TO-DATE
+> Task :mobiCore:checkDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:mergeDebugAssets UP-TO-DATE
+> Task :pdfiumNative:compileDebugLibraryResources UP-TO-DATE
+> Task :mobiCore:prepareDebugArtProfile UP-TO-DATE
+> Task :archiveCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :archiveCore:generateDebugAssets UP-TO-DATE
+> Task :shared:extractAndroidMainAnnotations UP-TO-DATE
+> Task :androidApp:preBuild UP-TO-DATE
+> Task :archiveCore:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :pdfiumNative:checkDebugAarMetadata UP-TO-DATE
+> Task :archiveCore:packageDebugResources UP-TO-DATE
+> Task :androidApp:preDebugUnitTestBuild UP-TO-DATE
+> Task :mobiCore:packageDebugResources UP-TO-DATE
+> Task :archiveCore:extractDeepLinksDebug UP-TO-DATE
+> Task :pdfiumNative:mergeDebugJniLibFolders UP-TO-DATE
+> Task :archiveCore:prepareDebugArtProfile UP-TO-DATE
+> Task :archiveCore:mergeDebugAssets UP-TO-DATE
+> Task :archiveCore:parseDebugLocalResources UP-TO-DATE
+> Task :pdfiumNative:mergeDebugAssets UP-TO-DATE
+> Task :archiveCore:prepareLintJarForPublish UP-TO-DATE
+> Task :archiveCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :androidApp:preDebugAndroidTestBuild SKIPPED
+> Task :pdfiumNative:parseDebugLocalResources UP-TO-DATE
+> Task :pdfiumNative:mergeDebugNativeLibs NO-SOURCE
+> Task :mobiCore:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :mobiCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :archiveCore:checkDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:extractProguardFiles UP-TO-DATE
+> Task :pdfiumNative:prepareDebugArtProfile UP-TO-DATE
+> Task :archiveCore:extractProguardFiles UP-TO-DATE
+> Task :pdfiumNative:writeDebugLintModelMetadata UP-TO-DATE
+> Task :androidApp:preDebugBuild UP-TO-DATE
+> Task :pdfiumNative:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :androidApp:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :pdfiumNative:extractProguardFiles UP-TO-DATE
+> Task :androidApp:generateDebugResources UP-TO-DATE
+> Task :archiveCore:compileDebugLibraryResources UP-TO-DATE
+> Task :mobiCore:writeDebugLintModelMetadata UP-TO-DATE
+> Task :pdfiumNative:stripDebugDebugSymbols NO-SOURCE
+> Task :androidApp:mapDebugSourceSetPaths UP-TO-DATE
+> Task :mobiCore:parseDebugLocalResources UP-TO-DATE
+> Task :androidApp:extractProguardFiles UP-TO-DATE
+> Task :archiveCore:generateDebugRFile UP-TO-DATE
+> Task :archiveCore:writeDebugLintModelMetadata UP-TO-DATE
+> Task :mobiCore:generateDebugRFile UP-TO-DATE
+> Task :pdfiumNative:generateDebugRFile UP-TO-DATE
+> Task :androidApp:extractDeepLinksDebug UP-TO-DATE
+> Task :androidApp:generateDebugBuildConfig UP-TO-DATE
+> Task :androidApp:javaPreCompileDebug UP-TO-DATE
+> Task :androidApp:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :androidApp:processDebugNavigationResources UP-TO-DATE
+> Task :mobiCore:configureCMakeDebug[arm64-v8a]
+> Task :mobiCore:preDebugAndroidTestBuild UP-TO-DATE
+> Task :archiveCore:extractDebugAnnotations UP-TO-DATE
+> Task :archiveCore:preDebugAndroidTestBuild UP-TO-DATE
+> Task :archiveCore:preDebugUnitTestBuild UP-TO-DATE
+> Task :pdfiumNative:preDebugAndroidTestBuild UP-TO-DATE
+> Task :mobiCore:compileDebugLibraryResources UP-TO-DATE
+> Task :androidApp:checkDebugAarMetadata UP-TO-DATE
+> Task :androidApp:packageDebugResources UP-TO-DATE
+> Task :mobiCore:preDebugUnitTestBuild UP-TO-DATE
+> Task :archiveCore:configureCMakeDebug[arm64-v8a]
+> Task :archiveCore:configureCMakeDebug[x86_64]
+> Task :mobiCore:configureCMakeDebug[x86_64]
+> Task :verifyDesignTokens
+> Task :pdfiumNative:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :pdfiumNative:extractDebugAnnotations UP-TO-DATE
+> Task :androidApp:mergeDebugResources UP-TO-DATE
+> Task :androidApp:compileDebugNavigationResources UP-TO-DATE
+> Task :pdfiumNative:preDebugUnitTestBuild UP-TO-DATE
+> Task :pdfiumNative:compileDebugKotlin NO-SOURCE
+> Task :androidApp:parseDebugLocalResources UP-TO-DATE
+> Task :mobiCore:extractDebugAnnotations UP-TO-DATE
+> Task :pdfiumNative:processDebugJavaRes NO-SOURCE
+> Task :androidApp:processDebugMainManifest UP-TO-DATE
+> Task :androidApp:generateDebugRFile UP-TO-DATE
+> Task :pdfiumNative:mergeDebugJavaResource UP-TO-DATE
+> Task :androidApp:processDebugManifest UP-TO-DATE
+> Task :androidApp:processDebugManifestForPackage UP-TO-DATE
+> Task :pdfiumNative:compileDebugJavaWithJavac UP-TO-DATE
+> Task :mobiCore:compileDebugKotlin UP-TO-DATE
+> Task :pdfiumNative:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :archiveCore:compileDebugKotlin UP-TO-DATE
+> Task :pdfiumNative:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :pdfiumNative:syncDebugLibJars UP-TO-DATE
+> Task :mobiCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :pdfiumNative:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :mobiCore:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :pdfiumNative:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :mobiCore:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :mobiCore:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :mobiCore:buildCMakeDebug[arm64-v8a]
+> Task :mobiCore:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :archiveCore:processDebugJavaRes UP-TO-DATE
+> Task :archiveCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :mobiCore:processDebugJavaRes UP-TO-DATE
+> Task :pdfiumNative:generateDebugLintModel UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebug UP-TO-DATE
+> Task :archiveCore:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :pdfiumNative:createFullJarDebug UP-TO-DATE
+> Task :archiveCore:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :archiveCore:mergeDebugJavaResource UP-TO-DATE
+> Task :archiveCore:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :archiveCore:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :archiveCore:createFullJarDebug UP-TO-DATE
+> Task :mobiCore:createFullJarDebug UP-TO-DATE
+> Task :mobiCore:mergeDebugJavaResource UP-TO-DATE
+> Task :archiveCore:syncDebugLibJars UP-TO-DATE
+> Task :archiveCore:generateDebugLintModel UP-TO-DATE
+> Task :mobiCore:buildCMakeDebug[x86_64]
+> Task :pdfiumNative:bundleDebugLocalLintAar UP-TO-DATE
+> Task :mobiCore:syncDebugLibJars UP-TO-DATE
+> Task :archiveCore:lintAnalyzeDebug UP-TO-DATE
+> Task :mobiCore:generateDebugLintModel UP-TO-DATE
+> Task :archiveCore:buildCMakeDebug[x86_64]
+> Task :mobiCore:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:stripDebugDebugSymbols UP-TO-DATE
+> Task :pdfiumNative:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :pdfiumNative:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :mobiCore:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :mobiCore:bundleDebugLocalLintAar UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebug UP-TO-DATE
+> Task :androidApp:processDebugResources UP-TO-DATE
+> Task :archiveCore:buildCMakeDebug[arm64-v8a]
+> Task :archiveCore:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :archiveCore:stripDebugDebugSymbols UP-TO-DATE
+> Task :archiveCore:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :archiveCore:bundleDebugLocalLintAar UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :archiveCore:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :archiveCore:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :archiveCore:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :archiveCore:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :mobiCore:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :verifyMobileOfflineContract
+> Task :shared:compileAndroidMain
+> Task :shared:processAndroidMainJavaRes UP-TO-DATE
+> Task :shared:mergeAndroidMainJavaResource UP-TO-DATE
+> Task :shared:bundleAndroidMainClassesToRuntimeJar
+> Task :shared:bundleAndroidMainClassesToCompileJar
+> Task :shared:createFullJarAndroidMain
+> Task :shared:syncAndroidMainLibJars
+> Task :shared:bundleAndroidMainLocalLintAar
+> Task :shared:generateAndroidHostTestLintModel
+
+> Task :androidApp:compileDebugKotlin FAILED
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/infrastructure/ReadiumPdfSession.kt:198:58 'when' expression must be exhaustive. Add the 'is RemoteReflowableReaderSource' branch or an 'else' branch.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:77:60 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:78:60 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:82:33 Unresolved reference 'createAndroidReaderServerGateway'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:400:29 Unresolved reference 'createAndroidReaderServerGateway'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:404:13 No parameter with name 'downloadPort' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:405:13 No parameter with name 'sinkFactory' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:405:44 Unresolved reference 'downloadSinkFactory'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:406:13 No parameter with name 'nativePdfiumRangeV1' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:616:35 Unresolved reference 'createAndroidReaderServerGateway'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:762:31 Unresolved reference 'createAndroidReaderServerGateway'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:763:33 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:774:54 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:776:33 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:778:38 Unresolved reference 'downloadSinkFactory'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:780:24 Unresolved reference 'PublicationDownloadContent'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:780:61 Unresolved reference 'source'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:782:24 Unresolved reference 'PublicationDownloadFailure'.
+e: file:///home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/reader/presentation/ReaderActivity.kt:784:36 Unresolved reference 'readerErrorCode'.
+
+> Task :shared:compileAndroidHostTest FAILED
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:34:53 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:35:37 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:70:53 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:98:44 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:127:58 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/KtorReaderBootstrapGatewayTest.kt:145:28 Unresolved reference 'downloadableOriginal'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:4:60 Unresolved reference 'LocalReaderSourceResolver'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:5:60 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:6:60 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:7:60 Unresolved reference 'PublicationDownloadSinkFactory'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:15:60 Unresolved reference 'ReaderPublicationDownload'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:38:28 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:38:54 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:38:57 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:40:17 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:59:28 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:59:54 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:59:57 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:61:17 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:63:24 Unresolved reference 'LocalReaderSourceResolver'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:76:28 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:76:54 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:76:57 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:78:17 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:99:13 No parameter with name 'downloadableOriginal' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:111:13 No parameter with name 'downloadPort' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:111:28 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:111:54 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:111:57 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:113:17 Unresolved reference 'PublicationDownloadResult'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:115:13 No parameter with name 'sinkFactory' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:115:27 Unresolved reference 'PublicationDownloadSinkFactory'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:126:23 Unresolved reference 'PublicationDownloadPort'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:127:19 Unresolved reference 'LocalReaderSourceResolver'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:131:9 No parameter with name 'downloadPort' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:132:9 No parameter with name 'sinkFactory' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:132:23 Unresolved reference 'PublicationDownloadSinkFactory'.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:133:9 No parameter with name 'localSourceResolver' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:134:9 No parameter with name 'nativePdfiumRangeV1' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:146:9 No parameter with name 'downloadableOriginal' found.
+e: file:///home/liumianti/ermao-library/apps/mobile/shared/src/commonTest/kotlin/com/ermao/library/shared/modules/reader/ReaderPublicationBootstrapTest.kt:146:32 Unresolved reference 'ReaderPublicationDownload'.
+
+> Task :shared:lintAnalyzeAndroidHostTest
+
+[Incubating] Problems report is available at: file:///home/liumianti/ermao-library/apps/mobile/build/reports/problems/problems-report.html
+
+FAILURE: Build completed with 2 failures.
+
+1: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':androidApp:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+2: Task failed with an exception.
+-----------
+* What went wrong:
+Execution failed for task ':shared:compileAndroidHostTest'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+==============================================================================
+
+BUILD FAILED in 10s
+167 actionable tasks: 21 executed, 146 up-to-date
+Configuration cache entry stored.

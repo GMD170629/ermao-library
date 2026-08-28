@@ -33,6 +33,32 @@ new module -> private helpers in a compatibility or legacy module
 
 Cross-capability collaboration must use a named public API, an application port, or a stable contract. Never bypass a boundary with deep imports, circular imports, runtime import tricks, or a generic shared helper.
 
+### Mandatory Reuse and Single Implementation
+
+In every implementation or refactor, reuse existing logic before writing new logic. The same business rule, workflow, or infrastructure behavior must have one authoritative implementation and owner. Copying, renaming, or independently rewriting equivalent logic is prohibited, even across different entry points, features, formats, or platforms. This is a mandatory gate, not an optional optimization.
+
+Before writing code:
+
+1. Search the repository by user intent and behavior, not only by the proposed function name. Trace existing entry points, public APIs, ports, adapters, state owners, and tests.
+2. Identify the implementation to reuse. If it lacks a needed variant, extend its explicit contract or extract the common behavior at its owning layer before adding the new caller; do not create a second implementation first.
+3. Keep capability-specific behavior in its capability and expose a public API or application port. Only stable, business-neutral behavior with at least two actual consumers belongs in generic shared infrastructure. The second consumer is the point to extract, not permission to duplicate.
+4. Keep only actual platform, protocol, or format differences in adapters. Mobile domain/application logic belongs in KMP where supported; native UI and SDK bindings remain platform-owned. Cross-language contracts use authoritative schemas and conformance fixtures instead of manually maintained copies. Similar syntax alone does not establish identical semantics.
+5. If safe reuse conflicts with a dependency boundary, an immutable migration, a runtime/language constraint, or the bounded task scope, stop and explain the conflict for a user decision. Do not bypass the boundary or silently approve a duplicate as a temporary exception.
+
+All related entry points must call the same owner for equivalent behavior. Separate user intentions may have separate use cases, but authentication, transport, response validation, cancellation, persistence, retry primitives, and other common mechanisms must be reused through their proper boundaries. A Reader and a Download Center must not each maintain a complete-file download pipeline.
+
+When replacing existing behavior, switch every in-scope caller and remove the superseded implementation, hidden fallback, duplicated state, and obsolete wiring. Compatibility code may delegate to the authoritative implementation; it may not contain a second copy of the rules. Record the reused owner, migrated callers, deleted duplicates, and verification evidence in the change summary. Finding a duplicate outside safe scope requires reporting it and obtaining a scope decision, not adding another copy.
+
+### Requirement Fidelity and End-to-End Verification
+
+A user's explicit behavior change must be implemented through the full execution chain: entry point, application use case, adapter, network/storage operation, fallback, and recovery. Removing a button, changing a route, renaming a function, or moving work into the background does not remove the underlying behavior.
+
+- Treat superseded repository guidance as migration debt. Do not use an older ADR, legacy implementation, or passing legacy test to justify behavior the user has explicitly rejected. Update conflicting guidance within the authorized scope and distinguish the required target from current implementation evidence.
+- For every request to remove a behavior or dependency, define both the desired outcome and the forbidden operations. Trace all supported entry variants and prove that the forbidden operations no longer occur, including retries, fallback, reopening, and empty-cache startup.
+- Verify implementation semantics in the actual pinned SDK and real call path. Names such as `stream`, `async`, `lazy`, or `online`, chunked writes after whole-response buffering, and a loading indicator are not evidence of streaming or incremental processing.
+- Tests must cover the absence of forbidden side effects as well as successful output. For streaming, hold the rest of a response open and verify early consumption and bounded buffering; for online reading, verify that readable content appears without completing the whole-file transfer. Cached reopening alone cannot prove online reading.
+- Do not claim completion from compilation, an entry-point change, or one format/platform test. State which paths were checked and which evidence is still missing. An audit-only request remains read-only for application code until implementation is authorized.
+
 ### Target Repository Layout
 
 Create directories only when they contain real code. Do not create empty architecture scaffolding.
@@ -343,14 +369,14 @@ Quality requirements:
 
 Refactor one named capability at a time:
 
-1. inventory entry points, callers, roles, contracts, state changes, and side effects;
+1. inventory entry points, callers, roles, contracts, state changes, side effects, and existing implementations to reuse;
 2. identify the current public contracts and invariants;
 3. extract pure rules and explicit types;
 4. replace raw SQL in the touched capability with ORM models and typed queries;
 5. introduce capability-specific ports and adapters;
 6. move orchestration and transaction ownership into an application use case;
 7. make routes, workers, and UI thin adapters;
-8. remove the legacy implementation after callers switch;
+8. switch every in-scope caller, then remove the legacy implementation, obsolete wiring, and hidden fallback;
 9. run focused and broad gates;
 10. record an ADR for durable cross-capability decisions.
 
@@ -363,6 +389,7 @@ Temporary compatibility code must have a named owner and an explicit removal con
 A change is complete only when:
 
 - the business capability and invariants are explicit;
+- the reuse search, authoritative implementation owner, and migration of equivalent callers are documented;
 - code resides in the target capability and layer;
 - dependency direction is valid and no private cross-feature import was added;
 - all database access uses SQLAlchemy ORM or typed expression APIs with no handwritten SQL;
@@ -371,6 +398,7 @@ A change is complete only when:
 - stable boundaries use explicit validated types;
 - both `zh-CN` and `en-US` are complete;
 - focused tests and all applicable quality gates pass;
+- end-to-end evidence verifies the requested behavior and the absence of explicitly forbidden operations, including fallback and recovery paths;
 - no duplicate implementation, unexplained compatibility shim, warning, or unowned follow-up remains.
 
 ## Functional Bug Triage
@@ -382,7 +410,7 @@ For every reported broken interaction:
 1. Identify the underlying user intent and feature surface.
 2. List the expected interaction variants for that surface.
 3. Check which variants are already implemented, partially implemented, or missing.
-4. Fix the reported issue and any closely related missing behaviors unless the scope would become risky or unrelated.
+4. When implementation is authorized, fix the reported issue and any closely related missing behaviors unless the scope would become risky or unrelated. For audit-only requests, report findings without changing application code.
 5. In the final response, name the broader capability area that was checked, not only the literal symptom.
 
 Example: if the user says EPUB left/right page turning and swipe page turning do not work, expand the investigation to the full reader navigation surface:
@@ -422,6 +450,18 @@ publication directory, or equivalent format-conversion artifact. MOBI-family and
 TXT support must use their parser-backed in-memory Publication directly. The
 existing dormant import conversion subsystem is not a Reader fallback and must
 not be connected to Reader bootstrap, delivery, download, cache, or progress.
+
+### Online Reading and Offline Download Separation
+
+Online reading and explicit Downloads are separate capabilities. Original-format preservation and exact-progress contracts remain in force.
+
+- Online Reader entry must not require, start, or await a complete-file download. Fetch the necessary chapters, resources, pages, or bounded byte ranges on demand and display readable content before the entire publication is transferred. Moving a whole-file download into Reader bootstrap, a loading screen, a cache warmup, or a background task is prohibited.
+- Reopening, chapter jumps, retries, and fallback must preserve that boundary. If an adapter cannot read online, report the capability gap; do not silently download the whole file as a fallback or label the format as online-capable.
+- Online reading retains only the current and immediate neighboring units, at most 64 MiB of body cache; a text chapter is limited to 8 MiB and each PDF Range request to 1 MiB. Validate headers before streaming bytes and cancel invalid/oversized responses immediately. Never assemble a complete publication, persist an online body store, or fill it in the background. Release session bodies on close, book change and logout.
+- Preserve complete original chapters. Necessary first server parsing is allowed without a prior import-index requirement. Server parser caches require explicit lifecycle, capacity, version invalidation and concurrent-request coalescing. Metadata and HEAD must not retrieve chapter bodies.
+- Offline download is a separate explicit user intention owned by the Download Center. Reader may consume a verified local artifact through its public contract, but must not own a second full-download pipeline or require an offline task for online reading.
+- Preserve the original publication and stable resource/locator semantics. Original-format preservation does not require complete-file acquisition on the client. Content preparation must be incremental where possible; any unavoidable whole-source indexing must be identified and measured, not described as streaming.
+- Acceptance must cover an empty cache and a slow or deliberately incomplete transfer, first readable content, bounded memory, navigation, cancellation, reopening, and failure recovery for each supported format and platform. Network streaming, incremental parsing, and on-demand rendering are separate properties and must be reported separately.
 
 ### Mobile Work Detail single source of truth
 

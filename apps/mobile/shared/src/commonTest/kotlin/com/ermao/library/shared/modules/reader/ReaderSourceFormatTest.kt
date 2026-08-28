@@ -8,6 +8,23 @@ import kotlin.test.assertTrue
 
 class ReaderSourceFormatTest {
     @Test
+    fun bothNativePlatformsShareExactFormatAndOnlineFamilySupport() {
+        for (format in listOf("EPUB", "TXT", "FB2", "MOBI", "AZW", "AZW3", "PRC")) {
+            assertTrue(ReaderFormatSupport.canReadOriginal("reflowable", format))
+            assertTrue(ReaderFormatSupport.canOpenOnline("reflowable", format))
+            assertFalse(ReaderFormatSupport.canReadOriginal("comic", format))
+        }
+        for (format in listOf("CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR")) {
+            assertTrue(ReaderFormatSupport.canReadOriginal("comic", format))
+        }
+        assertTrue(ReaderFormatSupport.canReadOriginal("pdf", "PDF"))
+        assertTrue(ReaderFormatSupport.canOpenOnline("reflowable", "KINDLE"))
+        assertFalse(ReaderFormatSupport.canReadOriginal("reflowable", "KINDLE"))
+        assertFalse(ReaderFormatSupport.canReadOriginal("audio", "MP3"))
+        assertFalse(ReaderFormatSupport.canOpenOnline("reflowable", "KFX"))
+    }
+
+    @Test
     fun mobiFamilyRetainsItsContainerFormatWhileSharingOneReaderFormat() {
         listOf(
             ReaderSourceFormat.Mobi,

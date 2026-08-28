@@ -1,0 +1,66 @@
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.AndroidShellSmokeTest:
+INSTRUMENTATION_STATUS: test=eachRootTabOwnsAVisibleNavigationDestination
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.AndroidShellSmokeTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with TestTag = 'tab-shelves' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.AndroidShellSmokeTest.eachRootTabOwnsAVisibleNavigationDestination(AndroidShellSmokeTest.kt:176)
+
+INSTRUMENTATION_STATUS: stream=
+Error in eachRootTabOwnsAVisibleNavigationDestination(com.ermao.library.AndroidShellSmokeTest):
+java.lang.AssertionError: Assert failed: The component with TestTag = 'tab-shelves' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.AndroidShellSmokeTest.eachRootTabOwnsAVisibleNavigationDestination(AndroidShellSmokeTest.kt:176)
+
+INSTRUMENTATION_STATUS: test=eachRootTabOwnsAVisibleNavigationDestination
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderEpubInstrumentedTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.reader.ReaderEpubInstrumentedTest:
+INSTRUMENTATION_STATUS: test=opensRendersNavigatesAndAppliesPreferencesWithReadium
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderEpubInstrumentedTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=2
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+INSTRUMENTATION_STATUS: stream=
+Error in opensRendersNavigatesAndAppliesPreferencesWithReadium(com.ermao.library.features.reader.ReaderEpubInstrumentedTest):
+java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+INSTRUMENTATION_STATUS: test=opensRendersNavigatesAndAppliesPreferencesWithReadium
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_RESULT: stream=
+
+Time: 24.639
+There were 2 failures:
+1) eachRootTabOwnsAVisibleNavigationDestination(com.ermao.library.AndroidShellSmokeTest)
+java.lang.AssertionError: Assert failed: The component with TestTag = 'tab-shelves' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.AndroidShellSmokeTest.eachRootTabOwnsAVisibleNavigationDestination(AndroidShellSmokeTest.kt:176)
+2) opensRendersNavigatesAndAppliesPreferencesWithReadium(com.ermao.library.features.reader.ReaderEpubInstrumentedTest)
+java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+FAILURES!!!
+Tests run: 2,  Failures: 2
+
+
+INSTRUMENTATION_CODE: -1

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B9A100000000000000000001 /* NativeBookManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A100000000000000000001 /* NativeBookManagement.swift */; };
 		C01100000000000000000004 /* IosReaderControlAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000004 /* IosReaderControlAdapters.swift */; };
 		C01100000000000000000003 /* IosReaderControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000003 /* IosReaderControlSheets.swift */; };
 		C01100000000000000000002 /* IosReaderControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000002 /* IosReaderControls.swift */; };
@@ -47,8 +48,8 @@
 		B04710000000000000000047 /* MultiDownloadSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04710000000000000000047 /* MultiDownloadSheet.swift */; };
 		B04720000000000000000047 /* BookDetailScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04720000000000000000047 /* BookDetailScrollView.swift */; };
 		BA0100000000000000000001 /* WorkManagementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0100000000000000000001 /* WorkManagementStore.swift */; };
-		BA0200000000000000000002 /* WorkManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA0200000000000000000002 /* WorkManagementView.swift */; };
 		B04800000000000000000048 /* SharedContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000048 /* SharedContentClient.swift */; };
+		BDAA31000000000000000001 /* KotlinByteArrayData.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDAA31000000000000000001 /* KotlinByteArrayData.swift */; };
 		B04800000000000000000049 /* SharedShelfClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04800000000000000000049 /* SharedShelfClient.swift */; };
 		B04900000000000000000049 /* ContentUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04900000000000000000049 /* ContentUITestFixture.swift */; };
 		B05000000000000000000050 /* SettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05000000000000000000050 /* SettingsModels.swift */; };
@@ -83,7 +84,7 @@
 		B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07900000000000000000079 /* IosEpubReaderSession.swift */; };
 		B08000000000000000000080 /* IosEpubReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08000000000000000000080 /* IosEpubReaderView.swift */; };
 		B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08400000000000000000084 /* IosReaderLocalDatabase.swift */; };
-		B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08500000000000000000085 /* IosPublicationDownloadSink.swift */; };
+		B08500000000000000000085 /* IosOnlinePublication.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08500000000000000000085 /* IosOnlinePublication.swift */; };
 		B08600000000000000000086 /* IosReaderComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08600000000000000000086 /* IosReaderComposition.swift */; };
 		B08800000000000000000088 /* IosMobiCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08800000000000000000088 /* IosMobiCore.swift */; };
 		B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15700000000000000000157 /* IosMobiContentSanitizer.swift */; };
@@ -98,7 +99,6 @@
 		B18500000000000000000185 /* IosPdfReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18500000000000000000185 /* IosPdfReaderView.swift */; };
 		B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18600000000000000000186 /* IosPdfPageCountStore.swift */; };
 		B18700000000000000000187 /* PdfReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18700000000000000000187 /* PdfReaderTests.swift */; };
-		B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18800000000000000000188 /* IosPdfRangeAccess.swift */; };
 		B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18900000000000000000189 /* IosPdfiumDocument.swift */; };
 		B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19000000000000000000190 /* IosPdfiumNavigator.swift */; };
 		B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19200000000000000000192 /* IosReaderPrivateContentCache.swift */; };
@@ -187,6 +187,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F9A100000000000000000001 /* NativeBookManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBookManagement.swift; sourceTree = "<group>"; };
 		C01200000000000000000004 /* IosReaderControlAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlAdapters.swift; sourceTree = "<group>"; };
 		C01200000000000000000003 /* IosReaderControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlSheets.swift; sourceTree = "<group>"; };
 		C01200000000000000000002 /* IosReaderControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControls.swift; sourceTree = "<group>"; };
@@ -227,8 +228,8 @@
 		F04710000000000000000047 /* MultiDownloadSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiDownloadSheet.swift; sourceTree = "<group>"; };
 		F04720000000000000000047 /* BookDetailScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookDetailScrollView.swift; sourceTree = "<group>"; };
 		FA0100000000000000000001 /* WorkManagementStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementStore.swift; sourceTree = "<group>"; };
-		FA0200000000000000000002 /* WorkManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkManagementView.swift; sourceTree = "<group>"; };
 		F04800000000000000000048 /* SharedContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedContentClient.swift; sourceTree = "<group>"; };
+		FDAA31000000000000000001 /* KotlinByteArrayData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KotlinByteArrayData.swift; sourceTree = "<group>"; };
 		F04800000000000000000049 /* SharedShelfClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedShelfClient.swift; sourceTree = "<group>"; };
 		F04900000000000000000049 /* ContentUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentUITestFixture.swift; sourceTree = "<group>"; };
 		F05000000000000000000050 /* SettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModels.swift; sourceTree = "<group>"; };
@@ -263,7 +264,7 @@
 		F07900000000000000000079 /* IosEpubReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderSession.swift; sourceTree = "<group>"; };
 		F08000000000000000000080 /* IosEpubReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderView.swift; sourceTree = "<group>"; };
 		F08400000000000000000084 /* IosReaderLocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderLocalDatabase.swift; sourceTree = "<group>"; };
-		F08500000000000000000085 /* IosPublicationDownloadSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPublicationDownloadSink.swift; sourceTree = "<group>"; };
+		F08500000000000000000085 /* IosOnlinePublication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosOnlinePublication.swift; sourceTree = "<group>"; };
 		F08600000000000000000086 /* IosReaderComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderComposition.swift; sourceTree = "<group>"; };
 		F08800000000000000000088 /* IosMobiCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiCore.swift; sourceTree = "<group>"; };
 		F15700000000000000000157 /* IosMobiContentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiContentSanitizer.swift; sourceTree = "<group>"; };
@@ -278,7 +279,6 @@
 		F18500000000000000000185 /* IosPdfReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderView.swift; sourceTree = "<group>"; };
 		F18600000000000000000186 /* IosPdfPageCountStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfPageCountStore.swift; sourceTree = "<group>"; };
 		F18700000000000000000187 /* PdfReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PdfReaderTests.swift; sourceTree = "<group>"; };
-		F18800000000000000000188 /* IosPdfRangeAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfRangeAccess.swift; sourceTree = "<group>"; };
 		F18900000000000000000189 /* IosPdfiumDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumDocument.swift; sourceTree = "<group>"; };
 		F19000000000000000000190 /* IosPdfiumNavigator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfiumNavigator.swift; sourceTree = "<group>"; };
 		F19200000000000000000192 /* IosReaderPrivateContentCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderPrivateContentCache.swift; sourceTree = "<group>"; };
@@ -499,6 +499,7 @@
 				F04100000000000000000041 /* ContentStores.swift */,
 				F15600000000000000000156 /* ReaderProgressPresentationCenter.swift */,
 				F04800000000000000000048 /* SharedContentClient.swift */,
+				FDAA31000000000000000001 /* KotlinByteArrayData.swift */,
 				F04800000000000000000049 /* SharedShelfClient.swift */,
 				F04900000000000000000049 /* ContentUITestFixture.swift */,
 			);
@@ -606,10 +607,10 @@
 			isa = PBXGroup;
 			children = (
 				F04700000000000000000047 /* WorkDetailView.swift */,
+				F9A100000000000000000001 /* NativeBookManagement.swift */,
 				F04710000000000000000047 /* MultiDownloadSheet.swift */,
 				F04720000000000000000047 /* BookDetailScrollView.swift */,
 				FA0100000000000000000001 /* WorkManagementStore.swift */,
-				FA0200000000000000000002 /* WorkManagementView.swift */,
 			);
 			path = Work;
 			sourceTree = "<group>";
@@ -667,7 +668,7 @@
 				C01200000000000000000002 /* IosReaderControls.swift */,
 				C01200000000000000000001 /* IosReaderControlSession.swift */,
 				F08400000000000000000084 /* IosReaderLocalDatabase.swift */,
-				F08500000000000000000085 /* IosPublicationDownloadSink.swift */,
+				F08500000000000000000085 /* IosOnlinePublication.swift */,
 				F08600000000000000000086 /* IosReaderComposition.swift */,
 				F08800000000000000000088 /* IosMobiCore.swift */,
 				F15700000000000000000157 /* IosMobiContentSanitizer.swift */,
@@ -683,7 +684,6 @@
 				F18400000000000000000184 /* IosPdfReaderSession.swift */,
 				F18500000000000000000185 /* IosPdfReaderView.swift */,
 				F18600000000000000000186 /* IosPdfPageCountStore.swift */,
-				F18800000000000000000188 /* IosPdfRangeAccess.swift */,
 				F18900000000000000000189 /* IosPdfiumDocument.swift */,
 				F19000000000000000000190 /* IosPdfiumNavigator.swift */,
 				F19200000000000000000192 /* IosReaderPrivateContentCache.swift */,
@@ -950,11 +950,12 @@
 				B04500000000000000000045 /* LibraryView.swift in Sources */,
 				B04600000000000000000046 /* FacetView.swift in Sources */,
 				B04700000000000000000047 /* WorkDetailView.swift in Sources */,
+				B9A100000000000000000001 /* NativeBookManagement.swift in Sources */,
 				B04710000000000000000047 /* MultiDownloadSheet.swift in Sources */,
 				B04720000000000000000047 /* BookDetailScrollView.swift in Sources */,
 				BA0100000000000000000001 /* WorkManagementStore.swift in Sources */,
-				BA0200000000000000000002 /* WorkManagementView.swift in Sources */,
 				B04800000000000000000048 /* SharedContentClient.swift in Sources */,
+				BDAA31000000000000000001 /* KotlinByteArrayData.swift in Sources */,
 				B04800000000000000000049 /* SharedShelfClient.swift in Sources */,
 				B2A100000000000000000000 /* ShelfCatalogModels.swift in Sources */,
 				B2A100000000000000000001 /* SharedShelfCatalogClient.swift in Sources */,
@@ -997,7 +998,7 @@
 				C01100000000000000000002 /* IosReaderControls.swift in Sources */,
 				C01100000000000000000001 /* IosReaderControlSession.swift in Sources */,
 				B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */,
-				B08500000000000000000085 /* IosPublicationDownloadSink.swift in Sources */,
+				B08500000000000000000085 /* IosOnlinePublication.swift in Sources */,
 				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
 				B08800000000000000000088 /* IosMobiCore.swift in Sources */,
 				B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */,
@@ -1010,7 +1011,6 @@
 				B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */,
 				B18500000000000000000185 /* IosPdfReaderView.swift in Sources */,
 				B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */,
-				B18800000000000000000188 /* IosPdfRangeAccess.swift in Sources */,
 				B18900000000000000000189 /* IosPdfiumDocument.swift in Sources */,
 				B19000000000000000000190 /* IosPdfiumNavigator.swift in Sources */,
 				B19200000000000000000192 /* IosReaderPrivateContentCache.swift in Sources */,

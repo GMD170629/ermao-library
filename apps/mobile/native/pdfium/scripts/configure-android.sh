@@ -54,7 +54,7 @@ configure() {
     pdf_is_standalone=false
     use_remoteexec=false
   "
-  autoninja -C "${output}" shuku_pdfium_wrapper:shuku_pdfium
+  (cd "${PDFIUM_CHECKOUT}" && autoninja -C "${output}" shuku_pdfium_wrapper:shuku_pdfium)
   local library="${output}/libshuku_pdfium.so"
   [[ -f "${library}" ]] || {
     echo "Missing stripped libshuku_pdfium.so for ${abi}" >&2
@@ -72,7 +72,7 @@ configure x86_64 x64
 mkdir -p "${PDFIUM_DIRECTORY}/artifacts/android"
 cp "${MOBILE_DIRECTORY}/pdfiumNative/build/outputs/aar/pdfiumNative-release.aar" \
   "${PDFIUM_DIRECTORY}/artifacts/android/shuku-pdfium.aar"
-"${SCRIPT_DIRECTORY}/package-licenses.sh" "${PDFIUM_CHECKOUT}" "${PDFIUM_DIRECTORY}/artifacts"
+bash "${SCRIPT_DIRECTORY}/package-licenses.sh" "${PDFIUM_CHECKOUT}" "${PDFIUM_DIRECTORY}/artifacts"
 
 git -C "${PDFIUM_CHECKOUT}" apply --reverse "${ROOT_BUILD_PATCH}"
 rm -rf -- "${WRAPPER_DESTINATION}"

@@ -1,0 +1,112 @@
+{
+  "contractVersion": "catalog-header-navigation@1",
+  "visualSpecId": "warm-page@2.0.0",
+  "sourceCommit": "fa5a879dbd35bab30d9134a1adaa635f00b8943c",
+  "sourceState": "dirty task patch; pre-existing unrelated changes preserved",
+  "platform": "Android physical",
+  "serial": "9e896bbc",
+  "model": "Xiaomi M2102K1AC (mars)",
+  "os": "Android 12",
+  "pixels": "1440x3200",
+  "densityDpi": 560,
+  "locale": "zh-CN",
+  "appearance": "light",
+  "fontScale": 1.0,
+  "package": "com.ermao.library",
+  "versionName": "1.0.0",
+  "versionCode": 1,
+  "apkSha256": "480380e7e88997a3af40f72e7eed44a4d1118f9f3413f7b61c641ee711db88f2",
+  "baselineApkSha256": "5e1e2a265704be6a697471a410ccb72993c3a6dbd9883558e3e6b4adf24a0f4f",
+  "baselineApk": "androidApp/build/outputs/catalog-header-baseline/baseline.apk",
+  "testApkSha256": "1008e048b29d9117a02df539a300f8f58b0d845f64fed6ff4149248ded978fbc",
+  "baseline": "B0 installed build before change",
+  "candidate": "C1",
+  "evidenceType": "product-shell",
+  "dataConditions": "Existing authenticated account; no server writes. Library 47 books; recent order differs between baseline and candidate (data-dependent). Shelves empty.",
+  "target": "target-contract.md",
+  "screenshots": [
+    {
+      "name": "baseline-library.png",
+      "sha256": "50098caad1a501327f52b97a84f9b6a2344ca0d6be036bec28ccdcf1fce0166b",
+      "timestamp": "2026-08-27T20:12:37.0393145+08:00"
+    },
+    {
+      "name": "baseline-shelves.png",
+      "sha256": "a240ec48783b19646b9d8aa2e45fee8e2aae5e9e3ea99f191e2d8bbb4798cf45",
+      "timestamp": "2026-08-27T20:12:40.9353139+08:00"
+    },
+    {
+      "name": "baseline-wrong-book.png",
+      "sha256": "3aafe02e1855d13b833f61fb906966eba6172e05be4e51cf665a86d84dfe562d",
+      "timestamp": "2026-08-27T20:12:37.7393143+08:00"
+    },
+    {
+      "name": "candidate-detail-a.png",
+      "sha256": "ac23bca06b14b67333cc250b7d2111c766d36b0d418333cc78c3da5e4cac276c",
+      "timestamp": "2026-08-27T20:20:02.6512375+08:00"
+    },
+    {
+      "name": "candidate-detail-b-ready.png",
+      "sha256": "8c34512d389287f67a87a605e4e760ceadeddabee2d1626d59d8148eb4e06c73",
+      "timestamp": "2026-08-27T20:22:24.6712113+08:00"
+    },
+    {
+      "name": "candidate-library.png",
+      "sha256": "0c0e037f9d8507e7d3e249f2fc9c444c0baae84a1164639884ca8da1ac1ac156",
+      "timestamp": "2026-08-27T20:19:24.4312438+08:00"
+    },
+    {
+      "name": "candidate-shelves.png",
+      "sha256": "b0829a09d3b4fe6cda181977a4156d7430bcbfef72cbf5a4f7f13a2ebdecfbcd",
+      "timestamp": "2026-08-27T20:20:25.5032332+08:00"
+    },
+    {
+      "name": "flow-library-filter.png",
+      "sha256": "2ce33b4a4f7cb3ba8f4502dc868e1609cdf2b05d46ce056618d3d26875ca94dd",
+      "timestamp": "2026-08-27T20:25:16.5991808+08:00"
+    },
+    {
+      "name": "flow-library-search.png",
+      "sha256": "41040be9e3ab8709e85683f358d53b39979976813578eec8a57ed17c7c7410da",
+      "timestamp": "2026-08-27T20:24:40.2551873+08:00"
+    },
+    {
+      "name": "risk-library-dark.png",
+      "sha256": "ef035ea278758e8bddf5dbc8ff555bc37ff1bc734f28425bc98e8632d9726d91",
+      "timestamp": "2026-08-27T20:25:44.6711758+08:00"
+    },
+    {
+      "name": "risk-library-large.png",
+      "sha256": "6caecd29355c13febb4dd26db4025a98e991bacb8d345ea8a22d5375ac5aaf02",
+      "timestamp": "2026-08-27T20:25:49.4431749+08:00"
+    }
+  ],
+  "axes": {
+    "order": "better: shared search then native tabs",
+    "fold": "same relative target; 16dp extra compared with undersized chips is intended native control correction",
+    "density": "same: existing three-column grid and shelf list",
+    "surfaces": "better: native secondary tabs replace chips",
+    "typography": "better: shared native label sizing",
+    "colors": "same: existing semantic theme",
+    "shell": "same",
+    "adjacentConsumers": "same: collection search and book list retain gutters"
+  },
+  "riskEvidence": [
+    "library dark",
+    "library font scale 1.5; restored 1.0",
+    "English and Chinese search/tab fixtures",
+    "2x font filter sheet fixture"
+  ],
+  "unverified": [
+    "real nonempty shelf journey (account empty; rows covered by fixture)",
+    "TalkBack",
+    "external keyboard",
+    "split-screen",
+    "predictive back on newer Android",
+    "process death saved-state restoration",
+    "full product en-US screenshots",
+    "iOS out of scope"
+  ],
+  "diagnosticExcluded": "candidate-detail-b.png captured before the second tap completed; grid only, not accepted detail evidence.",
+  "finalColdLaunch": "2026-08-27: COLD, 429ms, package/version verified, resumed MainActivity, crash buffer and am_crash/am_anr events empty; font 1.0/light restored."
+}

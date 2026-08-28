@@ -32,8 +32,8 @@ class ReaderRarInstrumentedTest {
     @Test
     fun opensOriginalRar5AndCbrWithoutConversionOrUnpacking() = runBlocking {
         val fixtures = listOf(
-            Fixture("山海邮差/单行本/02 雨师借伞.rar", ReaderSourceFormat.Rar),
-            Fixture("山海邮差/典藏版/终章/04 归山.cbr", ReaderSourceFormat.Cbr),
+            Fixture("reader-pages.rar", ReaderSourceFormat.Rar),
+            Fixture("reader-pages.cbr", ReaderSourceFormat.Cbr),
         )
 
         fixtures.forEach { fixture ->
@@ -51,11 +51,11 @@ class ReaderRarInstrumentedTest {
 
             ArchiveCore.open(original).use { archive ->
                 assertEquals("libarchive 3.8.9", ArchiveCore.version)
-                assertTrue(archive.pages.isNotEmpty())
+                assertEquals(2, archive.pages.size)
                 assertTrue(archive.readPage(0).isNotEmpty())
             }
             val pages = CbzReadiumPublicationFactory().indexPages(original)
-            assertTrue(pages.isNotEmpty())
+            assertEquals(2, pages.size)
             assertEquals(pages.indices.map { "pages/$it" }, pages.map { it.resourceHref })
         }
     }

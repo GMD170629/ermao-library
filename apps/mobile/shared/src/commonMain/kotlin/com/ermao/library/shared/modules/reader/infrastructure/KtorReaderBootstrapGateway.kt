@@ -6,20 +6,17 @@ import com.ermao.library.shared.core.network.ApiMethod
 import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.core.network.AppErrorKind
-import com.ermao.library.shared.modules.reader.application.PublicationDownloadPort
-import com.ermao.library.shared.modules.reader.application.PublicationDownloadResult
-import com.ermao.library.shared.modules.reader.application.PublicationDownloadSinkFactory
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrap
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
+import com.ermao.library.shared.modules.reader.application.ReaderPublicationAccess
+import com.ermao.library.shared.modules.reader.application.ReaderPdfAccess
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
 import com.ermao.library.shared.modules.reader.application.ReaderComicAccess
 import com.ermao.library.shared.modules.reader.application.ReaderComicPage
 import com.ermao.library.shared.modules.reader.application.ReaderNavigationUnit
 import com.ermao.library.shared.modules.reader.application.ReaderPdfPage
-import com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
 import com.ermao.library.shared.modules.reader.application.ReaderRemotePublicationAccess
-import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
@@ -37,7 +34,7 @@ class KtorReaderBootstrapGateway internal constructor(
     private val createClient: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
     private val json: Json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = false },
     private val progressMapper: ReaderServerWireMapper = ReaderServerWireMapper(),
-) : ReaderServerGateway {
+) : com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway {
     constructor(clients: ApiClientFactory) : this(clients::create)
 
     override suspend fun load(request: ReaderBootstrapRequest): ReaderBootstrapResult {
@@ -100,52 +97,6 @@ class KtorReaderBootstrapGateway internal constructor(
         }
     }
 
-    override suspend fun download(
-        download: ReaderPublicationDownload,
-        sinkFactory: PublicationDownloadSinkFactory,
-    ): PublicationDownloadResult {
-        val sink = try {
-            sinkFactory.open(download)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            return PublicationDownloadResult.Failure("PUBLICATION_SINK_OPEN_FAILED", recoverable = false)
-        }
-        val client = createClient(download.profile)
-        return try {
-            when (val result = client.streamAuthenticatedDownload(
-                apiPath = download.apiPath,
-                maximumBytes = MAXIMUM_PUBLICATION_DOWNLOAD_BYTES,
-                allowedMimeTypes = download.sourceFormat.allowedMimeTypes,
-                writeChunk = sink::write,
-            )) {
-                is ApiResult.Failure -> {
-                    sink.abort()
-                    PublicationDownloadResult.Failure(
-                        result.error.code,
-                        result.error.kind.isRecoverableReaderFailure(),
-                    )
-                }
-                is ApiResult.Success -> {
-                    if (!download.sourceFormat.acceptsMimeType(result.value.mimeType)) {
-                        sink.abort()
-                        PublicationDownloadResult.Failure("DOWNLOAD_CONTENT_TYPE_INVALID", false)
-                    } else {
-                        PublicationDownloadResult.Content(sink.commit())
-                    }
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            sink.abort()
-            throw cancelled
-        } catch (_: Throwable) {
-            sink.abort()
-            PublicationDownloadResult.Failure("PUBLICATION_DOWNLOAD_FAILED", recoverable = true)
-        } finally {
-            client.close()
-        }
-    }
-
     private fun ReaderBootstrapWire.toDomain(
         request: ReaderBootstrapRequest,
         comicManifest: ReaderComicManifestWire?,
@@ -204,22 +155,6 @@ class KtorReaderBootstrapGateway internal constructor(
             ) {
                 return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
             }
-            val artifact = access.downloadArtifact
-            if (exactSourceFormat == ReaderSourceFormat.ImageDir) {
-                // IMAGE_DIR is a server-owned directory. It has canonical online pages but no
-                // original archive to download; never synthesize a ZIP for native clients.
-                if (artifact != null) {
-                    return ReaderBootstrapResult.Failure("READER_COMIC_ARCHIVE_INVALID", false)
-                }
-            } else {
-                if (artifact == null || artifact.url != "/api/reader/v4/resources/${resource.id}/comic/archive" ||
-                    artifact.sourceFormat != exactSourceFormat.wireValue ||
-                    artifact.sizeBytes <= 0 ||
-                    !exactSourceFormat.acceptsMimeType(artifact.mimeType)
-                ) {
-                    return ReaderBootstrapResult.Failure("READER_COMIC_ARCHIVE_INVALID", false)
-                }
-            }
             ReaderComicAccess(
                 manifestApiPath = access.manifestUrl,
                 pageApiPathTemplate = access.pageUrlTemplate,
@@ -269,32 +204,22 @@ class KtorReaderBootstrapGateway internal constructor(
             require(snapshotSchema == READER_SERVER_SCHEMA_VERSION.toLong())
             progressMapper.decodeSnapshot(snapshot, resource.id)
         }.getOrNull() }
-        // A non-directory resource has one downloadable original Asset. IMAGE_DIR is different:
-        // its first PAGE may be the bootstrap's primary Asset, but that PAGE must never be
-        // advertised as the whole publication. The downloads capability owns its page-set bundle.
-        val apiPath = primaryAsset.url
-        val mimeType = primaryAsset.mimeType.lowercase()
-        val expectedSizeBytes = primaryAsset.sizeBytes
-        if (!exactSourceFormat.acceptsMimeType(mimeType) || expectedSizeBytes <= 0) {
+        if (!exactSourceFormat.acceptsMimeType(primaryAsset.mimeType)) {
             return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_INVALID", false)
         }
         val displayTitle = resource.title.ifBlank { book.title }
-        val downloadableOriginal = if (exactSourceFormat == ReaderSourceFormat.ImageDir) {
-            null
-        } else {
-            ReaderPublicationDownload(
-                profile = request.profile,
-                resourceId = resource.id,
-                displayTitle = displayTitle,
-                bookId = book.id,
-                assetId = primaryAsset.id,
-                apiPath = apiPath,
-                originalSourceFormat = exactSourceFormat,
-                sourceFormat = exactSourceFormat,
-                mimeType = mimeType,
-                expectedSizeBytes = expectedSizeBytes,
-            )
-        }
+        val reflowable = exactSourceFormat.readerFormat in setOf(ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text)
+        val publicationAccess = if (reflowable) {
+            val path = "/api/reader/v4/resources/${encodePathSegment(resource.id)}/publication/"
+            if (publication?.kind != "reflowable" || publication.manifestUrl != path + "manifest.json" ||
+                publication.positionsUrl != path + "positions.json") {
+                return ReaderBootstrapResult.Failure("READER_PUBLICATION_MANIFEST_INVALID", false)
+            }
+            ReaderPublicationAccess(path + "manifest.json", path + "positions.json")
+        } else null
+        val pdfAccess = if (exactSourceFormat == ReaderSourceFormat.Pdf) {
+            ReaderPdfAccess(primaryAsset.url, primaryAsset.sizeBytes)
+        } else null
         return ReaderBootstrapResult.Content(
             ReaderBootstrap(
                 target = target,
@@ -305,7 +230,8 @@ class KtorReaderBootstrapGateway internal constructor(
                     sourceFormat = exactSourceFormat,
                     assetId = primaryAsset.id.takeUnless { exactSourceFormat == ReaderSourceFormat.ImageDir },
                 ),
-                downloadableOriginal = downloadableOriginal,
+                publicationAccess = publicationAccess,
+                pdfAccess = pdfAccess,
                 remoteSnapshot = remoteSnapshot,
                 units = orderedUnits.map { unit ->
                     ReaderNavigationUnit(
@@ -349,7 +275,6 @@ class KtorReaderBootstrapGateway internal constructor(
     private companion object {
         const val READER_SERVER_SCHEMA_VERSION = 4
         const val HEX = "0123456789ABCDEF"
-        const val MAXIMUM_PUBLICATION_DOWNLOAD_BYTES = 512L * 1024 * 1024
     }
 }
 
@@ -456,15 +381,6 @@ private data class ReaderPublicationAccessWire(
     val positionsUrl: String? = null,
     val pageUrlTemplate: String? = null,
     val imageVariants: List<String> = emptyList(),
-    val downloadArtifact: ReaderComicDownloadArtifactWire? = null,
-)
-
-@Serializable
-private data class ReaderComicDownloadArtifactWire(
-    val url: String,
-    val sourceFormat: String,
-    val mimeType: String,
-    val sizeBytes: Long,
 )
 
 @Serializable

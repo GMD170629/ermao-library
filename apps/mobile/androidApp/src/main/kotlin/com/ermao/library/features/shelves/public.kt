@@ -25,6 +25,8 @@ fun ShelfCatalogRoute(
             ShelfCatalogViewModel(repository, ShelfRequestContext(context.profile, context.namespace), shelfId, onUnauthorized)
         } },
     )
+    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
+    androidx.compose.runtime.LaunchedEffect(managementRevision) { if (managementRevision > 0) model.refresh() }
     val state by model.state.collectAsStateWithLifecycle()
     ShelfCatalogScreen(state, shelfId == null, contentRepository, context, model::search, model::selectScope,
         model::refresh, model::loadMore, onBack, onOpenShelf, onOpenBook, model::create, model::clearSaveError)

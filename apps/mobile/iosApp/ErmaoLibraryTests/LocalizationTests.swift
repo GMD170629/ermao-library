@@ -102,7 +102,7 @@ final class LocalizationTests: XCTestCase {
             "work.reader.unavailable.message",
             "work.reader.accessibility.hint",
             "reader.close",
-            "reader.download.preparing",
+            "reader.loading.publication",
             "reader.opening",
             "reader.toc",
             "reader.settings",

@@ -138,7 +138,6 @@ internal fun ReaderScreen(
     onClose: () -> Unit,
     onRetryOpen: (() -> Unit)? = null,
     onReadOnline: (() -> Unit)? = null,
-    onDeleteDownload: (() -> Unit)? = null,
     onNavigatorContainerReady: () -> Unit,
     onPanelVisibilityChange: (Boolean) -> Unit = {},
 ) {
@@ -148,6 +147,9 @@ internal fun ReaderScreen(
         ?: remember { mutableStateOf(ReaderPreferences()) }
     val currentLocation by controller?.currentLocation?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderLocation?>(null) }
+    val contentError by controller?.contentError?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<ReaderError?>(null) }
+    val displayedError = openError ?: contentError
     val restoreWarning by controller?.restoreWarning?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderError?>(null) }
     val resumeNotice by controller?.resumeNotice?.collectAsStateWithLifecycle()
@@ -265,12 +267,11 @@ internal fun ReaderScreen(
             }
 
             when {
-                openError != null -> ReaderOpenError(
-                    openError,
+                displayedError != null -> ReaderOpenError(
+                    displayedError,
                     onClose,
                     onRetryOpen,
                     onReadOnline,
-                    onDeleteDownload,
                 )
                 opening -> ReaderOpeningIndicator()
             }
@@ -1111,7 +1112,6 @@ private fun KeepScreenAwake(enabled: Boolean) {
     onClose: () -> Unit,
     onRetryOpen: (() -> Unit)?,
     onReadOnline: (() -> Unit)?,
-    onDeleteDownload: (() -> Unit)?,
 ) {
     val message = when (error.code) {
         ReaderErrorCode.UnsupportedFormat -> R.string.reader_error_unsupported
@@ -1119,6 +1119,7 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.DrmProtected -> R.string.reader_error_drm
         ReaderErrorCode.ParseFailed -> R.string.reader_error_parse
         ReaderErrorCode.ResourceMissing -> R.string.reader_error_missing
+        ReaderErrorCode.PublicationChanged -> R.string.reader_error_publication_changed
         ReaderErrorCode.OutOfMemoryRisk -> R.string.reader_error_memory
         ReaderErrorCode.LocationRestoreFailed -> R.string.reader_error_location
         ReaderErrorCode.NetworkUnavailable -> R.string.reader_error_network
@@ -1148,9 +1149,6 @@ private fun KeepScreenAwake(enabled: Boolean) {
             }
             onReadOnline?.let { readOnline ->
                 Button(readOnline) { Text(stringResource(R.string.reader_read_online)) }
-            }
-            onDeleteDownload?.let { deleteDownload ->
-                Button(deleteDownload) { Text(stringResource(R.string.reader_delete_download)) }
             }
             Button(onClose) { Text(stringResource(R.string.reader_close)) }
         }

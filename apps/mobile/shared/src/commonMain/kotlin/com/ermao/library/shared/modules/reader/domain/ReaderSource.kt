@@ -104,6 +104,24 @@ enum class ReaderSourceFormat(
     }
 }
 
+/** Native entry support has one format inventory for online and completed originals. */
+object ReaderFormatSupport {
+    fun canReadOriginal(readerType: String, format: String): Boolean {
+        val source = ReaderSourceFormat.fromWireValue(format) ?: return false
+        val expected = when (source.readerFormat) {
+            ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text -> "reflowable"
+            ReaderFormat.Comic -> "comic"
+            ReaderFormat.Pdf -> "pdf"
+            ReaderFormat.Audio -> return false
+        }
+        return readerType.trim().equals(expected, ignoreCase = true)
+    }
+
+    fun canOpenOnline(readerType: String, format: String): Boolean =
+        canReadOriginal(readerType, format) ||
+            (readerType.trim().equals("reflowable", true) && format.trim().equals("KINDLE", true))
+}
+
 sealed interface ReaderSource {
     /** Resource identity; this is the Reader/progress owner and never a file identity. */
     val resourceId: String
@@ -198,5 +216,27 @@ data class RemoteComicReaderSource(
         require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
         require(pages.isNotEmpty())
         require(pages.map(RemoteComicPage::pageIndex) == pages.indices.toList())
+    }
+}
+
+/** Server-owned original publication exposed through bounded chapter resources. */
+data class RemoteReflowableReaderSource(
+    override val resourceId: String,
+    override val displayTitle: String,
+    override val bookId: String,
+    override val assetId: String,
+    override val sourceFormat: ReaderSourceFormat,
+    val namespace: ReaderSyncNamespace,
+    val manifestApiPath: String,
+    val positionsApiPath: String,
+) : ReaderSource {
+    override val format: ReaderFormat = sourceFormat.readerFormat
+
+    init {
+        require(resourceId.isNotBlank() && bookId.isNotBlank() && assetId.isNotBlank())
+        require(displayTitle.isNotBlank())
+        require(format in setOf(ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text))
+        require(manifestApiPath.startsWith("/api/") && manifestApiPath.endsWith("/publication/manifest.json"))
+        require(positionsApiPath == manifestApiPath.removeSuffix("manifest.json") + "positions.json")
     }
 }

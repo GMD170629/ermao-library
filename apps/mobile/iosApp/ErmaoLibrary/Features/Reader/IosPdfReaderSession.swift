@@ -27,7 +27,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     @Published private(set) var canonicalPageCount: Int
     private let pageTitleHints: [String]
     private let remoteSource: ErmaoShared.RemoteByteRangeReaderSource?
-    private let rangeCache: IosPdfRangeCache?
+    private let rangeCache: ErmaoShared.PdfRangeMemory?
     private let rangeServer: (any ErmaoShared.PdfRangeServerPort)?
     private let preferencesStore: IosReaderPreferencesStore
 
@@ -59,7 +59,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         preferences: IosReaderPreferences,
         preferencesStore: IosReaderPreferencesStore,
         remoteSource: ErmaoShared.RemoteByteRangeReaderSource? = nil,
-        rangeCache: IosPdfRangeCache? = nil,
+        rangeCache: ErmaoShared.PdfRangeMemory? = nil,
         rangeServer: (any ErmaoShared.PdfRangeServerPort)? = nil,
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
@@ -446,6 +446,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     private func releaseRuntime() async {
+        defer { rangeCache?.clear() }
         tapNavigation?.close()
         tapNavigation = nil
         navigator?.delegate = nil

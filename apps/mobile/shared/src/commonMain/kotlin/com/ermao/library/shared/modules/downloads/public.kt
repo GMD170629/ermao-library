@@ -20,6 +20,7 @@ typealias DownloadBundleByteSink = com.ermao.library.shared.modules.downloads.ap
 typealias DownloadBundleByteSinkSession = com.ermao.library.shared.modules.downloads.application.DownloadBundleByteSinkSession
 typealias DownloadBundleSinkRequest = com.ermao.library.shared.modules.downloads.application.DownloadBundleSinkRequest
 typealias DownloadBundleMemberSinkRequest = com.ermao.library.shared.modules.downloads.application.DownloadBundleMemberSinkRequest
+typealias DownloadCatalogCodec = com.ermao.library.shared.modules.downloads.infrastructure.DownloadCatalogCodec
 typealias DownloadCatalogRepository = com.ermao.library.shared.modules.downloads.application.DownloadCatalogRepository
 typealias CompletedTransfer = com.ermao.library.shared.modules.downloads.application.CompletedTransfer
 typealias DownloadDescriptor = com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
@@ -39,6 +40,7 @@ typealias MultiDownloadEligibility = com.ermao.library.shared.modules.downloads.
 typealias MultiDownloadResourceState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadResourceState
 typealias MultiDownloadSelectionMark = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionMark
 typealias MultiDownloadSelectionState = com.ermao.library.shared.modules.downloads.domain.MultiDownloadSelectionState
+typealias DownloadBatchPolicy = com.ermao.library.shared.modules.downloads.domain.DownloadBatchPolicy
 typealias DownloadBatchCommand = com.ermao.library.shared.modules.downloads.domain.DownloadBatchCommand
 typealias DownloadBatchOutcomeKind = com.ermao.library.shared.modules.downloads.domain.DownloadBatchOutcomeKind
 typealias DownloadBatchResourceResult = com.ermao.library.shared.modules.downloads.domain.DownloadBatchResourceResult
@@ -52,9 +54,10 @@ typealias DownloadTransferFailure = com.ermao.library.shared.modules.downloads.a
 typealias DownloadsGateway = com.ermao.library.shared.modules.downloads.application.DownloadsGateway
 typealias DownloadResourceObservation = com.ermao.library.shared.modules.downloads.application.DownloadResourceObservation
 typealias DownloadResourceObservationKind = com.ermao.library.shared.modules.downloads.application.DownloadResourceObservationKind
+typealias DownloadCancellation = com.ermao.library.shared.modules.downloads.application.DownloadCancellation
 typealias DownloadResourceObserver = com.ermao.library.shared.modules.downloads.application.DownloadResourceObserver
 typealias DownloadResourceResult = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult
-typealias DownloadResourceReadyToOpen = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult.ReadyToOpen
+typealias DownloadResourceCompleted = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult.Completed
 typealias DownloadResourceFailure = com.ermao.library.shared.modules.downloads.application.DownloadResourceResult.Failure
 typealias DownloadResourceRuntime = com.ermao.library.shared.modules.downloads.application.DownloadResourceRuntime
 typealias DownloadedResource = com.ermao.library.shared.modules.downloads.domain.DownloadedResource
@@ -76,33 +79,6 @@ fun PrivateDataNamespace.toDownloadNamespace(): DownloadNamespace = DownloadName
 )
 
 fun downloadReaderType(value: String): DownloadReaderType = parseDownloadReaderType(value)
-
-fun downloadStartEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Start
-
-fun downloadBytesTransferredEvent(totalTransferredBytes: Long): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.BytesTransferred(totalTransferredBytes)
-
-fun downloadPauseEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Pause
-
-fun downloadResumeEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Resume
-
-fun downloadWaitForWifiEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.WaitForWifi
-
-fun downloadInsufficientSpaceEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.ReportInsufficientSpace
-
-fun downloadFailEvent(code: String, retryable: Boolean): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Fail(code, retryable)
-
-fun downloadCompleteEvent(artifact: CompletedDownloadArtifact): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Complete(artifact)
-
-fun downloadCancelEvent(): DownloadTaskEvent =
-    com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent.Cancel
 
 fun summarizeDownloadBatch(
     selectedResourceIds: Set<String>,
@@ -150,3 +126,5 @@ fun createDownloadResourceRuntime(
     catalog: DownloadCatalogRepository,
     gateway: DownloadsGateway,
 ): DownloadResourceRuntime = DownloadResourceRuntime(catalog, gateway)
+
+typealias DownloadStoredBytes = com.ermao.library.shared.modules.downloads.application.DownloadStoredBytes

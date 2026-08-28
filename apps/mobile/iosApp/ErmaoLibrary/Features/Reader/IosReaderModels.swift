@@ -22,6 +22,7 @@ enum IosReaderFailureCode: String, Sendable {
     case drmProtected = "DRM_PROTECTED"
     case parseFailed = "PARSE_FAILED"
     case resourceMissing = "RESOURCE_MISSING"
+    case publicationChanged = "PUBLICATION_CHANGED"
     case networkUnavailable = "NETWORK_UNAVAILABLE"
     case outOfMemoryRisk = "OUT_OF_MEMORY_RISK"
     case engineError = "READER_ENGINE_ERROR"
@@ -54,6 +55,7 @@ enum IosReaderFailureCode: String, Sendable {
         case .drmProtected: String(localized: "reader.error.DRM_PROTECTED")
         case .parseFailed: String(localized: "reader.error.PARSE_FAILED")
         case .resourceMissing: String(localized: "reader.error.RESOURCE_MISSING")
+        case .publicationChanged: String(localized: "reader.error.PUBLICATION_CHANGED")
         case .networkUnavailable: String(localized: "reader.error.NETWORK_UNAVAILABLE")
         case .outOfMemoryRisk: String(localized: "reader.error.OUT_OF_MEMORY_RISK")
         case .engineError: String(localized: "reader.error.READER_ENGINE_ERROR")

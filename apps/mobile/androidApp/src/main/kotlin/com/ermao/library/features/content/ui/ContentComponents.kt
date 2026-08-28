@@ -96,17 +96,19 @@ fun BookCover(
     role: CoverRole,
     modifier: Modifier = Modifier,
     cacheRevision: Int = 0,
+    managementEnabled: Boolean = true,
 ) {
-    ContentCover(
+    val cover: @Composable () -> Unit = { ContentCover(
         contentId = book.id,
         title = book.title,
         coverUrl = book.coverUrl,
         repository = repository,
         context = context,
         role = role,
-        modifier = modifier,
+        modifier = if (managementEnabled) Modifier else modifier,
         cacheRevision = cacheRevision,
-    )
+    ) }
+    if (managementEnabled) com.ermao.library.features.workmanagement.ManageableBookCover(book.id, book.title, modifier, completed = book.completed, content = cover) else cover()
 }
 
 @Composable
@@ -141,7 +143,8 @@ fun ContentCover(
 ) {
     val theme = WarmPageThemeValues
     val appContext = LocalContext.current.applicationContext
-    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, role, context.namespace, cacheRevision) {
+    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
+    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, role, context.namespace, cacheRevision, managementRevision) {
         value = AndroidCoverCache.load(appContext, context, coverUrl, repository)?.let { bytes ->
             withContext(Dispatchers.Default) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()

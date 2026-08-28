@@ -16,6 +16,7 @@ from app.api.typed_route import TypedContractRoute
 from app.bootstrap.media import media_page_index, media_streaming
 from app.bootstrap.publications import (
     ensure_publication_navigation,
+    publication_runtime,
 )
 from app.bootstrap.reader import reader_resource_service
 from app.contracts.http_errors import ErrorResponses
@@ -32,7 +33,6 @@ from app.modules.publications.public import (
 )
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
-    ReaderAssetDto,
     ReaderAudioExactLocationDto,
     ReaderBookmarkDto,
     ReaderBootstrapDto,
@@ -77,8 +77,6 @@ from app.modules.reader.presentation.v4_schemas import (
     ReaderBootstrapData,
     ReaderBootstrapResponse,
     ReaderCapabilities,
-    ReaderComicArchiveResponse,
-    ReaderComicDownloadArtifact,
     ReaderComicManifestData,
     ReaderComicManifestPage,
     ReaderComicManifestResponse,
@@ -124,17 +122,10 @@ _PUBLICATION_SERVER_FORMATS = frozenset(
 )
 LOGGER = logging.getLogger(__name__)
 _COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar", "image_dir"})
-_COMIC_ARCHIVE_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar"})
 _COMIC_IMAGE_VARIANTS: list[Literal["original", "data-saver"]] = [
     "original",
     "data-saver",
 ]
-_COMIC_ARCHIVE_MIME_TYPES = {
-    "cbz": "application/vnd.comicbook+zip",
-    "zip": "application/zip",
-    "cbr": "application/vnd.comicbook-rar",
-    "rar": "application/vnd.rar",
-}
 
 
 def _current_user(db: Session, request: Request, settings: Settings) -> User:
@@ -146,8 +137,10 @@ def _current_user(db: Session, request: Request, settings: Settings) -> User:
     return user
 
 
-def _service(db: Session, settings: Settings) -> ResourceReaderService:
-    return reader_resource_service(db, settings)
+def _service(
+    db: Session, settings: Settings, request: Request
+) -> ResourceReaderService:
+    return reader_resource_service(db, settings, publication_runtime(request))
 
 
 def _not_found() -> ReaderNotFoundError:
@@ -184,7 +177,7 @@ def _authorized_bootstrap(
         raise _not_found()
     scope = _access_scope(db, user)
     try:
-        bootstrap = _service(db, settings).load_bootstrap(
+        bootstrap = _service(db, settings, request).load_bootstrap(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=scope,
@@ -192,30 +185,6 @@ def _authorized_bootstrap(
     except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
     return user, scope, bootstrap
-
-
-def _comic_source(bootstrap: ReaderBootstrapDto) -> tuple[ReaderAssetDto, str]:
-    context = bootstrap.context
-    source_format = context.resource.source_format.strip().lower()
-    if source_format not in _COMIC_ARCHIVE_SOURCE_FORMATS:
-        raise ReaderValidationError(
-            ReaderErrorBody(
-                message="当前资源不是漫画 Publication",
-                code="READER_LOCATION_FORMAT_MISMATCH",
-            )
-        )
-    source = next(
-        (
-            item
-            for item in bootstrap.assets
-            if item.role.strip().upper()
-            in {"PRIMARY", "COMIC", "CBZ", "ZIP", "CBR", "RAR"}
-        ),
-        None,
-    )
-    if source is None:
-        raise _not_found()
-    return source, source_format
 
 
 def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
@@ -504,7 +473,7 @@ def reader_bootstrap_v4(
     try:
         ensure_publication_navigation(
             _runtime_session_factory(request),
-            settings,
+            publication_runtime(request),
         ).execute(resource_id=resource_id, access_scope=publication_scope)
     except (
         OSError,
@@ -519,7 +488,7 @@ def reader_bootstrap_v4(
             type(error).__name__,
         )
     try:
-        bootstrap = _service(db, settings).load_bootstrap(
+        bootstrap = _service(db, settings, request).load_bootstrap(
             user_id=user_id,
             resource_id=resource_id,
             access_scope=reader_scope,
@@ -544,22 +513,6 @@ def reader_bootstrap_v4(
             ),
         )
     elif normalized_format in _COMIC_SOURCE_FORMATS:
-        comic_source = None
-        comic_source_format = normalized_format
-        download_artifact = None
-        if normalized_format in _COMIC_ARCHIVE_SOURCE_FORMATS:
-            comic_source, comic_source_format = _comic_source(bootstrap)
-            download_artifact = ReaderComicDownloadArtifact(
-                url=f"/api/reader/v4/resources/{resource_id}/comic/archive",
-                sourceFormat=cast(
-                    Literal["cbz", "zip", "cbr", "rar"], comic_source_format
-                ),
-                mimeType=(
-                    comic_source.mime_type
-                    or _COMIC_ARCHIVE_MIME_TYPES[comic_source_format]
-                ),
-                sizeBytes=comic_source.size_bytes,
-            )
         publication_access = ReaderPublicationAccess(
             kind="comic",
             manifestUrl=f"/api/reader/v4/resources/{resource_id}/comic/manifest",
@@ -567,7 +520,6 @@ def reader_bootstrap_v4(
                 f"/api/reader/v4/resources/{resource_id}/comic/pages/{{pageIndex}}"
             ),
             imageVariants=_COMIC_IMAGE_VARIANTS,
-            downloadArtifact=download_artifact,
         )
     return ReaderBootstrapResponse(
         data=ReaderBootstrapData(
@@ -779,42 +731,10 @@ def get_comic_page_v4(
             route="reader-v4-comic-page",
             asset_id=page.id,
         )
-    page_response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    page_response.headers["Cache-Control"] = "private, no-store"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
     page_response.headers["X-Comic-Resource-Href"] = f"pages/{page_index}"
     return page_response
-
-
-@router.get(
-    "/resources/{resource_id}/comic/archive",
-    response_class=ReaderComicArchiveResponse,
-)
-def download_comic_archive_v4(
-    resource_id: str,
-    request: Request,
-    db: DatabaseSession,
-    settings: ApplicationSettings,
-) -> Response:
-    user, _scope, bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
-    source, source_format = _comic_source(bootstrap)
-    indexed_source = media_page_index.resolve_read_only(
-        media_page_index.load_read_only(db, resource_id)
-    ).source_for(source.id)
-    if indexed_source is None:
-        raise _not_found()
-    return media_streaming.send_file(
-        media_streaming.stored_path(
-            indexed_source.path,
-            settings,
-            (Path(indexed_source.source_root),),
-        ),
-        request,
-        user.id,
-        media_type=source.mime_type or _COMIC_ARCHIVE_MIME_TYPES[source_format],
-        route="reader-v4-comic-archive",
-        asset_id=source.id,
-        as_attachment=True,
-    )
 
 
 @router.put(
@@ -840,7 +760,7 @@ def set_resource_reading_status_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings).set_resource_reading_status(
+        progress = _service(db, settings, request).set_resource_reading_status(
             SetResourceReadingStatusCommand(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -884,7 +804,7 @@ def save_progress_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings).save_progress(
+        progress = _service(db, settings, request).save_progress(
             SaveProgressCommand(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -938,7 +858,7 @@ def get_progress_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings).load_progress(
+        progress = _service(db, settings, request).load_progress(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=_access_scope(db, user),
@@ -987,7 +907,7 @@ def list_bookmarks_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        bookmarks = _service(db, settings).list_bookmarks(
+        bookmarks = _service(db, settings, request).list_bookmarks(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=_access_scope(db, user),
@@ -1045,7 +965,7 @@ def replace_bookmarks_v4(
         for bookmark in payload.bookmarks
     ]
     try:
-        bookmarks = _service(db, settings).replace_bookmarks(
+        bookmarks = _service(db, settings, request).replace_bookmarks(
             ReplaceBookmarksCommand(
                 user_id=user.id,
                 resource_id=resource_id,

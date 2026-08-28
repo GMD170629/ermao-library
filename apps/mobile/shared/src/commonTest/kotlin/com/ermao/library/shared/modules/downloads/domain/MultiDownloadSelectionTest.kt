@@ -15,6 +15,24 @@ class MultiDownloadSelectionTest {
     ).associateBy(MultiDownloadResourceState::resourceId)
 
     @Test
+    fun batchIntentPolicyDoesNotReportActiveCompletedOrRejectedTasksAsAccepted() {
+        val result = DownloadBatchResult(listOf(
+            DownloadBatchPolicy.decide("new", null, null, false),
+            DownloadBatchPolicy.decide("queued", DownloadTaskStatus.Queued, null, false),
+            DownloadBatchPolicy.decide("paused", DownloadTaskStatus.Paused, null, false),
+            DownloadBatchPolicy.decide("retry", DownloadTaskStatus.FailedRetryable, "NETWORK", false),
+            DownloadBatchPolicy.decide("space", DownloadTaskStatus.InsufficientSpace, "SPACE", false),
+            DownloadBatchPolicy.decide("active", null, null, true),
+            DownloadBatchPolicy.decide("complete", DownloadTaskStatus.Completed, null, false),
+            DownloadBatchPolicy.decide("terminal", DownloadTaskStatus.FailedTerminal, "DENIED", false),
+        ))
+        assertEquals(listOf("new", "queued", "paused", "retry", "space"), result.requestedResourceIds)
+        assertEquals(5, result.succeededCount)
+        assertEquals(setOf("terminal"), result.failedResourceIds)
+        assertEquals("DENIED", result.results.last().failureCode)
+    }
+
+    @Test
     fun directorySelectionIncludesOnlySmartBatchEligibleResources() {
         val state = MultiDownloadSelectionState().toggleDirectory(resources.keys, resources)
 

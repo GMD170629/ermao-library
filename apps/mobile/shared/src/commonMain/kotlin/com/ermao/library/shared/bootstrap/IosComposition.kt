@@ -31,7 +31,7 @@ import com.ermao.library.shared.modules.reader.application.ReaderProgressServerP
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
-import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
@@ -104,10 +104,10 @@ fun createIosAdministrativeSettingsRepository(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
     )
 
-/** Shared Reader v4 bootstrap/download mapper; publication bytes still terminate in a native sink. */
+/** Shared Reader v4 metadata mapper. */
 fun createIosReaderBootstrapGateway(
     cookieStore: SecureCookiePayloadStore,
-): ReaderServerGateway =
+): ReaderBootstrapGateway =
     KtorReaderBootstrapGateway(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
     )
@@ -180,6 +180,20 @@ fun createIosDownloadsGateway(
             } else {
                 TlsMode.SystemTrust
             },
+        ),
+    )
+}
+
+fun createIosOnlinePublicationSession(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+    source: com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource,
+): com.ermao.library.shared.modules.reader.application.OnlinePublicationSession {
+    require(profile.serverIdentity == source.namespace.serverIdentity)
+    return com.ermao.library.shared.modules.reader.application.OnlinePublicationSession(
+        source,
+        com.ermao.library.shared.modules.reader.infrastructure.KtorPublicationResourcePort(
+            ApiClientFactory(SerializedCookieVault(cookieStore)).create(profile),
         ),
     )
 }

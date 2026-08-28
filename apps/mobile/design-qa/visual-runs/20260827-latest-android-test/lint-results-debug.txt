@@ -1,0 +1,53 @@
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/workmanagement/infrastructure/AndroidCoverSelectionReader.kt:9: Error: Avoid using android.media.ExifInterface; use androidx.exifinterface.media.ExifInterface instead [ExifInterface]
+import android.media.ExifInterface
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/kotlin/com/ermao/library/features/workmanagement/infrastructure/AndroidCoverSelectionReader.kt:82: Error: Avoid using android.media.ExifInterface; use androidx.exifinterface.media.ExifInterface instead [ExifInterface]
+                    ExifInterface(input).getAttributeInt(
+                    ^
+
+   Explanation for issues of type "ExifInterface":
+   The android.media.ExifInterface implementation has some known security bugs
+   in older versions of Android. There is a new implementation available of
+   this library in the support library, which is preferable.
+
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:237: Error: The resource R.string.work_quick_remove_download appears to be unused [UnusedResources]
+    <string name="work_quick_remove_download">Remove downloaded resource</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:590: Error: The resource R.string.management_regenerate_cover_message appears to be unused [UnusedResources]
+    <string name="management_regenerate_cover_message">Generate a new cover from the source file.</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UnusedResources":
+   Unused resources make applications larger and slow down builds.
+
+
+   The unused resource check can ignore tests. If you want to include
+   resources that are only referenced from tests, consider packaging them in a
+   test source set instead.
+
+   You can include test sources in the unused resource check by setting the
+   system property lint.unused-resources.include-tests =true, and to exclude
+   them (usually for performance reasons), use
+   lint.unused-resources.exclude-tests =true.
+   ,
+
+   Available options:
+
+   **skip-libraries** (default is true):
+   Whether the unused resource check should skip reporting unused resources in libraries.
+
+   Many libraries will declare resources that are part of the library surface; other modules depending on the library will also reference the resources. To avoid reporting all these resources as unused (in the context of a library), the unused resource check normally skips reporting unused resources in libraries. Instead, run the unused resource check on the consuming app module (along with `checkDependencies=true`).
+
+   However, there are cases where you want to check that all the resources declared in a library are used; in that case, you can disable the skip option.
+
+   To configure this option, use a `lint.xml` file with an <option> like this:
+
+   ```xml
+   <lint>
+       <issue id="UnusedResources">
+           <option name="skip-libraries" value="true" />
+       </issue>
+   </lint>
+   ```
+
+4 errors

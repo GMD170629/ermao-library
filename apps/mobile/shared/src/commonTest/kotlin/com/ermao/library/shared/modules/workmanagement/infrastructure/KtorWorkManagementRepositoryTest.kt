@@ -6,6 +6,17 @@ import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.TlsMode
+import com.ermao.library.shared.modules.workmanagement.application.BookManagementSession
+import com.ermao.library.shared.modules.workmanagement.application.ManagementPhase
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementTarget
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementObject
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementAction
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementField
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementFieldValue
+import com.ermao.library.shared.modules.workmanagement.domain.ManagementSnapshot
+import com.ermao.library.shared.modules.workmanagement.domain.RecognizedField
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataApplyOutcome
+import com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate
 import com.ermao.library.shared.modules.workmanagement.domain.BookManagementContext
 import com.ermao.library.shared.modules.workmanagement.domain.BookMetadataDraft
 import com.ermao.library.shared.modules.workmanagement.domain.BookMutationOutcome
@@ -41,41 +52,19 @@ import kotlinx.io.readByteArray
 import kotlinx.serialization.json.Json
 
 class KtorWorkManagementRepositoryTest {
-    @Test
-    fun readsBookDetailManagementCapability() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE)
-
-        val result = assertIs<WorkManagementResult.Content<Boolean>>(
-            harness.repository.supportsNativeManagement(context),
-        )
-
+    @Test fun menuStatePreparationReadsOnlyTheBookEndpoint() = runBlocking {
+        val harness = Harness("""{"ok":true,"data":{"book":{"id":"book-1","completed":true}}}""")
+        val result = assertIs<WorkManagementResult.Content<Boolean>>(harness.repository.loadBookCompleted(context, "book-1"))
         assertTrue(result.value)
-        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
+        assertEquals(listOf("/base/api/books/book-1"), harness.requests.map { it.path })
     }
 
     @Test
-    fun cachesCapabilityForTheAuthenticatedAuthorizationVersion() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE)
+    fun bookLevelCommandsUseCurrentBackendContractsWithoutGlobalGate() = runBlocking {
+        val harness = Harness(OK, OK, DELETE_RESPONSE, OK)
 
-        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
-            harness.repository.supportsNativeManagement(context),
-        ).value)
-        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
-            harness.repository.supportsNativeManagement(context),
-        ).value)
-
-        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
-    }
-
-    @Test
-    fun bookLevelCommandsUseCurrentBackendContractsAndCachedCapability() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, OK, OK, DELETE_RESPONSE, OK)
-
-        assertTrue(assertIs<WorkManagementResult.Content<Boolean>>(
-            harness.repository.supportsNativeManagement(context),
-        ).value)
         assertIs<WorkManagementResult.Content<Unit>>(
-            harness.repository.regenerateBookCover(context, "book-1", "resource-1"),
+            harness.repository.regenerateBookImage(context, "book-1"),
         )
         assertIs<WorkManagementResult.Content<Unit>>(
             harness.repository.rescanBook(context, "source-1"),
@@ -89,45 +78,30 @@ class KtorWorkManagementRepositoryTest {
 
         assertEquals(
             listOf(
-                "/base/api/mobile/compatibility",
-                "/base/api/books/book-1/resources/resource-1/cover/regenerate",
+                "/base/api/library/operations/books/covers",
                 "/base/api/source-nodes/source-1/continue",
                 "/base/api/library/operations/books/delete-sources",
                 "/base/api/library/operations/books/reading-status",
             ),
             harness.requests.map(Request::path),
         )
-        assertEquals("{\"ids\":[\"book-1\"],\"confirmation\":\"DELETE_SOURCE_FILES\"}", harness.requests[3].body)
-        assertEquals("{\"ids\":[\"book-1\"],\"status\":\"FINISHED\"}", harness.requests[4].body)
-    }
-
-    @Test
-    fun disabledBookManagementReturnsUnavailableWithoutExecutingMutation() = runBlocking {
-        val harness = Harness(CAPABILITY_FALSE)
-
-        val result = assertIs<WorkManagementResult.Failure>(
-            harness.repository.updateBook(context, "book-1", BookMetadataDraft("Book", null, null, null, null)),
-        )
-
-        assertEquals(WorkManagementErrorKind.Unavailable, result.error.kind)
-        assertEquals("BOOK_DETAIL_MANAGEMENT_UNAVAILABLE", result.error.code)
-        assertEquals(listOf("/base/api/mobile/compatibility"), harness.requests.map(Request::path))
-        assertTrue(harness.requests.none { "/api/works" in it.path })
+        assertEquals("{\"ids\":[\"book-1\"],\"confirmation\":\"DELETE_SOURCE_FILES\"}", harness.requests[2].body)
+        assertEquals("{\"ids\":[\"book-1\"],\"status\":\"FINISHED\"}", harness.requests[3].body)
     }
 
     @Test
     fun bookEditUsesCurrentBookPatchContract() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, OK)
+        val harness = Harness(OK)
 
         assertIs<WorkManagementResult.Content<Unit>>(
-            harness.repository.updateBook(
+            harness.repository.saveBookFields(
                 context,
                 "book-1",
                 BookMetadataDraft("Updated", "Author", "Description", "Series", 2.0),
             ),
         )
 
-        val request = harness.requests[1]
+        val request = harness.requests[0]
         assertEquals("PATCH", request.method)
         assertEquals("/base/api/books/book-1", request.path)
         assertTrue(request.body.contains("\"title\":\"Updated\""))
@@ -138,35 +112,34 @@ class KtorWorkManagementRepositoryTest {
 
     @Test
     fun resourceEditUsesCurrentBookResourcePatchContract() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, RESOURCE_RESPONSE)
+        val harness = Harness(RESOURCE_RESPONSE)
 
-        val result = assertIs<WorkManagementResult.Content<BookMutationOutcome>>(
-            harness.repository.updateResource(
+        val result = assertIs<WorkManagementResult.Content<Unit>>(
+            harness.repository.saveResourceFields(
                 context,
                 "book-1",
                 "resource-1",
-                ResourceMetadataDraft(publisher = "Publisher", language = "zh-CN", isbn = "123"),
+                listOf(ManagementFieldValue(ManagementField.Publisher, "Publisher"), ManagementFieldValue(ManagementField.Language, "zh-CN"), ManagementFieldValue(ManagementField.Isbn, "123")),
             ),
         )
 
-        val request = harness.requests[1]
+        val request = harness.requests[0]
         assertEquals("PATCH", request.method)
         assertEquals("/base/api/books/book-1/resources/resource-1", request.path)
         assertTrue(request.body.contains("\"publisher\":\"Publisher\""))
         assertTrue(request.body.contains("\"language\":\"zh-CN\""))
-        assertEquals("book-1", result.value.bookId)
-        assertEquals("resource-1", result.value.resourceId)
+        assertEquals(Unit, result.value)
     }
 
     @Test
     fun metadataSearchUsesBookSourceNodeRoute() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, METADATA_SEARCH_RESPONSE)
+        val harness = Harness(METADATA_SEARCH_RESPONSE)
 
         val result = assertIs<WorkManagementResult.Content<*>>(
             harness.repository.searchMetadata(context, "book-1", "source-1", "openlibrary", "Book"),
         ).value
 
-        val request = harness.requests[1]
+        val request = harness.requests[0]
         assertEquals("POST", request.method)
         assertEquals("/base/api/books/book-1/source-nodes/source-1/metadata/search", request.path)
         assertTrue(request.body.contains("\"providerId\":\"openlibrary\""))
@@ -174,8 +147,8 @@ class KtorWorkManagementRepositoryTest {
     }
 
     @Test
-    fun metadataApplyAndCoverUploadUseTheirCurrentResourceContracts() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, OK, RESOURCE_COVER_RESPONSE)
+    fun directoryRecognitionAndResourceCoverUploadUseCurrentContracts() = runBlocking {
+        val harness = Harness(OK, RESOURCE_COVER_RESPONSE)
         val candidate = com.ermao.library.shared.modules.workmanagement.domain.MetadataCandidate(
             id = "candidate",
             source = "openlibrary",
@@ -192,14 +165,7 @@ class KtorWorkManagementRepositoryTest {
             confidence = 1.0,
         )
 
-        val apply = harness.repository.applyMetadata(
-            context,
-            "book-1",
-            "source-1",
-            "openlibrary",
-            candidate,
-            setOf(MetadataField.Title),
-        )
+        val apply = harness.repository.applyDirectoryMetadata(context, "book-1", "source-1", candidate.title.orEmpty(), "")
         val upload = harness.repository.uploadCover(
             context,
             "book-1",
@@ -213,20 +179,20 @@ class KtorWorkManagementRepositoryTest {
         )
         assertEquals("resource-1", coverOutcome.resourceId)
         assertEquals("/api/resources/resource-1/cover", coverOutcome.coverUrl)
-        assertEquals("PATCH", harness.requests[1].method)
-        assertEquals("/base/api/books/book-1/source-nodes/source-1", harness.requests[1].path)
-        assertTrue(harness.requests[1].body.contains("\"title\":\"Candidate\""))
-        assertEquals("PUT", harness.requests[2].method)
-        assertEquals("/base/api/books/book-1/resources/resource-1/cover", harness.requests[2].path)
-        assertTrue(harness.requests[2].contentType?.contains("multipart/form-data") == true)
-        assertTrue(harness.requests[2].body.contains("name=\"cover\""))
-        assertTrue(harness.requests[2].body.contains("filename=\"cover.jpg\""))
-        assertTrue(harness.requests[2].body.contains("cover-content"))
+        assertEquals("PATCH", harness.requests[0].method)
+        assertEquals("/base/api/books/book-1/source-nodes/source-1", harness.requests[0].path)
+        assertTrue(harness.requests[0].body.contains("\"title\":\"Candidate\""))
+        assertEquals("PUT", harness.requests[1].method)
+        assertEquals("/base/api/books/book-1/resources/resource-1/cover", harness.requests[1].path)
+        assertTrue(harness.requests[1].contentType?.contains("multipart/form-data") == true)
+        assertTrue(harness.requests[1].body.contains("name=\"cover\""))
+        assertTrue(harness.requests[1].body.contains("filename=\"cover.jpg\""))
+        assertTrue(harness.requests[1].body.contains("cover-content"))
     }
 
     @Test
     fun coverUploadRejectsMismatchedResourceIdentity() = runBlocking {
-        val harness = Harness(CAPABILITY_TRUE, MISMATCHED_RESOURCE_COVER_RESPONSE)
+        val harness = Harness(MISMATCHED_RESOURCE_COVER_RESPONSE)
 
         val result = assertIs<WorkManagementResult.Failure>(
             harness.repository.uploadCover(
@@ -271,6 +237,88 @@ class KtorWorkManagementRepositoryTest {
         assertTrue(harness.requests.none { "/volumes" in it.path })
     }
 
+    @Test
+    fun bookCoverRegenerationUsesMultipartWithoutAFileOrRepresentativeResource() = runBlocking {
+        val harness = Harness(OK)
+        assertIs<WorkManagementResult.Content<Unit>>(harness.repository.regenerateBookImage(context, "book-1"))
+        val request = harness.requests.single()
+        assertEquals("POST", request.method)
+        assertEquals("/base/api/library/operations/books/covers", request.path)
+        assertTrue(request.contentType.orEmpty().startsWith("multipart/form-data"))
+        listOf("ids", "action", "ratio", "quality", "maxDimension").forEach { assertTrue(request.body.contains("name=\"$it\"")) }
+        assertTrue(request.body.contains("[\"book-1\"]"))
+        assertTrue(request.body.contains("regenerate"))
+        assertFalse(request.body.contains("filename="))
+    }
+
+    @Test
+    fun sourceCoverCanBeReplacedOrRemovedAndBlankDescriptionIsPreserved() = runBlocking {
+        val harness = Harness(OK, OK)
+        harness.repository.saveSourcePresentation(context, "book-1", "directory-2", "目录", "", false,
+            CoverUpload("用户.png", "image/png", byteArrayOf(1, 2, 3)))
+        harness.repository.saveSourcePresentation(context, "book-1", "directory-2", "目录", "", true, null)
+        assertTrue(harness.requests.all { it.method == "PUT" && it.path == "/base/api/books/book-1/source-nodes/directory-2" })
+        assertTrue(harness.requests.first().body.contains("filename=\"cover.png\""))
+        assertTrue(harness.requests.last().body.contains("name=\"description\""))
+        assertTrue(harness.requests.last().body.contains("true"))
+        assertFalse(harness.requests.last().body.contains("filename="))
+    }
+
+    @Test
+    fun editorsDistinguishClearedFieldsFromOmittedFields() = runBlocking {
+        val harness = Harness(OK, OK)
+        harness.repository.saveBookFields(context, "book-1", BookMetadataDraft("Title", "", "", null, null))
+        harness.repository.saveResourceFields(context, "book-1", "resource-2", listOf(
+            ManagementFieldValue(ManagementField.Publisher, ""), ManagementFieldValue(ManagementField.ResourceIndex, "2.5")))
+        assertTrue(harness.requests.first().body.contains("\"seriesName\":null"))
+        assertTrue(harness.requests.first().body.contains("\"author\":\"\""))
+        assertEquals("{\"publisher\":null,\"resourceIndex\":2.5}", harness.requests.last().body)
+    }
+
+    @Test
+    fun resourceDeleteCarriesTypedConfirmationAndStableIdempotencyKey() = runBlocking {
+        val harness = Harness(OK)
+        assertIs<WorkManagementResult.Content<Unit>>(harness.repository.deleteResourceSource(context, "book-1", "resource-2", "卷二", "delete-123"))
+        val request = harness.requests.single()
+        assertEquals("DELETE", request.method)
+        assertEquals("/base/api/books/book-1/resources/resource-2/source", request.path)
+        assertEquals("delete-123", request.idempotencyKey)
+        assertEquals("{\"confirmation\":\"卷二\"}", request.body)
+    }
+
+    @Test
+    fun recognitionUsesFullApplyContractAndRetainsPartialResult() = runBlocking {
+        val harness = Harness("""{"ok":true,"data":{"appliedFields":["book.author"],"skippedFields":["resource.cover"],"coverStatus":"failed"}}""")
+        val candidate = MetadataCandidate("candidate", "provider", "Title", "Author", null, listOf("tag"), null,
+            null, null, null, null, "https://covers.example/cover.jpg", 0.9, identifier = "abc", narrator = "Narrator", abridged = false)
+        val outcome = assertIs<WorkManagementResult.Content<MetadataApplyOutcome>>(harness.repository.applyRecognizedFields(context,
+            ManagementTarget(ManagementObject.Resource, "book-1", "resource-2", "卷二"), candidate,
+            listOf(RecognizedField(ManagementObject.Book, ManagementField.Author), RecognizedField(ManagementObject.Resource, ManagementField.Cover)))).value
+        val request = harness.requests.single()
+        assertEquals("/base/api/books/book-1/metadata/apply", request.path)
+        assertEquals("POST", request.method)
+        assertTrue(request.body.contains("\"resourceId\":\"resource-2\""))
+        assertTrue(request.body.contains("\"abridged\":false"))
+        assertEquals(listOf("book.author"), outcome.appliedFields)
+        assertEquals(listOf("resource.cover"), outcome.skippedFields)
+        assertEquals("failed", outcome.coverStatus)
+    }
+
+    @Test
+    fun snapshotResolvesExactResourceAcrossPagesAndNeverUsesTheFirstResource() = runBlocking {
+        val harness = Harness(BOOK_SNAPSHOT, resourcePage("resource-1", 2), resourcePage("resource-2", 2))
+        val snapshot = assertIs<WorkManagementResult.Content<ManagementSnapshot>>(harness.repository.loadManagementSnapshot(context,
+            ManagementTarget(ManagementObject.Resource, "book-1", "resource-2", "Target"))).value
+        assertEquals(listOf("resource-1", "resource-2"), snapshot.resources.map { it.id })
+        assertEquals(listOf(null, "1", "2"), harness.requests.map { it.page })
+        val absent = Harness(BOOK_SNAPSHOT, resourcePage("resource-1", 1))
+        assertIs<WorkManagementResult.Failure>(absent.repository.loadManagementSnapshot(context,
+            ManagementTarget(ManagementObject.Resource, "book-1", "absent", "Absent")))
+        Unit
+    }
+
+    private fun resourcePage(id: String, pages: Int) = """{"ok":true,"data":{"resources":[{"id":"$id","bookId":"book-1","sourceNodeId":"node-$id","title":"$id","format":"EPUB","kindleSendAvailable":true,"assets":[{"id":"asset-$id","role":"PRIMARY"}]}],"totalPages":$pages}}"""
+
     private val profile = run {
         val parsed = assertIs<ServerBaseUrlParseResult.Valid>(ServerBaseUrl.parse("https://library.example/base"))
         ServerProfile("profile", "Library", parsed.baseUrl, "server", true, TlsMode.SystemTrust)
@@ -292,6 +340,8 @@ class KtorWorkManagementRepositoryTest {
                         request.url.encodedPath,
                         body,
                         request.body.contentType?.toString() ?: request.headers[HttpHeaders.ContentType],
+                        request.headers["Idempotency-Key"],
+                        request.url.parameters["page"],
                     )
                     respond(
                         pending.removeFirstOrNull() ?: OK,
@@ -326,11 +376,12 @@ class KtorWorkManagementRepositoryTest {
         val path: String,
         val body: String,
         val contentType: String?,
+        val idempotencyKey: String?,
+        val page: String?,
     )
 
     private companion object {
-        const val CAPABILITY_TRUE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":true}}}"""
-        const val CAPABILITY_FALSE = """{"ok":true,"data":{"capabilities":{"bookDetailManagement":false}}}"""
+        const val BOOK_SNAPSHOT = """{"ok":true,"data":{"book":{"id":"book-1","sourceNodeId":"root-node","title":"Book","author":"Author","tags":[],"completed":false}}}"""
         const val OK = """{"ok":true,"data":{}}"""
         const val RESOURCE_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1","bookId":"book-1"}}}"""
         const val RESOURCE_COVER_RESPONSE = """{"ok":true,"data":{"resource":{"id":"resource-1","bookId":"book-1","coverUrl":"/api/resources/resource-1/cover"}}}"""

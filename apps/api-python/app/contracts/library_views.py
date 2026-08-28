@@ -15,6 +15,7 @@ class ResourceAssetView(HttpContractModel):
     source_node_id: str = Field(alias="sourceNodeId")
     role: str
     mime_type: str = Field(alias="mimeType")
+    source_format: str | None = Field(default=None, alias="sourceFormat")
     size_bytes: int = Field(alias="sizeBytes", ge=0)
     size: str = "0 B"
     mtime_ms: int = Field(alias="mtimeMs", ge=0)

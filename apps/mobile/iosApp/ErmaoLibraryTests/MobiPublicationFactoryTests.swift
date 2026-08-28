@@ -211,23 +211,11 @@ final class MobiPublicationFactoryTests: XCTestCase {
             Bundle(for: Self.self).url(forResource: "test", withExtension: "azw3")
         )
         let original = try Data(contentsOf: originalURL)
-        let staging = try await store.prepareDownload(
-            resourceID: "volume-azw3",
-            expectedSize: Int64(original.count)
-        )
-        try original.write(to: staging)
-
-        let imported = try await store.commitDownload(
-            staging: staging,
-            resourceID: "volume-azw3",
-            displayTitle: "AZW3 fixture",
-            byteCount: Int64(original.count),
-            expectedSize: Int64(original.count),
+        let imported = try await store.importPublication(
+            from: originalURL, resourceID: "volume-azw3", displayTitle: "AZW3 fixture",
+            sourceFormat: .azw3, bookID: "work-azw3", assetID: "asset-azw3",
             parserVersion: IosMobiBook.parserIdentifier,
-            normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier,
-            sourceFormat: .azw3,
-            bookID: "work-azw3",
-            assetID: "asset-azw3"
+            normalizationVersion: IosMobiPublicationIdentity.normalizationIdentifier
         )
         XCTAssertEqual(imported.sourceFormat, .azw3)
         XCTAssertEqual(imported.fileURL.pathExtension, "azw3")

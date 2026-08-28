@@ -33,3 +33,31 @@ test('rejects markup before Readium blob creation when response security headers
     /READIUM_PUBLICATION_SECURITY_PROFILE_MISSING/,
   );
 });
+
+
+test('rejects a changed revision before consuming an unfinished body', async () => {
+  let requests = 0;
+  let cancelled = false;
+  const fetcher = createSecurePublicationFetch(async () => {
+    requests += 1;
+    if (requests === 1) return new Response('{}', {
+      headers: { 'content-type': 'application/json', 'X-Publication-Revision': 'first' },
+    });
+    return new Response(new ReadableStream({ cancel() { cancelled = true; } }), {
+      headers: { ...secureHeaders, 'X-Publication-Revision': 'second' },
+    });
+  });
+  await fetcher('https://reader.test/manifest.json');
+  await assert.rejects(fetcher('https://reader.test/chapter.xhtml'), /PUBLICATION_CHANGED/);
+  assert.equal(cancelled, true);
+});
+
+
+test('reports a chapter limit response without classifying it as a version change', async () => {
+  let requests = 0;
+  const fetcher = createSecurePublicationFetch(async () => ++requests === 1
+    ? new Response('{}', { headers: { 'content-type': 'application/json', 'X-Publication-Revision': 'first' } })
+    : new Response(null, { status: 413 }));
+  await fetcher('https://reader.test/manifest.json');
+  await assert.rejects(fetcher('https://reader.test/chapter.xhtml'), { code: 'PUBLICATION_RESOURCE_TOO_LARGE' });
+});

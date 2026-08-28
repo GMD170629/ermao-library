@@ -3,7 +3,7 @@
 from sqlalchemy.orm import Session
 
 from app.bootstrap.media import load_read_only_resource_page_index
-from app.bootstrap.publications import open_publication
+from app.bootstrap.publications import PublicationRuntime, open_publication
 from app.core.config import Settings
 from app.modules.reader.application.resource_reader import ResourceReaderService
 from app.modules.reader.infrastructure.clock import SystemReaderClock
@@ -17,7 +17,7 @@ from app.modules.reader.infrastructure.resource_repository import (
 
 
 def reader_resource_service(
-    session: Session, settings: Settings
+    session: Session, settings: Settings, runtime: PublicationRuntime
 ) -> ResourceReaderService:
     repository = SqlAlchemyReaderResourceRepository(session)
     return ResourceReaderService(
@@ -25,7 +25,7 @@ def reader_resource_service(
         session,
         SystemReaderClock(),
         NormalizedPublicationLocatorIndex(
-            open_publication(session, settings),
+            open_publication(session, runtime),
             repository,
             MediaComicPageIndex(
                 lambda resource_id: load_read_only_resource_page_index(

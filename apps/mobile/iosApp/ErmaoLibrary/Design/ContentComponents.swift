@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+@preconcurrency import ErmaoShared
 
 enum BookCoverLayout {
     static let horizontalCardWidth: CGFloat = 104
@@ -14,6 +15,8 @@ struct BookCoverView: View {
     let client: any ContentClient
     let cache: AuthenticatedCoverCache
     var cornerRadius: CGFloat = CGFloat(GeneratedDesignTokens.Radii.coverCompact)
+    var managementTarget: NativeManagementTarget? = nil
+    @Environment(\.managementRevision) private var managementRevision
 
     @Environment(\.appTheme) private var theme
     @State private var image: UIImage?
@@ -37,9 +40,10 @@ struct BookCoverView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .shadow(color: theme.textPrimary.opacity(0.10), radius: 4, x: 0, y: 2)
         .accessibilityLabel(Text(title))
-        .task(id: reference) {
+        .modifier(OptionalManagementCover(target: managementTarget))
+        .task(id: "\(reference?.path ?? "")|\(managementRevision)") {
             guard let reference else { return }
-            let key = "cover|\(reference.path)"
+            let key = "cover|\(ErmaoShared.PublicKt.smallCoverRequestPath(apiPath: reference.path))"
             do {
                 if let cached = try await cache.load(namespace: context.namespaceKey, key: key),
                    let decoded = UIImage(data: cached) {
@@ -114,7 +118,8 @@ struct WorkGrid: View {
                             title: work.title,
                             context: context,
                             client: client,
-                            cache: cache
+                            cache: cache,
+                            managementTarget: .book(work.id, work.title, completed: work.completed)
                         )
                         Text(work.title)
                             .appTextStyle(.label)
@@ -131,6 +136,7 @@ struct WorkGrid: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                .bookManagementMenu(.book(work.id, work.title, completed: work.completed))
                 .accessibilityIdentifier("work.\(work.id)")
                 .accessibilityLabel(Text(accessibilityLabel(for: work)))
                 .onAppear { onAppearWork?(work.id) }
@@ -172,7 +178,8 @@ struct WorkList: View {
                             title: work.title,
                             context: context,
                             client: client,
-                            cache: cache
+                            cache: cache,
+                            managementTarget: .book(work.id, work.title, completed: work.completed)
                         )
                         .frame(width: 56)
                         VStack(alignment: .leading, spacing: .spaceHalf) {
@@ -194,6 +201,7 @@ struct WorkList: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                .bookManagementMenu(.book(work.id, work.title, completed: work.completed))
                 .accessibilityIdentifier("work.\(work.id)")
                 .onAppear { onAppearWork?(work.id) }
                 Divider()

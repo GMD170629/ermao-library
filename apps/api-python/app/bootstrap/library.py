@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.bootstrap.publications import ensure_publication_navigation
+from app.bootstrap.publications import PublicationRuntime, ensure_publication_navigation
 from app.core.config import Settings
 from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
@@ -139,10 +139,10 @@ class _PublicationResourceNavigationPreparer(ResourceNavigationPreparer):
     def __init__(
         self,
         factory: sessionmaker[Session],
-        settings: Settings,
+        runtime: PublicationRuntime,
     ) -> None:
         self._factory = factory
-        self._settings = settings
+        self._runtime = runtime
 
     def prepare(self, *, resource_id: str, context: ResourceDetailAccessScope) -> None:
         access = PublicationAccessScope(
@@ -151,7 +151,7 @@ class _PublicationResourceNavigationPreparer(ResourceNavigationPreparer):
             library_ids=tuple(context.library_ids),
         )
         try:
-            ensure_publication_navigation(self._factory, self._settings).execute(
+            ensure_publication_navigation(self._factory, self._runtime).execute(
                 resource_id=resource_id,
                 access_scope=access,
             )
@@ -284,10 +284,11 @@ def resource_details(
     user_id: str,
     session_factory: sessionmaker[Session],
     settings: Settings,
+    runtime: PublicationRuntime,
 ) -> ListResourceDetails:
     return ListResourceDetails(
         SqlAlchemyResourceDetailQueries(db, user_id),
-        _PublicationResourceNavigationPreparer(session_factory, settings),
+        _PublicationResourceNavigationPreparer(session_factory, runtime),
     )
 
 

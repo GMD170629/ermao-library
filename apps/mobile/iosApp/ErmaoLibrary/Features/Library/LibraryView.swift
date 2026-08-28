@@ -10,6 +10,7 @@ struct LibraryView: View {
     @StateObject private var store: LibraryStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
+    @Environment(\.managementRevision) private var managementRevision
     @Environment(\.appTheme) private var theme
     @State private var presentsFilter = false
     @AccessibilityFocusState private var filterButtonFocused: Bool
@@ -70,6 +71,7 @@ struct LibraryView: View {
             if !isPresented { filterButtonFocused = true }
         }
         .appCanvas()
+        .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.refreshAfterManagement() }
         .task {
             store.loadLibraryOptionsIfNeeded()
             store.reload()

@@ -10,6 +10,7 @@ struct FacetView: View {
 
     @StateObject private var store: FacetStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.managementRevision) private var managementRevision
     @Environment(\.appTheme) private var theme
 
     init(
@@ -59,6 +60,7 @@ struct FacetView: View {
             }
         }
         .appCanvas()
+        .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.refreshAfterManagement() }
         .task { store.load() }
     }
 
@@ -142,7 +144,8 @@ struct FacetView: View {
                             title: work.title,
                             context: context,
                             client: client,
-                            cache: cache
+                            cache: cache,
+                            managementTarget: .book(work.id, work.title, completed: work.completed)
                         )
                         .frame(width: dynamicTypeSize >= .xxLarge ? 72 : 96)
                         VStack(alignment: .leading, spacing: .spaceHalf) {

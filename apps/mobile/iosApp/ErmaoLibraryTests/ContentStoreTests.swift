@@ -6,6 +6,14 @@ import XCTest
 
 @MainActor
 final class ContentStoreTests: XCTestCase {
+    func testCoverRequestsAndCacheKeysUseTheSameSmallVariant() {
+        let raw = "/api/books/book/cover?v=7&size=medium"
+        let small = PublicKt.smallCoverRequestPath(apiPath: raw)
+        XCTAssertEqual(small, "/api/books/book/cover?v=7&size=small")
+        XCTAssertEqual(PublicKt.smallCoverRequestPath(apiPath: small), small)
+        XCTAssertEqual(PublicKt.smallCoverRequestPath(apiPath: "/api/resources/book/previews/1"), "/api/resources/book/previews/1")
+    }
+
     func testWorkDescriptionPlainTextDoesNotUseUIKitHTMLRendering() {
         let value = WorkDescriptionPlainText.normalize(
             """

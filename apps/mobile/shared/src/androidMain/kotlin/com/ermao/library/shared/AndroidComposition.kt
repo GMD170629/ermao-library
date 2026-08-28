@@ -19,7 +19,7 @@ import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPor
 import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
 import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
-import com.ermao.library.shared.modules.reader.application.ReaderServerGateway
+import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
@@ -87,7 +87,7 @@ fun createAndroidAdministrativeSettingsRepository(context: Context): Administrat
     return KtorAdministrativeSettingsRepository(ApiClientFactory(cookieVault))
 }
 
-fun createAndroidReaderServerGateway(context: Context): ReaderServerGateway =
+fun createAndroidReaderBootstrapGateway(context: Context): ReaderBootstrapGateway =
     KtorReaderBootstrapGateway(
         ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
     )
@@ -125,3 +125,17 @@ fun createAndroidReaderBookmarkSyncPort(
         clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
         profile = profile,
     )
+
+fun createAndroidOnlinePublicationSession(
+    context: Context,
+    profile: ServerProfile,
+    source: com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource,
+): com.ermao.library.shared.modules.reader.application.OnlinePublicationSession {
+    require(profile.serverIdentity == source.namespace.serverIdentity)
+    return com.ermao.library.shared.modules.reader.application.OnlinePublicationSession(
+        source,
+        com.ermao.library.shared.modules.reader.infrastructure.KtorPublicationResourcePort(
+            ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)).create(profile),
+        ),
+    )
+}

@@ -22,8 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class WorkManagementUiState(
-    val capabilityChecked: Boolean = false,
-    val supported: Boolean = false,
+    val capabilityChecked: Boolean = true,
+    val supported: Boolean = true,
     val isBusy: Boolean = false,
     val errorCode: String? = null,
     val completedMutation: WorkManagementCompletion? = null,
@@ -46,7 +46,6 @@ class WorkManagementViewModel(
     private val mutableUiState = MutableStateFlow(WorkManagementUiState())
     val uiState: StateFlow<WorkManagementUiState> = mutableUiState.asStateFlow()
 
-    init { checkCapability() }
 
     fun consumeFeedback() {
         mutableUiState.value = mutableUiState.value.copy(
@@ -64,64 +63,6 @@ class WorkManagementViewModel(
         repository.setReadingStatus(context, resourceId, status)
     }
 
-    fun updateBook(draft: BookMetadataDraft) = run(WorkManagementCompletion.WorkUpdated) {
-        repository.updateBook(context, bookId, draft)
-    }
-
-    fun regenerateCover(anchoredResourceId: String) = run(WorkManagementCompletion.CoverUpdated) {
-        repository.regenerateBookCover(context, bookId, anchoredResourceId)
-    }
-
-    fun uploadCover(resourceId: String, upload: CoverUpload) = runValue(
-        assign = { mutation ->
-            mutableUiState.value = mutableUiState.value.copy(
-                coverMutation = mutation,
-                completedMutation = WorkManagementCompletion.CoverUpdated,
-            )
-        },
-        operation = { repository.uploadCover(context, bookId, resourceId, upload) },
-    )
-
-    fun rescan(sourceNodeId: String) = run(WorkManagementCompletion.RescanQueued) {
-        repository.rescanBook(context, sourceNodeId)
-    }
-
-    fun deleteBook() = run(WorkManagementCompletion.BookDeleted) { repository.deleteBook(context, bookId) }
-
-    fun loadMetadataProviders() = runValue(
-        assign = { result -> mutableUiState.value = mutableUiState.value.copy(metadataProviders = result) },
-        operation = { repository.loadMetadataProviders(context) },
-    )
-
-    fun searchMetadata(sourceNodeId: String, providerId: String, query: String) = runValue(
-        assign = { result -> mutableUiState.value = mutableUiState.value.copy(metadataCandidates = result.candidates) },
-        operation = { repository.searchMetadata(context, bookId, sourceNodeId, providerId, query) },
-    )
-
-    fun applyMetadata(sourceNodeId: String, providerId: String, candidate: MetadataCandidate) =
-        run(WorkManagementCompletion.MetadataApplied) {
-            repository.applyMetadata(
-                context,
-                bookId,
-                sourceNodeId,
-                providerId,
-                candidate,
-                setOf(MetadataField.Title, MetadataField.Description),
-            )
-        }
-
-    private fun checkCapability() {
-        viewModelScope.launch {
-            when (val result = repository.supportsNativeManagement(context)) {
-                is WorkManagementResult.Content -> mutableUiState.value = mutableUiState.value.copy(
-                    capabilityChecked = true,
-                    supported = result.value,
-                )
-                is WorkManagementResult.Failure -> fail(result)
-            }
-        }
-    }
-
     private fun run(completion: WorkManagementCompletion, operation: suspend () -> WorkManagementResult<*>) {
         if (mutableUiState.value.isBusy) return
         mutableUiState.value = mutableUiState.value.copy(isBusy = true, errorCode = null)
@@ -136,19 +77,7 @@ class WorkManagementViewModel(
         }
     }
 
-    private fun <T> runValue(assign: (T) -> Unit, operation: suspend () -> WorkManagementResult<T>) {
-        if (mutableUiState.value.isBusy) return
-        mutableUiState.value = mutableUiState.value.copy(isBusy = true, errorCode = null)
-        viewModelScope.launch {
-            when (val result = operation()) {
-                is WorkManagementResult.Content -> {
-                    assign(result.value)
-                    mutableUiState.value = mutableUiState.value.copy(isBusy = false)
-                }
-                is WorkManagementResult.Failure -> fail(result)
-            }
-        }
-    }
+
 
     private fun fail(result: WorkManagementResult.Failure) {
         if (result.error.kind.name == "Unauthorized") onUnauthorized()

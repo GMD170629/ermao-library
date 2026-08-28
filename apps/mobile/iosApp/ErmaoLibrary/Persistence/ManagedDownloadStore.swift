@@ -1,19 +1,20 @@
 import Foundation
-import OSLog
+@preconcurrency import ErmaoShared
 
-actor ManagedDownloadStore {
+actor ManagedDownloadStore: CompletedDownloadProviding {
     private struct Manifest: Codable {
         let contractVersion: Int
         var records: [ManagedDownloadRecord]
     }
 
     private static let currentContractVersion = 4
-    private static let logger = Logger(subsystem: "com.ermao.library", category: "reader-download")
     private let rootDirectory: URL
     private let encoder: JSONEncoder
+    private let initializationError: Error?
     private let decoder: JSONDecoder
 
     init(rootDirectory: URL? = nil) {
+        var initializationError: Error?
         if let rootDirectory {
             self.rootDirectory = rootDirectory
         } else {
@@ -23,10 +24,12 @@ actor ManagedDownloadStore {
             let legacy = parent.appendingPathComponent("managed-downloads-v3", isDirectory: true)
             if !FileManager.default.fileExists(atPath: current.path),
                FileManager.default.fileExists(atPath: legacy.path) {
-                try? FileManager.default.moveItem(at: legacy, to: current)
+                do { try FileManager.default.moveItem(at: legacy, to: current) }
+                catch { initializationError = error }
             }
             self.rootDirectory = current
         }
+        self.initializationError = initializationError
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         decoder = JSONDecoder()
@@ -53,69 +56,6 @@ actor ManagedDownloadStore {
         return manifest.records.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    func enqueue(
-        namespace: String,
-        book: BookCard,
-        resource: BookResource,
-        assetID: String,
-        sourceFormat: String? = nil,
-        mimeType: String? = nil,
-        readerType: ManagedDownloadReaderType,
-        expectedBytes: Int64?,
-        artifactKind: ManagedDownloadArtifactKind = .singleOriginalAsset,
-        now: Date = Date()
-    ) throws -> ManagedDownloadRecord {
-        let exactFormat = (sourceFormat ?? resource.format)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        let canonicalMimeType = mimeType?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        precondition(
-            !book.id.isEmpty && !resource.id.isEmpty && !assetID.isEmpty &&
-                ManagedReaderAccessPolicy.supportsNativeReader(readerType: readerType, format: exactFormat)
-        )
-        var manifest = try loadManifest(namespace: namespace)
-        if let existingIndex = manifest.records.firstIndex(where: { $0.resourceID == resource.id && $0.assetID == assetID }) {
-            let existing = manifest.records[existingIndex]
-            if existing.readerType == readerType,
-               existing.expectedBytes == expectedBytes,
-               existing.format == exactFormat,
-               existing.mimeType == canonicalMimeType {
-                return existing
-            }
-            try removeFiles(for: existing, namespace: namespace)
-            manifest.records.remove(at: existingIndex)
-        }
-        let record = ManagedDownloadRecord(
-            id: UUID().uuidString,
-            namespace: namespace,
-            bookID: book.id,
-            bookTitle: book.title,
-            bookAuthor: book.author,
-            resourceID: resource.id,
-            resourceTitle: resource.title,
-            assetID: assetID,
-            format: exactFormat,
-            mimeType: canonicalMimeType,
-            readerType: readerType,
-            state: .queued,
-            verification: .pending,
-            expectedBytes: expectedBytes,
-            artifactKind: artifactKind,
-            receivedBytes: 0,
-            localRelativePath: nil,
-            stableErrorCode: nil,
-            createdAt: now,
-            updatedAt: now,
-            completedAt: nil,
-            lastOpenedAt: nil
-        )
-        manifest.records.append(record)
-        try saveManifest(manifest, namespace: namespace)
-        return record
-    }
-
     func update(_ record: ManagedDownloadRecord) throws {
         var manifest = try loadManifest(namespace: record.namespace)
         if let index = manifest.records.firstIndex(where: { $0.id == record.id }) { manifest.records[index] = record }
@@ -126,7 +66,7 @@ actor ManagedDownloadStore {
     func destination(for record: ManagedDownloadRecord) throws -> ManagedDownloadDestination {
         let namespaceURL = namespaceDirectory(record.namespace)
         let staging = namespaceURL.appendingPathComponent("staging", isDirectory: true)
-        let contentDirectory = namespaceURL.appendingPathComponent("content", isDirectory: true).appendingPathComponent(stableFileName(record.assetID), isDirectory: true)
+        let contentDirectory = namespaceURL.appendingPathComponent("content", isDirectory: true).appendingPathComponent(stableFileName(record.assetID) + "-" + stableFileName(record.id), isDirectory: true)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
         let isBundle = record.effectiveArtifactKind == .originalPageSet
@@ -135,31 +75,32 @@ actor ManagedDownloadStore {
         return ManagedDownloadDestination(
             partialFileURL: staging.appendingPathComponent(record.id + (isBundle ? ".bundle.part" : ".part"), isDirectory: isBundle),
             finalFileURL: finalURL,
-            finalRelativePath: "content/\(stableFileName(record.assetID))/\(fileName)"
+            finalRelativePath: "content/\(stableFileName(record.assetID))-\(stableFileName(record.id))/\(fileName)"
         )
     }
 
-    func publish(record: ManagedDownloadRecord, destination: ManagedDownloadDestination, receipt: ManagedDownloadReceipt, now: Date = Date()) throws -> ManagedDownloadRecord {
-        guard receipt.receivedBytes > 0,
-              verifiedArtifactBytes(at: destination.partialFileURL, record: record) == receipt.receivedBytes,
-              receipt.expectedBytes.map({ $0 == receipt.receivedBytes }) ?? true else {
-            try? FileManager.default.removeItem(at: destination.partialFileURL)
+    func storedBytes(for record: ManagedDownloadRecord) throws -> ErmaoShared.DownloadStoredBytes {
+        let destination = try destination(for: record)
+        if verifiedArtifactBytes(at: destination.finalFileURL, record: record) == record.expectedBytes {
+            return ErmaoShared.DownloadStoredBytes(partialBytes: 0, completedReference: destination.finalRelativePath)
+        }
+        let bytes = record.effectiveArtifactKind == .singleOriginalAsset
+            ? fileSize(at: destination.partialFileURL) ?? 0 : 0
+        return ErmaoShared.DownloadStoredBytes(partialBytes: bytes < record.expectedBytes ? bytes : 0, completedReference: nil)
+    }
+
+    /// Filesystem port: validate and atomically publish; task registration belongs to shared Downloads.
+    func publishFile(record: ManagedDownloadRecord, destination: ManagedDownloadDestination, verifiedBytes: Int64) throws -> String {
+        guard verifiedBytes > 0,
+              verifiedArtifactBytes(at: destination.partialFileURL, record: record) == verifiedBytes,
+              record.expectedBytes == verifiedBytes else {
+            if FileManager.default.fileExists(atPath: destination.partialFileURL.path) { try FileManager.default.removeItem(at: destination.partialFileURL) }
             throw ManagedDownloadTransferError.invalidResponse
         }
         if FileManager.default.fileExists(atPath: destination.finalFileURL.path) {
             _ = try FileManager.default.replaceItemAt(destination.finalFileURL, withItemAt: destination.partialFileURL, backupItemName: nil, options: [])
         } else { try FileManager.default.moveItem(at: destination.partialFileURL, to: destination.finalFileURL) }
-        var completed = record
-        completed.state = .completed
-        completed.verification = .verified
-        completed.expectedBytes = receipt.expectedBytes ?? receipt.receivedBytes
-        completed.receivedBytes = receipt.receivedBytes
-        completed.localRelativePath = destination.finalRelativePath
-        completed.stableErrorCode = nil
-        completed.updatedAt = now
-        completed.completedAt = now
-        try update(completed)
-        return completed
+        return destination.finalRelativePath
     }
 
     func remove(_ record: ManagedDownloadRecord) throws {
@@ -182,13 +123,13 @@ actor ManagedDownloadStore {
         return url
     }
 
-    func verifiedReaderArtifact(recordID: String, namespace: String) throws -> IosReaderDownloadArtifact? {
+    func completedFile(recordID: String, namespace: String) throws -> CompletedDownloadFile? {
         let manifest = try loadManifest(namespace: namespace)
         guard let record = manifest.records.first(where: { $0.id == recordID }),
               record.namespace == namespace,
-              ManagedReaderAccessPolicy.supportsNativeReader(readerType: record.readerType, format: record.format),
+              ReaderFormatSupport.shared.canReadOriginal(readerType: record.readerType.rawValue, format: record.format),
               let fileURL = fileURL(for: record) else { return nil }
-        return IosReaderDownloadArtifact(
+        return CompletedDownloadFile(
             fileURL: fileURL,
             assetID: record.assetID,
             displayTitle: record.resourceTitle,
@@ -199,41 +140,18 @@ actor ManagedDownloadStore {
     }
 
     private func loadManifest(namespace: String) throws -> Manifest {
+        if let initializationError { throw initializationError }
         let url = manifestURL(namespace)
         guard FileManager.default.fileExists(atPath: url.path) else { return Manifest(contractVersion: Self.currentContractVersion, records: []) }
-        do {
-            let decoded = try decoder.decode(Manifest.self, from: Data(contentsOf: url))
-            guard decoded.contractVersion == 3 || decoded.contractVersion == Self.currentContractVersion else {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            let obsoleteRecords = decoded.records.filter { record in
-                record.format.trimmingCharacters(in: .whitespacesAndNewlines)
-                    .caseInsensitiveCompare("KINDLE") == .orderedSame
-            }
-            for record in obsoleteRecords {
-                try removeFiles(for: record, namespace: namespace)
-            }
-            let migrated = Manifest(
-                contractVersion: Self.currentContractVersion,
-                records: decoded.records.filter { record in
-                    record.format.trimmingCharacters(in: .whitespacesAndNewlines)
-                        .caseInsensitiveCompare("KINDLE") != .orderedSame
-                }
-            )
-            if decoded.contractVersion != Self.currentContractVersion || !obsoleteRecords.isEmpty {
-                try saveManifest(migrated, namespace: namespace)
-            }
-            if !obsoleteRecords.isEmpty {
-                Self.logger.notice(
-                    "reader_download_legacy_record_removed platform=ios format=KINDLE entry=download_center stage=catalog_load code=DOWNLOAD_LEGACY_FORMAT_REMOVED count=\(obsoleteRecords.count)"
-                )
-            }
-            return migrated
-        } catch {
-            let directory = namespaceDirectory(namespace)
-            if FileManager.default.fileExists(atPath: directory.path) { try FileManager.default.removeItem(at: directory) }
-            return Manifest(contractVersion: Self.currentContractVersion, records: [])
+        let decoded = try decoder.decode(Manifest.self, from: Data(contentsOf: url))
+        guard decoded.contractVersion == 3 || decoded.contractVersion == Self.currentContractVersion,
+              decoded.records.allSatisfy({ $0.namespace == namespace }) else {
+            // Invalid metadata must not erase user-initiated downloads.
+            throw CocoaError(.fileReadCorruptFile)
         }
+        let migrated = Manifest(contractVersion: Self.currentContractVersion, records: decoded.records)
+        if decoded.contractVersion != Self.currentContractVersion { try saveManifest(migrated, namespace: namespace) }
+        return migrated
     }
 
     private func saveManifest(_ manifest: Manifest, namespace: String) throws {

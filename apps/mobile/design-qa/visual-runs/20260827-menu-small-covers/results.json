@@ -1,0 +1,22 @@
+{
+  "shared": {
+    "tests": 125,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "android": {
+    "tests": 144,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "app": {
+    "path": "androidApp/build/outputs/apk/debug/androidApp-debug.apk",
+    "sha256": "401e123825afb6428771e664fed94c3260558f3471dc73cae3faed23721a557b"
+  },
+  "testApp": {
+    "path": "androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk",
+    "sha256": "08cc384116cb1b0865cbcfc131aa47e85bbf048d6716be0ce6421208fd452087"
+  }
+}

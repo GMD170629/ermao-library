@@ -48,14 +48,25 @@ final class ShelfCatalogStore: ObservableObject {
     func refresh() async {
         let requestID = UUID()
         generation = requestID
-        state = .loading; loadingMore = false; paginationFailed = false
+        let previousPage = detail?.page ?? 1
+        loadingMore = true; paginationFailed = false
         do {
             let catalog = try await client.catalog(context: context)
-            let detail: ShelfCatalogDetail?
+            var detail: ShelfCatalogDetail?
             if let shelfID { detail = try await client.detail(context: context, shelfID: shelfID, page: 1) }
             else { detail = nil }
+            if previousPage > 1, let shelfID {
+                for page in 2...previousPage {
+                    guard let current = detail, page <= current.totalPages else { break }
+                    var next = try await client.detail(context: context, shelfID: shelfID, page: page)
+                    var seen = Set<String>()
+                    next.shelf.books = (current.shelf.books + next.shelf.books).filter { seen.insert($0.id).inserted }
+                    detail = next
+                }
+            }
             guard generation == requestID, !Task.isCancelled else { return }
             state = .ready(catalog: catalog, detail: detail)
+            loadingMore = false
         } catch {
             guard generation == requestID, !Task.isCancelled else { return }
             fail(error)

@@ -2,6 +2,8 @@ package com.ermao.library.features.downloads.infrastructure
 
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.shared.modules.downloads.DownloadByteSink
+import com.ermao.library.shared.modules.downloads.DownloadStoredBytes
+import com.ermao.library.shared.modules.downloads.DownloadArtifactKind
 import com.ermao.library.shared.modules.downloads.DownloadByteSinkSession
 import com.ermao.library.shared.modules.downloads.DownloadBundleByteSink
 import com.ermao.library.shared.modules.downloads.DownloadBundleByteSinkSession
@@ -17,6 +19,20 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink, DownloadBundleByteSink {
+    override suspend fun inspect(request: DownloadSinkRequest): DownloadStoredBytes = withContext(Dispatchers.IO) {
+        val namespaceKey = sha256("${request.namespace.serverIdentity}|${request.namespace.userId}|${request.namespace.authorizationVersion}")
+        val artifactKey = sha256("${request.resourceId}:${request.assetId}") + "-" + sha256(request.taskId).take(16)
+        val relativeDirectory = "$namespaceKey/artifacts"
+        val isBundle = request.artifactKind == DownloadArtifactKind.OriginalPageSet
+        val finalName = artifactKey + if (isBundle) ".bundle" else ".bin"
+        if (hasLocalArtifact("$relativeDirectory/$finalName", request.expectedTotalBytes)) {
+            return@withContext DownloadStoredBytes(0, "$relativeDirectory/$finalName")
+        }
+        val part = File(rootDirectory, "$relativeDirectory/$artifactKey.part")
+        val size = if (part.isFile && !isBundle) part.length() else 0
+        DownloadStoredBytes(if (size < request.expectedTotalBytes) size else 0)
+    }
+
     override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession {
         return begin(
             namespace = AndroidDownloadNamespace(
@@ -27,6 +43,7 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             resourceId = request.resourceId,
             assetId = request.assetId,
             resumeFromBytes = request.resumeFromBytes,
+            taskId = request.taskId,
         )
     }
 
@@ -57,11 +74,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         resourceId: String,
         assetId: String,
         resumeFromBytes: Long = 0,
+        taskId: String,
     ): Session = withContext(Dispatchers.IO) {
         require(resourceId.isNotBlank())
         require(assetId.isNotBlank())
         val namespaceKey = sha256("${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}")
-        val artifactKey = sha256("$resourceId:$assetId")
+        val artifactKey = sha256("$resourceId:$assetId") + "-" + sha256(taskId).take(16)
         val relativeDirectory = "$namespaceKey/artifacts"
         val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
         val part = File(directory, "$artifactKey.part")
@@ -87,29 +105,26 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         return candidate.takeIf { it.path.startsWith(rootPrefix) }
     }
 
-    fun hasLocalArtifact(localReference: String?): Boolean {
+    fun hasLocalArtifact(localReference: String?, expectedBytes: Long? = null): Boolean {
         if (localReference.isNullOrBlank()) return false
         val file = resolveLocalReference(localReference) ?: return false
-        return (file.isFile && file.length() > 0L) ||
-            (file.isDirectory && File(file, BUNDLE_MANIFEST_NAME).isFile)
-    }
-
-    suspend fun replaceLocalArtifact(localReference: String, parsedSource: File) = withContext(Dispatchers.IO) {
-        val target = requireNotNull(resolveLocalReference(localReference)) { "Download reference is invalid" }
-        require(parsedSource.isFile && parsedSource.length() > 0L) { "Parsed Reader source is missing" }
-        target.parentFile?.mkdirs()
-        val temporary = File(target.parentFile, ".${target.name}.${System.nanoTime()}.repair")
-        try {
-            parsedSource.inputStream().use { input ->
-                FileOutputStream(temporary).use { output ->
-                    input.copyTo(output)
-                    output.fd.sync()
-                }
-            }
-            require(temporary.length() == parsedSource.length()) { "Reader repair copy is incomplete" }
-            atomicReplace(temporary, target)
-        } finally {
-            temporary.delete()
+        if (file.isFile) return file.length() > 0L && (expectedBytes == null || file.length() == expectedBytes)
+        if (!file.isDirectory) return false
+        val manifestFile = File(file, BUNDLE_MANIFEST_NAME)
+        if (!manifestFile.isFile || manifestFile.length() > 8 * 1024 * 1024) return false
+        val manifest = try { BUNDLE_JSON.decodeFromString<BundleManifest>(manifestFile.readText()) }
+        catch (_: kotlinx.serialization.SerializationException) { return false }
+        if (manifest.contractVersion != DOWNLOAD_BUNDLE_CONTRACT_VERSION ||
+            manifest.artifactKind != DownloadArtifactKind.OriginalPageSet.name || manifest.members.isEmpty() ||
+            (expectedBytes != null && manifest.totalBytes != expectedBytes) ||
+            manifest.members.map { it.sequenceIndex } != manifest.members.indices.toList() ||
+            manifest.members.map { it.fileName }.distinct().size != manifest.members.size ||
+            manifest.members.any { it.sizeBytes <= 0 || it.sizeBytes > manifest.totalBytes } ||
+            manifest.members.sumOf { it.sizeBytes } != manifest.totalBytes) return false
+        return manifest.members.all { member ->
+            val page = File(file, member.fileName)
+            member.fileName == page.name && page.canonicalFile.parentFile == file.canonicalFile &&
+                page.isFile && page.length() == member.sizeBytes && detectImageMime(page) == member.mimeType
         }
     }
 
@@ -153,9 +168,11 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         }
 
         private fun abortInternal() {
-            runCatching { output?.close() }
-            output = null
-            partFile.delete()
+            try { output?.close() }
+            finally {
+                output = null
+                java.nio.file.Files.deleteIfExists(partFile.toPath())
+            }
         }
     }
 

@@ -353,7 +353,7 @@ actor SharedContentClient: ContentClient {
     }
 
     private func mapBook(_ value: ErmaoShared.BookSummary) -> BookCard {
-        BookCard(id: value.id, title: value.title, author: value.author, cover: cover(value.coverUrl), progress: value.progress > 0 ? value.progress : nil)
+        BookCard(id: value.id, title: value.title, author: value.author, cover: cover(value.coverUrl), progress: value.progress > 0 ? value.progress : nil, completed: value.completed?.boolValue)
     }
 
     private func mapBooks(_ values: [Any]) throws -> [BookCard] {

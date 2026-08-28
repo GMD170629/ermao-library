@@ -112,19 +112,32 @@ data class DownloadBatchResourceResult(
         require(failureCode == null || failureCode.isNotBlank())
         require((outcome == DownloadBatchOutcomeKind.Failed) == (failureCode != null))
     }
+    val shouldStart: Boolean get() = outcome in setOf(
+        DownloadBatchOutcomeKind.Enqueued, DownloadBatchOutcomeKind.Resumed, DownloadBatchOutcomeKind.Retried,
+    )
+}
+
+/** Shared intent policy; a batch reports accepted actions, never completed transfers. */
+object DownloadBatchPolicy {
+    fun decide(resourceId: String, status: DownloadTaskStatus?, failureCode: String?, active: Boolean): DownloadBatchResourceResult {
+        val outcome = if (active) DownloadBatchOutcomeKind.Skipped else when (status) {
+            null, DownloadTaskStatus.Queued -> DownloadBatchOutcomeKind.Enqueued
+            DownloadTaskStatus.Paused, DownloadTaskStatus.WaitingForWifi -> DownloadBatchOutcomeKind.Resumed
+            DownloadTaskStatus.FailedRetryable, DownloadTaskStatus.InsufficientSpace -> DownloadBatchOutcomeKind.Retried
+            DownloadTaskStatus.FailedTerminal, DownloadTaskStatus.Cancelled -> DownloadBatchOutcomeKind.Failed
+            DownloadTaskStatus.Downloading, DownloadTaskStatus.Completed -> DownloadBatchOutcomeKind.Skipped
+        }
+        return DownloadBatchResourceResult(resourceId, outcome,
+            if (outcome == DownloadBatchOutcomeKind.Failed) failureCode ?: "DOWNLOAD_NOT_RETRYABLE" else null)
+    }
 }
 
 data class DownloadBatchResult(
     val results: List<DownloadBatchResourceResult>,
 ) {
+    val requestedResourceIds: List<String> get() = results.filter { it.shouldStart }.map { it.resourceId }
     val succeededCount: Int
-        get() = results.count {
-            it.outcome in setOf(
-                DownloadBatchOutcomeKind.Enqueued,
-                DownloadBatchOutcomeKind.Resumed,
-                DownloadBatchOutcomeKind.Retried,
-            )
-        }
+        get() = results.count { it.shouldStart }
     val failedCount: Int get() = results.count { it.outcome == DownloadBatchOutcomeKind.Failed }
     val failedResourceIds: Set<String>
         get() = results.filter { it.outcome == DownloadBatchOutcomeKind.Failed }

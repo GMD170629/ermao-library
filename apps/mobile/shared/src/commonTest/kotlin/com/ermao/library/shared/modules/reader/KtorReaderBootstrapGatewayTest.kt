@@ -26,13 +26,12 @@ import kotlin.test.assertNull
 
 class KtorReaderBootstrapGatewayTest {
     @Test
-    fun mapsResourceAndPrimaryAssetToOriginalPublication() = runBlocking {
+    fun mapsResourceIdentityAndOnlinePublicationAccess() = runBlocking {
         val content = assertIs<Content>(gateway(VALID_BOOTSTRAP).load(request())).value
 
         assertEquals("resource-1", content.target.resourceId)
         assertEquals("book-1", content.target.bookId)
-        assertEquals("/api/assets/asset-1", content.downloadableOriginal?.apiPath)
-        assertEquals(1_234, content.downloadableOriginal?.expectedSizeBytes)
+        assertEquals("/api/reader/v4/resources/resource-1/publication/manifest.json", content.publicationAccess?.manifestApiPath)
         assertEquals("asset-1", content.remoteAccess.assetId)
         assertEquals(18, content.remoteSnapshot?.revision)
         assertEquals(2_222, content.remoteSnapshot?.receivedAtEpochMillis)
@@ -67,7 +66,7 @@ class KtorReaderBootstrapGatewayTest {
         val content = assertIs<Content>(gateway(mismatch).load(request())).value
 
         assertNull(content.remoteSnapshot)
-        assertEquals("/api/assets/asset-1", content.downloadableOriginal?.apiPath)
+        assertEquals("/api/reader/v4/resources/resource-1/publication/manifest.json", content.publicationAccess?.manifestApiPath)
     }
 
     @Test
@@ -95,7 +94,7 @@ class KtorReaderBootstrapGatewayTest {
 
             assertEquals(readerFormat, content.target.sourceFormat)
             assertEquals(wireFormat, content.remoteAccess.sourceFormat.wireValue)
-            assertEquals(mimeType, content.downloadableOriginal?.mimeType)
+            assertEquals("/api/reader/v4/resources/resource-1/publication/positions.json", content.publicationAccess?.positionsApiPath)
         }
     }
 
@@ -124,7 +123,7 @@ class KtorReaderBootstrapGatewayTest {
         val comicContent = assertIs<Content>(gateway(comic).load(request())).value
         assertEquals(ReaderFormat.Comic, comicContent.target.sourceFormat)
         assertEquals("pages/0", comicContent.comicPages.single().resourceHref)
-        assertEquals("/api/assets/asset-1", comicContent.downloadableOriginal?.apiPath)
+        assertEquals("/api/reader/v4/resources/resource-1/comic/manifest", comicContent.comicAccess?.manifestApiPath)
     }
 
     @Test
@@ -142,7 +141,7 @@ class KtorReaderBootstrapGatewayTest {
         assertEquals("image_dir", content.remoteAccess.sourceFormat.wireValue)
         assertEquals(ReaderFormat.Comic, content.target.sourceFormat)
         assertNull(content.remoteAccess.assetId)
-        assertNull(content.downloadableOriginal)
+        assertNull(content.publicationAccess)
     }
 
     @Test
@@ -204,7 +203,7 @@ class KtorReaderBootstrapGatewayTest {
         const val COMIC_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"cbz","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/jpeg","width":1200,"height":1800,"sizeBytes":1234}]}"""
         const val IMAGE_DIRECTORY_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"image_dir","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/png","width":1200,"height":1800,"sizeBytes":1234}]}"""
         const val REFLOWABLE_PUBLICATION = """"publication":{"kind":"reflowable","manifestUrl":"/api/reader/v4/resources/resource-1/publication/manifest.json","positionsUrl":"/api/reader/v4/resources/resource-1/publication/positions.json"}"""
-        const val COMIC_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"],"downloadArtifact":{"url":"/api/reader/v4/resources/resource-1/comic/archive","sourceFormat":"cbz","mimeType":"application/vnd.comicbook+zip","sizeBytes":1234}}"""
+        const val COMIC_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"]}"""
         const val IMAGE_DIRECTORY_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"]}"""
         val VALID_BOOTSTRAP = """
             {

@@ -1,0 +1,270 @@
+diff --git a/dist/epub/frame/FramePoolManager.js b/dist/epub/frame/FramePoolManager.js
+index 45404eb07bd7217042355665857511037a7bec95..dea852449efee3cd258e49094411cddd285a75f1 100644
+--- a/dist/epub/frame/FramePoolManager.js
++++ b/dist/epub/frame/FramePoolManager.js
+@@ -1 +1 @@
+-import y from"./FrameBlobBuilder.js";import{FrameManager as P}from"./FrameManager.js";const b=5,m=3;class B{constructor(e,r,s,n,o,i,l){this.pool=new Map,this.blobs=new Map,this.inprogress=new Map,this.pendingUpdates=new Map,this.injector=null,this.container=e,this.positions=r,this.currentCssProperties=s,this.injector=n??null,this.contentProtectionConfig=o||{},this.keyboardPeripheralsConfig=i||[],this.getFragmentIds=l??(()=>[])}async destroy(){let e=this.inprogress.values(),r=e.next();const s=[];for(;r.value;)s.push(r.value),r=e.next();s.length>0&&await Promise.allSettled(s),this.inprogress.clear();let n=this.pool.values(),o=n.next();for(;o.value;)await o.value.destroy(),o=n.next();this.pool.clear(),this.blobs.forEach(i=>{this.injector?.releaseBlobUrl?.(i),URL.revokeObjectURL(i)}),this.injector?.dispose(),this.container.childNodes.forEach(i=>{(i.nodeType===Node.ELEMENT_NODE||i.nodeType===Node.TEXT_NODE)&&i.remove()})}async update(e,r,s,n=!1){let o=this.positions.findIndex(p=>p.locations.position===r.locations.position);if(o<0)throw Error(`Locator not found in position list: ${r.locations.position} > ${this.positions.reduce((p,d)=>d.locations.position||0>p?d.locations.position||0:p,0)}`);const i=this.positions[o].href;this.inprogress.has(i)&&await this.inprogress.get(i);const l=new Promise(async(p,d)=>{const u=[],f=[];this.positions.forEach((t,c)=>{(c>o+b||c<o-b)&&(u.includes(t.href)||u.push(t.href)),c<o+m&&c>o-m&&(f.includes(t.href)||f.push(t.href))}),u.forEach(async t=>{f.includes(t)||this.pool.has(t)&&(await this.pool.get(t)?.destroy(),this.pool.delete(t),this.pendingUpdates.has(t)&&this.pendingUpdates.set(t,{inPool:!1}))}),this.currentBaseURL!==void 0&&e.baseURL!==this.currentBaseURL&&(this.blobs.forEach(t=>{this.injector?.releaseBlobUrl?.(t),URL.revokeObjectURL(t)}),this.blobs.clear()),this.currentBaseURL=e.baseURL;const w=async t=>{if(n&&(this.blobs.forEach(a=>{this.injector?.releaseBlobUrl?.(a),URL.revokeObjectURL(a)}),this.blobs.clear(),this.pendingUpdates.clear()),this.pendingUpdates.has(t)&&this.pendingUpdates.get(t)?.inPool===!1){const a=this.blobs.get(t);a&&(this.injector?.releaseBlobUrl?.(a),URL.revokeObjectURL(a),this.blobs.delete(t),this.pendingUpdates.delete(t))}if(this.pool.has(t)){const a=this.pool.get(t);if(!this.blobs.has(t))await a.destroy(),this.pool.delete(t),this.pendingUpdates.delete(t);else{await a.load(s);return}}const c=e.readingOrder.findWithHref(t);if(!c)return;if(!this.blobs.has(t)){const U=await new y(e,this.currentBaseURL||"",c,{cssProperties:this.currentCssProperties,injector:this.injector}).build();this.blobs.set(t,U)}const g=new P(this.blobs.get(t),this.contentProtectionConfig,this.keyboardPeripheralsConfig,this.getFragmentIds(t));t!==i&&await g.hide(),this.container.appendChild(g.iframe),await g.load(s),this.pool.set(t,g)};try{await Promise.all(f.map(t=>w(t)))}catch(t){d(t)}const h=this.pool.get(i);if((h?.source!==this._currentFrame?.source||n)&&(await this._currentFrame?.hide(),h&&await h.load(s),h&&await h.show(r.locations.progression),this._currentFrame=h,h)){const t=this.container.ownerDocument.activeElement;t&&t.tagName==="IFRAME"&&t!==h.iframe&&h.iframe.focus({preventScroll:!0})}p()});this.inprogress.set(i,l),await l,this.inprogress.delete(i)}setCSSProperties(e){if(!((s,n)=>{const o=Object.keys(s),i=Object.keys(n);if(o.length!==i.length)return!1;for(const l of o)if(s[l]!==n[l])return!1;return!0})(this.currentCssProperties||{},e)){this.currentCssProperties=e,this.pool.forEach(s=>{s.setCSSProperties(e)});for(const s of this.blobs.keys())this.pendingUpdates.set(s,{inPool:this.pool.has(s)})}}get currentFrames(){return[this._currentFrame]}get currentBounds(){const e={x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0,toJSON(){return this}};return this.currentFrames.forEach(r=>{if(!r)return;const s=r.realSize;e.x=Math.min(e.x,s.x),e.y=Math.min(e.y,s.y),e.width+=s.width,e.height=Math.max(e.height,s.height),e.top=Math.min(e.top,s.top),e.right=Math.min(e.right,s.right),e.bottom=Math.min(e.bottom,s.bottom),e.left=Math.min(e.left,s.left)}),e}}export{B as FramePoolManager};
++import{readingWindow as y}from"./readingWindow.js";import w from"./FrameBlobBuilder.js";import{FrameManager as P}from"./FrameManager.js";class N{container;positions;_currentFrame;currentCssProperties;pool=new Map;blobs=new Map;inprogress=new Map;pendingUpdates=new Map;currentBaseURL;injector=null;contentProtectionConfig;keyboardPeripheralsConfig;getFragmentIds;constructor(t,r,i,n,s,o,h){this.container=t,this.positions=r,this.currentCssProperties=i,this.injector=n??null,this.contentProtectionConfig=s||{},this.keyboardPeripheralsConfig=o||[],this.getFragmentIds=h??(()=>[])}async destroy(){let t=this.inprogress.values(),r=t.next();const i=[];for(;r.value;)i.push(r.value),r=t.next();i.length>0&&await Promise.allSettled(i),this.inprogress.clear();let n=this.pool.values(),s=n.next();for(;s.value;)await s.value.destroy(),s=n.next();this.pool.clear(),this.blobs.forEach(o=>{this.injector?.releaseBlobUrl?.(o),URL.revokeObjectURL(o)}),this.injector?.dispose(),this.container.childNodes.forEach(o=>{(o.nodeType===Node.ELEMENT_NODE||o.nodeType===Node.TEXT_NODE)&&o.remove()})}async update(t,r,i,n=!1){let s=this.positions.findIndex(c=>c.locations.position===r.locations.position);if(s<0)throw Error(`Locator not found in position list: ${r.locations.position} > ${this.positions.reduce((c,d)=>d.locations.position||0>c?d.locations.position||0:c,0)}`);const o=this.positions[s].href;this.inprogress.has(o)&&await this.inprogress.get(o);const h=new Promise(async(c,d)=>{const f=y(t,o),m=[o];for(const e of new Set([...this.pool.keys(),...this.blobs.keys()])){if(f.has(e))continue;await this.pool.get(e)?.destroy(),this.pool.delete(e);const p=this.blobs.get(e);p&&(this.injector?.releaseBlobUrl?.(p),URL.revokeObjectURL(p),this.blobs.delete(e)),this.pendingUpdates.delete(e)}this.currentBaseURL!==void 0&&t.baseURL!==this.currentBaseURL&&(this.blobs.forEach(e=>{this.injector?.releaseBlobUrl?.(e),URL.revokeObjectURL(e)}),this.blobs.clear()),this.currentBaseURL=t.baseURL;const b=async e=>{if(n&&(this.blobs.forEach(a=>{this.injector?.releaseBlobUrl?.(a),URL.revokeObjectURL(a)}),this.blobs.clear(),this.pendingUpdates.clear()),this.pendingUpdates.has(e)&&this.pendingUpdates.get(e)?.inPool===!1){const a=this.blobs.get(e);a&&(this.injector?.releaseBlobUrl?.(a),URL.revokeObjectURL(a),this.blobs.delete(e),this.pendingUpdates.delete(e))}if(this.pool.has(e)){const a=this.pool.get(e);if(!this.blobs.has(e))await a.destroy(),this.pool.delete(e),this.pendingUpdates.delete(e);else{await a.load(i);return}}const p=t.readingOrder.findWithHref(e);if(!p)return;if(!this.blobs.has(e)){const u=await new w(t,this.currentBaseURL||"",p,{cssProperties:this.currentCssProperties,injector:this.injector}).build();this.blobs.set(e,u)}const g=new P(this.blobs.get(e),this.contentProtectionConfig,this.keyboardPeripheralsConfig,this.getFragmentIds(e));e!==o&&await g.hide(),this.container.appendChild(g.iframe),await g.load(i),this.pool.set(e,g)};try{await Promise.all(m.map(e=>b(e)))}catch(e){d(e);return}const l=this.pool.get(o);if((l?.source!==this._currentFrame?.source||n)&&(await this._currentFrame?.hide(),l&&await l.load(i),l&&await l.show(r.locations.progression),this._currentFrame=l,l)){const e=this.container.ownerDocument.activeElement;e&&e.tagName==="IFRAME"&&e!==l.iframe&&l.iframe.focus({preventScroll:!0})}c()});this.inprogress.set(o,h);try{await h}finally{this.inprogress.delete(o)}}setCSSProperties(t){if(!((i,n)=>{const s=Object.keys(i),o=Object.keys(n);if(s.length!==o.length)return!1;for(const h of s)if(i[h]!==n[h])return!1;return!0})(this.currentCssProperties||{},t)){this.currentCssProperties=t,this.pool.forEach(i=>{i.setCSSProperties(t)});for(const i of this.blobs.keys())this.pendingUpdates.set(i,{inPool:this.pool.has(i)})}}get currentFrames(){return[this._currentFrame]}get currentBounds(){const t={x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0,toJSON(){return this}};return this.currentFrames.forEach(r=>{if(!r)return;const i=r.realSize;t.x=Math.min(t.x,i.x),t.y=Math.min(t.y,i.y),t.width+=i.width,t.height=Math.max(t.height,i.height),t.top=Math.min(t.top,i.top),t.right=Math.min(t.right,i.right),t.bottom=Math.min(t.bottom,i.bottom),t.left=Math.min(t.left,i.left)}),t}}export{N as FramePoolManager};
+diff --git a/dist/epub/frame/readingWindow.js b/dist/epub/frame/readingWindow.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1b69733a09ae8b33630ede6bd58b8f250d0849b
+--- /dev/null
++++ b/dist/epub/frame/readingWindow.js
+@@ -0,0 +1 @@
++function o(t,i){const n=t.readingOrder.items,r=n.findIndex(e=>e.href===i);if(r<0)throw new Error("READIUM_READING_ORDER_INVALID");return new Set(n.slice(Math.max(0,r-1),r+2).map(e=>e.href))}export{o as readingWindow};
+diff --git a/dist/epub/fxl/FXLFramePoolManager.js b/dist/epub/fxl/FXLFramePoolManager.js
+index f10fa71a6741dc3ced4342457ee80e357a0bc13d..b91679ea81e47ff2c179f18f2598eea50f40d2ff 100644
+--- a/dist/epub/fxl/FXLFramePoolManager.js
++++ b/dist/epub/fxl/FXLFramePoolManager.js
+@@ -1 +1 @@
+-import{ReadingProgression as S,Page as p}from"@readium/shared";import k from"../frame/FrameBlobBuilder.js";import{FXLFrameManager as M}from"./FXLFrameManager.js";import{FXLPeripherals as x}from"./FXLPeripherals.js";import{Spread as y,FXLSpreader as B,Orientation as E}from"./FXLSpreader.js";const T=8,O=5,U=300,A=15e3,D=250,I=150,N=500;class z{constructor(e,t,r,a,n,s){if(this.pool=new Map,this.blobs=new Map,this.inprogress=new Map,this.delayedShow=new Map,this.delayedTimeout=new Map,this.previousFrames=[],this.injector=null,this.width=0,this.height=0,this.transform="",this.currentSlide=0,this.spread=!0,this.orientationInternal=-1,this.container=e,this.positions=t,this.pub=r,this.injector=a??null,this.contentProtectionConfig=n||{},this.keyboardPeripheralsConfig=s||[],this.spreadPresentation=r.metadata.otherMetadata?.spread||y.auto,this.pub.metadata.effectiveReadingProgression!==S.rtl&&this.pub.metadata.effectiveReadingProgression!==S.ltr)throw Error("Unsupported reading progression for EPUB");this.spreader=new B(this.pub),this.containerHeightCached=e.clientHeight,this.bookElement=document.createElement("div"),this.bookElement.ariaLabel="Book",this.bookElement.tabIndex=-1,this.updateBookStyle(!0),this.spineElement=document.createElement("div"),this.spineElement.ariaLabel="Spine",this.bookElement.appendChild(this.spineElement),this.container.appendChild(this.bookElement),this.updateSpineStyle(!0),this.peripherals=new x(this),this.pub.readingOrder.items.forEach(l=>{const h=new M(this.peripherals,this.pub.metadata.effectiveReadingProgression,l.href,this.contentProtectionConfig,this.keyboardPeripheralsConfig);this.spineElement.appendChild(h.element),this.pool.set(l.href,h),h.width=100/this.length*(l.properties?.otherProperties.orientation===E.landscape||l.properties?.otherProperties.addBlank?this.perPage:1),h.height=this.height})}set listener(e){this._listener=e}get listener(){return this._listener}get doNotDisturb(){return this.peripherals.pan.touchID>0}resizeHandler(e=!0,t=!0){this.currentSlide+this.perPage>this.length&&(this.currentSlide=this.length<=this.perPage?0:this.length-1),this.containerHeightCached=this.container.clientHeight,this.orientationInternal=-1,this.updateSpineStyle(!0),e&&(this.currentSlide=this.reAlign(),this.slideToCurrent(!t,t)),clearTimeout(this.resizeTimeout),this.resizeTimeout=window.setTimeout(()=>{this.pool.forEach((r,a)=>{let n=this.pub.readingOrder.items.findIndex(h=>h.href===a);const s=this.pub.readingOrder.items[n];if(r.width=100/this.length*(s.properties?.otherProperties.orientation===E.landscape||s.properties?.otherProperties.addBlank?this.perPage:1),r.height=this.height,!r.loaded)return;const l=this.spreader.findByLink(s);r.update(this.spreadPosition(l,s))})},D)}updateDimensions(){this.width=this.bookElement.clientWidth,this.height=this.bookElement.clientHeight}get rtl(){return this.pub.metadata.effectiveReadingProgression===S.rtl}get single(){return!this.spread||this.portrait}get perPage(){return this.spread&&!this.portrait?2:1}get threshold(){return 50}get portrait(){return this.spreadPresentation===y.none?!0:(this.orientationInternal===-1&&(this.orientationInternal=this.containerHeightCached>this.container.clientWidth?1:0),this.orientationInternal===1)}updateSpineStyle(e,t=!0){let r="0";this.updateDimensions(),this.perPage>1&&(r=`${this.width/2}px`);const a={transition:e?`all ${t?I:N}ms ease-out`:"all 0ms ease-out",marginRight:this.rtl?r:"0",marginLeft:this.rtl?"0":r,width:`${this.width/this.perPage*this.length}px`,transform:this.transform,contain:"content"};Object.assign(this.spineElement.style,a)}updateBookStyle(e=!1){if(e){const t={overflow:"hidden",direction:this.pub.metadata.effectiveReadingProgression,cursor:"",height:"100%",width:"100%",position:"relative",outline:"none",transition:this.peripherals?.dragState?"none":"transform .15s ease-in-out",touchAction:"none"};Object.assign(this.bookElement.style,t)}this.bookElement.style.transform=`scale(${this.peripherals?.scale||1})`+(this.peripherals?` translate3d(${this.peripherals.pan.translateX}px, ${this.peripherals.pan.translateY}px, 0px)`:"")}goTo(e){if(this.slength<=this.perPage)return;e=this.reAlign(e);const t=this.currentSlide;this.currentSlide=Math.min(Math.max(e,0),this.length-1),t!==this.currentSlide&&this.slideToCurrent(!1)}onChange(){this.peripherals.scale=1,this.updateBookStyle()}get offset(){return(this.rtl?1:-1)*this.currentSlide*(this.width/this.perPage)}get length(){if(this.single)return this.slength;const e=this.slength+this.nLandscape;return this.shift&&e%2===0?e+1:e}get slength(){return this.pub.readingOrder.items.length||0}get shift(){return this.spreader.shift}get nLandscape(){return this.spreader.nLandscape}setPerPage(e){e===null?this.spread=!0:e===1?this.spread=!1:this.spread=!0,requestAnimationFrame(()=>this.resizeHandler(!0))}slideToCurrent(e,t=!0){if(this.updateDimensions(),e)requestAnimationFrame(()=>{requestAnimationFrame(()=>{const r=`translate3d(${this.offset}px, 0, 0)`;this.spineElement.style.transform!==r&&(this.transform=r,this.updateSpineStyle(!0,t),this.deselect())})});else{const r=`translate3d(${this.offset}px, 0, 0)`;if(this.spineElement.style.transform===r)return;this.transform=r,this.updateSpineStyle(!1),this.deselect()}}bounce(e=!1){requestAnimationFrame(()=>{this.transform=`translate3d(${this.offset+50*(e?1:-1)}px, 0, 0)`,this.updateSpineStyle(!0,!0),setTimeout(()=>{this.transform=`translate3d(${this.offset}px, 0, 0)`,this.updateSpineStyle(!0,!0)},100)})}next(e=1){if(this.slength<=this.perPage)return!1;const t=this.currentSlide;return this.currentSlide=Math.min(this.currentSlide+e,this.length-1),this.perPage>1&&this.currentSlide%2&&this.currentSlide--,this.currentSlide===t&&(this.currentSlide+1,this.length),t!==this.currentSlide?(this.slideToCurrent(!0),this.onChange(),!0):(this.bounce(this.rtl),!1)}prev(e=1){if(this.slength<=this.perPage)return!1;const t=this.currentSlide;return this.currentSlide=Math.max(this.currentSlide-e,0),this.perPage>1&&this.currentSlide%2&&this.currentSlide++,t!==this.currentSlide?(this.slideToCurrent(!0),this.onChange(),!0):(this.bounce(!this.rtl),!1)}get ownerWindow(){return this.container.ownerDocument.defaultView||window}async destroy(){let e=this.inprogress.values(),t=e.next();const r=[];for(;t.value;)r.push(t.value),t=e.next();r.length>0&&await Promise.allSettled(r),this.inprogress.clear();let a=this.pool.values(),n=a.next();for(;n.value;)await n.value.destroy(),n=a.next();this.pool.clear(),this.blobs.forEach(s=>URL.revokeObjectURL(s)),this.injector?.dispose(),this.container.childNodes.forEach(s=>{(s.nodeType===Node.ELEMENT_NODE||s.nodeType===Node.TEXT_NODE)&&s.remove()})}makeSpread(e){return this.perPage<2?[this.pub.readingOrder.items[e]]:this.spreader.currentSpread(e,this.perPage)}reAlign(e=this.currentSlide){return e%2&&!this.single&&e++,e}spreadPosition(e,t){return this.perPage<2?p.center:e.length<2?p.center:t.href===e[0].href?this.rtl?p.right:p.left:this.rtl?p.left:p.right}async waitForItem(e){if(this.inprogress.has(e)&&await this.inprogress.get(e),this.delayedShow.has(e)){const t=this.delayedTimeout.get(e);t>0?clearTimeout(t):await this.delayedShow.get(e),this.delayedTimeout.set(e,0),this.delayedShow.delete(e)}}async cancelShowing(e){if(this.delayedShow.has(e)){const t=this.delayedTimeout.get(e);t>0&&clearTimeout(t),this.delayedShow.delete(e)}}async update(e,t,r,a=!1){let n=this.pub.readingOrder.items.findIndex(h=>h.href===t.href);if(n<0)throw Error("Href not found in reading order");this.currentSlide!==n&&(this.currentSlide=this.reAlign(n),this.slideToCurrent(!0));const s=this.makeSpread(this.currentSlide);this.perPage>1&&n++;for(const h of s)await this.waitForItem(h.href);const l=new Promise(async(h,L)=>{const g=[],c=[];this.positions.forEach((i,o)=>{(o>n+T||o<n-T)&&(g.includes(i.href)||g.push(i.href)),o<n+O&&o>n-O&&(c.includes(i.href)||c.push(i.href))}),g.forEach(async i=>{c.includes(i)||this.pool.has(i)&&(this.cancelShowing(i),await this.pool.get(i)?.unload())}),this.currentBaseURL!==void 0&&e.baseURL!==this.currentBaseURL&&(this.blobs.forEach(i=>URL.revokeObjectURL(i)),this.blobs.clear()),this.currentBaseURL=e.baseURL;const v=async i=>{const o=e.readingOrder.findIndexWithHref(i),d=e.readingOrder.items[o];if(d){if(!this.blobs.has(i)){const m=await new k(e,this.currentBaseURL||"",d,{injector:this.injector}).build(!0);this.blobs.set(i,m)}this.delayedShow.has(i)||this.delayedShow.set(i,new Promise((w,m)=>{let b=!1;const F=window.setTimeout(async()=>{this.delayedTimeout.set(i,0);const C=this.makeSpread(this.reAlign(o)),R=this.spreadPosition(C,d),P=this.pool.get(i);await P.load(r,this.blobs.get(i)),this.peripherals.isScaled||await P.show(R),this.delayedShow.delete(i),b=!0,w()},U);setTimeout(()=>{!b&&this.delayedShow.has(i)&&m(`Offscreen load timeout: ${i}`)},A),this.delayedTimeout.set(i,F)}))}};try{await Promise.all(c.map(i=>v(i)))}catch(i){L(i)}const u=[];for(const i of s){const o=this.pool.get(i.href),d=this.blobs.get(i.href);d&&(this.cancelShowing(i.href),await o.load(r,d),await o.show(this.spreadPosition(s,i)),this.previousFrames.push(o),await o.activate(),u.push(o))}for(;this.previousFrames.length>0;){const i=this.previousFrames.shift();i&&!u.includes(i)&&await i.unfocus()}this.previousFrames=u;const f=this.container.ownerDocument.activeElement;f&&f.tagName==="IFRAME"&&!u.some(i=>i.iframe===f)&&u[0]?.iframe.focus({preventScroll:!0}),h()});for(const h of s)this.inprogress.set(h.href,l);await l;for(const h of s)this.inprogress.delete(h.href)}get currentFrames(){if(this.perPage<2){const t=this.pub.readingOrder.items[this.currentSlide];return[this.pool.get(t.href)]}return this.spreader.currentSpread(this.currentSlide,this.perPage).map(t=>this.pool.get(t.href))}get currentBounds(){const e={x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0,toJSON(){return this}};return this.currentFrames.forEach(t=>{if(!t)return;const r=t.realSize;e.x=Math.min(e.x,r.x),e.y=Math.min(e.y,r.y),e.width+=r.width,e.height=Math.max(e.height,r.height),e.top=Math.min(e.top,r.top),e.right=Math.min(e.right,r.right),e.bottom=Math.min(e.bottom,r.bottom),e.left=Math.min(e.left,r.left)}),e}get viewport(){const e={readingOrder:[],progressions:new Map,positions:null};return(this.perPage<2?[this.pub.readingOrder.items[this.currentSlide]]:this.spreader.currentSpread(this.currentSlide,this.perPage)).forEach(r=>{e.readingOrder.push(r.href),e.progressions.set(r.href,{start:0,end:1})}),e.positions=this.getCurrentNumbers(),e}getCurrentNumbers(){if(this.perPage<2)return[this.pub.readingOrder.items[this.currentSlide].properties?.otherProperties.number];const e=this.spreader.currentSpread(this.currentSlide,this.perPage);return e.length>1?[e[0].properties?.otherProperties.number,e[e.length-1].properties?.otherProperties.number]:[e[0].properties?.otherProperties.number]}deselect(){this.currentFrames?.forEach(e=>e?.deselect())}}export{z as FXLFramePoolManager};
++import{readingWindow as y}from"../frame/readingWindow.js";import{ReadingProgression as g,Page as p}from"@readium/shared";import L from"../frame/FrameBlobBuilder.js";import{FXLFrameManager as E}from"./FXLFrameManager.js";import{FXLPeripherals as C}from"./FXLPeripherals.js";import{FXLSpreader as F,Orientation as f,Spread as b}from"./FXLSpreader.js";const M=250,k=150,T=500;class Z{container;positions;pool=new Map;blobs=new Map;inprogress=new Map;currentBaseURL;previousFrames=[];injector=null;contentProtectionConfig;keyboardPeripheralsConfig;bookElement;spineElement;pub;width=0;height=0;transform="";currentSlide=0;spreader;spread=!0;spreadPresentation;orientationInternal=-1;containerHeightCached;resizeTimeout;peripherals;constructor(e,t,r,h,a,s){if(this.container=e,this.positions=t,this.pub=r,this.injector=h??null,this.contentProtectionConfig=a||{},this.keyboardPeripheralsConfig=s||[],this.spreadPresentation=r.metadata.otherMetadata?.spread||b.auto,this.pub.metadata.effectiveReadingProgression!==g.rtl&&this.pub.metadata.effectiveReadingProgression!==g.ltr)throw Error("Unsupported reading progression for EPUB");this.spreader=new F(this.pub),this.containerHeightCached=e.clientHeight,this.bookElement=document.createElement("div"),this.bookElement.ariaLabel="Book",this.bookElement.tabIndex=-1,this.updateBookStyle(!0),this.spineElement=document.createElement("div"),this.spineElement.ariaLabel="Spine",this.bookElement.appendChild(this.spineElement),this.container.appendChild(this.bookElement),this.updateSpineStyle(!0),this.peripherals=new C(this),this.pub.readingOrder.items.forEach(l=>{const n=new E(this.peripherals,this.pub.metadata.effectiveReadingProgression,l.href,this.contentProtectionConfig,this.keyboardPeripheralsConfig);this.spineElement.appendChild(n.element),this.pool.set(l.href,n),n.width=100/this.length*(l.properties?.otherProperties.orientation===f.landscape||l.properties?.otherProperties.addBlank?this.perPage:1),n.height=this.height})}_listener;set listener(e){this._listener=e}get listener(){return this._listener}get doNotDisturb(){return this.peripherals.pan.touchID>0}resizeHandler(e=!0,t=!0){this.currentSlide+this.perPage>this.length&&(this.currentSlide=this.length<=this.perPage?0:this.length-1),this.containerHeightCached=this.container.clientHeight,this.orientationInternal=-1,this.updateSpineStyle(!0),e&&(this.currentSlide=this.reAlign(),this.slideToCurrent(!t,t)),clearTimeout(this.resizeTimeout),this.resizeTimeout=window.setTimeout(()=>{this.pool.forEach((r,h)=>{let a=this.pub.readingOrder.items.findIndex(n=>n.href===h);const s=this.pub.readingOrder.items[a];if(r.width=100/this.length*(s.properties?.otherProperties.orientation===f.landscape||s.properties?.otherProperties.addBlank?this.perPage:1),r.height=this.height,!r.loaded)return;const l=this.spreader.findByLink(s);r.update(this.spreadPosition(l,s))})},M)}updateDimensions(){this.width=this.bookElement.clientWidth,this.height=this.bookElement.clientHeight}get rtl(){return this.pub.metadata.effectiveReadingProgression===g.rtl}get single(){return!this.spread||this.portrait}get perPage(){return this.spread&&!this.portrait?2:1}get threshold(){return 50}get portrait(){return this.spreadPresentation===b.none?!0:(this.orientationInternal===-1&&(this.orientationInternal=this.containerHeightCached>this.container.clientWidth?1:0),this.orientationInternal===1)}updateSpineStyle(e,t=!0){let r="0";this.updateDimensions(),this.perPage>1&&(r=`${this.width/2}px`);const h={transition:e?`all ${t?k:T}ms ease-out`:"all 0ms ease-out",marginRight:this.rtl?r:"0",marginLeft:this.rtl?"0":r,width:`${this.width/this.perPage*this.length}px`,transform:this.transform,contain:"content"};Object.assign(this.spineElement.style,h)}updateBookStyle(e=!1){if(e){const t={overflow:"hidden",direction:this.pub.metadata.effectiveReadingProgression,cursor:"",height:"100%",width:"100%",position:"relative",outline:"none",transition:this.peripherals?.dragState?"none":"transform .15s ease-in-out",touchAction:"none"};Object.assign(this.bookElement.style,t)}this.bookElement.style.transform=`scale(${this.peripherals?.scale||1})`+(this.peripherals?` translate3d(${this.peripherals.pan.translateX}px, ${this.peripherals.pan.translateY}px, 0px)`:"")}goTo(e){if(this.slength<=this.perPage)return;e=this.reAlign(e);const t=this.currentSlide;this.currentSlide=Math.min(Math.max(e,0),this.length-1),t!==this.currentSlide&&this.slideToCurrent(!1)}onChange(){this.peripherals.scale=1,this.updateBookStyle()}get offset(){return(this.rtl?1:-1)*this.currentSlide*(this.width/this.perPage)}get length(){if(this.single)return this.slength;const e=this.slength+this.nLandscape;return this.shift&&e%2===0?e+1:e}get slength(){return this.pub.readingOrder.items.length||0}get shift(){return this.spreader.shift}get nLandscape(){return this.spreader.nLandscape}setPerPage(e){e===null?this.spread=!0:e===1?this.spread=!1:this.spread=!0,requestAnimationFrame(()=>this.resizeHandler(!0))}slideToCurrent(e,t=!0){if(this.updateDimensions(),e)requestAnimationFrame(()=>{requestAnimationFrame(()=>{const r=`translate3d(${this.offset}px, 0, 0)`;this.spineElement.style.transform!==r&&(this.transform=r,this.updateSpineStyle(!0,t),this.deselect())})});else{const r=`translate3d(${this.offset}px, 0, 0)`;if(this.spineElement.style.transform===r)return;this.transform=r,this.updateSpineStyle(!1),this.deselect()}}bounce(e=!1){requestAnimationFrame(()=>{this.transform=`translate3d(${this.offset+50*(e?1:-1)}px, 0, 0)`,this.updateSpineStyle(!0,!0),setTimeout(()=>{this.transform=`translate3d(${this.offset}px, 0, 0)`,this.updateSpineStyle(!0,!0)},100)})}next(e=1){if(this.slength<=this.perPage)return!1;const t=this.currentSlide;return this.currentSlide=Math.min(this.currentSlide+e,this.length-1),this.perPage>1&&this.currentSlide%2&&this.currentSlide--,this.currentSlide===t&&(this.currentSlide+1,this.length),t!==this.currentSlide?(this.slideToCurrent(!0),this.onChange(),!0):(this.bounce(this.rtl),!1)}prev(e=1){if(this.slength<=this.perPage)return!1;const t=this.currentSlide;return this.currentSlide=Math.max(this.currentSlide-e,0),this.perPage>1&&this.currentSlide%2&&this.currentSlide++,t!==this.currentSlide?(this.slideToCurrent(!0),this.onChange(),!0):(this.bounce(!this.rtl),!1)}get ownerWindow(){return this.container.ownerDocument.defaultView||window}async destroy(){let e=this.inprogress.values(),t=e.next();const r=[];for(;t.value;)r.push(t.value),t=e.next();r.length>0&&await Promise.allSettled(r),this.inprogress.clear();let h=this.pool.values(),a=h.next();for(;a.value;)await a.value.destroy(),a=h.next();this.pool.clear(),this.blobs.forEach(s=>URL.revokeObjectURL(s)),this.injector?.dispose(),this.container.childNodes.forEach(s=>{(s.nodeType===Node.ELEMENT_NODE||s.nodeType===Node.TEXT_NODE)&&s.remove()})}makeSpread(e){return this.perPage<2?[this.pub.readingOrder.items[e]]:this.spreader.currentSpread(e,this.perPage)}reAlign(e=this.currentSlide){return e%2&&!this.single&&e++,e}spreadPosition(e,t){return this.perPage<2?p.center:e.length<2?p.center:t.href===e[0].href?this.rtl?p.right:p.left:this.rtl?p.left:p.right}async waitForItem(e){this.inprogress.has(e)&&await this.inprogress.get(e)}async update(e,t,r,h=!1){let a=this.pub.readingOrder.items.findIndex(n=>n.href===t.href);if(a<0)throw Error("Href not found in reading order");this.currentSlide!==a&&(this.currentSlide=this.reAlign(a),this.slideToCurrent(!0));const s=this.makeSpread(this.currentSlide);this.perPage>1&&a++;for(const n of s)await this.waitForItem(n.href);const l=new Promise(async(n,S)=>{const P=y(e,t.href),m=s.map(i=>i.href);for(const i of this.blobs.keys()){if(P.has(i)||m.includes(i))continue;await this.pool.get(i)?.unload();const o=this.blobs.get(i);o&&(this.injector?.releaseBlobUrl?.(o),URL.revokeObjectURL(o),this.blobs.delete(i))}this.currentBaseURL!==void 0&&e.baseURL!==this.currentBaseURL&&(this.blobs.forEach(i=>URL.revokeObjectURL(i)),this.blobs.clear()),this.currentBaseURL=e.baseURL;const v=async i=>{const o=e.readingOrder.findIndexWithHref(i),d=e.readingOrder.items[o];if(d&&!this.blobs.has(i)){const w=await new L(e,this.currentBaseURL||"",d,{injector:this.injector}).build(!0);this.blobs.set(i,w)}};try{await Promise.all(m.map(i=>v(i)))}catch(i){S(i);return}const u=[];for(const i of s){const o=this.pool.get(i.href),d=this.blobs.get(i.href);d&&(await o.load(r,d),await o.show(this.spreadPosition(s,i)),this.previousFrames.push(o),await o.activate(),u.push(o))}for(;this.previousFrames.length>0;){const i=this.previousFrames.shift();i&&!u.includes(i)&&await i.unfocus()}this.previousFrames=u;const c=this.container.ownerDocument.activeElement;c&&c.tagName==="IFRAME"&&!u.some(i=>i.iframe===c)&&u[0]?.iframe.focus({preventScroll:!0}),n()});for(const n of s)this.inprogress.set(n.href,l);await l;for(const n of s)this.inprogress.delete(n.href)}get currentFrames(){if(this.perPage<2){const t=this.pub.readingOrder.items[this.currentSlide];return[this.pool.get(t.href)]}return this.spreader.currentSpread(this.currentSlide,this.perPage).map(t=>this.pool.get(t.href))}get currentBounds(){const e={x:0,y:0,width:0,height:0,top:0,right:0,bottom:0,left:0,toJSON(){return this}};return this.currentFrames.forEach(t=>{if(!t)return;const r=t.realSize;e.x=Math.min(e.x,r.x),e.y=Math.min(e.y,r.y),e.width+=r.width,e.height=Math.max(e.height,r.height),e.top=Math.min(e.top,r.top),e.right=Math.min(e.right,r.right),e.bottom=Math.min(e.bottom,r.bottom),e.left=Math.min(e.left,r.left)}),e}get viewport(){const e={readingOrder:[],progressions:new Map,positions:null};return(this.perPage<2?[this.pub.readingOrder.items[this.currentSlide]]:this.spreader.currentSpread(this.currentSlide,this.perPage)).forEach(r=>{e.readingOrder.push(r.href),e.progressions.set(r.href,{start:0,end:1})}),e.positions=this.getCurrentNumbers(),e}getCurrentNumbers(){if(this.perPage<2)return[this.pub.readingOrder.items[this.currentSlide].properties?.otherProperties.number];const e=this.spreader.currentSpread(this.currentSlide,this.perPage);return e.length>1?[e[0].properties?.otherProperties.number,e[e.length-1].properties?.otherProperties.number]:[e[0].properties?.otherProperties.number]}deselect(){this.currentFrames?.forEach(e=>e?.deselect())}}export{Z as FXLFramePoolManager};
+diff --git a/src/epub/frame/FramePoolManager.ts b/src/epub/frame/FramePoolManager.ts
+index ce54d56d18e3ee3a897a9a9634f491c238008f0b..06fa3aaf3baa5ae5fb57708f91327438cf8ba42f 100644
+--- a/src/epub/frame/FramePoolManager.ts
++++ b/src/epub/frame/FramePoolManager.ts
+@@ -1,3 +1,4 @@
++import { readingWindow } from "./readingWindow.ts";
+ import { ModuleName } from "@readium/navigator-html-injectables";
+ import { Locator, Publication } from "@readium/shared";
+ import FrameBlobBuider from "./FrameBlobBuilder.ts";
+@@ -5,8 +6,6 @@ import { FrameManager } from "./FrameManager.ts";
+ import { Injector } from "../../injection/Injector.ts";
+ import { IContentProtectionConfig, IKeyboardPeripheralsConfig } from "../../Navigator.ts";
+ 
+-const UPPER_BOUNDARY = 5;
+-const LOWER_BOUNDARY = 3;
+ 
+ export class FramePoolManager {
+     private readonly container: HTMLElement;
+@@ -92,24 +91,20 @@ export class FramePoolManager {
+         // Create a new progress that doesn't resolve until complete
+         // loading of the resource and its dependencies has finished.
+         const progressPromise = new Promise<void>(async (resolve, reject) => {
+-            const disposal: string[] = [];
+-            const creation: string[] = [];
+-            this.positions.forEach((l, j) => {
+-                if(j > (i + UPPER_BOUNDARY) || j < (i - UPPER_BOUNDARY)) {
+-                    if(!disposal.includes(l.href)) disposal.push(l.href);
+-                }
+-                if(j < (i + LOWER_BOUNDARY) && j > (i - LOWER_BOUNDARY)) {
+-                    if(!creation.includes(l.href)) creation.push(l.href);
+-                }
+-            });
+-            disposal.forEach(async href => {
+-                if(creation.includes(href)) return;
+-                if(!this.pool.has(href)) return;
++            const retained = readingWindow(pub, newHref);
++            const creation = [newHref];
++            for (const href of new Set([...this.pool.keys(), ...this.blobs.keys()])) {
++                if (retained.has(href)) continue;
+                 await this.pool.get(href)?.destroy();
+                 this.pool.delete(href);
+-                if(this.pendingUpdates.has(href))
+-                    this.pendingUpdates.set(href, { inPool: false });
+-            });
++                const url = this.blobs.get(href);
++                if (url) {
++                    this.injector?.releaseBlobUrl?.(url);
++                    URL.revokeObjectURL(url);
++                    this.blobs.delete(href);
++                }
++                this.pendingUpdates.delete(href);
++            }
+ 
+             // Check if base URL of publication has changed
+             if(this.currentBaseURL !== undefined && pub.baseURL !== this.currentBaseURL) {
+@@ -184,6 +179,7 @@ export class FramePoolManager {
+                 await Promise.all(creation.map(href => creator(href)));
+             } catch (error) {
+                 reject(error);
++                return;
+             }
+ 
+             // Update current frame
+@@ -211,8 +207,7 @@ export class FramePoolManager {
+         });
+ 
+         this.inprogress.set(newHref, progressPromise); // Add the job to the in progress map
+-        await progressPromise; // Wait on the job to finish...
+-        this.inprogress.delete(newHref); // Delete it from the in progress map!
++        try { await progressPromise; } finally { this.inprogress.delete(newHref); }
+     }
+ 
+     setCSSProperties(properties: { [key: string]: string }) {
+diff --git a/src/epub/frame/readingWindow.ts b/src/epub/frame/readingWindow.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..460215f9a232baa53864270952e4dee4ddcfbe78
+--- /dev/null
++++ b/src/epub/frame/readingWindow.ts
+@@ -0,0 +1,9 @@
++import type { Publication } from "@readium/shared";
++
++/** Preserve the active resource and at most one original resource on either side. */
++export function readingWindow(publication: Publication, href: string): Set<string> {
++    const order = publication.readingOrder.items;
++    const current = order.findIndex(link => link.href === href);
++    if (current < 0) throw new Error("READIUM_READING_ORDER_INVALID");
++    return new Set(order.slice(Math.max(0, current - 1), current + 2).map(link => link.href));
++}
+diff --git a/src/epub/fxl/FXLFramePoolManager.ts b/src/epub/fxl/FXLFramePoolManager.ts
+index cc96a8afaf531cba80934779364964a973df3974..973de0cfba5a7d84a02717338ee801ed764acc4a 100644
+--- a/src/epub/fxl/FXLFramePoolManager.ts
++++ b/src/epub/fxl/FXLFramePoolManager.ts
+@@ -1,3 +1,4 @@
++import { readingWindow } from "../frame/readingWindow.ts";
+ import { ModuleName } from "@readium/navigator-html-injectables";
+ import { Locator, Publication, ReadingProgression, Page, Link } from "@readium/shared";
+ import { FrameCommsListener } from "../frame/index.ts";
+@@ -8,11 +9,6 @@ import { FXLSpreader, Orientation, Spread } from "./FXLSpreader.ts";
+ import { VisualNavigatorViewport, IContentProtectionConfig, IKeyboardPeripheralsConfig } from "../../Navigator.ts";
+ import { Injector } from "../../injection/Injector.ts";
+ 
+-const UPPER_BOUNDARY = 8;
+-const LOWER_BOUNDARY = 5;
+-
+-const OFFSCREEN_LOAD_DELAY = 300;
+-const OFFSCREEN_LOAD_TIMEOUT = 15000;
+ const RESIZE_UPDATE_TIMEOUT = 250;
+ const SLIDE_FAST = 150;
+ const SLIDE_SLOW = 500;
+@@ -23,8 +19,6 @@ export class FXLFramePoolManager {
+     private readonly pool: Map<string, FXLFrameManager> = new Map();
+     private readonly blobs: Map<string, string> = new Map();
+     private readonly inprogress: Map<string, Promise<void>> = new Map();
+-    private readonly delayedShow: Map<string, Promise<void>> = new Map();
+-    private readonly delayedTimeout: Map<string, number> = new Map();
+     private currentBaseURL: string | undefined;
+     private previousFrames: FXLFrameManager[] = [];
+     private readonly injector: Injector | null = null;
+@@ -438,29 +432,6 @@ export class FXLFramePoolManager {
+             // call has finished executing so we don't end up e.g. loading the blob twice.
+             await this.inprogress.get(href);
+ 
+-        if(this.delayedShow.has(href)) {
+-            const timeoutVal = this.delayedTimeout.get(href)!;
+-            if(timeoutVal > 0) {
+-                // Delayed resource showing has not yet commenced, cancel it
+-                clearTimeout(timeoutVal);
+-            } else {
+-                // Await a current delayed showing of the resource
+-                await this.delayedShow.get(href);
+-            }
+-            this.delayedTimeout.set(href, 0);
+-            this.delayedShow.delete(href);
+-        }
+-    }
+-
+-    async cancelShowing(href: string) {
+-        if(this.delayedShow.has(href)) {
+-            const timeoutVal = this.delayedTimeout.get(href)!;
+-            if(timeoutVal > 0) {
+-                // Delayed resource showing has not yet commenced, cancel it
+-                clearTimeout(timeoutVal);
+-            }
+-            this.delayedShow.delete(href);
+-        }
+     }
+ 
+     async update(pub: Publication, locator: Locator, modules: ModuleName[], _force=false) {
+@@ -480,24 +451,18 @@ export class FXLFramePoolManager {
+         // Create a new progress that doesn't resolve until complete
+         // loading of the resource and its dependencies has finished.
+         const progressPromise = new Promise<void>(async (resolve, reject) => {
+-            const disposal: string[] = [];
+-            const creation: string[] = [];
+-
+-            this.positions.forEach((l, j) => {
+-                if(j > (i + UPPER_BOUNDARY) || j < (i - UPPER_BOUNDARY)) {
+-                    if(!disposal.includes(l.href)) disposal.push(l.href);
+-                }
+-                if(j < (i + LOWER_BOUNDARY) && j > (i - LOWER_BOUNDARY)) {
+-                    if(!creation.includes(l.href)) creation.push(l.href);
+-                }
+-            });
+-            disposal.forEach(async href => {
+-                if(creation.includes(href)) return;
+-                if(!this.pool.has(href)) return;
+-                this.cancelShowing(href);
++            const retained = readingWindow(pub, locator.href);
++            const creation = spread.map(link => link.href);
++            for (const href of this.blobs.keys()) {
++                if (retained.has(href) || creation.includes(href)) continue;
+                 await this.pool.get(href)?.unload();
+-                // this.pool.delete(href);
+-            });
++                const url = this.blobs.get(href);
++                if (url) {
++                    this.injector?.releaseBlobUrl?.(url);
++                    URL.revokeObjectURL(url);
++                    this.blobs.delete(href);
++                }
++            }
+ 
+             // Check if base URL of publication has changed
+             if(this.currentBaseURL !== undefined && pub.baseURL !== this.currentBaseURL) {
+@@ -524,34 +489,12 @@ export class FXLFramePoolManager {
+                     this.blobs.set(href, blobURL);
+                 }
+ 
+-                // Show future offscreen frame in advance after a delay
+-                // The added delay prevents this expensive operation from
+-                // occuring during the sliding animation, to reduce lag
+-                if(!this.delayedShow.has(href))
+-                    this.delayedShow.set(href, new Promise((resolve, reject) => {
+-                        let done = false;
+-                        const t = window.setTimeout(async () => {
+-                            this.delayedTimeout.set(href, 0);
+-                            const spread = this.makeSpread(this.reAlign(index));
+-                            const page = this.spreadPosition(spread, itm);
+-                            const fm = this.pool.get(href)!;
+-                            await fm.load(modules, this.blobs.get(href)!);
+-                            if(!this.peripherals.isScaled) // When scaled, positioning is screwed up, so wait to show
+-                                await fm.show(page); // Show/activate new frame
+-                            this.delayedShow.delete(href);
+-                            done = true;
+-                            resolve();
+-                        }, OFFSCREEN_LOAD_DELAY);
+-                        setTimeout(() => {
+-                            if(!done && this.delayedShow.has(href)) reject(`Offscreen load timeout: ${href}`);
+-                        }, OFFSCREEN_LOAD_TIMEOUT);
+-                        this.delayedTimeout.set(href, t);
+-                    }));
+             }
+             try {
+                 await Promise.all(creation.map(href => creator(href)));
+             } catch (error) {
+                 reject(error);
++                return;
+             }
+ 
+             // Update current frame(s)
+@@ -561,7 +504,6 @@ export class FXLFramePoolManager {
+                 const source = this.blobs.get(s.href);
+                 if(!source) continue; // This can get destroyed
+ 
+-                this.cancelShowing(s.href);
+                 await newFrame.load(modules, source); // In order to ensure modules match the latest configuration
+                 await newFrame.show(this.spreadPosition(spread, s)); // Show/activate new frame
+                 this.previousFrames.push(newFrame);
+diff --git a/types/src/epub/fxl/FXLFramePoolManager.d.ts b/types/src/epub/fxl/FXLFramePoolManager.d.ts
+index 790787f2c6efece9cae61566505d27cc68869000..2b9ecf82fbcc86d774a6bed76e94ec2e275279a5 100644
+--- a/types/src/epub/fxl/FXLFramePoolManager.d.ts
++++ b/types/src/epub/fxl/FXLFramePoolManager.d.ts
+@@ -11,8 +11,6 @@ export declare class FXLFramePoolManager {
+     private readonly pool;
+     private readonly blobs;
+     private readonly inprogress;
+-    private readonly delayedShow;
+-    private readonly delayedTimeout;
+     private currentBaseURL;
+     private previousFrames;
+     private readonly injector;
+@@ -87,7 +85,6 @@ export declare class FXLFramePoolManager {
+     reAlign(index?: number): number;
+     spreadPosition(spread: Link[], target: Link): Page;
+     waitForItem(href: string): Promise<void>;
+-    cancelShowing(href: string): Promise<void>;
+     update(pub: Publication, locator: Locator, modules: ModuleName[], _force?: boolean): Promise<void>;
+     get currentFrames(): (FXLFrameManager | undefined)[];
+     get currentBounds(): DOMRect;

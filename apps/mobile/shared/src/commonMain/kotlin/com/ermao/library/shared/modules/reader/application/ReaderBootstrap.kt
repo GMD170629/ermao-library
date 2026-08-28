@@ -5,10 +5,10 @@ import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
-import com.ermao.library.shared.modules.reader.domain.LocalReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
+import com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
@@ -23,38 +23,7 @@ data class ReaderBootstrapRequest(
     }
 }
 
-data class ReaderPublicationDownload(
-    val profile: ServerProfile,
-    val resourceId: String,
-    val displayTitle: String,
-    val bookId: String,
-    val assetId: String,
-    val apiPath: String,
-    /** Original library format; retained for metadata and compatibility. */
-    val originalSourceFormat: ReaderSourceFormat,
-    /** Format of the bytes opened by the local reader. */
-    val sourceFormat: ReaderSourceFormat,
-    val mimeType: String,
-    val expectedSizeBytes: Long,
-) {
-    init {
-        require(resourceId.isNotBlank())
-        require(displayTitle.isNotBlank())
-        require(bookId.isNotBlank())
-        require(assetId.isNotBlank())
-        require(apiPath.startsWith("/api/") && !apiPath.contains('#'))
-        require(sourceFormat.acceptsMimeType(mimeType)) { "Reader publication MIME type does not match its source format" }
-        require(expectedSizeBytes > 0)
-    }
-}
-
-/**
- * Resource identity used while opening through Reader v4.
- *
- * This is deliberately separate from [ReaderPublicationDownload]: IMAGE_DIR is a remotely
- * page-addressable publication but has no single original publication file. Its original pages
- * are downloaded by the downloads capability as an OriginalPageSet bundle.
- */
+/** Identity of an online publication; never an offline transfer request. */
 data class ReaderRemotePublicationAccess(
     val resourceId: String,
     val displayTitle: String,
@@ -79,7 +48,8 @@ data class ReaderRemotePublicationAccess(
 data class ReaderBootstrap(
     val target: ReaderProgressSyncTarget,
     val remoteAccess: ReaderRemotePublicationAccess,
-    val downloadableOriginal: ReaderPublicationDownload?,
+    val publicationAccess: ReaderPublicationAccess? = null,
+    val pdfAccess: ReaderPdfAccess? = null,
     val remoteSnapshot: ReaderProgressSnapshotV4?,
     /** Canonical Reader v4 navigation units. Native publications must never replace this list. */
     val units: List<ReaderNavigationUnit> = emptyList(),
@@ -107,19 +77,11 @@ data class ReaderBootstrap(
         require(comicPages.isEmpty() || remoteAccess.sourceFormat.isComic)
         require((comicAccess == null) == comicPages.isEmpty())
         require(pdfPages.isEmpty() || remoteAccess.sourceFormat == ReaderSourceFormat.Pdf)
-        require(remoteAccess.sourceFormat == ReaderSourceFormat.ImageDir || downloadableOriginal != null) {
-            "Single-file Reader formats must expose their downloadable original"
-        }
-        require(remoteAccess.sourceFormat != ReaderSourceFormat.ImageDir || downloadableOriginal == null) {
-            "IMAGE_DIR originals are a page set, not a single publication download"
-        }
-        downloadableOriginal?.let { original ->
-            require(original.resourceId == remoteAccess.resourceId)
-            require(original.bookId == remoteAccess.bookId)
-            require(original.assetId == remoteAccess.assetId)
-            require(original.sourceFormat == remoteAccess.sourceFormat)
-            require(original.originalSourceFormat == remoteAccess.sourceFormat)
-        }
+        require((publicationAccess != null) == (remoteAccess.sourceFormat.readerFormat in
+            setOf(com.ermao.library.shared.modules.reader.domain.ReaderFormat.Epub,
+                com.ermao.library.shared.modules.reader.domain.ReaderFormat.Mobi,
+                com.ermao.library.shared.modules.reader.domain.ReaderFormat.Text)))
+        require((pdfAccess != null) == (remoteAccess.sourceFormat == ReaderSourceFormat.Pdf))
         require(pageCount == null || pageCount > 0) { "Reader page count must be positive" }
         require(comicPages.map(ReaderComicPage::pageIndex) == comicPages.indices.toList()) {
             "Comic pages are not canonical and contiguous"
@@ -205,50 +167,22 @@ fun interface ReaderBootstrapGateway {
     suspend fun load(request: ReaderBootstrapRequest): ReaderBootstrapResult
 }
 
-interface PublicationDownloadSink {
-    /** Implementations consume the bytes before returning and never retain the mutable buffer. */
-    suspend fun write(bytes: ByteArray, count: Int)
-    suspend fun commit(): com.ermao.library.shared.modules.reader.domain.ReaderSource
-    suspend fun abort()
-}
-
-fun interface PublicationDownloadSinkFactory {
-    suspend fun open(download: ReaderPublicationDownload): PublicationDownloadSink
-}
-
-fun interface LocalReaderSourceResolver {
-    suspend fun resolve(download: ReaderPublicationDownload): LocalReaderSource?
-}
-
-sealed interface PublicationDownloadResult {
-    data class Content(val source: com.ermao.library.shared.modules.reader.domain.ReaderSource) :
-        PublicationDownloadResult
-
-    data class Failure(val failureCode: String, val recoverable: Boolean) : PublicationDownloadResult {
-        init {
-            require(failureCode.isNotBlank())
-        }
-
-        val readerErrorCode: ReaderErrorCode = readerErrorCodeForFailure(failureCode, recoverable)
+data class ReaderPublicationAccess(val manifestApiPath: String, val positionsApiPath: String) {
+    init {
+        require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
+        require(positionsApiPath.startsWith("/api/") && '#' !in positionsApiPath)
     }
 }
 
-fun interface PublicationDownloadPort {
-    suspend fun download(
-        download: ReaderPublicationDownload,
-        sinkFactory: PublicationDownloadSinkFactory,
-    ): PublicationDownloadResult
+data class ReaderPdfAccess(val apiPath: String, val expectedSizeBytes: Long) {
+    init {
+        require(apiPath.startsWith("/api/") && '#' !in apiPath)
+        require(expectedSizeBytes > 0)
+    }
 }
-
-/** Single authenticated Reader v4 gateway used by native composition roots. */
-interface ReaderServerGateway : ReaderBootstrapGateway, PublicationDownloadPort
 
 class BootstrapReaderPublication(
     private val bootstrapGateway: ReaderBootstrapGateway,
-    private val downloadPort: PublicationDownloadPort,
-    private val sinkFactory: PublicationDownloadSinkFactory,
-    private val localSourceResolver: LocalReaderSourceResolver? = null,
-    private val nativePdfiumRangeV1: Boolean = false,
 ) {
     suspend fun execute(request: ReaderBootstrapRequest): ReaderPublicationBootstrapResult =
         when (val bootstrap = bootstrapGateway.load(request)) {
@@ -256,34 +190,26 @@ class BootstrapReaderPublication(
                 bootstrap.failureCode,
                 bootstrap.recoverable,
             )
-            is ReaderBootstrapResult.Content -> openPublication(request, bootstrap.value)
+            is ReaderBootstrapResult.Content -> resolve(request, bootstrap.value)
         }
 
-    private suspend fun openPublication(
+    fun resolve(
         request: ReaderBootstrapRequest,
         bootstrap: ReaderBootstrap,
     ): ReaderPublicationBootstrapResult {
         val access = bootstrap.remoteAccess
-        val downloadableOriginal = bootstrap.downloadableOriginal
-        if (downloadableOriginal != null) {
-            localSourceResolver?.resolve(downloadableOriginal)?.let { local ->
-                return ReaderPublicationBootstrapResult.Content(local, bootstrap)
-            }
-        }
-        if (nativePdfiumRangeV1 && access.sourceFormat == ReaderSourceFormat.Pdf) {
-            val publication = downloadableOriginal
-                ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_ASSET_MISSING", false)
+        if (access.sourceFormat == ReaderSourceFormat.Pdf) {
+            val pdf = requireNotNull(bootstrap.pdfAccess)
             return ReaderPublicationBootstrapResult.Content(
                 RemoteByteRangeReaderSource(
-                    resourceId = publication.resourceId,
-                    displayTitle = publication.displayTitle,
-                    bookId = publication.bookId,
-                    assetId = publication.assetId,
+                    resourceId = access.resourceId,
+                    displayTitle = access.displayTitle,
+                    bookId = access.bookId,
+                    assetId = requireNotNull(access.assetId),
                     namespace = request.namespace,
-                    apiPath = publication.apiPath,
-                    expectedSizeBytes = publication.expectedSizeBytes,
-                ),
-                bootstrap,
+                    apiPath = pdf.apiPath,
+                    expectedSizeBytes = pdf.expectedSizeBytes,
+                ), bootstrap,
             )
         }
         if (access.sourceFormat.isComic) {
@@ -312,18 +238,20 @@ class BootstrapReaderPublication(
                 bootstrap,
             )
         }
-        val publication = downloadableOriginal
-            ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_ASSET_MISSING", false)
-        return when (val downloaded = downloadPort.download(publication, sinkFactory)) {
-            is PublicationDownloadResult.Failure -> ReaderPublicationBootstrapResult.Failure(
-                downloaded.failureCode,
-                downloaded.recoverable,
-            )
-            is PublicationDownloadResult.Content -> ReaderPublicationBootstrapResult.Content(
-                downloaded.source,
-                bootstrap,
-            )
-        }
+        val publication = bootstrap.publicationAccess
+            ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_UNSUPPORTED", false)
+        return ReaderPublicationBootstrapResult.Content(
+            RemoteReflowableReaderSource(
+                resourceId = access.resourceId,
+                displayTitle = access.displayTitle,
+                bookId = access.bookId,
+                assetId = requireNotNull(access.assetId),
+                sourceFormat = access.sourceFormat,
+                namespace = request.namespace,
+                manifestApiPath = publication.manifestApiPath,
+                positionsApiPath = publication.positionsApiPath,
+            ), bootstrap,
+        )
     }
 }
 

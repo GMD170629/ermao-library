@@ -16,6 +16,7 @@ enum class ReaderErrorCode(val wireValue: String) {
     DrmProtected("DRM_PROTECTED"),
     ParseFailed("PARSE_FAILED"),
     ResourceMissing("RESOURCE_MISSING"),
+    PublicationChanged("PUBLICATION_CHANGED"),
     NetworkUnavailable("NETWORK_UNAVAILABLE"),
     OutOfMemoryRisk("OUT_OF_MEMORY_RISK"),
     ReaderEngineError("READER_ENGINE_ERROR"),
@@ -44,6 +45,8 @@ fun readerErrorCodeForFailure(
 ): ReaderErrorCode {
     val code = failureCode.trim().uppercase()
     return when {
+        code in setOf("PUBLICATION_CHANGED", "PUBLICATION_RESOURCE_CHANGED", "BINARY_VERSION_CHANGED") -> ReaderErrorCode.PublicationChanged
+        code in setOf("PUBLICATION_RESOURCE_TOO_LARGE", "BINARY_TOO_LARGE") -> ReaderErrorCode.OutOfMemoryRisk
         code in NETWORK_FAILURE_CODES || recoverable -> ReaderErrorCode.NetworkUnavailable
         code == "COMIC_ARCHIVE_PART_MISSING" || code == "ARCHIVE_PART_MISSING" ->
             ReaderErrorCode.ComicArchivePartMissing
@@ -65,7 +68,7 @@ fun readerErrorCodeForFailure(
             ReaderErrorCode.ComicArchiveEncrypted
         }
         "UNSUPPORTED" in code || "FORMAT_UNSUPPORTED" in code -> ReaderErrorCode.UnsupportedFormat
-        "OUT_OF_MEMORY" in code || "LIMIT_EXCEEDED" in code -> ReaderErrorCode.OutOfMemoryRisk
+        "OUT_OF_MEMORY" in code || "LIMIT_EXCEEDED" in code || "TOO_LARGE" in code -> ReaderErrorCode.OutOfMemoryRisk
         "MISSING" in code || "NOT_FOUND" in code -> ReaderErrorCode.ResourceMissing
         "PARSE" in code -> ReaderErrorCode.ParseFailed
         "CORRUPT" in code || "INVALID" in code || "CONTENT_TYPE" in code -> ReaderErrorCode.CorruptFile
@@ -76,7 +79,6 @@ fun readerErrorCodeForFailure(
 private val NETWORK_FAILURE_CODES = setOf(
     "NETWORK_UNAVAILABLE",
     "TIMEOUT",
-    "DOWNLOAD_TIMEOUT",
     "RATE_LIMITED",
     "SERVICE_UNAVAILABLE",
     "SERVER_FAILURE",

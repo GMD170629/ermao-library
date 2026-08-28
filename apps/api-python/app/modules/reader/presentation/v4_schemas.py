@@ -31,10 +31,6 @@ class ReaderComicPageResponse(Response):
     media_type = "application/octet-stream"
 
 
-class ReaderComicArchiveResponse(Response):
-    media_type = "application/octet-stream"
-
-
 ReaderFormat = Literal["reflowable", "comic", "pdf", "audio"]
 ReaderSourceFormat = Literal[
     "epub",
@@ -438,13 +434,6 @@ class ReaderCapabilities(ReaderWireModel):
     supports_spreads: bool = Field(alias="supportsSpreads")
 
 
-class ReaderComicDownloadArtifact(ReaderWireModel):
-    url: str
-    source_format: Literal["cbz", "zip", "cbr", "rar"] = Field(alias="sourceFormat")
-    mime_type: str = Field(alias="mimeType", min_length=1, max_length=191)
-    size_bytes: int = Field(alias="sizeBytes", gt=0)
-
-
 class ReaderPublicationAccess(ReaderWireModel):
     kind: Literal["reflowable", "comic"]
     manifest_url: str = Field(alias="manifestUrl")
@@ -454,18 +443,13 @@ class ReaderPublicationAccess(ReaderWireModel):
         default_factory=list,
         alias="imageVariants",
     )
-    download_artifact: ReaderComicDownloadArtifact | None = Field(
-        default=None,
-        alias="downloadArtifact",
-        exclude_if=lambda value: value is None,
-    )
 
     @model_validator(mode="after")
     def validate_kind(self) -> ReaderPublicationAccess:
         if self.kind == "reflowable":
             if self.positions_url is None or self.page_url_template is not None:
                 raise ValueError("Invalid reflowable publication access")
-            if self.image_variants or self.download_artifact is not None:
+            if self.image_variants:
                 raise ValueError("Invalid reflowable publication access")
         elif (
             self.positions_url is not None

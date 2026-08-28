@@ -13,7 +13,6 @@ struct IosReaderPrivateContentCache: PrivateContentCacheClearing, Sendable {
     func removeNamespace(_ namespace: String) async throws {
         try await managedPublications?.removeNamespace(namespace)
         try IosReaderLocalDatabase.purgeNamespace(namespace)
-        try IosPdfRangeCache.clearNamespace(namespace)
 
         guard let (serverIdentity, userID) = accountComponents(namespace) else {
             throw IosReaderFailure(code: .persistenceFailed)

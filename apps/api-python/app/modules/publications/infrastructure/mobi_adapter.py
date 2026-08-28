@@ -6,8 +6,9 @@ import ctypes
 import ctypes.util
 import os
 import posixpath
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -22,9 +23,13 @@ from app.modules.publications.domain.model import (
     PublicationLink,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
+)
+from app.modules.publications.infrastructure.snapshot_cache import (
+    PublicationSnapshotCache,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
@@ -93,6 +98,7 @@ class _MobiResourceDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class _MobiSnapshot:
+    book: ctypes.c_void_p
     publication: NormalizedPublication
     resources_by_href: dict[str, _MobiResourceDescriptor]
 
@@ -357,14 +363,11 @@ def _safe_href(value: str) -> str:
     return normalized
 
 
-@lru_cache(maxsize=32)
 def _snapshot(
     core: _MobiCore,
     source_path_value: str,
     source_size: int,
     source_mtime_ns: int,
-    fallback_title: str,
-    fallback_author: str | None,
 ) -> _MobiSnapshot:
     source_path = Path(source_path_value)
     book = core.open(source_path)
@@ -445,8 +448,8 @@ def _snapshot(
         )
         publication = NormalizedPublication(
             identifier=f"urn:shuku:mobi:{source_size}:{source_mtime_ns}",
-            title=core.copy_metadata(book, 1) or fallback_title,
-            author=core.copy_metadata(book, 2) or fallback_author,
+            title=core.copy_metadata(book, 1) or "",
+            author=core.copy_metadata(book, 2),
             language=core.copy_metadata(book, 4),
             reading_progression="rtl" if info.reading_direction == 2 else "ltr",
             revision=PublicationRevision(
@@ -459,61 +462,73 @@ def _snapshot(
             resources=resources,
             toc=toc,
         )
-        return _MobiSnapshot(publication=publication, resources_by_href=by_href)
-    finally:
+        return _MobiSnapshot(
+            book=book, publication=publication, resources_by_href=by_href
+        )
+    except BaseException:
         core.close(book)
+        raise
 
 
 class MobiPublicationAdapter(PublicationAdapter):
     def __init__(self, storage_root: Path, core: _MobiCore | None = None) -> None:
         self._storage_root = storage_root
         self._core = core or load_mobi_core()
+        self._cache: PublicationSnapshotCache[_MobiSnapshot] = PublicationSnapshotCache(
+            dispose=self._close_snapshot,
+        )
+
+    def _close_snapshot(self, snapshot: _MobiSnapshot) -> None:
+        if self._core is not None:
+            self._core.close(snapshot.book)
+
+    def close(self) -> None:
+        self._cache.close()
 
     def open(self, source: PublicationSource) -> NormalizedPublication:
-        return self._snapshot(source).publication
+        with self._snapshot(source) as snapshot:
+            return replace(
+                snapshot.publication,
+                title=snapshot.publication.title or source.title,
+                author=snapshot.publication.author or source.author,
+            )
 
     def read_resource(
-        self,
-        source: PublicationSource,
-        href: str,
+        self, source: PublicationSource, href: str
     ) -> PublicationResource:
         core = self._require_core(source)
-        snapshot = self._snapshot(source)
-        safe_href = _safe_href(href)
-        descriptor = snapshot.resources_by_href.get(safe_href)
-        if descriptor is None:
-            raise PublicationResourceNotFoundError
-        source_path = resolve_publication_source(
-            source.path,
-            select_publication_source_root(source.library_root, self._storage_root),
-        )
-        book = core.open(source_path)
-        try:
-            content = core.read_resource(book, descriptor)
-        finally:
-            core.close(book)
-        return PublicationResource(
-            href=safe_href,
-            media_type=descriptor.media_type,
-            content=content,
-            source_mtime=source_path.stat().st_mtime,
-        )
+        with self._snapshot(source) as snapshot:
+            safe_href = _safe_href(href)
+            descriptor = snapshot.resources_by_href.get(safe_href)
+            if descriptor is None:
+                raise PublicationResourceNotFoundError
+            limit = (
+                8 * 1024 * 1024
+                if descriptor.category == _MARKUP_CATEGORY
+                else _MAX_RESOURCE_BYTES
+            )
+            if descriptor.decoded_length > limit:
+                raise PublicationResourceTooLargeError
+            return PublicationResource(
+                href=safe_href,
+                media_type=descriptor.media_type,
+                content=core.read_resource(snapshot.book, descriptor),
+                source_mtime=snapshot.publication.revision.source_mtime_ms / 1000,
+            )
 
-    def _snapshot(self, source: PublicationSource) -> _MobiSnapshot:
+    @contextmanager
+    def _snapshot(self, source: PublicationSource) -> Iterator[_MobiSnapshot]:
         core = self._require_core(source)
-        source_path = resolve_publication_source(
+        path = resolve_publication_source(
             source.path,
             select_publication_source_root(source.library_root, self._storage_root),
         )
-        stat_result = source_path.stat()
-        return _snapshot(
-            core,
-            str(source_path),
-            stat_result.st_size,
-            stat_result.st_mtime_ns,
-            source.title,
-            source.author,
-        )
+        stat = path.stat()
+        key = (str(path), stat.st_size, stat.st_mtime_ns)
+        with self._cache.lease(
+            key, lambda: _snapshot(core, *key), max(1, stat.st_size * 8)
+        ) as snapshot:
+            yield snapshot
 
     def _require_core(self, source: PublicationSource) -> _MobiCore:
         if source.source_format not in _MOBI_FORMATS:

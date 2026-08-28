@@ -164,6 +164,7 @@ test('PDF page navigation resets a zoomed document to the top', async () => {
     cleanup() {}
   } as unknown as PDFPageProxy;
   const document = {
+    setReadingWindow: async () => undefined,
     numPages: 2,
     getPage: async () => page
   } as unknown as PDFDocumentProxy;
@@ -248,6 +249,7 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
     cleanup() {}
   } as unknown as PDFPageProxy;
   const document = {
+    setReadingWindow: async () => undefined,
     numPages: 7,
     getPage: async () => page
   } as unknown as PDFDocumentProxy;
@@ -393,6 +395,7 @@ test('PDF resize and preference rerenders keep the committed page visible until 
     cleanup() {}
   } as unknown as PDFPageProxy;
   const document = {
+    setReadingWindow: async () => undefined,
     numPages: 1,
     getPage: async () => page
   } as unknown as PDFDocumentProxy;

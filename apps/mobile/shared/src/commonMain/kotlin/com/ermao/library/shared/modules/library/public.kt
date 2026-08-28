@@ -16,6 +16,19 @@ import com.ermao.library.shared.modules.servers.domain.TlsMode
 
 /** Stable capability boundary; platform code does not import library infrastructure mappers directly. */
 object LibraryContract {
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    fun resourcePayload(payload: kotlinx.serialization.json.JsonObject): com.ermao.library.shared.modules.library.domain.Resource {
+        val resource = payload["resource"] ?: throw IllegalArgumentException("Resource payload is missing")
+        return json.decodeFromJsonElement(
+            com.ermao.library.shared.modules.library.infrastructure.ResourceWire.serializer(), resource,
+        ).toDomain()
+    }
+
+    fun bookPayload(payload: kotlinx.serialization.json.JsonObject): BookDetailSummary =
+        json.decodeFromJsonElement(
+            BookPayloadWire.serializer(), payload,
+        ).toDomain()
+
     fun bookSummary(wire: BookSummaryWire): BookSummary = wire.toDomain()
 
     fun bookDetailSummary(wire: BookPayloadWire): BookDetailSummary = wire.toDomain()
@@ -86,3 +99,7 @@ suspend fun loadBookContentPage(
 ): ContentResult<BookContentSnapshot> = com.ermao.library.shared.modules.library.application.loadBookContent(
     repository, context, bookId, target, sort, page,
 )
+
+/** Canonical URL for displayed cover bytes and their cache identity. */
+fun smallCoverRequestPath(apiPath: String): String =
+    com.ermao.library.shared.modules.library.domain.smallCoverRequestPath(apiPath)

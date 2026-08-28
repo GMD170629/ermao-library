@@ -15,11 +15,13 @@ fun CatalogBookCover(
     repository: ContentRepository,
     context: ContentRequestContext,
     modifier: Modifier = Modifier,
+    managementEnabled: Boolean = true,
 ) {
     key(context.namespace, id, coverUrl) {
-        com.ermao.library.features.content.ui.ContentCover(
+        val artwork: @Composable () -> Unit = { com.ermao.library.features.content.ui.ContentCover(
             contentId = id, title = title, coverUrl = coverUrl, repository = repository,
-            context = context, role = com.ermao.library.features.content.ui.CoverRole.Compact, modifier = modifier,
-        )
+            context = context, role = com.ermao.library.features.content.ui.CoverRole.Compact, modifier = if (managementEnabled) Modifier else modifier,
+        ) }
+        if (managementEnabled) com.ermao.library.features.workmanagement.ManageableBookCover(id, title, modifier, content = artwork) else artwork()
     }
 }

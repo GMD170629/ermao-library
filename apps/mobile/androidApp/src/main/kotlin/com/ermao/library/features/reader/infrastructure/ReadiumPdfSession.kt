@@ -1,5 +1,9 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.PdfRangeLoader
+import com.ermao.library.shared.modules.reader.PdfRangeFailure
+
+import com.ermao.library.shared.modules.reader.PdfRangeMemory
 import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.shared.modules.reader.ReaderMorphology
@@ -198,6 +202,7 @@ internal class ReadiumPdfSession(
     private suspend fun openPublication(): Publication = when (val currentSource = source) {
         is LocalReaderSource -> openLocalPublication(currentSource)
         is RemoteByteRangeReaderSource -> openRemotePublication(currentSource)
+        is com.ermao.library.shared.modules.reader.RemoteReflowableReaderSource,
         is RemoteComicReaderSource -> throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
     }
 
@@ -230,8 +235,7 @@ internal class ReadiumPdfSession(
             namespace = remoteSource.namespace,
             resourceId = remoteSource.resourceId,
         )
-        val loader = AndroidPdfRangeLoader(
-            scope = configuration.scope,
+        val loader = PdfRangeLoader(
             source = remoteSource,
             identity = identity,
             cache = configuration.cache,
@@ -251,7 +255,7 @@ internal class ReadiumPdfSession(
         } catch (failure: ReaderOpenFailure) {
             closeNativeDocument()
             throw failure
-        } catch (failure: AndroidPdfRangeFailure) {
+        } catch (failure: PdfRangeFailure) {
             closeNativeDocument()
             throw ReaderOpenFailure(ReaderError(failure.code), cause = failure)
         } catch (failure: ShukuPdfiumFailure) {
@@ -405,6 +409,7 @@ internal class ReadiumPdfSession(
     private fun closeNativeDocument() {
         nativeDocument?.close()
         nativeDocument = null
+        remotePdfium?.cache?.clear()
     }
 
     private fun isValidPage(pageIndex: Int): Boolean = pageIndex in 0 until pageCount
@@ -454,7 +459,6 @@ internal class ReadiumPdfSession(
 }
 
 internal data class AndroidRemotePdfiumSessionConfiguration(
-    val scope: CoroutineScope,
-    val cache: AndroidPdfRangeCache,
+    val cache: PdfRangeMemory,
     val server: PdfRangeServerPort,
 )

@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.media_capabilities import (
+    exact_source_format,
     kindle_send_available_for_format,
     require_reader_type_for_format,
+    resolve_asset_mime_type,
 )
 from app.core.natural_sort import natural_sort_key
 from app.models import (
@@ -174,9 +176,15 @@ def _resource_view(
             "sourceNodeId": asset.source_node_id,
             "role": asset.role,
             "title": asset_titles[asset.id],
-            "mimeType": asset_metadata.mime_type
-            if asset_metadata and asset_metadata.mime_type
-            else "application/octet-stream",
+            "sourceFormat": exact_source_format(
+                resource_format=format_value, filename=source.name
+            ),
+            "mimeType": resolve_asset_mime_type(
+                resource_format=format_value,
+                asset_role=asset.role,
+                filename=source.name,
+                stored_mime_type=asset_metadata.mime_type if asset_metadata else None,
+            ),
             "sizeBytes": int(source.observed_size_bytes or 0),
             "size": _format_bytes(source.observed_size_bytes),
             "mtimeMs": int(source.observed_mtime_ns // 1_000_000),

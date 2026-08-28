@@ -7,6 +7,21 @@ import kotlin.test.assertIs
 import kotlinx.coroutines.runBlocking
 
 class ContentModelsTest {
+    @Test fun coverSizeIsCanonicalWithoutChangingOtherAssetsOrQueryValues() {
+        listOf("/api/books/a/cover", "/api/resources/a%2Fb/cover", "/api/books/a/source-nodes/node/cover").forEach { path ->
+            val expected = "$path?v=7&resourceId=a%2Fb&size=small"
+            assertEquals(expected, smallCoverRequestPath("$path?size=medium&v=7&size=large&resourceId=a%2Fb"))
+            assertEquals(expected, smallCoverRequestPath(expected))
+            assertEquals("$path?size=small", smallCoverRequestPath(path))
+        }
+        listOf("/api/resources/a/previews/1?size=large", "/api/resources/a/content", "content://local/cover",
+            "https://external.example/cover.jpg", "", "/api/books/a/cover-invalid").forEach { path ->
+            assertEquals(path, smallCoverRequestPath(path))
+        }
+        // Preserve invalid fragments for the existing authenticated transport to reject; do not weaken validation.
+        assertEquals("/api/books/a/cover?size=small#preview", smallCoverRequestPath("/api/books/a/cover#preview"))
+    }
+
     @Test
     fun queryFingerprintDoesNotIncludePage() {
         val first = BooksQuery(

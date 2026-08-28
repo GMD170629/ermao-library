@@ -469,7 +469,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let canonicalNavigation: [IosReaderTocEntry]
     private var publication: Publication?
     private var openedPublication: IosOpenedReadiumPublication?
-    private var managedPublication: IosManagedPublication?
+    private let onlineSource: ErmaoShared.RemoteReflowableReaderSource?
+    private let onlinePublication: ErmaoShared.OnlinePublicationSession?
     private var pendingSave: Task<Void, Never>?
     private var bookmarkSyncTask: Task<Void, Never>?
     private var persistenceGate = IosReaderPersistenceGate()
@@ -483,6 +484,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         displayTitle: String,
         sourceFormat: ErmaoShared.ReaderSourceFormat = .epub,
         canonicalNavigation: [IosReaderTocEntry] = [],
+        onlineSource: ErmaoShared.RemoteReflowableReaderSource? = nil,
+        onlinePublication: ErmaoShared.OnlinePublicationSession? = nil,
         preferences: IosReaderPreferences = IosReaderPreferences(),
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
@@ -504,6 +507,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         self.displayTitle = displayTitle
         self.sourceFormat = sourceFormat
         self.canonicalNavigation = canonicalNavigation
+        self.onlineSource = onlineSource
+        self.onlinePublication = onlinePublication
         self.preferences = preferences
         self.managedStore = managedStore
         self.progressStore = progressStore
@@ -529,6 +534,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     deinit {
+        onlinePublication?.close()
         pendingSave?.cancel()
         bookmarkSyncTask?.cancel()
     }
@@ -538,14 +544,24 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         didOpen = true
         phase = .opening
         do {
-            let managed = try await managedStore.resolve(
-                resourceID: resourceID,
-                namespace: namespaceKey
-            )
-            guard managed.sourceFormat == sourceFormat else {
-                throw IosReaderFailure(code: .corruptFile)
+            let openedPublication: IosOpenedReadiumPublication
+            let openedSource: any ErmaoShared.ReaderSource
+            if let onlineSource, let onlinePublication {
+                let publication = try await IosOnlinePublicationFactory(session: onlinePublication) { [weak self] code in
+                    self?.presentationError = IosReaderFailureCode(rawValue: code) ?? .engineError
+                }.open()
+                openedPublication = IosOpenedReadiumPublication(publication: publication) { publication.close() }
+                openedSource = onlineSource
+            } else {
+                let managed = try await managedStore.resolve(resourceID: resourceID, namespace: namespaceKey)
+                guard managed.sourceFormat == sourceFormat else { throw IosReaderFailure(code: .corruptFile) }
+                openedPublication = try await runtime.open(managed)
+                openedSource = ErmaoShared.LocalReaderSource(
+                    resourceId: managed.resourceID, displayTitle: managed.displayTitle,
+                    format: managed.sourceFormat.readerFormat, bookId: managed.bookID,
+                    assetId: managed.assetID, sourceFormat: managed.sourceFormat
+                )
             }
-            let openedPublication = try await runtime.open(managed)
             let publication = openedPublication.publication
             self.openedPublication = openedPublication
             let saved = try? await progressStore.load(sourceId: resourceID)
@@ -557,7 +573,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 else { throw IosReaderFailure(code: .locationRestoreFailed) }
                 initial = locator
             } else {
-                initial = await restore(local: saved, remote: remoteSnapshot, in: publication, managed: managed)
+                initial = await restore(local: saved, remote: remoteSnapshot, in: publication, openedSource: openedSource)
             }
             let navigator = try makeIosReflowableNavigator(
                 publication: publication, preferences: preferences.readium(for: systemAppearance), location: initial
@@ -566,7 +582,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             persistenceGate.protectRestoredLocation(
                 restoredLocation.map { locationSignature($0) }
             )
-            self.managedPublication = managed
             self.publication = publication
             installControlNavigator(navigator)
             renderedControlPreferences = preferences.readium(for: systemAppearance)
@@ -579,11 +594,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             if let initial { reflectLocation(initial) }
             await progressCoordination?.checkForRemoteProgress()
         } catch let failure as IosReaderFailure {
+            onlinePublication?.close()
             await openedPublication?.close()
             openedPublication = nil
             publication = nil
             phase = .failed(failure.code)
         } catch {
+            onlinePublication?.close()
             await openedPublication?.close()
             openedPublication = nil
             publication = nil
@@ -862,7 +879,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         _ = await navigator.go(to: prompt.locator, options: navigationOptions)
         try? await Task.sleep(for: .milliseconds(120))
         if let recaptured = await navigator.firstVisibleElementLocator(),
-           managedPublication != nil,
+           publication != nil,
            let actual = try? mapper.exactEnvelope(from: recaptured),
            ErmaoShared.PublicKt.compareExactProgressReadiumLocators(
                expected: prompt.expectedEnvelope,
@@ -881,7 +898,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     func verifyRestoredLocationAfterPresentation() async {
         guard let expected = expectedRestoredEnvelope,
               let navigator,
-              managedPublication != nil
+              publication != nil
         else { return }
         expectedRestoredEnvelope = nil
         try? await Task.sleep(for: .milliseconds(160))
@@ -961,6 +978,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         await openedPublication?.close()
         openedPublication = nil
         publication = nil
+        onlinePublication?.close()
         phase = .closed
     }
 
@@ -993,16 +1011,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         local: ErmaoShared.ReaderProgress?,
         remote: ErmaoShared.ReaderProgressSnapshotV4?,
         in publication: Publication,
-        managed: IosManagedPublication
+        openedSource: any ErmaoShared.ReaderSource
     ) async -> Locator? {
-        let openedSource = ErmaoShared.LocalReaderSource(
-            resourceId: managed.resourceID,
-            displayTitle: managed.displayTitle,
-            format: managed.sourceFormat.readerFormat,
-            bookId: managed.bookID,
-            assetId: managed.assetID,
-            sourceFormat: managed.sourceFormat
-        )
         let decision = ErmaoShared.PublicKt.decideReaderResume(
             localProgress: local,
             remoteSnapshot: remote,
@@ -1276,7 +1286,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     private func makeProgress(from locator: Locator) throws -> ErmaoShared.ReaderProgress {
-        guard managedPublication != nil else { throw IosReaderFailure(code: .persistenceFailed) }
+        guard publication != nil else { throw IosReaderFailure(code: .persistenceFailed) }
         let location = try mapper.sharedLocation(from: locator)
         return ErmaoShared.ReaderProgress(
             resourceId: resourceID,
@@ -1305,7 +1315,7 @@ extension IosReflowableReaderSession: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
-        presentationError = .engineError
+        presentationError = presentationError ?? .engineError
     }
 
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {

@@ -8,7 +8,6 @@ import re
 import stat
 import zipfile
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 from xml.etree import ElementTree
@@ -24,6 +23,7 @@ from app.modules.publications.domain.model import (
     PublicationMarkupError,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationRevision,
     PublicationSecurityError,
     PublicationStructureError,
@@ -31,6 +31,9 @@ from app.modules.publications.domain.model import (
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.locator_dom import parse_safe_markup_root
+from app.modules.publications.infrastructure.snapshot_cache import (
+    PublicationSnapshotCache,
+)
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
     select_publication_source_root,
@@ -364,7 +367,6 @@ def _toc_from_ncx(
     )
 
 
-@lru_cache(maxsize=64)
 def _index_epub(
     source_path_value: str,
     source_size: int,
@@ -502,6 +504,7 @@ def _index_epub(
 class EpubPublicationAdapter(PublicationAdapter):
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root
+        self._cache: PublicationSnapshotCache[_IndexedEpub] = PublicationSnapshotCache()
 
     def open(self, source: PublicationSource) -> NormalizedPublication:
         return self._index(source).publication
@@ -518,6 +521,16 @@ class EpubPublicationAdapter(PublicationAdapter):
             raise PublicationResourceNotFoundError
         try:
             with zipfile.ZipFile(indexed.source_path) as archive:
+                size_limit = (
+                    8 * 1024 * 1024
+                    if indexed.media_types_by_href[key]
+                    in {"application/xhtml+xml", "text/html"}
+                    else 32 * 1024 * 1024
+                )
+                if archive.getinfo(archive_name).file_size > size_limit:
+                    raise PublicationResourceTooLargeError(
+                        "Publication resource exceeds the byte limit"
+                    )
                 content = archive.read(archive_name)
         except (OSError, KeyError, zipfile.BadZipFile, RuntimeError) as error:
             raise PublicationCorruptError("EPUB resource cannot be read") from error
@@ -536,10 +549,16 @@ class EpubPublicationAdapter(PublicationAdapter):
             select_publication_source_root(source.library_root, self._storage_root),
         )
         stat_result = path.stat()
-        return _index_epub(
+        key = (
             str(path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
             source.title,
             source.author,
         )
+        return self._cache.get(
+            key, lambda: _index_epub(*key), MAX_ARCHIVE_ENTRIES * 2048
+        )
+
+    def close(self) -> None:
+        self._cache.close()

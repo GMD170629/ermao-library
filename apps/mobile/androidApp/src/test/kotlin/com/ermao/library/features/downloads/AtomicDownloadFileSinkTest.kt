@@ -50,6 +50,13 @@ class AtomicDownloadFileSinkTest {
             assertTrue(directory.isDirectory)
             assertTrue(directory.resolve("bundle.json").isFile)
             assertTrue(sink.hasLocalArtifact(reference))
+            val page = directory.listFiles().orEmpty().first { it.extension == "png" }
+            page.writeBytes(byteArrayOf(1))
+            assertFalse(sink.hasLocalArtifact(reference))
+            val recovered = sink.inspect(DownloadSinkRequest(DownloadNamespace("server", "user", 1),
+                "task", "resource", "page-set:resource", (first.size + second.size).toLong(), 0,
+                DownloadArtifactKind.OriginalPageSet))
+            assertTrue(recovered.completedReference == null)
             assertFalse(root.walkTopDown().any { it.name.endsWith(".part") })
         } finally {
             root.deleteRecursively()
@@ -91,7 +98,7 @@ class AtomicDownloadFileSinkTest {
         val root = Files.createTempDirectory("download-sink-test").toFile()
         try {
             val sink = AtomicDownloadFileSink(root)
-            val session = sink.begin(AndroidDownloadNamespace("server", "user", 1), "resource", "asset")
+            val session = sink.begin(AndroidDownloadNamespace("server", "user", 1), "resource", "asset", taskId = "task")
             session.write(byteArrayOf(1, 2))
             session.write(byteArrayOf(3, 4))
 
@@ -114,6 +121,7 @@ class AtomicDownloadFileSinkTest {
                 AndroidDownloadNamespace("server", "user", 1),
                 "resource",
                 "asset",
+                taskId = "task",
             )
             session.write(byteArrayOf(1, 2))
 

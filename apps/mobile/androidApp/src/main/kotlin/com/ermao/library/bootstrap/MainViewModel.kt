@@ -34,7 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.content.Context
 import com.ermao.library.features.me.platform.AppLocaleController
-import com.ermao.library.features.reader.infrastructure.AndroidPdfRangeCache
+import com.ermao.library.shared.modules.reader.PdfRangeMemory
 import com.ermao.library.platform.persistence.AndroidCoverCache
 import com.ermao.library.platform.persistence.AndroidReaderPrivateStateStore
 import com.ermao.library.shared.modules.library.ContentRequestContext

@@ -65,17 +65,28 @@ class ShelfCatalogViewModel(
     fun refresh() {
         loadJob?.cancel()
         val requestGeneration = ++generation
-        mutableState.update { it.copy(content = ShelfLoadState.Loading, loadingMore = false, paginationError = null) }
+        val previous = mutableState.value.content as? ShelfLoadState.Ready
+        mutableState.update { it.copy(loadingMore = true, paginationError = null) }
         loadJob = viewModelScope.launch {
             val catalog = when (val result = repository.loadCatalog(context)) {
                 is ShelfResult.Content -> result.value
                 is ShelfResult.Failure -> { fail(result.error, requestGeneration); return@launch }
             }
-            val detail = if (shelfId == null) null else when (val result = repository.loadPage(context, shelfId, 1)) {
+            var detail = if (shelfId == null) null else when (val result = repository.loadPage(context, shelfId, 1)) {
                 is ShelfResult.Content -> result.value
                 is ShelfResult.Failure -> { fail(result.error, requestGeneration); return@launch }
             }
-            if (generation == requestGeneration) mutableState.update { it.copy(content = ShelfLoadState.Ready(catalog, detail)) }
+            val lastPage = previous?.detail?.page ?: 1
+            for (page in 2..lastPage) {
+                val current = detail ?: break
+                if (page > current.totalPages) break
+                when (val result = repository.loadPage(context, current.shelf.id, page)) {
+                    is ShelfResult.Content -> detail = result.value.copy(shelf = result.value.shelf.copy(
+                        books = (current.shelf.books + result.value.shelf.books).distinctBy { it.id }))
+                    is ShelfResult.Failure -> { fail(result.error, requestGeneration); return@launch }
+                }
+            }
+            if (generation == requestGeneration) mutableState.update { it.copy(content = ShelfLoadState.Ready(catalog, detail), loadingMore = false) }
         }
     }
 

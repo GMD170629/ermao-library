@@ -55,20 +55,25 @@ class HomeViewModel(
     }
 
     fun refresh() = load(isRefresh = true)
+    fun refreshAfterManagement(bookId: String, readingStatusChanged: Boolean) {
+        if (readingStatusChanged) latestProgressUpdatesByResourceId.entries.removeAll { it.value.bookId == bookId }
+        load(isRefresh = true)
+    }
 
     fun retry() = load()
 
+    private var loadJob: kotlinx.coroutines.Job? = null
     private fun load(isRefresh: Boolean = false) {
-        if (mutableUiState.value.isRefreshing) return
+        loadJob?.cancel()
         mutableUiState.update {
             it.copy(
-                isLoading = true,
+                isLoading = !isRefresh || it.content == null,
                 isRefreshing = isRefresh,
-                content = null,
+                content = if (isRefresh) it.content else null,
                 errorCode = null,
             )
         }
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             try {
                 when (val result = repository.loadHome(context)) {
                     is ContentResult.Content -> {

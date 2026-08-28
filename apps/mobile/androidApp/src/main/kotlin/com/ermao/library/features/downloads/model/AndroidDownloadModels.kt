@@ -34,6 +34,7 @@ data class AndroidDownloadMemberRecord(
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
+    val sourceModifiedAtMillis: Long? = null,
 )
 
 /** Book -> Resource -> Asset ownership for catalog v3. */
@@ -53,6 +54,7 @@ data class AndroidDownloadRecord(
     val sourceApiPath: String,
     val sourceMimeType: String,
     val expectedBytes: Long,
+    val sourceModifiedAtMillis: Long? = null,
     /** Source byte count is separate from bundle total in catalog v4. */
     val sourceBytes: Long? = null,
     val artifactKind: String = "SingleOriginalAsset",

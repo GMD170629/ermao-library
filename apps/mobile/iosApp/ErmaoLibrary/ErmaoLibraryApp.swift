@@ -26,7 +26,7 @@ struct ErmaoLibraryApp: App {
         let readerPrivateContentCache = IosReaderPrivateContentCache()
         readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
             cookieStore: cookieStore,
-            downloadArtifacts: managedDownloads
+            completedDownloads: managedDownloads
         )
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()

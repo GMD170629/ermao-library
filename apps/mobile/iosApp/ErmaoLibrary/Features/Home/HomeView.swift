@@ -13,6 +13,7 @@ struct HomeView: View {
     let openCollection: (HomeCollectionKind) -> Void
 
     @StateObject private var store: HomeStore
+    @Environment(\.managementRevision) private var managementRevision
     @Environment(\.appTheme) private var theme
 
     init(
@@ -71,6 +72,7 @@ struct HomeView: View {
             }
         }
         .appCanvas()
+        .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.load() }
         .task { store.load() }
     }
 
@@ -106,7 +108,8 @@ struct HomeView: View {
                                 context: context,
                                 client: client,
                                 cache: cache,
-                                cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero)
+                                cornerRadius: CGFloat(GeneratedDesignTokens.Radii.coverHero),
+                                managementTarget: .book(item.book.id, item.book.title, completed: item.book.completed)
                             )
                             .frame(width: BookCoverLayout.horizontalCardWidth)
                             VStack(alignment: .leading, spacing: .spaceHalf) {
@@ -200,7 +203,8 @@ struct HomeView: View {
                                         title: work.title,
                                         context: context,
                                         client: client,
-                                        cache: cache
+                                        cache: cache,
+                            managementTarget: .book(work.id, work.title, completed: work.completed)
                                     )
                                     Text(work.title)
                                         .appTextStyle(.label)

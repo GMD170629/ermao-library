@@ -31,20 +31,6 @@ struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
     var id: String { "\(context.namespaceKey)|\(resourceID)" }
 }
 
-struct IosReaderDownloadArtifact: Sendable {
-    let fileURL: URL
-    let assetID: String
-    let displayTitle: String
-    let bookID: String
-    let resourceID: String
-    let sourceFormat: String
-}
-
-protocol IosReaderDownloadArtifactProviding: Sendable {
-    func verifiedReaderArtifact(recordID: String, namespace: String) async throws -> IosReaderDownloadArtifact?
-    func deleteReaderArtifact(recordID: String, namespace: String) async throws
-}
-
 struct IosReaderNavigationSnapshot: Codable {
     struct Unit: Codable {
         let id: String
@@ -138,28 +124,21 @@ final class IosReaderNavigationCache {
     }
 }
 
-extension ManagedDownloadStore: IosReaderDownloadArtifactProviding {
-    func deleteReaderArtifact(recordID: String, namespace: String) async throws {
-        guard let record = try records(namespace: namespace).first(where: { $0.id == recordID }) else { return }
-        try remove(record)
-    }
-}
-
 @MainActor
 final class IosReaderComposition: ObservableObject {
     private static let logger = Logger(subsystem: "com.ermao.library", category: "MobileReader")
     private let cookieStore: KeychainCookiePayloadStore
     private let managedStore: IosManagedPublicationStore
     private let deviceIdentity: IosReaderDeviceIdentity
-    private let downloadArtifacts: any IosReaderDownloadArtifactProviding
+    private let completedDownloads: any CompletedDownloadProviding
     private let navigationCache = IosReaderNavigationCache()
 
     init(
         cookieStore: KeychainCookiePayloadStore,
-        downloadArtifacts: any IosReaderDownloadArtifactProviding
+        completedDownloads: any CompletedDownloadProviding
     ) throws {
         self.cookieStore = cookieStore
-        self.downloadArtifacts = downloadArtifacts
+        self.completedDownloads = completedDownloads
         managedStore = try IosManagedPublicationStore()
         deviceIdentity = IosReaderDeviceIdentity()
     }
@@ -169,9 +148,7 @@ final class IosReaderComposition: ObservableObject {
     }
 
     fileprivate func bootstrap(
-        _ request: IosReaderLaunchRequest,
-        reacquireDownloadedPublication: Bool = false,
-        retryOpening: Bool = false
+        _ request: IosReaderLaunchRequest
     ) async throws -> IosReaderSession {
         let namespace = ErmaoShared.PublicKt.createReaderSyncNamespace(
             serverIdentity: request.context.serverIdentity,
@@ -187,9 +164,9 @@ final class IosReaderComposition: ObservableObject {
             acceptsInsecureTls: request.context.acceptsInsecureTLS
         )
         let gateway = IosCompositionKt.createIosReaderBootstrapGateway(cookieStore: cookieStore)
-        var launchArtifact: IosReaderDownloadArtifact?
-        if let recordID = request.managedDownloadRecordID, !reacquireDownloadedPublication {
-            guard let artifact = try await downloadArtifacts.verifiedReaderArtifact(
+        var launchArtifact: CompletedDownloadFile?
+        if let recordID = request.managedDownloadRecordID {
+            guard let artifact = try await completedDownloads.completedFile(
                 recordID: recordID,
                 namespace: request.context.namespaceKey
             ), artifact.resourceID == request.resourceID else {
@@ -202,7 +179,7 @@ final class IosReaderComposition: ObservableObject {
         } else {
             launchArtifact = nil
         }
-        let opensVerifiedLocalArtifact = launchArtifact != nil && !reacquireDownloadedPublication
+        let opensVerifiedLocalArtifact = launchArtifact != nil
         var launchArtifactFailure: IosReaderFailure?
         let bootstrapRequest = ErmaoShared.ReaderBootstrapRequest(
             profile: profile,
@@ -235,29 +212,19 @@ final class IosReaderComposition: ObservableObject {
             }
         }
         let onlineBootstrap = (result as? ErmaoShared.ReaderBootstrapResultContent)?.value
-        if let launchArtifact, !reacquireDownloadedPublication {
-            let artifactFormat = Self.downloadArtifactSourceFormat(
+        if let launchArtifact {
+            let artifactFormat = Self.completedFileSourceFormat(
                 launchArtifact.sourceFormat
             )
             if let artifactFormat, Self.hasCompleteReaderEngine(for: artifactFormat) {
                 do {
-                    Self.logger.notice(
-                        "reader_start platform=ios format=\(artifactFormat.wireValue, privacy: .public) entry=download_center stage=import_started code=READER_LOCAL_IMPORT"
-                    )
-                    _ = try await managedStore.importPublication(
-                        from: launchArtifact.fileURL,
-                        resourceID: launchArtifact.resourceID,
-                        displayTitle: launchArtifact.displayTitle,
-                        sourceFormat: artifactFormat,
-                        bookID: launchArtifact.bookID,
-                        assetID: launchArtifact.assetID,
-                        namespace: request.context.namespaceKey,
-                        parserVersion: Self.localParserVersion(for: artifactFormat),
-                        normalizationVersion: Self.localNormalizationVersion(for: artifactFormat)
-                    )
-                    Self.logger.notice(
-                        "reader_start platform=ios format=\(artifactFormat.wireValue, privacy: .public) entry=download_center stage=import_completed code=READER_LOCAL_IMPORT"
-                    )
+                    let values = try launchArtifact.fileURL.resourceValues(forKeys: [.fileSizeKey])
+                    await managedStore.bindCompleted(IosManagedPublication(
+                        resourceID: launchArtifact.resourceID, displayTitle: launchArtifact.displayTitle,
+                        fileURL: launchArtifact.fileURL, byteCount: Int64(values.fileSize ?? 0),
+                        bookID: launchArtifact.bookID, assetID: launchArtifact.assetID,
+                        namespace: request.context.namespaceKey, sourceFormat: artifactFormat
+                    ))
                 } catch let failure as IosReaderFailure {
                     launchArtifactFailure = failure
                 } catch {
@@ -268,6 +235,10 @@ final class IosReaderComposition: ObservableObject {
             }
         }
         if let onlineBootstrap {
+            if let assetID = onlineBootstrap.remoteAccess.assetId {
+                try await managedStore.removeAutomaticReplica(resourceID: request.resourceID, assetID: assetID,
+                                                              namespace: request.context.namespaceKey)
+            }
             navigationCache.save(
                 serverIdentity: request.context.serverIdentity,
                 userID: request.context.userID,
@@ -285,97 +256,19 @@ final class IosReaderComposition: ObservableObject {
         let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
         let source: ErmaoShared.ReaderSource
         if let onlineBootstrap {
-            let remoteAccess = onlineBootstrap.remoteAccess
-            let downloadableOriginal = onlineBootstrap.downloadableOriginal
             remoteSnapshot = onlineBootstrap.remoteSnapshot
-            let existing: IosManagedPublication?
-            if retryOpening {
-                existing = nil
-            } else {
-                let candidate = try? await managedStore.resolve(
-                    resourceID: request.resourceID,
-                    namespace: request.context.namespaceKey
-                )
-                if candidate?.sourceFormat == remoteAccess.sourceFormat {
-                    existing = candidate
-                } else {
-                    if candidate != nil {
-                        try? await managedStore.remove(
-                            resourceID: request.resourceID,
-                            namespace: request.context.namespaceKey
-                        )
-                    }
-                    existing = nil
-                }
-            }
-            if downloadableOriginal != nil && (reacquireDownloadedPublication ||
-                (retryOpening && remoteAccess.sourceFormat.readerFormat != .comic)) {
-                exactSourceFormat = remoteAccess.sourceFormat
-                target = onlineBootstrap.target
-                source = try await download(
-                    bootstrap: onlineBootstrap,
-                    gateway: gateway,
-                    namespace: request.context.namespaceKey
-                )
-            } else if let existing {
-                exactSourceFormat = existing.sourceFormat
-                source = Self.sharedSource(existing)
-                target = ErmaoShared.ReaderProgressSyncTarget(
-                    namespace: namespace,
-                    bookId: onlineBootstrap.target.bookId,
-                    resourceId: onlineBootstrap.target.resourceId,
-                    sourceFormat: exactSourceFormat.readerFormat
-                )
-            } else if remoteAccess.sourceFormat == .pdf,
-                      IosPdfiumFeatureFlags.nativePdfiumRangeV1,
-                      let downloadableOriginal {
-                exactSourceFormat = remoteAccess.sourceFormat
-                target = onlineBootstrap.target
-                source = ErmaoShared.RemoteByteRangeReaderSource(
-                    resourceId: remoteAccess.resourceId,
-                    displayTitle: remoteAccess.displayTitle,
-                    bookId: remoteAccess.bookId,
-                    assetId: downloadableOriginal.assetId,
-                    namespace: namespace,
-                    apiPath: downloadableOriginal.apiPath,
-                    expectedSizeBytes: downloadableOriginal.expectedSizeBytes
-                )
-            } else if remoteAccess.sourceFormat.readerFormat == .comic,
-                      let access = onlineBootstrap.comicAccess {
-                exactSourceFormat = remoteAccess.sourceFormat
-                target = onlineBootstrap.target
-                source = ErmaoShared.RemoteComicReaderSource(
-                    resourceId: remoteAccess.resourceId,
-                    displayTitle: remoteAccess.displayTitle,
-                    bookId: remoteAccess.bookId,
-                    assetId: remoteAccess.assetId,
-                    namespace: namespace,
-                    sourceFormat: remoteAccess.sourceFormat,
-                    manifestApiPath: access.manifestApiPath,
-                    pageApiPathTemplate: access.pageApiPathTemplate,
-                    pages: onlineBootstrap.comicPages.map {
-                        ErmaoShared.RemoteComicPage(
-                            pageIndex: $0.pageIndex,
-                            resourceHref: $0.resourceHref,
-                            mediaType: $0.mediaType,
-                            width: $0.width,
-                            height: $0.height
-                        )
-                    }
-                )
-            } else {
-                exactSourceFormat = remoteAccess.sourceFormat
-                target = onlineBootstrap.target
-                source = try await download(
-                    bootstrap: onlineBootstrap,
-                    gateway: gateway,
-                    namespace: request.context.namespaceKey
-                )
-            }
-            guard Self.hasCompleteReaderEngine(for: exactSourceFormat) else {
+            target = onlineBootstrap.target
+            exactSourceFormat = onlineBootstrap.remoteAccess.sourceFormat
+            let resolved = ErmaoShared.BootstrapReaderPublication(bootstrapGateway: gateway)
+                .resolve(request: bootstrapRequest, bootstrap: onlineBootstrap)
+            guard let content = resolved as? ErmaoShared.ReaderPublicationBootstrapResultContent else {
                 throw IosReaderFailure(code: .unsupportedFormat)
             }
+            source = content.source
         } else {
+            guard opensVerifiedLocalArtifact else {
+                throw bootstrapFailure ?? IosReaderFailure(code: .networkUnavailable)
+            }
             let existing: IosManagedPublication
             do {
                 Self.logger.notice(
@@ -564,7 +457,7 @@ final class IosReaderComposition: ObservableObject {
                 preferencesStore: preferencesStore,
                 remoteSource: source as? ErmaoShared.RemoteByteRangeReaderSource,
                 rangeCache: source is ErmaoShared.RemoteByteRangeReaderSource
-                    ? try IosPdfRangeCache()
+                    ? ErmaoShared.PdfRangeMemory()
                     : nil,
                 rangeServer: source is ErmaoShared.RemoteByteRangeReaderSource
                     ? IosCompositionKt.createIosPdfRangeServerPort(
@@ -597,6 +490,10 @@ final class IosReaderComposition: ObservableObject {
             displayTitle: source.displayTitle,
             sourceFormat: exactSourceFormat,
             canonicalNavigation: navigationUnits,
+            onlineSource: source as? ErmaoShared.RemoteReflowableReaderSource,
+            onlinePublication: (source as? ErmaoShared.RemoteReflowableReaderSource).map {
+                IosCompositionKt.createIosOnlinePublicationSession(cookieStore: cookieStore, profile: profile, source: $0)
+            },
             preferences: preferencesStore.load(),
             managedStore: managedStore,
             progressStore: progressStore,
@@ -617,18 +514,6 @@ final class IosReaderComposition: ObservableObject {
         ))
     }
 
-    fileprivate func deleteDownloadedArtifact(for request: IosReaderLaunchRequest) async throws {
-        guard let recordID = request.managedDownloadRecordID else { return }
-        try await downloadArtifacts.deleteReaderArtifact(
-            recordID: recordID,
-            namespace: request.context.namespaceKey
-        )
-        try? await managedStore.remove(
-            resourceID: request.resourceID,
-            namespace: request.context.namespaceKey
-        )
-    }
-
     private static func sharedSource(_ existing: IosManagedPublication) -> ErmaoShared.ReaderSource {
         ErmaoShared.LocalReaderSource(
             resourceId: existing.resourceID,
@@ -640,7 +525,7 @@ final class IosReaderComposition: ObservableObject {
         )
     }
 
-    private static func downloadArtifactSourceFormat(
+    private static func completedFileSourceFormat(
         _ storedFormat: String
     ) -> ErmaoShared.ReaderSourceFormat? {
         IosManagedPublicationStore.sourceFormat(storedFormat)
@@ -726,29 +611,7 @@ final class IosReaderComposition: ObservableObject {
         }
     }
 
-    private func download(
-        bootstrap: ErmaoShared.ReaderBootstrap,
-        gateway: ErmaoShared.ReaderServerGateway,
-        namespace: String
-    ) async throws -> ErmaoShared.ReaderSource {
-        guard let downloadableOriginal = bootstrap.downloadableOriginal else {
-            throw IosReaderFailure(code: .resourceMissing)
-        }
-        let result = try await gateway.download(
-            download: downloadableOriginal,
-            sinkFactory: IosPublicationDownloadSinkFactory(
-                store: managedStore,
-                namespace: namespace
-            )
-        )
-        guard let content = result as? ErmaoShared.PublicationDownloadResultContent else {
-            let failure = result as? ErmaoShared.PublicationDownloadResultFailure
-            throw IosReaderFailure(
-                code: failure.map { IosReaderFailureCode(sharedCode: $0.readerErrorCode) } ?? .engineError
-            )
-        }
-        return content.source
-    }
+
 }
 
 @MainActor
@@ -798,9 +661,7 @@ final class IosReaderBootstrapHost: ObservableObject {
         state = .loading
         do {
             state = .ready(try await composition.bootstrap(
-                request,
-                reacquireDownloadedPublication: request.managedDownloadRecordID != nil,
-                retryOpening: true
+                request
             ))
             started = true
         } catch let failure as IosReaderFailure {
@@ -841,9 +702,7 @@ final class IosReaderBootstrapHost: ObservableObject {
         )
     }
 
-    func deleteDownload() async throws {
-        try await composition.deleteDownloadedArtifact(for: request)
-    }
+
 }
 
 struct IosReaderBootstrapView: View {
@@ -858,7 +717,7 @@ struct IosReaderBootstrapView: View {
         Group {
             switch host.state {
             case .loading:
-                ProgressView("reader.download.preparing")
+                ProgressView("reader.loading.publication")
                     .accessibilityIdentifier("reader.bootstrap.loading")
             case .ready(let session):
                 switch session {
@@ -877,12 +736,6 @@ struct IosReaderBootstrapView: View {
                     Button("common.retry") { Task { await host.retry() } }
                     if host.hasDownloadedArtifact {
                         Button("reader.read.online") { Task { await host.readOnline() } }
-                        Button("reader.download.delete", role: .destructive) {
-                            Task {
-                                try? await host.deleteDownload()
-                                dismiss()
-                            }
-                        }
                     }
                     Button("common.close") { dismiss() }
                 }

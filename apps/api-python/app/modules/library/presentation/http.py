@@ -46,6 +46,7 @@ from app.bootstrap.library_resource_actions import (
     regenerate_resource_cover,
     upload_resource_cover,
 )
+from app.bootstrap.publications import publication_runtime
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
@@ -1813,6 +1814,7 @@ def list_library_reading_units(
             user_id=user.id,
             session_factory=factory,
             settings=settings,
+            runtime=publication_runtime(request),
         ).execute(
             context=context,
             book_id=book_id,

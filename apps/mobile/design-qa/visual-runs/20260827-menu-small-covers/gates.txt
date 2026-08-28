@@ -1,0 +1,286 @@
+Reusing configuration cache.
+> Task :archiveCore:preBuild UP-TO-DATE
+> Task :mobiCore:generateDebugAssets UP-TO-DATE
+> Task :androidApp:syncBrandAsset UP-TO-DATE
+> Task :shared:processAndroidHostTestJavaRes NO-SOURCE
+> Task :archiveCore:preDebugBuild UP-TO-DATE
+> Task :shared:androidPreBuild UP-TO-DATE
+> Task :mobiCore:preBuild UP-TO-DATE
+> Task :archiveCore:generateDebugAssets UP-TO-DATE
+> Task :pdfiumNative:preBuild UP-TO-DATE
+> Task :androidApp:syncReaderAssets UP-TO-DATE
+> Task :shared:preAndroidMainBuild UP-TO-DATE
+> Task :shared:preAndroidHostTestBuild UP-TO-DATE
+> Task :mobiCore:preDebugBuild UP-TO-DATE
+> Task :pdfiumNative:preDebugBuild UP-TO-DATE
+> Task :archiveCore:processDebugNavigationResources UP-TO-DATE
+> Task :shared:kmpPartiallyResolvedDependenciesChecker
+> Task :androidApp:syncReaderTestFb2Assets UP-TO-DATE
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared:androidJar UP-TO-DATE
+> Task :archiveCore:javaPreCompileDebug UP-TO-DATE
+> Task :generateDesignTokens UP-TO-DATE
+> Task :archiveCore:writeDebugAarMetadata UP-TO-DATE
+> Task :shared:generateAndroidMainEmptyResourceFiles UP-TO-DATE
+> Task :pdfiumNative:processDebugNavigationResources UP-TO-DATE
+> Task :mobiCore:processDebugNavigationResources UP-TO-DATE
+> Task :archiveCore:generateDebugResources UP-TO-DATE
+> Task :pdfiumNative:javaPreCompileDebug UP-TO-DATE
+> Task :androidApp:preBuild UP-TO-DATE
+> Task :mobiCore:javaPreCompileDebug UP-TO-DATE
+> Task :androidApp:preDebugBuild UP-TO-DATE
+> Task :mobiCore:generateDebugResources UP-TO-DATE
+> Task :pdfiumNative:generateDebugResources UP-TO-DATE
+> Task :archiveCore:extractDeepLinksDebug UP-TO-DATE
+> Task :androidApp:preDebugUnitTestBuild UP-TO-DATE
+> Task :pdfiumNative:extractDeepLinksDebug UP-TO-DATE
+> Task :mobiCore:writeDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:extractDeepLinksDebug UP-TO-DATE
+> Task :archiveCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :shared:writeAndroidMainAarMetadata UP-TO-DATE
+> Task :mobiCore:mapDebugSourceSetPaths UP-TO-DATE
+> Task :shared:processAndroidMainManifest UP-TO-DATE
+> Task :androidApp:generateDebugResources UP-TO-DATE
+> Task :archiveCore:packageDebugResources UP-TO-DATE
+> Task :mobiCore:processDebugManifest UP-TO-DATE
+> Task :pdfiumNative:mapDebugSourceSetPaths UP-TO-DATE
+> Task :pdfiumNative:writeDebugAarMetadata UP-TO-DATE
+> Task :androidApp:mapDebugSourceSetPaths UP-TO-DATE
+> Task :archiveCore:processDebugManifest UP-TO-DATE
+> Task :androidApp:generateDebugBuildConfig UP-TO-DATE
+> Task :androidApp:javaPreCompileDebug UP-TO-DATE
+> Task :pdfiumNative:processDebugManifest UP-TO-DATE
+> Task :androidApp:extractDeepLinksDebug UP-TO-DATE
+> Task :androidApp:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :mobiCore:packageDebugResources UP-TO-DATE
+> Task :pdfiumNative:packageDebugResources UP-TO-DATE
+> Task :shared:checkAndroidMainAarMetadata UP-TO-DATE
+> Task :androidApp:javaPreCompileDebugUnitTest UP-TO-DATE
+> Task :androidApp:packageDebugResources UP-TO-DATE
+> Task :mobiCore:compileDebugLibraryResources UP-TO-DATE
+> Task :archiveCore:parseDebugLocalResources UP-TO-DATE
+> Task :mobiCore:mergeDebugAssets UP-TO-DATE
+> Task :mobiCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :mobiCore:prepareLintJarForPublish UP-TO-DATE
+> Task :archiveCore:checkDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:parseDebugLocalResources UP-TO-DATE
+> Task :mobiCore:prepareDebugArtProfile UP-TO-DATE
+> Task :pdfiumNative:compileDebugLibraryResources UP-TO-DATE
+> Task :mobiCore:checkDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :pdfiumNative:checkDebugAarMetadata UP-TO-DATE
+> Task :archiveCore:mergeDebugJniLibFolders UP-TO-DATE
+> Task :pdfiumNative:generateDebugAssets UP-TO-DATE
+> Task :shared:extractAndroidMainAnnotations UP-TO-DATE
+> Task :archiveCore:compileDebugLibraryResources UP-TO-DATE
+> Task :androidApp:preDebugAndroidTestBuild SKIPPED
+> Task :archiveCore:prepareLintJarForPublish UP-TO-DATE
+> Task :pdfiumNative:mergeDebugJniLibFolders UP-TO-DATE
+> Task :archiveCore:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :androidApp:processDebugNavigationResources UP-TO-DATE
+> Task :pdfiumNative:parseDebugLocalResources UP-TO-DATE
+> Task :pdfiumNative:prepareLintJarForPublish UP-TO-DATE
+> Task :pdfiumNative:extractDeepLinksForAarDebug UP-TO-DATE
+> Task :pdfiumNative:mergeDebugAssets UP-TO-DATE
+> Task :shared:prepareLintJarForPublish UP-TO-DATE
+> Task :pdfiumNative:writeDebugLintModelMetadata UP-TO-DATE
+> Task :pdfiumNative:prepareDebugArtProfile UP-TO-DATE
+> Task :archiveCore:prepareDebugArtProfile UP-TO-DATE
+> Task :archiveCore:writeDebugLintModelMetadata UP-TO-DATE
+> Task :archiveCore:mergeDebugAssets UP-TO-DATE
+> Task :pdfiumNative:extractProguardFiles UP-TO-DATE
+> Task :archiveCore:preDebugUnitTestBuild UP-TO-DATE
+> Task :mobiCore:preDebugAndroidTestBuild UP-TO-DATE
+> Task :archiveCore:preDebugAndroidTestBuild UP-TO-DATE
+> Task :mobiCore:preDebugUnitTestBuild UP-TO-DATE
+> Task :androidApp:checkDebugAarMetadata UP-TO-DATE
+> Task :mobiCore:generateDebugRFile UP-TO-DATE
+> Task :pdfiumNative:preDebugAndroidTestBuild UP-TO-DATE
+> Task :archiveCore:extractProguardFiles UP-TO-DATE
+> Task :pdfiumNative:preDebugUnitTestBuild UP-TO-DATE
+> Task :androidApp:extractProguardFiles UP-TO-DATE
+> Task :androidApp:generateDebugAssets UP-TO-DATE
+> Task :mobiCore:extractProguardFiles UP-TO-DATE
+> Task :androidApp:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :androidApp:compileDebugNavigationResources UP-TO-DATE
+> Task :pdfiumNative:generateDebugRFile UP-TO-DATE
+> Task :mobiCore:writeDebugLintModelMetadata UP-TO-DATE
+> Task :pdfiumNative:mergeDebugNativeLibs NO-SOURCE
+> Task :androidApp:parseDebugLocalResources UP-TO-DATE
+> Task :archiveCore:generateDebugRFile UP-TO-DATE
+> Task :androidApp:mergeDebugResources UP-TO-DATE
+> Task :verifyDesignTokens
+> Task :androidApp:writeDebugAppMetadata UP-TO-DATE
+> Task :androidApp:writeDebugSigningConfigVersions UP-TO-DATE
+> Task :androidApp:generateDebugAndroidTestResources UP-TO-DATE
+> Task :androidApp:javaPreCompileDebugAndroidTest UP-TO-DATE
+> Task :shared:compileAndroidMain UP-TO-DATE
+> Task :shared:mergeAndroidMainJniLibFolders UP-TO-DATE
+> Task :archiveCore:extractDebugAnnotations UP-TO-DATE
+> Task :androidApp:desugarDebugFileDependencies UP-TO-DATE
+> Task :pdfiumNative:extractDebugAnnotations UP-TO-DATE
+> Task :shared:bundleAndroidMainClassesToRuntimeJar UP-TO-DATE
+> Task :shared:bundleAndroidMainClassesToCompileJar UP-TO-DATE
+> Task :androidApp:mergeDebugJniLibFolders UP-TO-DATE
+> Task :shared:mergeAndroidMainNativeLibs NO-SOURCE
+> Task :androidApp:validateSigningDebug UP-TO-DATE
+> Task :androidApp:l8DexDesugarLibDebug UP-TO-DATE
+> Task :shared:copyAndroidMainJniLibsProjectOnly UP-TO-DATE
+> Task :androidApp:desugarDebugAndroidTestFileDependencies UP-TO-DATE
+> Task :androidApp:processDebugMainManifest UP-TO-DATE
+> Task :androidApp:generateDebugRFile UP-TO-DATE
+> Task :pdfiumNative:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :androidApp:mergeDebugAssets UP-TO-DATE
+> Task :mobiCore:compileDebugKotlin UP-TO-DATE
+> Task :androidApp:mapDebugAndroidTestSourceSetPaths UP-TO-DATE
+> Task :androidApp:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :mobiCore:extractDebugAnnotations UP-TO-DATE
+> Task :mobiCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :androidApp:processDebugManifest UP-TO-DATE
+> Task :shared:bundleLibRuntimeToDirAndroidMain UP-TO-DATE
+> Task :androidApp:processDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :archiveCore:compileDebugKotlin UP-TO-DATE
+> Task :shared:processAndroidMainJavaRes UP-TO-DATE
+> Task :androidApp:checkDebugAndroidTestAarMetadata UP-TO-DATE
+> Task :androidApp:processDebugAndroidTestManifest UP-TO-DATE
+> Task :pdfiumNative:compileDebugKotlin NO-SOURCE
+> Task :androidApp:writeDebugAndroidTestSigningConfigVersions UP-TO-DATE
+> Task :mobiCore:processDebugJavaRes UP-TO-DATE
+> Task :androidApp:processDebugManifestForPackage UP-TO-DATE
+> Task :mobiCore:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :mobiCore:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :androidApp:validateSigningDebugAndroidTest UP-TO-DATE
+> Task :androidApp:compressDebugAssets UP-TO-DATE
+> Task :shared:createFullJarAndroidMain UP-TO-DATE
+> Task :androidApp:packageDebugAndroidTestResources UP-TO-DATE
+> Task :pdfiumNative:processDebugJavaRes NO-SOURCE
+> Task :shared:mergeAndroidMainJavaResource UP-TO-DATE
+> Task :androidApp:compileDebugAndroidTestNavigationResources UP-TO-DATE
+> Task :androidApp:mergeDebugAndroidTestAssets UP-TO-DATE
+> Task :mobiCore:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :androidApp:mergeDebugAndroidTestJniLibFolders UP-TO-DATE
+> Task :androidApp:checkDebugAndroidTestDuplicateClasses UP-TO-DATE
+> Task :archiveCore:compileDebugJavaWithJavac NO-SOURCE
+> Task :androidApp:generateDebugAndroidTestBuildConfig UP-TO-DATE
+> Task :androidApp:checkDebugDuplicateClasses UP-TO-DATE
+> Task :androidApp:mergeDebugAndroidTestResources UP-TO-DATE
+> Task :shared:syncAndroidMainLibJars UP-TO-DATE
+> Task :archiveCore:processDebugJavaRes UP-TO-DATE
+> Task :mobiCore:generateDebugLintModel UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebug UP-TO-DATE
+> Task :archiveCore:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :archiveCore:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :androidApp:parseDebugAndroidTestLocalResources UP-TO-DATE
+> Task :shared:bundleAndroidMainLocalLintAar UP-TO-DATE
+> Task :androidApp:compressDebugAndroidTestAssets UP-TO-DATE
+> Task :archiveCore:generateDebugLintModel UP-TO-DATE
+> Task :archiveCore:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :androidApp:generateDebugAndroidTestRFile UP-TO-DATE
+> Task :archiveCore:lintAnalyzeDebug UP-TO-DATE
+> Task :archiveCore:createFullJarDebug UP-TO-DATE
+> Task :mobiCore:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :archiveCore:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :mobiCore:createFullJarDebug UP-TO-DATE
+> Task :pdfiumNative:stripDebugDebugSymbols NO-SOURCE
+> Task :pdfiumNative:mergeDebugJavaResource UP-TO-DATE
+> Task :archiveCore:mergeDebugJavaResource UP-TO-DATE
+> Task :mobiCore:mergeDebugJavaResource UP-TO-DATE
+> Task :pdfiumNative:compileDebugJavaWithJavac UP-TO-DATE
+> Task :pdfiumNative:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :pdfiumNative:bundleLibRuntimeToJarDebug UP-TO-DATE
+> Task :pdfiumNative:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :archiveCore:syncDebugLibJars UP-TO-DATE
+> Task :mobiCore:syncDebugLibJars UP-TO-DATE
+> Task :mobiCore:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :pdfiumNative:mergeDebugGeneratedProguardFiles UP-TO-DATE
+> Task :androidApp:mergeExtDexDebugAndroidTest UP-TO-DATE
+> Task :mobiCore:configureCMakeDebug[x86_64]
+> Task :archiveCore:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :androidApp:mergeExtDexDebug UP-TO-DATE
+> Task :pdfiumNative:bundleLibRuntimeToDirDebug UP-TO-DATE
+> Task :pdfiumNative:generateDebugLintModel UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebug UP-TO-DATE
+> Task :pdfiumNative:mergeDebugConsumerProguardFiles UP-TO-DATE
+> Task :pdfiumNative:createFullJarDebug UP-TO-DATE
+> Task :androidApp:processDebugResources UP-TO-DATE
+> Task :archiveCore:configureCMakeDebug[arm64-v8a]
+> Task :pdfiumNative:syncDebugLibJars UP-TO-DATE
+> Task :archiveCore:configureCMakeDebug[x86_64]
+> Task :androidApp:processDebugAndroidTestResources UP-TO-DATE
+> Task :mobiCore:configureCMakeDebug[arm64-v8a]
+> Task :androidApp:compileDebugKotlin UP-TO-DATE
+> Task :androidApp:processDebugJavaRes UP-TO-DATE
+> Task :androidApp:compileDebugJavaWithJavac UP-TO-DATE
+> Task :pdfiumNative:bundleDebugLocalLintAar UP-TO-DATE
+> Task :androidApp:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :androidApp:dexBuilderDebug UP-TO-DATE
+> Task :pdfiumNative:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :androidApp:bundleDebugClassesToRuntimeJar UP-TO-DATE
+> Task :pdfiumNative:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :pdfiumNative:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :androidApp:mergeDebugJavaResource UP-TO-DATE
+> Task :androidApp:compileDebugUnitTestKotlin UP-TO-DATE
+> Task :androidApp:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :androidApp:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :androidApp:generateDebugLintReportModel UP-TO-DATE
+> Task :androidApp:testDebugUnitTest UP-TO-DATE
+> Task :androidApp:mergeLibDexDebugAndroidTest UP-TO-DATE
+> Task :shared:generateAndroidHostTestLintModel
+> Task :mobiCore:buildCMakeDebug[x86_64]
+> Task :mobiCore:buildCMakeDebug[arm64-v8a]
+> Task :archiveCore:buildCMakeDebug[arm64-v8a]
+> Task :archiveCore:buildCMakeDebug[x86_64]
+> Task :archiveCore:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:stripDebugDebugSymbols UP-TO-DATE
+> Task :mobiCore:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :archiveCore:copyDebugJniLibsProjectOnly UP-TO-DATE
+> Task :archiveCore:stripDebugDebugSymbols UP-TO-DATE
+> Task :archiveCore:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :mobiCore:copyDebugJniLibsProjectAndLocalJars UP-TO-DATE
+> Task :archiveCore:bundleDebugLocalLintAar UP-TO-DATE
+> Task :mobiCore:bundleDebugLocalLintAar UP-TO-DATE
+> Task :archiveCore:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :archiveCore:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :androidApp:mergeDebugNativeLibs UP-TO-DATE
+> Task :mobiCore:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :androidApp:stripDebugDebugSymbols UP-TO-DATE
+> Task :mobiCore:generateDebugAndroidTestLintModel UP-TO-DATE
+> Task :archiveCore:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :mobiCore:lintAnalyzeDebugAndroidTest UP-TO-DATE
+> Task :androidApp:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :androidApp:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :archiveCore:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :androidApp:lintAnalyzeDebugUnitTest UP-TO-DATE
+> Task :androidApp:generateDebugUnitTestLintModel UP-TO-DATE
+> Task :androidApp:lintAnalyzeDebug UP-TO-DATE
+> Task :androidApp:generateDebugAndroidTestLintModel
+> Task :androidApp:mergeDebugGlobalSynthetics
+> Task :androidApp:mergeLibDexDebug
+> Task :androidApp:mergeProjectDexDebug
+> Task :verifyMobileOfflineContract
+> Task :androidApp:packageDebug
+> Task :androidApp:assembleDebug
+> Task :androidApp:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :androidApp:compileDebugAndroidTestKotlin
+> Task :androidApp:processDebugAndroidTestJavaRes UP-TO-DATE
+> Task :androidApp:mergeDebugAndroidTestJavaResource UP-TO-DATE
+> Task :androidApp:compileDebugAndroidTestJavaWithJavac UP-TO-DATE
+> Task :androidApp:dexBuilderDebugAndroidTest
+> Task :androidApp:mergeDebugAndroidTestGlobalSynthetics
+> Task :androidApp:mergeProjectDexDebugAndroidTest
+> Task :shared:compileAndroidHostTest
+> Task :androidApp:packageDebugAndroidTest
+> Task :androidApp:assembleDebugAndroidTest
+> Task :androidApp:createDebugAndroidTestApkListingFileRedirect UP-TO-DATE
+> Task :shared:testAndroidHostTest
+> Task :androidApp:lintAnalyzeDebugAndroidTest
+> Task :shared:lintAnalyzeAndroidHostTest
+> Task :androidApp:lintReportDebug
+> Task :androidApp:lintDebug
+
+BUILD SUCCESSFUL in 4s
+242 actionable tasks: 28 executed, 214 up-to-date
+Configuration cache entry reused.

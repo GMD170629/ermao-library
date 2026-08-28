@@ -7,7 +7,7 @@ import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.AndroidDownloadStatus
 import java.nio.file.Files
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -40,7 +40,7 @@ class AndroidDownloadCatalogTest {
     }
 
     @Test
-    fun newerTaskReplacesOlderTaskForSameAsset() = runTest {
+    fun newSourceVersionPreservesPreviousUserDownload() = runTest {
         val root = Files.createTempDirectory("download-catalog-version-test").toFile()
         try {
             val catalog = AndroidDownloadCatalog(root)
@@ -50,15 +50,15 @@ class AndroidDownloadCatalogTest {
             catalog.upsert(old)
             val replaced = catalog.upsert(current)
 
-            assertEquals(listOf(old), replaced)
-            assertEquals(listOf(current), catalog.records(current.namespace))
+            assertEquals(emptyList(), replaced)
+            assertEquals(listOf(current, old), catalog.records(current.namespace))
         } finally {
             root.deleteRecursively()
         }
     }
 
     @Test
-    fun unsupportedSchemaCatalogAndArtifactsAreRemoved() = runTest {
+    fun unsupportedSchemaFailsWithoutDeletingUserFiles() = runTest {
         val root = Files.createTempDirectory("download-catalog-unsupported-schema-test").toFile()
         val namespace = AndroidDownloadNamespace("server", "user", 3)
         try {
@@ -71,15 +71,18 @@ class AndroidDownloadCatalogTest {
                 """{"schemaVersion":1,"records":[]}""",
             )
 
-            assertEquals(emptyList(), AndroidDownloadCatalog(root).records(namespace))
-            assertEquals(false, directory.exists())
+            assertFailsWith<com.ermao.library.features.downloads.infrastructure.AndroidDownloadStorageException> {
+                AndroidDownloadCatalog(root).records(namespace)
+            }
+            assertTrue(artifacts.resolve("legacy.bin").exists())
+            assertTrue(directory.resolve("catalog.json").exists())
         } finally {
             root.deleteRecursively()
         }
     }
 
     @Test
-    fun legacyGenericKindleRecordAndArtifactsAreRemovedOnLoad() = runTest {
+    fun legacyUserDownloadIsPreservedWithoutGuessingSourceFormat() = runTest {
         val root = Files.createTempDirectory("download-catalog-kindle-cleanup-test").toFile()
         val namespace = AndroidDownloadNamespace("server", "user", 3)
         try {
@@ -92,9 +95,9 @@ class AndroidDownloadCatalogTest {
             val catalog = AndroidDownloadCatalog(root)
             catalog.upsert(record("legacy-kindle", localReference, 2, format = "KINDLE"))
 
-            assertEquals(emptyList(), AndroidDownloadCatalog(root).records(namespace))
-            assertFalse(artifact.exists())
-            assertFalse(root.resolve(namespaceKey).resolve("catalog.json").readText().contains("KINDLE"))
+            assertEquals("KINDLE", AndroidDownloadCatalog(root).records(namespace).single().format)
+            assertTrue(artifact.exists())
+            assertTrue(root.resolve(namespaceKey).resolve("catalog.json").readText().contains("KINDLE"))
         } finally {
             root.deleteRecursively()
         }

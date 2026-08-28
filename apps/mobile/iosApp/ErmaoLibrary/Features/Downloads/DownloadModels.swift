@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import ErmaoShared
 
 enum ManagedDownloadReaderType: String, Codable, Hashable, Sendable {
     case reflowable
@@ -23,8 +24,6 @@ enum ManagedDownloadReaderType: String, Codable, Hashable, Sendable {
         }
     }
 
-    var requiresCompleteDownloadBeforeReading: Bool { self == .reflowable }
-    var supportsStreaming: Bool { self == .comic || self == .pdf }
 }
 
 enum ManagedDownloadState: String, Codable, Hashable, Sendable {
@@ -71,6 +70,7 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     var updatedAt: Date
     var completedAt: Date?
     var lastOpenedAt: Date?
+    var sharedTaskJSON: String? = nil
 
     var progress: Double? {
         guard let expectedBytes, expectedBytes > 0 else { return nil }
@@ -123,37 +123,10 @@ enum ManagedDownloadGrouping {
     }
 }
 
-struct ManagedDownloadRequest: Sendable {
-    let context: ContentRequestContext
-    let record: ManagedDownloadRecord
-    let destination: ManagedDownloadDestination
-}
-
-struct ManagedDownloadBootstrap: Sendable {
-    let bookID: String
-    let resourceID: String
-    let assetID: String
-    let sourceFormat: String
-    let mimeType: String
-    let readerType: ManagedDownloadReaderType
-    let expectedBytes: Int64?
-    let artifactKind: ManagedDownloadArtifactKind
-}
-
 struct ManagedDownloadDestination: Sendable {
     let partialFileURL: URL
     let finalFileURL: URL
     let finalRelativePath: String
-}
-
-struct ManagedDownloadProgress: Sendable {
-    let receivedBytes: Int64
-    let expectedBytes: Int64?
-}
-
-struct ManagedDownloadReceipt: Sendable {
-    let receivedBytes: Int64
-    let expectedBytes: Int64?
 }
 
 enum ManagedDownloadTransferError: Error, Equatable, Sendable {
@@ -174,19 +147,6 @@ enum ManagedDownloadTransferError: Error, Equatable, Sendable {
         case .cancelled: "DOWNLOAD_CANCELLED"
         }
     }
-}
-
-enum ManagedReaderAccessOutcome: Sendable {
-    case open(ReaderHandoff)
-    case needsDownload(recordID: String)
-    case unavailable(String)
-}
-
-struct ReaderPreparationRequest: Identifiable, Sendable {
-    let context: ContentRequestContext
-    let book: BookCard
-    let resource: BookResource
-    var id: String { "\(context.namespaceKey)|\(resource.id)" }
 }
 
 enum ReaderHandoffSource: Hashable, Sendable {
@@ -210,21 +170,11 @@ enum ManagedReaderAccessPolicy {
     /// Library resources expose KINDLE as a family; Reader bootstrap resolves the exact original.
     /// Verified offline artifacts must still have an exact format.
     static func supportsNativeHandoff(_ handoff: ReaderHandoff) -> Bool {
-        if case .remoteStream = handoff.source,
-           handoff.readerType == .reflowable,
-           handoff.format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "KINDLE" {
-            return true
-        }
-        return supportsNativeReader(readerType: handoff.readerType, format: handoff.format)
-    }
-
-    static func supportsNativeReader(readerType: ManagedDownloadReaderType, format: String) -> Bool {
-        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return switch readerType {
-        case .reflowable: ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"].contains(normalized)
-        case .comic: ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"].contains(normalized)
-        case .pdf: normalized == "PDF"
-        case .audio: false
+        switch handoff.source {
+        case .remoteStream:
+            ReaderFormatSupport.shared.canOpenOnline(readerType: handoff.readerType.rawValue, format: handoff.format)
+        case .verifiedLocal:
+            ReaderFormatSupport.shared.canReadOriginal(readerType: handoff.readerType.rawValue, format: handoff.format)
         }
     }
 
@@ -242,12 +192,28 @@ enum ManagedReaderAccessPolicy {
     }
 }
 
+@MainActor
 protocol ManagedDownloadTransferring: Sendable {
-    func prepare(context: ContentRequestContext, resourceID: String) async throws -> ManagedDownloadBootstrap
-    func download(_ request: ManagedDownloadRequest, progress: @escaping @Sendable (ManagedDownloadProgress) async -> Void) async throws -> ManagedDownloadReceipt
+    func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws
 }
 
 struct UnavailableManagedDownloadTransfer: ManagedDownloadTransferring {
-    func prepare(context: ContentRequestContext, resourceID: String) async throws -> ManagedDownloadBootstrap { throw ManagedDownloadTransferError.transportUnavailable }
-    func download(_ request: ManagedDownloadRequest, progress: @escaping @Sendable (ManagedDownloadProgress) async -> Void) async throws -> ManagedDownloadReceipt { throw ManagedDownloadTransferError.transportUnavailable }
+    func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
+        throw ManagedDownloadTransferError.transportUnavailable
+    }
+}
+
+struct CompletedDownloadFile: Sendable {
+    let fileURL: URL
+    let assetID: String
+    let displayTitle: String
+    let bookID: String
+    let resourceID: String
+    let sourceFormat: String
+}
+
+protocol CompletedDownloadProviding: Sendable {
+    func completedFile(recordID: String, namespace: String) async throws -> CompletedDownloadFile?
 }

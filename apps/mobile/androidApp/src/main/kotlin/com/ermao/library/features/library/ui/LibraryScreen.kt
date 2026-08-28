@@ -36,8 +36,6 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -94,7 +92,8 @@ import com.ermao.library.ui.components.WarmPagePaginationLoading
 import com.ermao.library.ui.components.WarmPagePermissionGate
 import com.ermao.library.ui.components.WarmPagePrimaryAction
 import com.ermao.library.ui.components.WarmPageScaffold
-import com.ermao.library.ui.components.WarmPageSearchField
+import com.ermao.library.ui.components.WarmPageCatalogHeader
+import com.ermao.library.ui.components.WarmPageCatalogTab
 import com.ermao.library.ui.components.WarmPageSingleChoiceMenu
 import com.ermao.library.ui.components.WarmPageTextAction
 import com.ermao.library.ui.components.WarmPageTopBarRole
@@ -131,7 +130,6 @@ fun LibraryScreen(
     onScrollAnchorChanged: (String?, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val theme = WarmPageThemeValues
     val filterSheetCopy = resolveLibraryFilterSheetCopy()
     var menuState by rememberSaveable { mutableStateOf<LibraryMenuState?>(null) }
     val filterFocusRequester = remember { FocusRequester() }
@@ -177,22 +175,19 @@ fun LibraryScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            WarmPageSearchField(
-                value = state.current.query,
-                onValueChange = onQueryChanged,
-                onClear = onClearQuery,
+            WarmPageCatalogHeader(
+                query = state.current.query,
+                onQueryChanged = onQueryChanged,
+                onClearQuery = onClearQuery,
                 clearLabel = stringResource(R.string.clear_action),
                 placeholder = stringResource(state.selectedScope.searchPlaceholderResource),
                 enabled = interactionsEnabled,
-                modifier = Modifier
-                    .padding(horizontal = theme.components.page.compactGutter)
-                    .testTag("library-search"),
-            )
-            LibrarySourcePicker(
-                options = state.libraryOptions,
-                selectedLibraryId = state.selectedLibraryId,
-                onSelect = onSelectLibrary,
-                enabled = interactionsEnabled,
+                searchModifier = Modifier.testTag("library-search"),
+                tabsModifier = Modifier.testTag("library-source-picker"),
+                tabs = listOf(WarmPageCatalogTab<String?>(null, stringResource(R.string.library_scope_works))) +
+                    state.libraryOptions.map { WarmPageCatalogTab<String?>(it.id, it.name) },
+                selectedTab = state.selectedLibraryId,
+                onSelectTab = onSelectLibrary,
             )
             LibraryContextRow(
                 state,
@@ -227,59 +222,6 @@ fun LibraryScreen(
             onApply = onApplyFilter,
             onDismiss = onDismissFilter,
         )
-    }
-}
-
-@Composable
-private fun LibrarySourcePicker(
-    options: List<com.ermao.library.features.library.application.LibrarySourceOption>,
-    selectedLibraryId: String?,
-    onSelect: (String?) -> Unit,
-    enabled: Boolean,
-) {
-    val theme = WarmPageThemeValues
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("library-source-picker"),
-        contentPadding = PaddingValues(horizontal = theme.components.page.compactGutter),
-        horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
-    ) {
-        item {
-            FilterChip(
-                selected = selectedLibraryId == null,
-                onClick = { onSelect(null) },
-                enabled = enabled,
-                label = { Text(stringResource(R.string.library_scope_works), style = theme.typography.label) },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = theme.colors.canvas,
-                    labelColor = theme.colors.textPrimary,
-                    selectedContainerColor = theme.colors.accentSoft,
-                    selectedLabelColor = theme.colors.actionAccent,
-                ),
-            )
-        }
-        items(options, key = { it.id }) { option ->
-            FilterChip(
-                selected = selectedLibraryId == option.id,
-                onClick = { onSelect(option.id) },
-                enabled = enabled,
-                label = {
-                    Text(
-                        option.name,
-                        style = theme.typography.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = theme.colors.canvas,
-                    labelColor = theme.colors.textPrimary,
-                    selectedContainerColor = theme.colors.accentSoft,
-                    selectedLabelColor = theme.colors.actionAccent,
-                ),
-            )
-        }
     }
 }
 
@@ -614,6 +556,7 @@ private fun GroupingCoverStack(
                 context,
                 CoverRole.Compact,
                 Modifier.width(theme.components.covers.groupingCoverWidth),
+                managementEnabled = false,
             )
         }
     }

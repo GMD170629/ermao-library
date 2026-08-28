@@ -34,7 +34,6 @@ class DownloadsRuntime(
             ?: error("DOWNLOAD_TASK_NOT_FOUND")
         val next = current.transition(event)
         catalog.saveTask(next)
-        if (next.artifact != null) catalog.saveArtifact(next.artifact)
         return next
     }
 
@@ -51,18 +50,13 @@ class DownloadsRuntime(
 }
 
 class InMemoryDownloadCatalogRepository : DownloadCatalogRepository {
-    private val artifacts = mutableMapOf<String, CompletedDownloadArtifact>()
     private val tasks = mutableMapOf<String, DownloadTask>()
 
     override suspend fun listArtifacts(namespace: DownloadNamespace): List<CompletedDownloadArtifact> =
-        artifacts.values.filter { it.identity.namespace == namespace }
-
-    override suspend fun saveArtifact(artifact: CompletedDownloadArtifact) {
-        artifacts[artifactKey(artifact.identity)] = artifact
-    }
+        listTasks(namespace).mapNotNull { it.artifact }
 
     override suspend fun deleteArtifact(namespace: DownloadNamespace, identity: DownloadIdentity) {
-        artifacts.remove(artifactKey(identity))
+        tasks.entries.removeAll { it.value.descriptor.identity == identity && it.value.descriptor.identity.namespace == namespace }
     }
 
     override suspend fun listTasks(namespace: DownloadNamespace): List<DownloadTask> =
@@ -77,10 +71,8 @@ class InMemoryDownloadCatalogRepository : DownloadCatalogRepository {
     }
 
     override suspend fun clearNamespace(namespace: DownloadNamespace) {
-        artifacts.entries.removeAll { it.value.identity.namespace == namespace }
         tasks.entries.removeAll { it.value.descriptor.identity.namespace == namespace }
     }
 
-    private fun artifactKey(identity: DownloadIdentity) = "${identity.namespace.stableKey}:artifact:${identity.bookId}:${identity.resourceId}:${identity.assetId}"
     private fun taskKey(namespace: DownloadNamespace, taskId: String) = "${namespace.stableKey}:task:$taskId"
 }

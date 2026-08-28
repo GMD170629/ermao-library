@@ -17,8 +17,8 @@ therefore become unreadable even though the native parser could open it.
 
 Every authenticated online entry still requests Reader v4 bootstrap. Bootstrap
 content access remains mandatory when bytes are not already local: remote comics
-require their manifest and page API; remote PDF requires usable Range metadata or a
-complete-file URL; reflowable content requires a file URL.
+require their manifest and page API; remote PDF requires usable bounded Range
+access; reflowable content requires manifest, positions and chapter resources.
 
 A completed local artifact is selected only by server/user/authorization namespace and
 `bookId + resourceId + assetId`.
@@ -39,12 +39,11 @@ invalid progress starts at the beginning, and persistence failures never block t
 Reader or its close action. Startup progress conflicts are resolved deterministically
 without a blocking dialog.
 
-For a damaged downloaded EPUB, CBZ/ZIP, or PDF, “download again and open” performs a
-fresh Bootstrap and full-file request. Security and parser validation occur on a
-temporary file. Publication succeeds before the old file is atomically replaced;
-failure preserves the old download. Retrying a streamed comic refreshes Bootstrap,
-the page manifest, and failed pages without downloading an archive. PDF Range retry
-refreshes Bootstrap metadata and may fall back to a full-file download.
+Online retry refreshes authorized metadata and repeats only the requested chapter,
+page or bounded PDF range. Invalid or oversized responses fail explicitly. Reader
+contains no file acquisition/repair path. A damaged explicit offline download is
+managed in Downloads; its existing completed artifact remains until a new transfer
+has passed validation and atomic publication. Local imports remain user-owned.
 
 ## Consequences
 

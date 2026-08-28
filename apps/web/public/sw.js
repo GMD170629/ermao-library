@@ -116,7 +116,7 @@ function isCoverRequest(pathname) {
 
 function shouldBypass(request) {
   const url = new URL(request.url);
-  if (request.method !== 'GET') return true;
+  if (request.method !== 'GET' || request.headers.has('Range') || request.cache === 'no-store') return true;
   if (!isSameOrigin(url)) return true;
   // Development chunks keep stable URLs while their contents change. Any
   // service-worker cache on localhost can therefore make a normal reload run
@@ -217,6 +217,19 @@ async function clearOldFrontendResourceCaches() {
     .map((cacheName) => caches.delete(cacheName)));
 }
 
+async function clearObsoleteReaderBodies() {
+  const names = await caches.keys();
+  for (const name of names.filter((name) => name.startsWith('shuku-pwa-'))) {
+    const cache = await caches.open(name);
+    for (const request of await cache.keys()) {
+      const pathname = new URL(request.url).pathname;
+      if (withoutBasePath(pathname).startsWith('/api/reader/') || isLargeReaderPayload(pathname)) {
+        await cache.delete(request);
+      }
+    }
+  }
+}
+
 self.addEventListener('install', (event) => {
   debugLog('info', 'install', VERSION);
   if (isLocalDevelopmentHost(self.location.hostname)) {
@@ -240,6 +253,7 @@ self.addEventListener('activate', (event) => {
   debugLog('info', 'activate', VERSION);
   event.waitUntil(
     clearOldFrontendResourceCaches()
+      .then(clearObsoleteReaderBodies)
       .then(() => self.clients.claim())
       .then(() => debugLog('info', 'clients claimed', VERSION))
       .catch((error) => {

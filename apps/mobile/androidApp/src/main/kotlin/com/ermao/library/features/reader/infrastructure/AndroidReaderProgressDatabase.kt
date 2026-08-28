@@ -35,13 +35,20 @@ internal class AndroidReaderProgressDatabase(
 
     override suspend fun load(resourceId: String): ReaderProgress? {
         require(resourceId == identity.resourceId) { "Reader progress resource does not match its exact identity" }
-        val stored = io { readByKey(database.readableDatabase, progressStorageKey(), resourceId) }
+        val stored = io {
+            val writable = database.writableDatabase
+            readByKey(writable, progressStorageKey(), resourceId)
+                ?: migrateAuthorizationScopedProgress(writable, resourceId)
+        }
         if (stored != null) return stored
 
-        // The pre-union file namespace is intentionally invalidated with every
-        // other old exact/pending/conflict representation.
-        legacyProgressStore?.delete(resourceId)
-        return null
+        // Import only a validated document belonging to this client/resource.
+        // Unknown historical representations remain on disk for recovery.
+        val legacy = legacyProgressStore?.load(resourceId) ?: return null
+        if (!matchesIdentity(legacy)) return null
+        save(legacy)
+        legacyProgressStore.delete(resourceId)
+        return legacy
     }
 
     override suspend fun save(progress: ReaderProgress): Unit = io {
@@ -137,7 +144,7 @@ internal class AndroidReaderProgressDatabase(
             val writable = database.writableDatabase
             writable.transaction {
                 writable.delete(PROGRESS_TABLE, "$PROGRESS_SOURCE_ID = ?", arrayOf(progressStorageKey()))
-                writable.delete(SYNC_TABLE, "$SYNC_OWNER_KEY = ?", arrayOf(progressStorageKey()))
+                writable.delete(SYNC_TABLE, "$SYNC_OWNER_KEY = ?", arrayOf(syncStorageKey()))
             }
         }
         legacyProgressStore?.delete(resourceId)
@@ -177,7 +184,7 @@ internal class AndroidReaderProgressDatabase(
         SYNC_TABLE,
         arrayOf(SYNC_DOCUMENT),
         "$SYNC_OWNER_KEY = ?",
-        arrayOf(progressStorageKey()),
+        arrayOf(syncStorageKey()),
         null,
         null,
         null,
@@ -189,17 +196,43 @@ internal class AndroidReaderProgressDatabase(
 
     private fun writeSyncState(database: SQLiteDatabase, state: ReaderProgressDurableState) {
         val values = ContentValues().apply {
-            put(SYNC_OWNER_KEY, progressStorageKey())
+            put(SYNC_OWNER_KEY, syncStorageKey())
             put(SYNC_DOCUMENT, syncCodec.encode(state))
         }
         database.insertWithOnConflict(SYNC_TABLE, null, values, SQLiteDatabase.CONFLICT_REPLACE)
             .also { rowId -> check(rowId != -1L) { "Reader sync state save failed" } }
     }
 
-    /** Include the auth generation for isolation, but keep the account prefix
-     * stable so logout/auth changes can evict every generation for this user. */
+    // Exact reading position belongs to the account, not its current access token.
     private fun progressStorageKey(): String =
+        "${readerAccountStorageKey(identity.namespace)}:${identity.stableKey}"
+
+    // Pending writes remain isolated by authorization generation.
+    private fun syncStorageKey(): String =
         "${readerAccountStorageKey(identity.namespace)}:${identity.namespace.authorizationVersion}:${identity.stableKey}"
+
+    private fun migrateAuthorizationScopedProgress(database: SQLiteDatabase, resourceId: String): ReaderProgress? {
+        val prefix = "${readerAccountStorageKey(identity.namespace)}:"
+        val suffix = ":${identity.stableKey}"
+        val candidates = mutableListOf<Pair<String, ReaderProgress>>()
+        database.query(PROGRESS_TABLE, arrayOf(PROGRESS_SOURCE_ID, PROGRESS_DOCUMENT),
+            "$PROGRESS_SOURCE_ID >= ? AND $PROGRESS_SOURCE_ID < ?", arrayOf(prefix, prefix + "\uffff"),
+            null, null, null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val key = cursor.getString(0)
+                if (!key.startsWith(prefix) || !key.endsWith(suffix)) continue
+                if (key.removePrefix(prefix).removeSuffix(suffix).toLongOrNull() == null) continue
+                val progress = progressCodec.decode(cursor.getString(1))
+                if (progress.resourceId == resourceId && matchesIdentity(progress)) candidates += key to progress
+            }
+        }
+        val latest = candidates.maxByOrNull { it.second.updatedAtEpochMillis }?.second ?: return null
+        database.transaction {
+            write(database, latest)
+            candidates.forEach { (key, _) -> delete(PROGRESS_TABLE, "$PROGRESS_SOURCE_ID = ?", arrayOf(key)) }
+        }
+        return latest
+    }
 
     private fun matchesIdentity(progress: ReaderProgress): Boolean =
         progress.resourceId == identity.resourceId &&
@@ -228,30 +261,37 @@ internal class AndroidReaderProgressDatabase(
             require(oldVersion in 1 until DATABASE_VERSION && newVersion == DATABASE_VERSION) {
                 "Unsupported Reader progress database upgrade $oldVersion to $newVersion"
             }
-            // Reader v4 was unreleased. Database version 6 is the destructive
-            // Book/Resource/Asset PublicationLocation boundary: no prior
-            // Work/Version/Volume exact, pending, or conflict document may be
-            // interpreted as the new contract.
-            if (oldVersion < 4) {
-                database.delete(PROGRESS_TABLE, null, null)
+            // Preserve opaque historical progress; never reinterpret missing identity fields.
+            // Older schemas called this storage key source_id. Copy through the typed
+            // ContentValues API so this also works on devices without RENAME COLUMN.
+            val columns = database.query(PROGRESS_TABLE, null, null, null, null, null, null, "0")
+                .use { it.columnNames.toSet() }
+            if (PROGRESS_SOURCE_ID !in columns) {
+                val oldTable = "reader_progress_previous"
+                database.execSQL("ALTER TABLE $PROGRESS_TABLE RENAME TO $oldTable")
+                database.execSQL("CREATE TABLE $PROGRESS_TABLE ($PROGRESS_SOURCE_ID TEXT PRIMARY KEY NOT NULL,$PROGRESS_DOCUMENT TEXT NOT NULL)")
+                database.query(oldTable, arrayOf("source_id", PROGRESS_DOCUMENT), null, null, null, null, null)
+                    .use { cursor ->
+                        while (cursor.moveToNext()) {
+                            database.insertOrThrow(PROGRESS_TABLE, null, ContentValues().apply {
+                                put(PROGRESS_SOURCE_ID, cursor.getString(0))
+                                put(PROGRESS_DOCUMENT, cursor.getString(1))
+                            })
+                        }
+                    }
+                database.execSQL("DROP TABLE $oldTable")
             }
-            database.execSQL("DROP TABLE IF EXISTS $OUTBOX_TABLE")
-            database.execSQL("DROP TABLE IF EXISTS $SEQUENCE_TABLE")
             database.execSQL(
                 "CREATE TABLE IF NOT EXISTS $SYNC_TABLE (" +
                     "$SYNC_OWNER_KEY TEXT PRIMARY KEY NOT NULL," +
                     "$SYNC_DOCUMENT TEXT NOT NULL)",
             )
-            if (oldVersion < 6) {
-                database.delete(PROGRESS_TABLE, null, null)
-                database.delete(SYNC_TABLE, null, null)
-            }
         }
     }
 
     companion object {
         internal const val DATABASE_NAME = "reader-progress.db"
-        internal const val DATABASE_VERSION = 6
+        internal const val DATABASE_VERSION = 7
         internal const val PROGRESS_TABLE = "reader_progress"
         internal const val PROGRESS_SOURCE_ID = "resource_id"
         internal const val PROGRESS_DOCUMENT = "document_json"

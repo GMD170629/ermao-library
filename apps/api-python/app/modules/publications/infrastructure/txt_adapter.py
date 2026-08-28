@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -22,6 +21,9 @@ from app.modules.publications.domain.model import (
     PublicationRevision,
     PublicationTocEntry,
     PublicationUnsupportedError,
+)
+from app.modules.publications.infrastructure.snapshot_cache import (
+    PublicationSnapshotCache,
 )
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
@@ -58,7 +60,7 @@ class _TxtChapter:
 class _TxtSnapshot:
     publication: NormalizedPublication
     source_mtime: float
-    resources_by_href: dict[str, tuple[str, bytes]]
+    chapters_by_href: dict[str, _TxtChapter]
 
 
 def _decode_txt(content: bytes) -> str:
@@ -188,7 +190,6 @@ def _resource_href(raw_href: str) -> str:
     return decoded
 
 
-@lru_cache(maxsize=64)
 def _snapshot(
     source_path_value: str,
     source_size: int,
@@ -202,17 +203,12 @@ def _snapshot(
     except OSError as error:
         raise PublicationCorruptError("TXT source is unavailable") from error
     chapters = _chapters(_normalized_lines(_decode_txt(content)), title)
-    resources: dict[str, tuple[str, bytes]] = {
-        _STYLESHEET_HREF: ("text/css", _STYLESHEET)
-    }
+    chapters_by_href: dict[str, _TxtChapter] = {}
     reading_order: list[PublicationLink] = []
     toc: list[PublicationTocEntry] = []
     for chapter_index, chapter in enumerate(chapters, start=1):
         href = f"text/chapter-{chapter_index:04d}.xhtml"
-        resources[href] = (
-            "application/xhtml+xml",
-            _chapter_xhtml(chapter),
-        )
+        chapters_by_href[href] = chapter
         reading_order.append(
             PublicationLink(
                 href=href,
@@ -245,13 +241,14 @@ def _snapshot(
     return _TxtSnapshot(
         publication=publication,
         source_mtime=source_path.stat().st_mtime,
-        resources_by_href=resources,
+        chapters_by_href=chapters_by_href,
     )
 
 
 class TxtPublicationAdapter(PublicationAdapter):
     def __init__(self, storage_root: Path) -> None:
         self._storage_root = storage_root
+        self._cache: PublicationSnapshotCache[_TxtSnapshot] = PublicationSnapshotCache()
 
     def open(self, source: PublicationSource) -> NormalizedPublication:
         return self._require_snapshot(source).publication
@@ -263,10 +260,13 @@ class TxtPublicationAdapter(PublicationAdapter):
     ) -> PublicationResource:
         snapshot = self._require_snapshot(source)
         safe_href = _resource_href(href)
-        indexed = snapshot.resources_by_href.get(safe_href)
-        if indexed is None:
-            raise PublicationResourceNotFoundError
-        media_type, content = indexed
+        if safe_href == _STYLESHEET_HREF:
+            media_type, content = "text/css", _STYLESHEET
+        else:
+            chapter = snapshot.chapters_by_href.get(safe_href)
+            if chapter is None:
+                raise PublicationResourceNotFoundError
+            media_type, content = "application/xhtml+xml", _chapter_xhtml(chapter)
         return PublicationResource(
             href=safe_href,
             media_type=media_type,
@@ -284,13 +284,19 @@ class TxtPublicationAdapter(PublicationAdapter):
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
             raise PublicationCorruptError("TXT source exceeds the size limit")
-        return _snapshot(
+        key = (
             str(source_path),
             stat_result.st_size,
             stat_result.st_mtime_ns,
             source.title,
             source.author,
         )
+        return self._cache.get(
+            key, lambda: _snapshot(*key), max(1, stat_result.st_size * 8)
+        )
+
+    def close(self) -> None:
+        self._cache.close()
 
 
 __all__ = [

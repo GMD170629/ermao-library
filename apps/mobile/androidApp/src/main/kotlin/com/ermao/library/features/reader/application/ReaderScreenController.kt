@@ -41,6 +41,7 @@ internal interface ReaderScreenController {
     val capabilities: ReaderCapabilities
     val currentLocation: StateFlow<ReaderLocation?>
     val preferences: StateFlow<ReaderPreferences>
+    val contentError: StateFlow<ReaderError?>? get() = null
     val restoreWarning: StateFlow<ReaderError?>
     val resumeNotice: StateFlow<ReaderResumeNotice?>
     val resumeActionFailed: StateFlow<Boolean>

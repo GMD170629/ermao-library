@@ -166,7 +166,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.emit({ type: 'phase-changed', phase: 'loading-font' }, context.operation);
     await this.resolveFont(context.preferences, context.signal);
     this.emit({ type: 'phase-changed', phase: 'loading-content' }, context.operation);
-    const opened = await openReadiumPublication(context.source.publicationManifestUrl); this.assertActive(generation, context.signal);
+    const opened = await openReadiumPublication(context.source.publicationManifestUrl, context.signal); this.assertActive(generation, context.signal);
     this.positions = opened.positions;
     const handlePointer: EpubNavigatorListeners['tap'] = (event) => this.onPointer(event);
     const listeners: EpubNavigatorListeners = {

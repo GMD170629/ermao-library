@@ -84,7 +84,7 @@ class DownloadsTest {
             DownloadSource("/api/assets/asset?download=true", "application/epub+zip", 10)
         }
         assertFailsWith<IllegalArgumentException> {
-            DownloadSource("/api/reader/v4/resources/resource/comic/archive", "application/zip", 10)
+            DownloadSource("/api/unrelated/file", "application/zip", 10)
         }
     }
 

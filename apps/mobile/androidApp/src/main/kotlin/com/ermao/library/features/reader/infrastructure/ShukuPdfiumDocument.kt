@@ -1,5 +1,8 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.PdfRangeLoader
+import com.ermao.library.shared.modules.reader.PdfRangeFailure
+
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.core.graphics.createBitmap
@@ -27,12 +30,13 @@ internal interface AndroidPdfiumDataSource : ShukuPdfiumNative.ByteSource {
     val length: Long
     suspend fun prepare()
     suspend fun acquireRequested(): Boolean
+    fun activateUnit(pageIndex: Int) = Unit
     fun close()
 }
 
 internal class AndroidRemotePdfiumDataSource(
     override val length: Long,
-    private val loader: AndroidPdfRangeLoader,
+    private val loader: PdfRangeLoader,
 ) : AndroidPdfiumDataSource {
     private val byteSource = AndroidPdfiumByteSource(loader)
 
@@ -42,7 +46,8 @@ internal class AndroidRemotePdfiumDataSource(
     override fun readCachedBlock(offset: Long, destination: ByteBuffer): Boolean =
         byteSource.readCachedBlock(offset, destination)
     override fun requestRange(offset: Long, size: Long) = byteSource.requestRange(offset, size)
-    override fun close() = Unit
+    override fun activateUnit(pageIndex: Int) = loader.activateUnit(pageIndex)
+    override fun close() = loader.close()
 }
 
 internal class AndroidLocalPdfiumDataSource(file: File) : AndroidPdfiumDataSource {
@@ -148,6 +153,7 @@ internal class ShukuPdfiumDocument private constructor(
 
     private suspend fun ensurePageAvailable(pageIndex: Int) {
         require(pageIndex in 0 until pageCount)
+        dataSource.activateUnit(pageIndex)
         repeat(MAX_AVAILABILITY_STEPS) {
             when (val status = nativeDocument.stepPage(pageIndex)) {
                 ShukuPdfiumNative.Status.OK -> return

@@ -151,9 +151,46 @@ struct MainTabView: View {
     @State private var paths = RootTabPaths()
     @State private var restoredNavigationNamespace: String?
     @State private var readerLaunch: IosReaderLaunchRequest?
-    @State private var readerPreparation: ReaderPreparationRequest?
     @State private var didOpenUITestRoute = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    @ViewBuilder private func managedTabs(_ context: ContentRequestContext) -> some View {
+        if let repository = workManagementRepository {
+            NativeBookManagementHost(repository: repository, context: context,
+                canManage: store.snapshot.authorization?.canManageSystem == true, cache: cache,
+                onChange: { change in
+                    if change.deleted && change.resourceID == nil {
+                        for tab in [TabPresentation.home, .library, .shelves, .me] {
+                            let existing = paths.path(for: tab)
+                            if let index = existing.firstIndex(where: { route in
+                                switch route {
+                                case .work(let id), .bookContent(let id, _): return id == change.bookID
+                                default: return false
+                                }
+                            }) { paths.setPath(Array(existing.prefix(index)), for: tab) }
+                        }
+                    }
+                }, onUnauthorized: store.refreshForForeground,
+                onSettings: { selectedTabID = rootTabs.first(where: { $0.presentation == .me })?.id ?? "me"; open(.administrative(.emailAndKindle), in: .me) },
+                onQueue: { selectedTabID = rootTabs.first(where: { $0.presentation == .me })?.id ?? "me"; open(.administrative(.kindleQueue), in: .me) }) { tabContent(context) }
+        } else { tabContent(context) }
+    }
+
+    private func tabContent(_ context: ContentRequestContext) -> some View {
+                TabView(selection: selection) {
+                    ForEach(rootTabs) { tab in
+                        tabRoot(presentation: tab.presentation, context: context)
+                            .tabItem {
+                                Label(
+                                    tab.presentation.title,
+                                    systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
+                                )
+                            }
+                            .tag(tab.id)
+                    }
+                }
+
+    }
 
     private var selection: Binding<String> {
         Binding(
@@ -172,19 +209,7 @@ struct MainTabView: View {
     var body: some View {
         Group {
             if let context = contentContext {
-                TabView(selection: selection) {
-                    ForEach(rootTabs) { tab in
-                        tabRoot(presentation: tab.presentation, context: context)
-                            .tabItem {
-                                Label(
-                                    tab.presentation.title,
-                                    systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
-                                )
-                            }
-                            .tag(tab.id)
-                    }
-                }
-                .id(context.namespaceKey)
+                managedTabs(context).id(context.namespaceKey)
             } else {
                 ProgressView().accessibilityLabel(Text("common.loading"))
             }
@@ -194,15 +219,7 @@ struct MainTabView: View {
                 IosReaderBootstrapView(request: request, composition: readerComposition)
             }
         }
-        .fullScreenCover(item: $readerPreparation) { request in
-            ReaderDownloadTransitionView(
-                request: request,
-                store: downloads,
-                client: contentClient,
-                cache: cache,
-                readerComposition: readerComposition
-            )
-        }
+
         .onChange(of: selectedTabID) { _, value in
             guard let namespace = restoredNavigationNamespace else { return }
             UserDefaults.standard.set(value, forKey: "book-content.tab.\(namespace)")

@@ -8,6 +8,8 @@ import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.request
+import io.ktor.client.request.prepareRequest
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.bodyAsChannel
@@ -21,6 +23,7 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.cancel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -40,6 +43,7 @@ data class ApiRequest<T>(
     val responseDeserializer: DeserializationStrategy<T>,
     val requestBody: String? = null,
     val queryParameters: Map<String, List<String>> = emptyMap(),
+    val idempotencyKey: String? = null,
 )
 
 internal data class ApiMultipartFile(
@@ -53,7 +57,8 @@ internal data class ApiMultipartRequest<T>(
     val method: ApiMethod = ApiMethod.Post,
     val apiPath: String,
     val responseDeserializer: DeserializationStrategy<T>,
-    val file: ApiMultipartFile,
+    val file: ApiMultipartFile? = null,
+    val fields: Map<String, String> = emptyMap(),
 )
 
 data class AuthenticatedAsset(
@@ -76,22 +81,12 @@ internal data class AuthenticatedBinary(
     val contentDisposition: String?,
 )
 
-internal data class AuthenticatedDownload(
-    val mimeType: String,
-    val contentLength: Long?,
-    val etag: String?,
-)
-
-internal sealed interface StreamedDownloadBodyResult {
-    data class Complete(val totalBytes: Long) : StreamedDownloadBodyResult
-    data class Failure(val error: AppError) : StreamedDownloadBodyResult
-}
-
 class ApiClient internal constructor(
     private val profile: ServerProfile,
     private val client: HttpClient,
     private val json: Json,
 ) {
+    private data class JsonExchange(val status: Int, val headers: Map<String, List<String>>, val body: String?)
     private val decoder = ApiEnvelopeDecoder(json)
 
     /** Feature infrastructure may stream authenticated bodies without exposing Ktor publicly. */
@@ -111,16 +106,37 @@ class ApiClient internal constructor(
             var requestBody = request.requestBody
             var redirectCount = 0
             while (true) {
-            val response = client.request(requestUrl) {
+            val exchange = client.prepareRequest(requestUrl) {
                 this.method = method.toKtorMethod()
+                request.idempotencyKey?.let { key ->
+                    require(key.isNotBlank() && key.length <= 128 && key.all { it.isLetterOrDigit() || it == '-' })
+                    headers.append("Idempotency-Key", key)
+                }
                 requestBody?.let {
                     contentType(ContentType.Application.Json)
                     setBody(it)
                 }
+            }.execute { response ->
+                val status = response.status.value
+                val headers = response.headers.entries().associate { it.key to it.value }
+                val limit = if (status in 200..299) 8 * 1024 * 1024 else ERROR_BODY_LIMIT_BYTES
+                if (status in REDIRECT_STATUS_CODES) {
+                    response.bodyAsChannel().cancel(null)
+                    JsonExchange(status, headers, "")
+                } else {
+                    val declared = response.headers[HttpHeaders.ContentLength]
+                    val size = declared?.toLongOrNull()
+                    val body = if (declared != null && (size == null || size !in 0..limit.toLong())) {
+                        response.bodyAsChannel().cancel(null)
+                        null
+                    } else response.bodyAsChannel().readBounded(limit)?.takeIf {
+                        size == null || it.size.toLong() == size
+                    }?.decodeToString(throwOnInvalidSequence = true)
+                    JsonExchange(status, headers, body)
+                }
             }
-            if (response.status.value in REDIRECT_STATUS_CODES) {
-                response.bodyAsText()
-                val location = response.headers[io.ktor.http.HttpHeaders.Location]
+            if (exchange.status in REDIRECT_STATUS_CODES) {
+                val location = exchange.headers.entries.firstOrNull { it.key.equals(HttpHeaders.Location, true) }?.value?.firstOrNull()
                     ?: return redirectFailure("REDIRECT_LOCATION_MISSING")
                 val targetUrl = RedirectPolicy.resolve(requestUrl, location)
                     ?: return redirectFailure("REDIRECT_LOCATION_INVALID")
@@ -130,7 +146,7 @@ class ApiClient internal constructor(
                 if (redirectCount >= MAX_REDIRECTS) {
                     return redirectFailure("TOO_MANY_REDIRECTS")
                 }
-                when (response.status.value) {
+                when (exchange.status) {
                     303 -> {
                         method = ApiMethod.Get
                         requestBody = null
@@ -144,10 +160,10 @@ class ApiClient internal constructor(
                 continue
             }
             return decoder.decode(
-                statusCode = response.status.value,
-                body = response.bodyAsText(),
+                statusCode = exchange.status,
+                body = exchange.body ?: return redirectFailure("JSON_RESPONSE_LIMIT_OR_LENGTH_INVALID"),
                 dataDeserializer = request.responseDeserializer,
-                headers = response.headers.entries().associate { it.key to it.value },
+                headers = exchange.headers,
             )
             }
         } catch (cancelled: CancellationException) {
@@ -171,26 +187,31 @@ class ApiClient internal constructor(
             require(request.method in setOf(ApiMethod.Post, ApiMethod.Put, ApiMethod.Patch)) {
                 "Multipart request method must support a body"
             }
-            require(request.file.fieldName.isSafeMultipartToken()) { "Invalid multipart field name" }
-            require(request.file.fileName.isSafeMultipartFileName()) { "Invalid multipart file name" }
-            require(request.file.bytes.isNotEmpty()) { "Multipart file must not be empty" }
-            val contentType = ContentType.parse(request.file.contentType)
+            request.file?.let { file ->
+                require(file.fieldName.isSafeMultipartToken()) { "Invalid multipart field name" }
+                require(file.fileName.isSafeMultipartFileName()) { "Invalid multipart file name" }
+                require(file.bytes.isNotEmpty()) { "Multipart file must not be empty" }
+            }
+            require(request.fields.keys.all { it.isSafeMultipartToken() }) { "Invalid multipart field name" }
             val response = client.request(profile.baseUrl.resolveApiPath(request.apiPath)) {
                 method = request.method.toKtorMethod()
                 setBody(
                     MultiPartFormDataContent(
                         formData {
+                            request.fields.forEach { (name, value) -> append(name, value) }
+                            request.file?.let { file ->
                             append(
-                                request.file.fieldName,
-                                request.file.bytes,
+                                file.fieldName,
+                                file.bytes,
                                 Headers.build {
                                     append(
                                         HttpHeaders.ContentDisposition,
-                                        "filename=\"${request.file.fileName}\"",
+                                        "filename=\"${file.fileName}\"",
                                     )
-                                    append(HttpHeaders.ContentType, contentType.toString())
+                                    append(HttpHeaders.ContentType, ContentType.parse(file.contentType).toString())
                                 },
                             )
+                            }
                         },
                     ),
                 )
@@ -274,7 +295,12 @@ class ApiClient internal constructor(
                     response.bodyAsText()
                     return redirectFailure("ASSET_CONTENT_TYPE_INVALID")
                 }
-                val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                val declaredLength = response.headers[HttpHeaders.ContentLength]
+            val declaredSize = declaredLength?.toLongOrNull()
+            if (declaredLength != null && declaredSize == null) {
+                response.bodyAsChannel().cancel(null)
+                return redirectFailure("BINARY_LENGTH_INVALID")
+            }
                 if (declaredSize != null && declaredSize > maximumBytes) {
                     response.bodyAsText()
                     return ApiResult.Failure(
@@ -372,7 +398,12 @@ class ApiClient internal constructor(
                     response.bodyAsText()
                     return redirectFailure("JSON_CONTENT_TYPE_INVALID")
                 }
-                val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                val declaredLength = response.headers[HttpHeaders.ContentLength]
+            val declaredSize = declaredLength?.toLongOrNull()
+            if (declaredLength != null && declaredSize == null) {
+                response.bodyAsChannel().cancel(null)
+                return redirectFailure("BINARY_LENGTH_INVALID")
+            }
                 if (declaredSize != null && declaredSize > maximumBytes) {
                     response.bodyAsText()
                     return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "JSON_TOO_LARGE"))
@@ -402,22 +433,24 @@ class ApiClient internal constructor(
         apiPath: String,
         maximumBytes: Int,
         allowedMimeTypes: Set<String>,
+        requestHeaders: Map<String, String> = emptyMap(),
+        expectedResponseHeaders: Map<String, String> = emptyMap(),
     ): ApiResult<AuthenticatedBinary> {
         try {
             require(apiPath.startsWith("/api/")) { "Binary path must start with /api/" }
             require(!apiPath.contains('#')) { "Binary path must not contain a fragment" }
             require(maximumBytes > 0) { "Binary size limit must be positive" }
             require(allowedMimeTypes.isNotEmpty()) { "At least one binary MIME type is required" }
-            val response = client.request(profile.baseUrl.resolveApiPath(apiPath)) {
-                method = HttpMethod.Get
-            }
+            return client.prepareGet(profile.baseUrl.resolveApiPath(apiPath)) {
+                requestHeaders.forEach { (key, value) -> headers.append(key, value) }
+            }.execute { response ->
             if (response.status.value in REDIRECT_STATUS_CODES) {
-                return redirectFailure("BINARY_REDIRECT_REJECTED")
+                return@execute redirectFailure("BINARY_REDIRECT_REJECTED")
             }
             if (response.status.value !in 200..299) {
-                val errorBody = response.bodyAsChannel().readBounded(DOWNLOAD_ERROR_BODY_BYTES)
-                    ?: return redirectFailure("DOWNLOAD_ERROR_BODY_TOO_LARGE")
-                return when (val decoded = decoder.decode(
+                val errorBody = response.bodyAsChannel().readBounded(ERROR_BODY_LIMIT_BYTES)
+                    ?: return@execute redirectFailure("ERROR_BODY_TOO_LARGE")
+                return@execute when (val decoded = decoder.decode(
                     response.status.value,
                     errorBody.decodeToString(),
                     JsonElement.serializer(),
@@ -426,21 +459,33 @@ class ApiClient internal constructor(
                     is ApiResult.Success -> redirectFailure("UNEXPECTED_BINARY_RESPONSE")
                 }
             }
+            if (expectedResponseHeaders.any { (name, expected) -> response.headers[name] != expected }) {
+                response.bodyAsChannel().cancel(null)
+                return@execute redirectFailure("BINARY_VERSION_CHANGED")
+            }
             val mimeType = response.headers[HttpHeaders.ContentType]
                 ?.substringBefore(';')
                 ?.trim()
                 ?.lowercase()
-                ?: return redirectFailure("BINARY_CONTENT_TYPE_MISSING")
+                ?: return@execute redirectFailure("BINARY_CONTENT_TYPE_MISSING")
             if (mimeType !in allowedMimeTypes) {
-                return redirectFailure("BINARY_CONTENT_TYPE_INVALID")
+                return@execute redirectFailure("BINARY_CONTENT_TYPE_INVALID")
             }
-            val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-            if (declaredSize != null && declaredSize > maximumBytes) {
-                return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "BINARY_TOO_LARGE"))
+            val declaredLength = response.headers[HttpHeaders.ContentLength]
+            val declaredSize = declaredLength?.toLongOrNull()
+            if (declaredLength != null && declaredSize == null) {
+                response.bodyAsChannel().cancel(null)
+                return@execute redirectFailure("BINARY_LENGTH_INVALID")
+            }
+            if (declaredSize != null && declaredSize !in 0..maximumBytes.toLong()) {
+                return@execute ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "BINARY_TOO_LARGE"))
             }
             val bytes = response.bodyAsChannel().readBounded(maximumBytes)
-                ?: return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "BINARY_TOO_LARGE"))
-            return ApiResult.Success(
+                ?: return@execute ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "BINARY_TOO_LARGE"))
+            if (declaredSize != null && bytes.size.toLong() != declaredSize) {
+                return@execute redirectFailure("BINARY_LENGTH_MISMATCH")
+            }
+            return@execute ApiResult.Success(
                 AuthenticatedBinary(
                     bytes = bytes,
                     mimeType = mimeType,
@@ -451,86 +496,7 @@ class ApiClient internal constructor(
                     response.headers.entries().associate { it.key to it.value },
                 ),
             )
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (timeout: HttpRequestTimeoutException) {
-            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
-        } catch (error: PlatformStorageException) {
-            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
-        } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
-        }
-    }
-
-    /** Streams an authenticated response without retaining the publication in memory. */
-    internal suspend fun streamAuthenticatedDownload(
-        apiPath: String,
-        maximumBytes: Long,
-        allowedMimeTypes: Set<String>,
-        writeChunk: suspend (bytes: ByteArray, count: Int) -> Unit,
-    ): ApiResult<AuthenticatedDownload> {
-        try {
-            require(apiPath.startsWith("/api/")) { "Download path must start with /api/" }
-            require(!apiPath.contains('#')) { "Download path must not contain a fragment" }
-            require(maximumBytes > 0) { "Download size limit must be positive" }
-            require(allowedMimeTypes.isNotEmpty()) { "At least one download MIME type is required" }
-            val response = client.request(profile.baseUrl.resolveApiPath(apiPath)) {
-                method = HttpMethod.Get
             }
-            if (response.status.value in REDIRECT_STATUS_CODES) {
-                response.bodyAsChannel().cancelQuietly()
-                return redirectFailure("DOWNLOAD_REDIRECT_REJECTED")
-            }
-            if (response.status.value !in 200..299) {
-                val errorChannel = response.bodyAsChannel()
-                val errorBody = errorChannel.readBounded(DOWNLOAD_ERROR_BODY_BYTES)
-                if (errorBody == null) {
-                    errorChannel.cancelQuietly()
-                    return redirectFailure("DOWNLOAD_ERROR_BODY_TOO_LARGE")
-                }
-                return when (val decoded = decoder.decode(
-                    response.status.value,
-                    errorBody.decodeToString(),
-                    JsonElement.serializer(),
-                )) {
-                    is ApiResult.Failure -> decoded
-                    is ApiResult.Success -> redirectFailure("UNEXPECTED_DOWNLOAD_RESPONSE")
-                }
-            }
-            val mimeType = response.headers[HttpHeaders.ContentType]
-                ?.substringBefore(';')
-                ?.trim()
-                ?.lowercase()
-                ?: run {
-                    response.bodyAsChannel().cancelQuietly()
-                    return redirectFailure("DOWNLOAD_CONTENT_TYPE_MISSING")
-                }
-            if (mimeType !in allowedMimeTypes) {
-                response.bodyAsChannel().cancelQuietly()
-                return redirectFailure("DOWNLOAD_CONTENT_TYPE_INVALID")
-            }
-            val declaredSize = response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-            if (declaredSize != null && declaredSize !in 1..maximumBytes) {
-                response.bodyAsChannel().cancelQuietly()
-                return ApiResult.Failure(AppError(AppErrorKind.PayloadTooLarge, "DOWNLOAD_TOO_LARGE"))
-            }
-            val channel = response.bodyAsChannel()
-            when (val body = consumeStreamedDownloadBody(
-                channel,
-                maximumBytes,
-                declaredSize,
-                writeChunk,
-            )) {
-                is StreamedDownloadBodyResult.Failure -> return ApiResult.Failure(body.error)
-                is StreamedDownloadBodyResult.Complete -> Unit
-            }
-            return ApiResult.Success(
-                AuthenticatedDownload(mimeType, declaredSize, response.headers[HttpHeaders.ETag]),
-                ApiResponseMetadata(
-                    response.status.value,
-                    response.headers.entries().associate { it.key to it.value },
-                ),
-            )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
@@ -543,6 +509,7 @@ class ApiClient internal constructor(
     }
 
     fun close() {
+        client.coroutineContext.cancel()
         client.close()
     }
 
@@ -614,58 +581,9 @@ class ApiClient internal constructor(
         const val DEFAULT_MAXIMUM_ASSET_BYTES = 12 * 1024 * 1024
         const val DEFAULT_MAXIMUM_JSON_BYTES = 196_608
         const val BINARY_READ_BUFFER_BYTES = 64 * 1024
-        const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
-        const val DOWNLOAD_ERROR_BODY_BYTES = 64 * 1024
+        const val ERROR_BODY_LIMIT_BYTES = 64 * 1024
     }
 }
 
-internal suspend fun consumeStreamedDownloadBody(
-    channel: ByteReadChannel,
-    maximumBytes: Long,
-    declaredSize: Long?,
-    writeChunk: suspend (bytes: ByteArray, count: Int) -> Unit,
-): StreamedDownloadBodyResult {
-    require(maximumBytes > 0)
-    val buffer = ByteArray(64 * 1024)
-    var totalBytes = 0L
-    while (true) {
-        val remainingWithOverflowProbe = maximumBytes - totalBytes + 1L
-        val requestedBytes = minOf(buffer.size.toLong(), remainingWithOverflowProbe).toInt()
-        val count = try {
-            channel.readAvailable(buffer, 0, requestedBytes)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Throwable) {
-            return StreamedDownloadBodyResult.Failure(
-                AppError(AppErrorKind.NetworkUnavailable, "DOWNLOAD_INTERRUPTED"),
-            )
-        }
-        if (count < 0) break
-        if (count == 0) continue
-        totalBytes += count
-        if (totalBytes > maximumBytes) {
-            try {
-                channel.cancel()
-            } catch (_: Throwable) {
-                // The body is already rejected and no bytes are retained.
-            }
-            return StreamedDownloadBodyResult.Failure(
-                AppError(AppErrorKind.PayloadTooLarge, "DOWNLOAD_TOO_LARGE"),
-            )
-        }
-        writeChunk(buffer, count)
-    }
-    if (totalBytes == 0L) {
-        return StreamedDownloadBodyResult.Failure(
-            AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_EMPTY"),
-        )
-    }
-    if (declaredSize != null && totalBytes != declaredSize) {
-        return StreamedDownloadBodyResult.Failure(
-            AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_LENGTH_MISMATCH"),
-        )
-    }
-    return StreamedDownloadBodyResult.Complete(totalBytes)
-}
 
 internal expect fun mapTransportError(error: Throwable): AppError

@@ -25,15 +25,24 @@ import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
+import com.ermao.library.shared.navigation.TabId
 import kotlinx.serialization.Serializable
 
 @Serializable
-internal data class BookContentRoute(val target: BookContentTarget) : NavKey
+internal data class BookContentRoute(
+    val bookId: String,
+    val serverIdentity: String,
+    val userId: String,
+    val authorizationVersion: Long,
+    val sourceTab: String,
+    val target: BookContentTarget,
+) : NavKey
 
 /** One native detail stack per Book, used in both the compact destination and detail pane. */
 @Composable
 internal fun BookContentNavigation(
     bookId: String,
+    sourceTab: TabId,
     repository: ContentRepository,
     shelfRepository: ShelfRepository,
     context: ContentRequestContext,
@@ -47,12 +56,30 @@ internal fun BookContentNavigation(
     onOpenResource: (ResourceContent) -> Unit,
     onOpenReadingUnit: (ResourceContent, ReadingUnit) -> Unit,
     onOpenDownload: (AndroidDownloadRecord) -> Unit,
-) = key(context.namespace, bookId) {
-    val backStack = rememberNavBackStack(BookContentRoute(BookContentTarget.Root))
+) = key(context.namespace, bookId, sourceTab) {
+    // The decorator retains stores in the parent Activity. A composition key alone
+    // cannot distinguish identical Root targets belonging to different books/tabs.
+    val root = BookContentRoute(
+        bookId = bookId,
+        serverIdentity = context.namespace.serverIdentity,
+        userId = context.namespace.userId,
+        authorizationVersion = context.namespace.authorizationVersion,
+        sourceTab = sourceTab.stableValue,
+        target = BookContentTarget.Root,
+    )
+    val backStack = rememberNavBackStack(root)
     val records by downloads.recordsByResource.collectAsStateWithLifecycle()
     val failures by downloads.failureByResource.collectAsStateWithLifecycle()
     val appContext = LocalContext.current.applicationContext
     val back = { if (backStack.size > 1) { backStack.removeLastOrNull(); Unit } else onBack() }
+    val revision = com.ermao.library.features.workmanagement.managementRevision()
+    val change = com.ermao.library.features.workmanagement.managementChange()
+    androidx.compose.runtime.LaunchedEffect(revision) {
+        if (revision > 0 && change?.bookId == bookId && change.deleted && change.resourceId != null) {
+            val index = backStack.indexOfFirst { it is BookContentRoute && (it.target as? BookContentTarget.ResourceDetail)?.resourceId == change.resourceId }
+            if (index > 0) while (backStack.size > index) backStack.removeLastOrNull()
+        }
+    }
     NavDisplay(
         backStack = backStack,
         onBack = back,
@@ -63,14 +90,19 @@ internal fun BookContentNavigation(
         entryProvider = entryProvider {
             entry<BookContentRoute> { route ->
                 val detail: WorkDetailViewModel = viewModel(factory = WorkDetailViewModel.factory(
-                    repository, shelfRepository, context, appContext, bookId, onUnauthorized, route.target,
+                    repository, shelfRepository, context, appContext, route.bookId, onUnauthorized, route.target,
                 ))
+                androidx.compose.runtime.LaunchedEffect(revision) {
+                    if (revision > 0 && change?.bookId == bookId) {
+                        if (change.readingStatusChanged) detail.refreshAfterBookReadingStatusChange() else detail.refresh()
+                    }
+                }
                 val state by detail.uiState.collectAsStateWithLifecycle()
                 val management: WorkManagementViewModel = viewModel(factory = WorkManagementViewModel.factory(
-                    managementRepository, context, bookId, onUnauthorized,
+                    managementRepository, context, route.bookId, onUnauthorized,
                 ))
                 val openTarget: (BookContentTarget) -> Unit = { target ->
-                    val destination = BookContentRoute(target)
+                    val destination = root.copy(target = target)
                     val existing = backStack.indexOf(destination)
                     if (existing >= 0) {
                         while (backStack.lastIndex > existing) backStack.removeLastOrNull()

@@ -6,6 +6,7 @@ data class BookSummary(
     val author: String?,
     val coverUrl: String,
     val progress: Double,
+    val completed: Boolean? = null,
 )
 
 data class BookDetailSummary(

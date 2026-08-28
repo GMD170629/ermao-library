@@ -112,6 +112,11 @@ data class MetadataCandidate(
     val isbn: String?,
     val coverUrl: String?,
     val confidence: Double,
+    val seriesIndex: Double? = null,
+    val identifier: String? = null,
+    val narrator: String? = null,
+    val abridged: Boolean? = null,
+    val resourceIndex: Double? = null,
 )
 
 data class MetadataSearchResult(

@@ -13,12 +13,15 @@ from app.api.typed_route import TypedContractRoute
 from app.bootstrap.publications import (
     ensure_publication_navigation,
     open_publication,
+    publication_runtime,
 )
 from app.contracts.http import MessageError
 from app.contracts.http_errors import (
+    BasicConflictError,
     BasicNotFoundError,
     BasicUnauthorizedError,
     ErrorResponses,
+    PayloadTooLargeError,
 )
 from app.core.authorization import authorization_context
 from app.core.config import Settings, get_settings
@@ -27,9 +30,11 @@ from app.models.auth import User
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import (
     NormalizedPublication,
+    PublicationChangedError,
     PublicationCorruptError,
     PublicationNotFoundError,
     PublicationResourceNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationUnsupportedError,
 )
 from app.modules.publications.domain.model import (
@@ -61,6 +66,8 @@ ApplicationSettings = Annotated[Settings, Depends(get_settings)]
 PUBLICATION_ERROR_RESPONSES = ErrorResponses(
     BasicUnauthorizedError,
     BasicNotFoundError,
+    PayloadTooLargeError,
+    BasicConflictError,
 )
 _EPUB_PROFILE = "https://readium.org/webpub-manifest/profiles/epub"
 _MANIFEST_MEDIA_TYPE = "application/webpub+json"
@@ -110,10 +117,10 @@ def _open_manifest_publication(
     settings: Settings,
     scope: PublicationAccessScope,
 ) -> NormalizedPublication:
-    return (
+    publication = (
         ensure_publication_navigation(
             _runtime_session_factory(request),
-            settings,
+            publication_runtime(request),
         )
         .open_and_ensure(
             resource_id=resource_id,
@@ -121,6 +128,15 @@ def _open_manifest_publication(
         )
         .publication
     )
+    expected = request.headers.get("X-Publication-Revision")
+    if expected is not None and expected != publication.revision.token:
+        raise BasicConflictError(
+            MessageError(
+                message="Publication changed; reopen it",
+                code="PUBLICATION_RESOURCE_CHANGED",
+            )
+        )
+    return publication
 
 
 def _manifest(publication: NormalizedPublication) -> PublicationManifest:
@@ -181,6 +197,7 @@ def _manifest(publication: NormalizedPublication) -> PublicationManifest:
 def publication_manifest(
     resource_id: str,
     request: Request,
+    response: Response,
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Annotated[PublicationManifest, PUBLICATION_ERROR_RESPONSES]:
@@ -192,12 +209,21 @@ def publication_manifest(
             settings=settings,
             scope=scope,
         )
+    except PublicationResourceTooLargeError as error:
+        raise PayloadTooLargeError(
+            MessageError(
+                message="Publication exceeds the online reading limit",
+                code="PUBLICATION_RESOURCE_TOO_LARGE",
+            )
+        ) from error
     except (
         PublicationNotFoundError,
         PublicationUnsupportedError,
         PublicationCorruptError,
     ) as error:
         raise _not_found() from error
+    response.headers["X-Publication-Revision"] = publication.revision.token
+    response.headers["Cache-Control"] = "private, no-store"
     return _manifest(publication)
 
 
@@ -209,6 +235,7 @@ def publication_manifest(
 def publication_positions(
     resource_id: str,
     request: Request,
+    response: Response,
     db: DatabaseSession,
     settings: ApplicationSettings,
 ) -> Annotated[PublicationPositions, PUBLICATION_ERROR_RESPONSES]:
@@ -220,6 +247,13 @@ def publication_positions(
             settings=settings,
             scope=scope,
         )
+    except PublicationResourceTooLargeError as error:
+        raise PayloadTooLargeError(
+            MessageError(
+                message="Publication exceeds the online reading limit",
+                code="PUBLICATION_RESOURCE_TOO_LARGE",
+            )
+        ) from error
     except (
         PublicationNotFoundError,
         PublicationUnsupportedError,
@@ -239,6 +273,8 @@ def publication_positions(
         )
         for index, link in enumerate(publication.reading_order)
     ]
+    response.headers["X-Publication-Revision"] = publication.revision.token
+    response.headers["Cache-Control"] = "private, no-store"
     return PublicationPositions(total=total, positions=positions)
 
 
@@ -253,12 +289,47 @@ def publication_resource(
 ) -> Annotated[Response, PUBLICATION_ERROR_RESPONSES]:
     _user, scope = _authenticated_scope(db, request, settings)
     try:
-        resource = open_publication(db, settings).resource(
+        use_case = open_publication(db, publication_runtime(request))
+        if request.method == "HEAD":
+            description = use_case.describe_resource(
+                resource_id=resource_id,
+                href=resource_href,
+                access_scope=scope,
+                expected_revision=request.headers.get("X-Publication-Revision"),
+            )
+            response = Response(
+                media_type=description.link.media_type,
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "Vary": "Cookie",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Publication-Revision": description.revision_token,
+                },
+            )
+            del response.headers["content-length"]
+            return response
+        delivery = use_case.resource(
             resource_id=resource_id,
             href=resource_href,
             access_scope=scope,
+            expected_revision=request.headers.get("X-Publication-Revision"),
         )
+        resource = delivery.resource
         content = resource.content
+    except PublicationChangedError as error:
+        raise BasicConflictError(
+            MessageError(
+                message="Publication changed; reopen it",
+                code="PUBLICATION_RESOURCE_CHANGED",
+            )
+        ) from error
+    except PublicationResourceTooLargeError as error:
+        raise PayloadTooLargeError(
+            MessageError(
+                message="Publication chapter exceeds the online reading limit",
+                code="PUBLICATION_RESOURCE_TOO_LARGE",
+            )
+        ) from error
     except (
         PublicationNotFoundError,
         PublicationUnsupportedError,
@@ -267,16 +338,16 @@ def publication_resource(
     ) as error:
         raise _not_found() from error
     headers = {
-        "Cache-Control": "private, no-cache",
+        "Cache-Control": "private, no-store",
         "Vary": "Cookie",
         "X-Content-Type-Options": "nosniff",
+        "X-Publication-Revision": delivery.revision_token,
     }
     if resource.media_type in {"application/xhtml+xml", "text/html"}:
         headers["Content-Security-Policy"] = _ACTIVE_CONTENT_CSP
-    response_content = b"" if request.method == "HEAD" else content
     headers["Content-Length"] = str(len(content))
     return Response(
-        content=response_content,
+        content=content,
         media_type=resource.media_type,
         headers=headers,
     )

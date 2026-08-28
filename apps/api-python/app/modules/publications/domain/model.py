@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 
 class PublicationNotFoundError(Exception):
@@ -29,6 +30,14 @@ class PublicationStructureError(PublicationCorruptError):
     """The publication package cannot provide a usable reading order."""
 
 
+class PublicationResourceTooLargeError(Exception):
+    """One requested chapter exceeds the bounded online resource contract."""
+
+
+class PublicationChangedError(Exception):
+    """The original changed after the reader opened its metadata."""
+
+
 class PublicationResourceNotFoundError(Exception):
     """The requested resource is not in the validated publication index."""
 
@@ -39,6 +48,11 @@ class PublicationRevision:
     source_mtime_ms: int
     parser: str
     normalization: str
+
+    @property
+    def token(self) -> str:
+        identity = f"{self.source_size_bytes}:{self.source_mtime_ms}:{self.parser}:{self.normalization}"
+        return sha256(identity.encode()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

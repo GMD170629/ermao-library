@@ -172,25 +172,12 @@ typealias ReaderBootstrapContent =
 typealias ReaderBootstrapFailure =
     com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult.Failure
 typealias ReaderBootstrapGateway = com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
-typealias ReaderPublicationDownload =
-    com.ermao.library.shared.modules.reader.application.ReaderPublicationDownload
 typealias ReaderRemotePublicationAccess =
     com.ermao.library.shared.modules.reader.application.ReaderRemotePublicationAccess
-typealias LocalReaderSourceResolver =
-    com.ermao.library.shared.modules.reader.application.LocalReaderSourceResolver
 typealias ReaderComicPage = com.ermao.library.shared.modules.reader.application.ReaderComicPage
 typealias ReaderPdfPage = com.ermao.library.shared.modules.reader.application.ReaderPdfPage
 typealias ReaderPublicationBootstrapResult =
     com.ermao.library.shared.modules.reader.application.ReaderPublicationBootstrapResult
-typealias PublicationDownloadSink =
-    com.ermao.library.shared.modules.reader.application.PublicationDownloadSink
-typealias PublicationDownloadSinkFactory =
-    com.ermao.library.shared.modules.reader.application.PublicationDownloadSinkFactory
-typealias PublicationDownloadPort =
-    com.ermao.library.shared.modules.reader.application.PublicationDownloadPort
-typealias PublicationDownloadResult =
-    com.ermao.library.shared.modules.reader.application.PublicationDownloadResult
-typealias ReaderServerGateway = com.ermao.library.shared.modules.reader.application.ReaderServerGateway
 typealias PdfRangeServerPort = com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 typealias PdfRangeProbeResult = com.ermao.library.shared.modules.reader.application.PdfRangeProbeResult
 typealias PdfRangeReadResult = com.ermao.library.shared.modules.reader.application.PdfRangeReadResult
@@ -433,3 +420,18 @@ fun mergeReaderPreferenceChanges(base: ReaderPreferences, requested: ReaderPrefe
 
 fun changedReaderControls(before: ReaderPreferences, after: ReaderPreferences): Set<ReaderControl> =
     com.ermao.library.shared.modules.reader.domain.changedReaderControls(before, after)
+
+typealias RemoteReflowableReaderSource = com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource
+typealias ReaderPublicationAccess = com.ermao.library.shared.modules.reader.application.ReaderPublicationAccess
+typealias ReaderPdfAccess = com.ermao.library.shared.modules.reader.application.ReaderPdfAccess
+
+typealias OnlinePublicationSession = com.ermao.library.shared.modules.reader.application.OnlinePublicationSession
+typealias OnlinePublicationMetadata = com.ermao.library.shared.modules.reader.application.OnlinePublicationMetadata
+typealias OnlinePublicationReadResult = com.ermao.library.shared.modules.reader.application.OnlinePublicationReadResult
+
+typealias PdfRangeMemory = com.ermao.library.shared.modules.reader.application.PdfRangeMemory
+
+typealias PdfRangeLoader = com.ermao.library.shared.modules.reader.application.PdfRangeLoader
+typealias PdfRangeFailure = com.ermao.library.shared.modules.reader.application.PdfRangeFailure
+
+typealias ReaderFormatSupport = com.ermao.library.shared.modules.reader.domain.ReaderFormatSupport

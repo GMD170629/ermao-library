@@ -35,7 +35,6 @@ internal class AndroidReaderProgressStore(
         val progress = try {
             codec.decode(file.readText(Charsets.UTF_8))
         } catch (_: IllegalArgumentException) {
-            Files.deleteIfExists(file.toPath())
             return@withContext null
         }
         progress.also {

@@ -40,8 +40,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 class KtorContentRepository(
-    private val clients: ApiClientFactory,
+    private val clientProvider: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
 ) : ContentRepository, BookResourcePageRepository {
+    constructor(clients: ApiClientFactory) : this(clients::create)
+
     override suspend fun loadHome(context: ContentRequestContext): ContentResult<HomeSnapshot> = coroutineScope {
         val continueReading = async { requestContinueReading(context) }
         val recentReading = async { requestBooksSection(context, "/api/dashboard/recent-reading") }
@@ -236,7 +238,7 @@ class KtorContentRepository(
         apiPath: String,
         etag: String?,
     ): ContentResult<AuthenticatedCover> = when (val result = withClient(context) { client ->
-        client.loadAuthenticatedAsset(apiPath, etag)
+        client.loadAuthenticatedAsset(com.ermao.library.shared.modules.library.domain.smallCoverRequestPath(apiPath), etag)
     }) {
         is ApiResult.Success -> ContentResult.Content(
             AuthenticatedCover(result.value.bytes, result.value.mimeType, result.value.etag, result.value.notModified),
@@ -296,7 +298,7 @@ class KtorContentRepository(
         context: ContentRequestContext,
         block: suspend (ApiClient) -> ApiResult<T>,
     ): ApiResult<T> {
-        val client = clients.create(context.profile)
+        val client = clientProvider(context.profile)
         return try { block(client) } finally { client.close() }
     }
 
