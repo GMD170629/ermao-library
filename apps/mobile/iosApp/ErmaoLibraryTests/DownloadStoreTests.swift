@@ -8,6 +8,45 @@ import UIKit
 
 @MainActor
 final class DownloadStoreTests: XCTestCase {
+    func testTwoGiBAdmissionDoesNotPromiseWholeArrayOpening() {
+        let admission = ReaderAdmission.shared
+        let limit = admission.maximumPublicationBytes
+        XCTAssertEqual(limit, 2_147_483_648)
+        XCTAssertTrue(admission.accepts(bytes: limit - 1))
+        XCTAssertTrue(admission.accepts(bytes: limit))
+        XCTAssertFalse(admission.accepts(bytes: limit + 1))
+        XCTAssertNotNil(admission.localFailure(format: "txt", bytes: limit))
+        XCTAssertEqual(admission.progress(received: limit / 2, total: limit), 0.5)
+        XCTAssertEqual(admission.progress(received: limit, total: limit), 1.0)
+    }
+
+    @MainActor
+    func testReaderReusesTheAccountDownloadAndAccountChangeCancelsIt() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = ManagedDownloadStore(rootDirectory: root)
+        let transfer = SuspendedReaderDownloadTransfer()
+        let store = DownloadCenterStore(repository: repository, transfer: transfer)
+        let context = ContentRequestContext(profileID: "profile", profileDisplayName: "Books", serverIdentity: "server",
+                                            userID: "user", authorizationVersion: 1, baseURL: "https://books.example", acceptsInsecureTLS: false)
+        store.activate(context: context)
+        let descriptor = DownloadDescriptor(identity: DownloadIdentity(namespace: context.downloadRequestContext.namespace_,
+            bookId: "book", resourceId: "resource", assetId: "asset"), bookTitle: "Book", bookAuthor: nil,
+            coverApiPath: nil, resourceTitle: "Resource", format: "epub", readerType: .reflowable,
+            source: DownloadSource(apiPath: "/api/assets/asset", mimeType: "application/epub+zip", totalBytes: 4,
+                                   sourceModifiedAtMillis: nil), resourceIndex: nil, resourceSortOrder: nil,
+            isDownloadable: true, artifactKind: .singleoriginalasset, members: [])
+        XCTAssertTrue(store.beginReaderDownload(resourceID: "resource", descriptor: descriptor))
+        XCTAssertFalse(store.beginReaderDownload(resourceID: "resource", descriptor: descriptor))
+        try await waitUntil { transfer.started == 1 }
+        let other = ContentRequestContext(profileID: "profile", profileDisplayName: "Books", serverIdentity: "server",
+                                         userID: "other", authorizationVersion: 1, baseURL: "https://books.example", acceptsInsecureTLS: false)
+        store.activate(context: other)
+        try await waitUntil { transfer.cancelled == 1 }
+        XCTAssertFalse(store.isCurrent(context))
+        XCTAssertTrue(store.isCurrent(other))
+        await store.cancelAllTransfers()
+    }
     func testOriginalPageSetPublishesAsOneVerifiedDirectoryArtifact() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -622,6 +661,18 @@ final class DownloadStoreTests: XCTestCase {
 
 private extension Array {
     var single: Element? { count == 1 ? first : nil }
+}
+
+@MainActor
+private final class SuspendedReaderDownloadTransfer: ManagedDownloadTransferring {
+    private(set) var started = 0
+    private(set) var cancelled = 0
+    func download(context: ErmaoLibrary.ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  expectedDescriptor: DownloadDescriptor?, changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
+        started += 1
+        do { try await Task.sleep(for: .seconds(60)) }
+        catch is CancellationError { cancelled += 1; throw CancellationError() }
+    }
 }
 
 // Storage fixtures create explicit persisted states; production transitions are tested through shared Downloads.

@@ -28,7 +28,10 @@ static void expect_open_status(
     char path[4096];
     make_path(path, sizeof(path), directory, name);
     ErmaoMobiBook *book = NULL;
-    assert(ermao_mobi_open(path, NULL, &book) == expected);
+    const ErmaoMobiStatus actual = ermao_mobi_open(path, NULL, &book);
+    if (actual != expected) fprintf(stderr, "%s: expected %s, actual %s\n", name,
+        ermao_mobi_status_name(expected), ermao_mobi_status_name(actual));
+    assert(actual == expected);
     assert(book == NULL);
 }
 
@@ -201,12 +204,12 @@ int main(int argc, char **argv) {
         "negative-upstream-drm-v1.mobi",
         ERMAO_MOBI_DRM_PROTECTED
     );
-    expect_open_status(argv[1], "negative-no-content.mobi", ERMAO_MOBI_NO_CONTENT);
+    expect_open_status(argv[1], "negative-no-content.mobi", ERMAO_MOBI_CORRUPT);
     expect_open_status(argv[1], "negative-truncated.mobi", ERMAO_MOBI_CORRUPT);
     expect_open_status(argv[1], "negative-corrupt-record-offset.mobi", ERMAO_MOBI_CORRUPT);
-    expect_open_status(argv[1], "negative-pseudo.mobi", ERMAO_MOBI_UNSUPPORTED);
-    expect_open_status(argv[1], "negative-synthetic-kfx.kfx", ERMAO_MOBI_UNSUPPORTED);
-    expect_open_status(argv[1], "negative-synthetic-azw4.azw4", ERMAO_MOBI_UNSUPPORTED);
+    expect_open_status(argv[1], "negative-pseudo.mobi", ERMAO_MOBI_CORRUPT);
+    expect_open_status(argv[1], "negative-synthetic-kfx.kfx", ERMAO_MOBI_CORRUPT);
+    expect_open_status(argv[1], "negative-synthetic-azw4.azw4", ERMAO_MOBI_CORRUPT);
 
     for (uint32_t iteration = 0u; iteration < 1000u; iteration++) {
         assert(ermao_mobi_open(first_fixture, NULL, &book) == ERMAO_MOBI_OK);

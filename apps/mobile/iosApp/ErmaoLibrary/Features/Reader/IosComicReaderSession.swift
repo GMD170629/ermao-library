@@ -100,7 +100,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                 opened = try IosRemoteComicPublicationFactory().open(
                     source: remoteSource,
                     pages: pages,
-                    server: comicPageServer
+                    server: comicPageServer,
+                    onFailure: { [weak self] failure in self?.presentationError = failure.code }
                 )
                 openedSource = remoteSource
             } else {
@@ -162,12 +163,11 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         }
     }
 
-    func goPrevious() async { _ = await navigator?.goBackward(options: .animated) }
-    func goNext() async { _ = await navigator?.goForward(options: .animated) }
+    func goPrevious() async { _ = await navigator?.goBackward(options: .init(animated: preferences.comicPageTurnAnimation == "slide")) }
+    func goNext() async { _ = await navigator?.goForward(options: .init(animated: preferences.comicPageTurnAnimation == "slide")) }
 
     func applyPreferences(_ updated: IosReaderPreferences) async -> Bool {
         guard canApplyControlPreferences(updated) else { return false }
-        guard updated == preferences.reset(for: .comic) || (updated.comicFlow == preferences.comicFlow && updated.comicSpread == preferences.comicSpread && updated.comicDirection == preferences.comicDirection && updated.comicPageGap == preferences.comicPageGap && updated.comicCoverSingle == preferences.comicCoverSingle && updated.comicZoom == preferences.comicZoom) else { return false }
         guard preferencesStore.save(updated) else { return false }
         preferences = updated
         return true
@@ -184,7 +184,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         guard pages.indices.contains(index), let navigator else { return false }
         let expected = pages[index]
         if pageIndex == expected.pageIndex { return true }
-        guard await navigator.go(to: locator(for: expected), options: .animated) else { return false }
+        guard await navigator.go(to: locator(for: expected), options: .init(animated: preferences.comicPageTurnAnimation == "slide")) else { return false }
         await verifyCurrentPage(expected: pages[index])
         return pageIndex == expected.pageIndex && pages[pageIndex].resourceHref == expected.resourceHref
     }
@@ -392,6 +392,9 @@ final class IosComicReaderSession: NSObject, ObservableObject {
 
 extension IosComicReaderSession: CBZNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) { locationChanged(locator) }
+    func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        presentationError = presentationError ?? .comicArchiveOpenFailed
+    }
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) { presentationError = .engineError }
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {

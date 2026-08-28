@@ -60,13 +60,13 @@ class Fb2ReadiumPublicationFactoryTest {
     }
 
     @Test
-    fun rejectsMalformedXmlEntitiesDuplicateIdsAndInvalidImages() {
+    fun rejectsActualXmlErrorsAndUnsafeEntities() {
         val examples = listOf(
             "<FictionBook><body><p>broken</body></FictionBook>",
             "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><FictionBook><body><p>&x;</p></body></FictionBook>",
             "<FictionBook><body><section id='x'/><section id='x'/></body></FictionBook>",
             "<FictionBook><body><p l:href='#x'>unbound</p></body></FictionBook>",
-            "<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>SGVsbG8=</binary></FictionBook>",
+            "<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>!!!!</binary></FictionBook>",
         )
         examples.forEach { xml ->
             withSource(xml.toByteArray()) { file ->
@@ -75,6 +75,13 @@ class Fb2ReadiumPublicationFactoryTest {
         }
         withSource(examples[1].toByteArray(Charsets.UTF_16)) { file ->
             assertFailsWith<IllegalArgumentException> { Fb2SourceParser.read(file, "Fallback") }
+        }
+    }
+
+    @Test
+    fun passesEmbeddedBytesToTheImageDecoderWithoutSignatureValidation() {
+        withSource("<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>SGVsbG8=</binary></FictionBook>".toByteArray()) { file ->
+            assertContentEquals("Hello".toByteArray(), Fb2SourceParser.read(file, "Book").images.values.single())
         }
     }
 

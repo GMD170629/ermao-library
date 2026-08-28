@@ -14,6 +14,7 @@ import {
 } from '@shuku/reader-core';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import { emitReaderDebug } from '../../../lib/reader';
+import { ReaderResourceError } from '../api/client';
 
 type ReaderSessionOptions = {
   adapter: ReaderAdapter | null;
@@ -31,13 +32,20 @@ function newSessionId() {
 }
 
 function readerOpenError(reason: unknown) {
+  if (reason instanceof ReaderResourceError) {
+    return {
+      code: reason.code, message: reason.code, recoverable: true,
+      safeContext: { stage: reason.stage, source: reason.source, status: String(reason.status) },
+      cause: reason,
+    };
+  }
   if (reason instanceof Error) {
     const code = 'code' in reason && typeof reason.code === 'string'
       ? reason.code
-      : 'READER_OPEN_FAILED';
-    return { code, message: reason.message, recoverable: code !== 'NOVEL_DRM_PROTECTED' };
+      : 'READER_ENGINE_ERROR';
+    return { code, message: '阅读引擎失败，未提供详细原因。', recoverable: code !== 'NOVEL_DRM_PROTECTED', cause: reason };
   }
-  return { code: 'READER_OPEN_FAILED', message: '阅读器加载失败', recoverable: true };
+  return { code: 'READER_ENGINE_ERROR', message: '阅读引擎失败，未提供详细原因。', recoverable: true, cause: reason };
 }
 
 /**

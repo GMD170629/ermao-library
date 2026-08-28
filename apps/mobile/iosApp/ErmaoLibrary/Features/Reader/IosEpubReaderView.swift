@@ -60,7 +60,7 @@ struct IosReflowableReaderView: View {
             )
         ) {
             Button(String(localized: "common.ok"), role: .cancel) {}
-        } message: { Text(session.presentationError?.localizedDescription ?? "") }
+        } message: { Text(session.presentationError.map(session.failureDescription(for:)) ?? "") }
     }
 
     private var resumeNotice: some View {
@@ -130,12 +130,14 @@ struct IosReflowableReaderView: View {
     private var content: some View {
         switch session.phase {
         case .opening:
-            ProgressView("reader.opening").tint(palette.accent)
+            ProgressView("reader.opening").tint(palette.accent).accessibilityIdentifier("reader.opening")
         case let .failed(code):
             VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                 Text("reader.error.title").font(.headline)
-                Text(code.localizedDescription).multilineTextAlignment(.center)
+                Text(session.failureDescription(for: code))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("reader.open.failure.\(code.rawValue)")
                 Button("reader.retry.open", action: onRetry)
                 Button("common.close") { dismiss() }
             }
@@ -143,7 +145,7 @@ struct IosReflowableReaderView: View {
             .foregroundStyle(palette.foreground)
         default:
             if let navigator = session.navigator {
-                ReadiumNavigatorHost(navigator: navigator).id(ObjectIdentifier(navigator)).ignoresSafeArea()
+                ReadiumNavigatorHost(navigator: navigator).ignoresSafeArea()
             }
         }
     }

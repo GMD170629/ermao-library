@@ -102,6 +102,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 private enum class LibraryMenuState {
     Root,
+    Filter,
     Sort,
     View,
 }
@@ -132,14 +133,14 @@ fun LibraryScreen(
 ) {
     val filterSheetCopy = resolveLibraryFilterSheetCopy()
     var menuState by rememberSaveable { mutableStateOf<LibraryMenuState?>(null) }
-    val filterFocusRequester = remember { FocusRequester() }
+    val moreFocusRequester = remember { FocusRequester() }
     var filterWasPresented by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.filterDraft) {
         if (state.filterDraft != null) {
             filterWasPresented = true
         } else if (filterWasPresented) {
             filterWasPresented = false
-            filterFocusRequester.requestFocus()
+            moreFocusRequester.requestFocus()
         }
     }
     val interactionsEnabled = state.current.errorCode != "PERMISSION_REVALIDATING"
@@ -155,12 +156,14 @@ fun LibraryScreen(
                         label = stringResource(R.string.library_more_actions),
                         enabled = interactionsEnabled,
                         onClick = { menuState = LibraryMenuState.Root },
+                        modifier = Modifier.focusRequester(moreFocusRequester).testTag("library-more"),
                     )
                     LibraryOverflowMenus(
                         menuState = menuState,
                         state = state,
                         onDismiss = { menuState = null },
                         onOpenMenu = { menuState = it },
+                        onOpenFilter = onOpenFilter,
                         onSelectSort = {
                             menuState = null
                             onSelectSort(it)
@@ -191,10 +194,7 @@ fun LibraryScreen(
             )
             LibraryContextRow(
                 state,
-                onOpenFilter,
                 onRemoveReadingFilter,
-                filterFocusRequester,
-                interactionsEnabled,
             )
             Box(Modifier.fillMaxSize()) {
                 key(state.selectedScope) {
@@ -259,10 +259,7 @@ internal fun resolveLibraryFilterSheetCopy(): LibraryFilterSheetCopy = LibraryFi
 @Composable
 private fun LibraryContextRow(
     state: LibraryUiState,
-    onOpenFilter: () -> Unit,
     onRemoveReadingFilter: (ReadingFilter) -> Unit,
-    filterFocusRequester: FocusRequester,
-    enabled: Boolean,
 ) {
     val theme = WarmPageThemeValues
     Column(
@@ -284,21 +281,6 @@ private fun LibraryContextRow(
                 style = theme.typography.callout,
                 color = theme.colors.textSecondary,
             )
-            if (state.selectedScope == LibraryScope.Books) {
-                WarmPageTextAction(
-                    label = if (state.current.filters.count == 0) {
-                        stringResource(R.string.library_filter_action)
-                    } else {
-                        stringResource(R.string.library_filter_count, state.current.filters.count)
-                    },
-                    onClick = onOpenFilter,
-                    enabled = enabled,
-                    leadingIcon = Icons.Outlined.FilterList,
-                    modifier = Modifier
-                        .focusRequester(filterFocusRequester)
-                        .testTag("library-filter"),
-                )
-            }
         }
         if (state.selectedScope == LibraryScope.Books && state.current.filters.count > 0) {
             LazyRow(
@@ -639,6 +621,7 @@ private fun LibraryOverflowMenus(
     state: LibraryUiState,
     onDismiss: () -> Unit,
     onOpenMenu: (LibraryMenuState) -> Unit,
+    onOpenFilter: () -> Unit,
     onSelectSort: (ContentSort) -> Unit,
     onSelectViewMode: (ContentViewMode) -> Unit,
 ) {
@@ -646,6 +629,15 @@ private fun LibraryOverflowMenus(
         title = stringResource(R.string.library_more_actions),
         expanded = menuState == LibraryMenuState.Root,
         actions = listOf(
+            WarmPageMenuAction(
+                LibraryMenuState.Filter,
+                if (state.current.filters.count == 0) {
+                    stringResource(R.string.library_filter_action)
+                } else {
+                    stringResource(R.string.library_filter_count, state.current.filters.count)
+                },
+                Icons.Outlined.FilterList,
+            ),
             WarmPageMenuAction(
                 LibraryMenuState.Sort,
                 stringResource(R.string.library_sort_action),
@@ -661,7 +653,14 @@ private fun LibraryOverflowMenus(
                 },
             ),
         ),
-        onSelect = onOpenMenu,
+        onSelect = { action ->
+            if (action == LibraryMenuState.Filter) {
+                onDismiss()
+                onOpenFilter()
+            } else {
+                onOpenMenu(action)
+            }
+        },
         onDismiss = onDismiss,
     )
     WarmPageSingleChoiceMenu(

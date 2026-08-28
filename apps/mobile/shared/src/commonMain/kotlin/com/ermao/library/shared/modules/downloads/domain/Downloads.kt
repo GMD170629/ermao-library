@@ -28,9 +28,9 @@ data class DownloadSource(
     val sourceModifiedAtMillis: Long? = null,
 ) {
     init {
-        require(apiPath.isSafeMediaApiPath())
+        require(apiPath.isSafeMediaApiPath()) { "DOWNLOAD_ASSET_PATH_INVALID" }
         require(mimeType.isNotBlank())
-        require(totalBytes > 0)
+        require(totalBytes > 0) { "DOWNLOAD_ASSET_SIZE_INVALID" }
     }
 }
 
@@ -79,7 +79,9 @@ data class DownloadDescriptor(
         require(bookTitle.isNotBlank())
         require(resourceTitle.isNotBlank())
         require(format.isNotBlank())
-        require(coverApiPath == null || coverApiPath.isSafeApiPath())
+        // Cover variants carry size/version queries. Original-asset paths remain query-free.
+        require(coverApiPath == null || (coverApiPath.substringBefore('?').isSafeApiPath() &&
+            coverApiPath.none { it == '#' || it.isISOControl() })) { "DOWNLOAD_COVER_PATH_INVALID" }
         require(resourceIndex == null || resourceIndex.isFinite())
         require(resourceSortOrder == null || resourceSortOrder >= 0)
         require(isDownloadable)
@@ -104,7 +106,10 @@ data class DownloadDescriptor(
     val bundleMembers: List<DownloadBundleMember>
         get() = if (members.isEmpty()) listOf(DownloadBundleMember(identity.assetId, 0, source)) else members
 
-    val totalBytes: Long get() = bundleMembers.sumOf { it.source.totalBytes }
+    val totalBytes: Long get() = bundleMembers.fold(0L) { total, member ->
+        require(member.source.totalBytes <= Long.MAX_VALUE - total) { "Download size overflow" }
+        total + member.source.totalBytes
+    }
 }
 
 data class CompletedDownloadArtifact(

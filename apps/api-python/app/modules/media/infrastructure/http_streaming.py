@@ -22,7 +22,13 @@ from fastapi.responses import Response, StreamingResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import Settings, get_settings
-from app.infrastructure.comic_archives import ComicArchiveError, open_comic_archive
+from app.infrastructure.comic_archives import (
+    ComicArchiveBackendUnavailableError,
+    ComicArchiveEncryptedError,
+    ComicArchiveError,
+    ComicArchiveMultiVolumeError,
+    open_comic_archive,
+)
 from app.schemas.responses import fail
 
 logger = logging.getLogger(__name__)
@@ -874,10 +880,50 @@ def _send_zip_entry(
     try:
         archive = open_comic_archive(archive_path)
         info = archive.getinfo(entry_name)
-    except (KeyError, OSError, ComicArchiveError):
+    except (KeyError, FileNotFoundError) as error:
         if archive is not None:
             archive.close()
-        return fail("页面不存在", status_code=404)
+        logger.info(
+            "comic_page_missing",
+            extra={"asset_id": asset_id, "reason": type(error).__name__},
+        )
+        response = fail(
+            "The requested comic page was not found.",
+            status_code=404,
+            code="ARCHIVE_PAGE_MISSING",
+        )
+        response.headers["X-Error-Code"] = "ARCHIVE_PAGE_MISSING"
+        return response
+    except (OSError, ComicArchiveError) as error:
+        if archive is not None:
+            archive.close()
+        if isinstance(error, ComicArchiveEncryptedError):
+            code, message = (
+                "ARCHIVE_ENCRYPTED",
+                "The comic archive requires a password.",
+            )
+        elif isinstance(error, ComicArchiveMultiVolumeError):
+            code, message = (
+                "ARCHIVE_PART_MISSING",
+                "The comic archive requires additional volumes.",
+            )
+        elif isinstance(error, ComicArchiveBackendUnavailableError):
+            code, message = (
+                "ARCHIVE_FORMAT_SETUP_FAILED",
+                "The archive extraction backend is unavailable.",
+            )
+        else:
+            code, message = (
+                "ARCHIVE_OPEN_FAILED",
+                "The archive reader could not open the requested page.",
+            )
+        logger.warning(
+            "comic_page_open_failed",
+            extra={"asset_id": asset_id, "code": code, "reason": type(error).__name__},
+        )
+        response = fail(message, status_code=404, code=code)
+        response.headers["X-Error-Code"] = code
+        return response
     request.state.user_id = user_id
     resolved_media_type = (
         media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"

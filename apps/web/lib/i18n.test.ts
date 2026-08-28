@@ -85,3 +85,23 @@ test('brand metadata has a deliberate English translation', () => {
     'A self-hosted private library and immersive reading app'
   );
 });
+
+test('administrator API errors and audit events remain translated in both locales', () => {
+  const messages: Record<string, string> = {
+    '不能删除当前登录的管理员': 'The currently signed-in administrator cannot be deleted',
+    '不能停用或降级当前登录的管理员': 'The currently signed-in administrator cannot be disabled or demoted',
+    '仅管理员可以管理用户与权限': 'Only administrators can manage users and permissions',
+    '确认邮箱不匹配': 'Confirmation email does not match',
+    '系统必须至少保留一个有效管理员': 'The system must retain at least one active administrator',
+    '用户不存在': 'User not found',
+    '管理员创建了用户': 'An administrator created a user',
+    '管理员更新了用户与权限': 'An administrator updated a user and permissions',
+    '管理员永久删除了用户及其个人数据': 'An administrator permanently deleted a user and their personal data',
+    '管理员重置了用户密码并撤销会话': 'An administrator reset a user password and revoked their sessions'
+  };
+
+  for (const [source, english] of Object.entries(messages)) {
+    assert.equal(translateMessage('zh-CN', source), source);
+    assert.equal(translateMessage('en-US', source), english);
+  }
+});

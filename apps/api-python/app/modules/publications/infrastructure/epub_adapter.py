@@ -21,6 +21,7 @@ from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationLink,
     PublicationMarkupError,
+    PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
     PublicationResourceTooLargeError,
@@ -498,7 +499,7 @@ def _index_epub(
     except (zipfile.BadZipFile, RuntimeError) as error:
         raise PublicationStructureError("EPUB archive is invalid") from error
     except OSError as error:
-        raise PublicationCorruptError("EPUB archive cannot be read") from error
+        raise PublicationReadError("EPUB archive cannot be read") from error
 
 
 class EpubPublicationAdapter(PublicationAdapter):
@@ -533,7 +534,7 @@ class EpubPublicationAdapter(PublicationAdapter):
                     )
                 content = archive.read(archive_name)
         except (OSError, KeyError, zipfile.BadZipFile, RuntimeError) as error:
-            raise PublicationCorruptError("EPUB resource cannot be read") from error
+            raise PublicationReadError("EPUB resource cannot be read") from error
         return PublicationResource(
             href=href,
             media_type=indexed.media_types_by_href[key],

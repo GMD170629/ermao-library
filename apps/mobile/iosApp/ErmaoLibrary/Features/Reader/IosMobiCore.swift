@@ -1,5 +1,6 @@
 import CLibMobi
 import Foundation
+@preconcurrency import ErmaoShared
 
 enum IosMobiCoreStatus: Int32, Sendable {
     case invalidArgument = 1
@@ -112,8 +113,11 @@ actor IosMobiBook {
             throw IosMobiCoreError(ERMAO_MOBI_INVALID_ARGUMENT)
         }
         var openedHandle: OpaquePointer?
+        var options = ErmaoMobiOpenOptions()
+        ermao_mobi_default_options(&options)
+        options.max_file_bytes = UInt64(ErmaoShared.ReaderAdmission.shared.maximumPublicationBytes)
         let status = fileURL.path.withCString { path in
-            ermao_mobi_open(path, nil, &openedHandle)
+            ermao_mobi_open(path, &options, &openedHandle)
         }
         try requireSuccess(status)
         guard let openedHandle else {

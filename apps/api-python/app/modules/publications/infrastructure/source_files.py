@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.modules.publications.domain.model import PublicationCorruptError
+from app.modules.publications.domain.model import (
+    PublicationNotFoundError,
+    PublicationReadError,
+    PublicationSecurityError,
+)
 
 
 def select_publication_source_root(
@@ -21,23 +25,25 @@ def select_publication_source_root(
 def resolve_publication_source(raw_path: str, source_root: Path) -> Path:
     try:
         resolved_root = source_root.expanduser().resolve(strict=True)
+    except FileNotFoundError as error:
+        raise PublicationNotFoundError from error
     except OSError as error:
-        raise PublicationCorruptError(
-            "publication source root is unavailable"
-        ) from error
+        raise PublicationReadError("publication source root is unavailable") from error
     candidate = Path(raw_path)
     if not candidate.is_absolute():
         candidate = resolved_root / candidate
     try:
         resolved = candidate.expanduser().resolve(strict=True)
+    except FileNotFoundError as error:
+        raise PublicationNotFoundError from error
     except OSError as error:
-        raise PublicationCorruptError("publication source is unavailable") from error
+        raise PublicationReadError("publication source is unavailable") from error
     try:
         resolved.relative_to(resolved_root)
     except ValueError as error:
-        raise PublicationCorruptError(
+        raise PublicationSecurityError(
             "publication source escapes its library"
         ) from error
     if not resolved.is_file():
-        raise PublicationCorruptError("publication source is not a file")
+        raise PublicationReadError("publication source is not a file")
     return resolved

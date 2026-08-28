@@ -68,7 +68,10 @@ extension IosPdfReaderSession: IosReaderControlSession {
     var controlReady: Bool { (navigator != nil || pdfiumNavigator != nil) && (phase == .reading || phase == .background) }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
-    func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool { platformControlEnabled(control) }
+    func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool {
+        if control == .pdfzoom { return controlReady }
+        return platformControlEnabled(control)
+    }
     func applyControlPreferences(_ updated: IosReaderPreferences) async -> Bool { await applyPreferences(updated) }
     func seekControlProgress(_ progress: Double) async -> Bool { await goToPage(Int((progress * Double(max(0, canonicalPageCount - 1))).rounded())) }
     func zoomControl(_ direction: Int) {

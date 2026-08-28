@@ -1,8 +1,27 @@
 import Foundation
 import XCTest
+import ErmaoShared
 @testable import ErmaoLibrary
 
 final class LocalizationTests: XCTestCase {
+    func testOnlineFailureNamesTheStageAndActualTxtReasonInBothLanguages() throws {
+        for (locale, stage, reason) in [
+            ("en", "book information", "embedded NUL characters"),
+            ("zh-Hans", "书籍信息", "拒绝了正文中的 NUL 空字符"),
+        ] {
+            let path = try XCTUnwrap(Bundle.main.path(forResource: locale, ofType: "lproj"))
+            let bundle = try XCTUnwrap(Bundle(path: path))
+            let context = IosReaderOnlineFailureContext(sourceCode: "PUBLICATION_TXT_NUL_CHARACTER", stage: .manifest)
+            let description = context.localizedDescription(for: .txtNulCharacter, bundle: bundle)
+            XCTAssertTrue(description.contains(stage), description)
+            XCTAssertTrue(description.contains(reason), description)
+            XCTAssertTrue(description.contains("PUBLICATION_TXT_NUL_CHARACTER"), description)
+            XCTAssertFalse(description.contains("downloaded"), description)
+            XCTAssertFalse(description.contains("已下载"), description)
+            XCTAssertFalse(description.contains("%@"), description)
+        }
+    }
+
     func testCompatibilityCopyReflectsTheActualFailure() {
         XCTAssertEqual(
             ServerCompatibilityCopy.resolve(reasonCode: "CLIENT_UPDATE_REQUIRED"),
@@ -28,7 +47,31 @@ final class LocalizationTests: XCTestCase {
     }
 
     func testRequiredStringsExistInEnglishAndSimplifiedChinese() throws {
-        let keys = [
+        var keys = [
+            "reader.error.PUBLICATION_UNAVAILABLE",
+            "reader.error.UNAUTHORIZED",
+            "reader.error.FORBIDDEN",
+            "reader.error.PUBLICATION_RESPONSE_INVALID",
+            "reader.error.SERVER_UNAVAILABLE",
+            "reader.error.REQUEST_TIMEOUT",
+            "reader.error.TLS_FAILURE",
+            "reader.error.RATE_LIMITED",
+            "reader.error.PUBLICATION_TXT_NUL_CHARACTER",
+            "reader.error.PUBLICATION_TXT_ENCODING_UNSUPPORTED",
+            "reader.error.PUBLICATION_TXT_EMPTY",
+            "reader.online.failure.format",
+            "reader.online.stage.manifest",
+            "reader.online.stage.positions",
+            "reader.online.stage.chapter",
+            "reader.online.stage.resource",
+            "reader.download.reason",
+            "reader.download.preparing",
+            "reader.download.failed",
+            "reader.download.transferring",
+            "reader.download.queued",
+            "reader.download.paused",
+            "reader.download.cancel",
+            "reader.error.READER_PUBLICATION_TOO_LARGE",
             "server.empty.title",
             "server.add.action",
             "server.tls.risk.title",
@@ -158,7 +201,27 @@ final class LocalizationTests: XCTestCase {
             "reader.error.PDF_PAGE_LOAD_FAILED",
             "reader.error.PDF_RENDER_FAILED",
             "reader.pdf.page.description",
+            "nativeManagement.appliedFields",
+            "nativeManagement.skippedFields",
+            "nativeManagement.coverResult.applied",
+            "nativeManagement.coverResult.notSelected",
+            "nativeManagement.coverResult.failed",
+            "nativeManagement.notice.refreshFailed",
+            "nativeManagement.readingStatus",
+            "nativeManagement.failure.General",
+            "nativeManagement.current %@",
+            "nativeManagement.candidate %@",
+            "nativeManagement.sourceCount %lld",
         ]
+        keys += ManagementField.entries.map { "nativeManagement.field.\($0.wireName)" }
+        keys += CoverEdit.entries.map { "nativeManagement.cover.\($0.name)" }
+        keys += ManagementSaveStage.entries.map { "nativeManagement.failure.\($0.name)" }
+        keys += ["saved", "queued", "alreadyQueued", "deleted", "metadataPartial"].map { "nativeManagement.notice.\($0)" }
+        for kind in ManagementObject.entries {
+            for completed in [false, true] {
+                keys += ManagementAction.entries.map { managementActionKey($0.name, kind: kind, completed: completed) }
+            }
+        }
 
         for locale in ["en", "zh-Hans"] {
             let localizationPath = try XCTUnwrap(

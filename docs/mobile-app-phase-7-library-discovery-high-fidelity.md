@@ -1,5 +1,7 @@
 # 移动 App 第七阶段：书库发现流高保真闭环
 
+> 2026-08-28 书库控件修订：iOS / Android 的阅读状态筛选入口统一放入本页右上角三点菜单，结果数量旁不再保留独立筛选按钮；已应用条件仍可在结果区直接移除。草稿、应用、清除、取消行为保持不变，关闭 Sheet 后焦点回到三点按钮。iOS 搜索沿用与书架一致的原生 `.searchable`，书库名选择改用原生分段 `Picker`。此决定覆盖旧截图与本文中的筛选按钮位置，不改变筛选数据与权限契约。
+
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
 ## 1. 目的与范围

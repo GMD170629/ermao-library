@@ -225,14 +225,17 @@ def _seed_epub(
     )
 
 
-def _seed_txt(db: Session, settings: Settings) -> LibraryReadableResource:
+def _seed_txt(
+    db: Session, settings: Settings, *, content: bytes | None = None
+) -> LibraryReadableResource:
     relative_path = Path("library") / "exact.txt"
     source_path = settings.resolved_storage_root / relative_path
     source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_bytes(
-        b"\xff\xfe"
-        + "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
-    )
+    if content is None:
+        content = b"\xff\xfe" + (
+            "序言\r\n第一章 开端\r\n天地 & <宇宙>\r\n第二章\r\n终章".encode("utf-16-le")
+        )
+    source_path.write_bytes(content)
     _use_storage_root_as_library_root(db, settings)
     return _seed_resource(
         db,
@@ -258,6 +261,7 @@ def test_epub_publication_requires_authentication(
     )
 
     assert response.status_code == 401
+    assert response.headers["X-Error-Code"] == "UNAUTHORIZED"
 
 
 def test_epub_publication_exposes_stable_rwpm_and_private_resources(
@@ -422,6 +426,9 @@ def test_corrupt_publication_detail_clears_stale_chapters_and_stays_available(
 
     assert detail_response.status_code == 200
     assert manifest_response.status_code == 404
+    assert manifest_response.json()["error"]["code"] == "PUBLICATION_STRUCTURE_INVALID"
+    assert manifest_response.headers["X-Error-Code"] == "PUBLICATION_STRUCTURE_INVALID"
+    assert str(source_path) not in manifest_response.text
     detail_resource = detail_response.json()["data"]["book"]["resources"][0]
     assert detail_resource["chapterCount"] == 1
     assert units_response.status_code == 200
@@ -460,6 +467,7 @@ def test_reader_bootstrap_does_not_materialize_or_preflight_invalid_publication(
     assert response.status_code == 200
     assert "renderArtifact" not in response.json()["data"]["publication"]
     assert manifest_response.status_code == 404
+    assert manifest_response.json()["error"]["code"] == "PUBLICATION_STRUCTURE_INVALID"
 
 
 def test_epub_publication_rejects_unindexed_and_traversal_resources(
@@ -479,6 +487,9 @@ def test_epub_publication_rejects_unindexed_and_traversal_resources(
 
     assert missing.status_code == 404
     assert traversal.status_code == 404
+    assert missing.json() == traversal.json()
+    assert missing.headers["X-Error-Code"] == "PUBLICATION_NOT_FOUND"
+    assert traversal.headers["X-Error-Code"] == "PUBLICATION_NOT_FOUND"
 
 
 def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
@@ -637,6 +648,131 @@ def test_mobi_publication_uses_pinned_runtime_without_materializing_epub(
     assert not (
         test_settings.resolved_storage_root / "cache" / "publication-render"
     ).exists()
+
+
+@pytest.mark.parametrize("size", [17 * 1024 * 1024, 65 * 1024 * 1024])
+def test_online_parser_limit_is_typed_without_reading_oversized_original(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+    size: int,
+) -> None:
+    _login(client, db_session)
+    resource = _seed_txt(db_session, test_settings)
+    source_path = test_settings.resolved_storage_root / "library/exact.txt"
+    # Sparse file: tests metadata admission, not a claim that the engine opens it.
+    with source_path.open("r+b") as source:
+        source.truncate(size)
+    # Library metadata (used by Downloads and the App launch policy) stays available.
+    assert client.get(f"/api/resources/{resource.id}").status_code == 200
+    for suffix in (
+        "bootstrap",
+        "publication/manifest.json",
+        "publication/positions.json",
+    ):
+        response = client.get(f"/api/reader/v4/resources/{resource.id}/{suffix}")
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "PUBLICATION_ONLINE_LIMIT"
+        assert response.headers["X-Error-Code"] == "PUBLICATION_ONLINE_LIMIT"
+    assert source_path.stat().st_size == size
+
+
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [
+        (b"\xef\xbb\xbf\xff", "PUBLICATION_TXT_ENCODING_UNSUPPORTED"),
+        (b" \r\n\t", "PUBLICATION_TXT_EMPTY"),
+        (b"", "PUBLICATION_TXT_EMPTY"),
+    ],
+)
+def test_txt_publication_reports_parser_reason_without_changing_original(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+    content: bytes,
+    code: str,
+) -> None:
+    _login(client, db_session)
+    resource = _seed_txt(db_session, test_settings, content=content)
+    source_path = test_settings.resolved_storage_root / "library/exact.txt"
+    original_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+
+    for suffix in ("manifest.json", "positions.json", "text/chapter-0001.xhtml"):
+        response = client.get(
+            f"/api/reader/v4/resources/{resource.id}/publication/{suffix}"
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == code
+        assert response.headers["X-Error-Code"] == code
+        assert str(source_path) not in response.text
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == original_hash
+
+
+def test_txt_publication_delivers_nul_to_the_renderer_without_rewriting_source(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    content = "第一章\n测试文本".encode("gb18030") + b"\x00" * 160
+    resource = _seed_txt(db_session, test_settings, content=content)
+    source_path = test_settings.resolved_storage_root / "library/exact.txt"
+    original_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    base = f"/api/reader/v4/resources/{resource.id}/publication"
+
+    manifest = client.get(f"{base}/manifest.json")
+    positions = client.get(f"{base}/positions.json")
+    assert manifest.status_code == positions.status_code == 200
+    chapter_href = manifest.json()["readingOrder"][0]["href"]
+    assert positions.json()["positions"][0]["href"] == chapter_href
+    chapter = client.get(f"{base}/{chapter_href}")
+    assert chapter.status_code == 200
+    assert "测试文本" in chapter.text
+    assert chapter.content.count(b"\x00") == 160
+    assert hashlib.sha256(source_path.read_bytes()).hexdigest() == original_hash
+
+
+def test_publication_parser_reason_is_hidden_from_unauthorized_actors(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    user = _login(client, db_session)
+    resource = _seed_txt(db_session, test_settings, content=b"before\x00after")
+    user.role = "member"
+    db_session.commit()
+
+    for suffix in ("manifest.json", "positions.json", "text/chapter-0001.xhtml"):
+        denied = client.get(
+            f"/api/reader/v4/resources/{resource.id}/publication/{suffix}"
+        )
+        missing = client.get(
+            f"/api/reader/v4/resources/missing-resource/publication/{suffix}"
+        )
+        assert denied.status_code == missing.status_code == 404
+        assert denied.json() == missing.json()
+        assert denied.json()["error"]["code"] == "PUBLICATION_NOT_FOUND"
+        assert denied.headers["X-Error-Code"] == "PUBLICATION_NOT_FOUND"
+        assert missing.headers["X-Error-Code"] == "PUBLICATION_NOT_FOUND"
+
+
+def test_unsupported_publication_retains_404_with_a_specific_reason(
+    client: TestClient,
+    db_session: Session,
+    test_settings: Settings,
+) -> None:
+    _login(client, db_session)
+    resource = _seed_txt(db_session, test_settings)
+    resource.format = "PDF"
+    db_session.commit()
+
+    for suffix in ("manifest.json", "positions.json", "text/chapter-0001.xhtml"):
+        response = client.get(
+            f"/api/reader/v4/resources/{resource.id}/publication/{suffix}"
+        )
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "PUBLICATION_UNSUPPORTED"
+        assert response.headers["X-Error-Code"] == "PUBLICATION_UNSUPPORTED"
 
 
 def test_txt_publication_exposes_deterministic_rwpm_and_normalized_resources(

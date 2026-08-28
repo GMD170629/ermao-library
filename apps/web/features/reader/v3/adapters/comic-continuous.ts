@@ -174,7 +174,7 @@ export class ComicContinuousController {
           delete slot.element.dataset.comicContinuousLoaded;
           this.renderFailure(slot, page.pageIndex, translateMessage(
             normalizeLocale(this.document.documentElement.lang),
-            '漫画页面加载失败'
+            '漫画页面加载失败，浏览器未提供具体原因。'
           ));
         }, { once: true });
         slot.image = image;

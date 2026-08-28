@@ -42,3 +42,29 @@ Android Compose / iOS SwiftUI 的书架根页、全部/书架/合集筛选、完
 - Comparison history：第一次仅取得空状态，非空源图与实现不匹配，完整比较阻塞。尚无非空完整视图或局部对照，不宣称还原验收通过。
 
 final result: blocked
+
+## 2026-08-28 补充复验：Web i18n / Android lint
+
+以上失败记录保留为历史证据。本次仅处理 catalog 与 lint，不修改书架、Reader
+流程或 API 合同；详细根因、命令和本地日志见
+[Reader controls 补充复验](mobile-reader-controls-2026-08-27.md#2026-08-28-follow-up-web-i18n-and-android-lint)。
+
+- 旧报告中的 4 条事件翻译、AndroidX ExifInterface 和 2 个未用资源问题已由
+  `9fcadcda` 修复。但 6 条被判为过期的管理员错误仍会返回前端；提取器漏识别
+  `UserAdministrationError` 的 message 参数，导致英文错误仍显示中文。本次复用
+  现有提取规则与翻译入口，恢复双语条目及历史英文译文，并补齐回归测试。
+- Android 当前剩余错误是下载失败边界的 `LogNotTimber`；改用项目已有的
+  `java.util.logging.Logger`，保留事件、资源标识和错误码，不改取消与恢复行为，
+  不新增日志依赖或豁免。
+- Web lint、typecheck、400 项测试及 2053 条双语 catalog 校验通过。PDF 类型与
+  测试失败来自本机未应用已有补丁，冻结锁文件安装后通过；未改锁文件或依赖版本。
+- 离线契约、设计令牌、KMP 322 项测试和 Android JVM 146 项测试通过，无失败或
+  跳过；未改动的 KMP 在最终增量运行中为 up-to-date。Android lint 为
+  `No issues found.`，`git diff --check` 通过。Android 门禁使用单次非并行 Gradle 调用。
+- ADB 仍无设备，未执行保留数据安装、冷启动、真实下载失败及恢复、双语 UI、
+  TalkBack 或生命周期验收，未启动模拟器；此前书架真机待验项仍保留。本次未运行
+  iOS 或 Web 浏览器 UI 验收。
+- 初次诊断的 SDK XML v3/v4 警告未在最终增量日志中重现，但未调整 SDK 工具链，
+  不能据此宣称全新环境的兼容性问题已修复。
+
+补充结果：catalog 与 lint 阻塞已解除；整体真机运行与视觉验收仍未完成。

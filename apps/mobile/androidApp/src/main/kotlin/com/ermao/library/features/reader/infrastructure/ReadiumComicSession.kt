@@ -84,17 +84,19 @@ internal class ReadiumComicSession(
         supportsReadingMode = false,
         supportsSpreadMode = false,
         supportsParagraphLayout = false,
-        supportsIndependentPublisherStyles = false,
         supportsProgressStyles = true,
         supportsClock = true,
         supportsKeepAwake = true,
         supportsTapZones = true,
         supportsSwipeToggle = false,
-        supportsPageTurnAnimation = false,
+        supportsPageTurnAnimation = true,
         supportsSmartOptimization = false,
         supportsKeyboardPageTurn = true,
         supportsVolumeKeyPageTurn = true,
     )
+    private val _contentError = MutableStateFlow<ReaderError?>(null)
+    override val contentError: StateFlow<ReaderError?> = _contentError.asStateFlow()
+
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
     private val _preferences = MutableStateFlow(initialPreferences)
@@ -148,6 +150,7 @@ internal class ReadiumComicSession(
                 }
                 is RemoteComicReaderSource -> RemoteComicReadiumPublicationFactory(
                     requireNotNull(comicPageServer) { "Comic page server is missing" },
+                    onFailure = { _contentError.value = it },
                 ).open(source, _preferences.value.comic.imageVariant)
                 else -> throw IllegalArgumentException("Comic source is unsupported")
             }
@@ -310,8 +313,8 @@ internal class ReadiumComicSession(
 
     override fun updatePreferences(updated: ReaderPreferences) {
         if (_preferences.value == updated) return
-        _preferences.value = updated
         persistPreferences(updated)
+        _preferences.value = updated
     }
 
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null

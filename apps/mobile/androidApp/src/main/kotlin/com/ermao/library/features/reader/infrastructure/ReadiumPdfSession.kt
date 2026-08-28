@@ -78,6 +78,8 @@ internal class ReadiumPdfSession(
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
 ) : AndroidReaderNavigatorSession {
+    override var requestedNavigationTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = initialTarget
+        private set
     override val morphology = ReaderMorphology.Pdf
     override val capabilities = ReaderCapabilities(
         canGoPrevious = true, canGoNext = true, hasTableOfContents = true,
@@ -87,8 +89,7 @@ internal class ReadiumPdfSession(
         supportsPositiveLetterSpacing = false, supportsNegativeLetterSpacing = false,
         supportsPageMargins = false, supportsPageWidth = false, supportsReadingMode = false,
         supportsSpreadMode = false, supportsParagraphLayout = false,
-        supportsIndependentPublisherStyles = false, supportsProgressStyles = true,
-        supportsClock = true, supportsKeepAwake = true, supportsTapZones = true,
+        supportsProgressStyles = true, supportsClock = true, supportsKeepAwake = true, supportsTapZones = true,
         supportsSwipeToggle = false, supportsPageTurnAnimation = false,
         supportsSmartOptimization = false, supportsKeyboardPageTurn = true,
         supportsVolumeKeyPageTurn = true,
@@ -348,6 +349,7 @@ internal class ReadiumPdfSession(
     override fun goTo(location: ReaderLocation): Boolean {
         val pdf = location as? PdfReaderLocation ?: return false
         if (!isValidPage(pdf.pageIndex)) return false
+        requestedNavigationTarget = com.ermao.library.shared.modules.reader.ReaderNavigationTargetPdf(pdf.pageIndex)
         expectedRestorePage = pdf.pageIndex
         return navigator?.go(positions[pdf.pageIndex], animated = navigationAnimationsEnabled()) ?: false
     }
@@ -375,9 +377,9 @@ internal class ReadiumPdfSession(
     }
     override fun updatePreferences(updated: ReaderPreferences) {
         if (_preferences.value == updated) return
+        persistPreferences(updated)
         _preferences.value = updated
         submitNavigatorPreferences?.invoke(updated)
-        persistPreferences(updated)
     }
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
     override fun removeBookmark(id: String) = Unit

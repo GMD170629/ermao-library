@@ -444,6 +444,14 @@ For every implementation:
 
 `docs/mobile-reader-architecture.md` is the authoritative native Mobile Reader architecture and phase contract. Read it before designing or changing Reader domain models, location/progress persistence, publication storage, native Reader navigation or UI, Readium/libmobi/PDF/Comic engine adapters, or Reader server synchronization. It fixes the reading-morphology boundaries, dependency direction, shared JSON schema, fingerprint and restoration policy, native UI boundary, security rules, Android R2 opening chain, and the interfaces reserved for later phases. It does not override the Mobile phase 1–5 product, navigation, flow, visual, localization, accessibility, or platform-native requirements.
 
+The approved iOS Reader SDK baseline is official Readium Swift Toolkit **3.9.0**.
+Earlier 3.8.0 freeze instructions are superseded; do not downgrade to resolve build
+or migration failures. Keep the exact official revision, SwiftPM lock and runtime
+locator diagnostic version aligned via `python3 apps/mobile/iosApp/verify_readium.py`.
+See section 10 of `docs/mobile-reader-architecture.md` for the revision and upgrade
+acceptance. Do not modify SDK source, use private APIs or restore application-level
+reflow validation/loading. Android and Web SDK versions are unchanged by this approval.
+
 Reader code must preserve the original publication format. It must not create,
 cache, advertise, download, or restore from a derived EPUB, ZIP, unpacked
 publication directory, or equivalent format-conversion artifact. MOBI-family and
@@ -453,15 +461,18 @@ not be connected to Reader bootstrap, delivery, download, cache, or progress.
 
 ### Online Reading and Offline Download Separation
 
-Online reading and explicit Downloads are separate capabilities. Original-format preservation and exact-progress contracts remain in force.
+Online reading and Downloads have separate ownership. Native App reading is online-first, with a visible download transition when online capabilities are insufficient. Web retains the stricter online-only strategy.
 
-- Online Reader entry must not require, start, or await a complete-file download. Fetch the necessary chapters, resources, pages, or bounded byte ranges on demand and display readable content before the entire publication is transferred. Moving a whole-file download into Reader bootstrap, a loading screen, a cache warmup, or a background task is prohibited.
-- Reopening, chapter jumps, retries, and fallback must preserve that boundary. If an adapter cannot read online, report the capability gap; do not silently download the whole file as a fallback or label the format as online-capable.
-- Online reading retains only the current and immediate neighboring units, at most 64 MiB of body cache; a text chapter is limited to 8 MiB and each PDF Range request to 1 MiB. Validate headers before streaming bytes and cancel invalid/oversized responses immediately. Never assemble a complete publication, persist an online body store, or fill it in the background. Release session bodies on close, book change and logout.
-- Preserve complete original chapters. Necessary first server parsing is allowed without a prior import-index requirement. Server parser caches require explicit lifecycle, capacity, version invalidation and concurrent-request coalescing. Metadata and HEAD must not retrieve chapter bodies.
-- Offline download is a separate explicit user intention owned by the Download Center. Reader may consume a verified local artifact through its public contract, but must not own a second full-download pipeline or require an offline task for online reading.
-- Preserve the original publication and stable resource/locator semantics. Original-format preservation does not require complete-file acquisition on the client. Content preparation must be incremental where possible; any unavoidable whole-source indexing must be identified and measured, not described as streaming.
-- Acceptance must cover an empty cache and a slow or deliberately incomplete transfer, first readable content, bounded memory, navigation, cancellation, reopening, and failure recovery for each supported format and platform. Network streaming, incremental parsing, and on-demand rendering are separate properties and must be reported separately.
+- Normal online Reader startup fetches only required original chapters/resources, comic pages or bounded PDF ranges. It must display readable content without downloading the whole publication. No automatic cache warmup or background completion of the original is allowed.
+- Native Android/iOS use the shared Reader launch coordinator and a 2 GiB inclusive admission limit. Admission does not promise successful parsing, rendering, memory safety under all device conditions, or smooth reading. Preserve full chapters; do not add synthetic chapters, conversion artifacts, indexing infrastructure or incremental parsers to bypass engine limits.
+- Explicit online parser/size limits and unsupported PDF Range may select a visible Download Center transition after checking local capability. Authentication, corruption, revision changes and ordinary network errors must not select download. A known local allocation/engine limitation fails before a pointless download. A failed local parse never redownloads or loops back online.
+- Downloads owns the only full-file transport, task, resume and publication implementation. Native account lifecycle owns that runtime. Reader observes/reuses its tasks through the public application boundary, preserving resource identity and navigation/progress. Verified local files open without awaiting network; completed files remain in Downloads.
+- Closing/cancelling removes the auto-open intention. Pause a transfer started by that launch while retaining resumable bytes; observing an existing independent transfer does not take cancellation ownership. Account changes and late completions must not open a reader.
+- Shared online adapters retain bounded application buffers (currently 64 MiB body cache, 8 MiB chapter response, 1 MiB PDF request), validate headers and reject oversize/invalid responses. Native SDK ordinary caches are allowed; do not patch SDK internals to enforce an exact aggregate cache budget. Release owned sessions on close/account change. No online original-file body store or background completion.
+- Web keeps its existing request/cache limits, dependency patches, no full-download fallback and no persistent online body store. Native concessions do not change Web.
+- All sizes, offsets, totals and admission comparisons are 64-bit. Check directory resources by total original member bytes. Keep independent image, XML, expanded-archive and allocation safety limits. Pass the shared admission policy explicitly across native language boundaries.
+- Server parser budgets remain bounded, with explicit lifecycle, revision invalidation and concurrent-request coalescing. Metadata/HEAD must not read chapter bodies. Online size/budget errors are typed separately from corrupt publications.
+- Verify cold online opening without original-file requests/tasks, visible transition and real progress, task reuse, cancellation, account changes, retry, exact navigation and offline reopening. Report admission tests separately from real large-file opening and device evidence.
 
 ### Mobile Work Detail single source of truth
 

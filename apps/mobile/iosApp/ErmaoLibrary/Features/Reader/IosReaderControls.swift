@@ -102,8 +102,8 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
             switch panel {
             case .contents: ReaderTOCSheet(session: session)
             case .bookmarks: ReaderNotesSheet(session: session)
-            case .appearance: ReaderAppearanceSheet(session: session, editor: editor)
-            case .settings: ReaderSettingsSheet(session: session, editor: editor)
+            case .appearance: ReaderPreferenceSheet(session: session, editor: editor, panel: "appearance")
+            case .settings: ReaderPreferenceSheet(session: session, editor: editor, panel: "settings")
             }
         }
     }
@@ -126,45 +126,5 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
             Text(String(format: String(localized: "reader.progress.remaining.format"), locale: .current, Int(((1 - session.progress) * 100).rounded())))
         case .auto, .percent: Text(session.progress, format: .percent.precision(.fractionLength(0)))
         }
-    }
-}
-
-struct ReaderFixedLayoutSettings: View {
-    @ObservedObject var editor: IosReaderPreferenceEditor
-    let morphology: ErmaoShared.ReaderMorphology
-    var body: some View {
-        Section("reader.settings.layout") {
-            if morphology == .comic {
-                Picker("reader.settings.readingMode", selection: editor.binding(\.comicFlow)) {
-                    Text("reader.mode.paged").tag(IosComicFlow.paginated)
-                    Text("reader.mode.scroll").tag(IosComicFlow.scrolled)
-                }
-                Picker("reader.settings.spread", selection: editor.binding(\.comicSpread)) {
-                    Text("reader.spread.single").tag(IosComicSpread.single)
-                    Text("reader.spread.double").tag(IosComicSpread.double)
-                }
-                Picker("reader.settings.comicDirection", selection: editor.binding(\.comicDirection)) {
-                    Text(verbatim: "LTR").tag(IosComicDirection.ltr)
-                    Text(verbatim: "RTL").tag(IosComicDirection.rtl)
-                }
-                Toggle("reader.settings.coverSingle", isOn: editor.binding(\.comicCoverSingle))
-                Picker("reader.settings.pageGap", selection: editor.binding(\.comicPageGap)) {
-                    ForEach([0, 8, 16, 24], id: \.self) { Text($0, format: .number).tag($0) }
-                }
-            } else {
-                LabeledContent("reader.settings.pdfZoom", value: editor.draft.pdfZoom.formatted(.percent))
-                Picker("reader.settings.pdfFit", selection: editor.binding(\.pdfFit)) {
-                    Text("reader.settings.pdfFit.page").tag(IosPdfFit.page)
-                    Text("reader.settings.pdfFit.width").tag(IosPdfFit.width)
-                }
-                Picker("reader.settings.pdfRotation", selection: editor.binding(\.pdfRotation)) {
-                    ForEach([0, 90, 180, 270], id: \.self) { Text($0, format: .number).tag($0) }
-                }
-                Picker("reader.settings.pdfCrop", selection: editor.binding(\.pdfCropMargins)) {
-                    Text("reader.settings.pdfCrop.off").tag(IosPdfCropMargins.off)
-                    Text("reader.settings.pdfCrop.auto").tag(IosPdfCropMargins.auto)
-                }
-            }
-        }.disabled(true)
     }
 }

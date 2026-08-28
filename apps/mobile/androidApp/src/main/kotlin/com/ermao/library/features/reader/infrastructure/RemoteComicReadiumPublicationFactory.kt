@@ -24,6 +24,7 @@ import org.readium.r2.shared.util.resource.Resource
 /** Readium image publication whose resources are fetched one page at a time from Reader V4. */
 internal class RemoteComicReadiumPublicationFactory(
     private val server: ComicPageServerPort,
+    private val onFailure: (com.ermao.library.shared.modules.reader.ReaderError) -> Unit,
 ) {
     fun open(
         source: RemoteComicReaderSource,
@@ -40,9 +41,10 @@ internal class RemoteComicReadiumPublicationFactory(
                 return LazyResource {
                     when (val result = server.read(source, page.pageIndex, imageVariant)) {
                         is ComicPageReadResult.Content -> InMemoryResource(result.bytes)
-                        is ComicPageReadResult.Failure -> FailureResource(
-                            ReadError.Decoding(IllegalStateException(result.code)),
-                        )
+                        is ComicPageReadResult.Failure -> {
+                            onFailure(result.readerError)
+                            FailureResource(ReadError.Decoding(ReaderOpenFailure(result.readerError)))
+                        }
                     }
                 }
             }

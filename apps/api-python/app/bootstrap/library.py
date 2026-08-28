@@ -131,6 +131,7 @@ from app.modules.publications.public import (
     PublicationAccessScope,
     PublicationCorruptError,
     PublicationNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationUnsupportedError,
 )
 
@@ -159,6 +160,7 @@ class _PublicationResourceNavigationPreparer(ResourceNavigationPreparer):
             PublicationCorruptError,
             PublicationNotFoundError,
             PublicationUnsupportedError,
+            PublicationResourceTooLargeError,
         ):
             return
 

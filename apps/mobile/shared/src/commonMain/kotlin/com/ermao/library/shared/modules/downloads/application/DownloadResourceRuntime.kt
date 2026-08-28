@@ -1,5 +1,7 @@
 package com.ermao.library.shared.modules.downloads.application
 
+import com.ermao.library.shared.modules.downloads.domain.DownloadDescriptor
+
 import com.ermao.library.shared.core.network.AppError
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.core.time.currentEpochMillis
@@ -103,6 +105,7 @@ class DownloadResourceRuntime(
         sink: DownloadByteSink,
         observer: DownloadResourceObserver? = null,
         cancellation: DownloadCancellation? = null,
+        expectedDescriptor: DownloadDescriptor? = null,
     ): DownloadResourceResult = coroutineScope {
         cancellation?.attach(coroutineContext.job)
         try { queue.withLock {
@@ -113,6 +116,9 @@ class DownloadResourceRuntime(
             is DownloadBootstrapResult.Failure -> return@withLock failure(resourceId, result.error, observer)
         }
         require(descriptor.identity.namespace == context.namespace && descriptor.identity.resourceId == resourceId)
+        if (expectedDescriptor != null && !DownloadTask(taskId, expectedDescriptor).matchesDescriptor(descriptor)) {
+            return@withLock failure(resourceId, AppError(AppErrorKind.Conflict, "ASSET_VERSION_CHANGED"), observer)
+        }
         if (!descriptor.isDownloadable) return@withLock failure(
             resourceId, AppError(AppErrorKind.InvalidRequest, "DOWNLOAD_NOT_AVAILABLE_OFFLINE"), observer,
         )

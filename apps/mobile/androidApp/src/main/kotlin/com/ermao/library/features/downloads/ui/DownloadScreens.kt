@@ -278,10 +278,11 @@ private fun FailedRow(
 }
 
 @Composable
-private fun downloadFailureSummary(errorCode: String?): String = stringResource(
+internal fun downloadFailureSummary(errorCode: String?): String = stringResource(
     when (errorCode) {
         "DOWNLOAD_INTERRUPTED" -> R.string.downloads_failed_interrupted
-        "INSUFFICIENT_SPACE" -> R.string.downloads_failed_storage
+        "INSUFFICIENT_SPACE", "DOWNLOAD_INSUFFICIENT_SPACE", "DOWNLOAD_STORAGE_FAILURE" -> R.string.downloads_failed_storage
+        "ASSET_VERSION_CHANGED" -> R.string.reader_error_publication_changed
         "NETWORK_UNAVAILABLE", "TIMEOUT", "SERVICE_UNAVAILABLE", "SERVER_FAILURE" -> R.string.downloads_failed_network
         else -> R.string.downloads_failed_generic
     },

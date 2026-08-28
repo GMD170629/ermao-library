@@ -24,10 +24,6 @@ struct ErmaoLibraryApp: App {
         let cookieStore = KeychainCookiePayloadStore()
         let managedDownloads = ManagedDownloadStore()
         let readerPrivateContentCache = IosReaderPrivateContentCache()
-        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
-            cookieStore: cookieStore,
-            completedDownloads: managedDownloads
-        )
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()
             : AppCompositionRoot.makeRuntimeClient(cookieStore: cookieStore)
@@ -35,9 +31,15 @@ struct ErmaoLibraryApp: App {
         let downloadTransfer: any ManagedDownloadTransferring = usesContentFixture
             ? UnavailableManagedDownloadTransfer()
             : SharedManagedDownloadTransfer(cookieStore: cookieStore)
-        contentClient = usesContentFixture
+        let downloadCenter = DownloadCenterStore(repository: managedDownloads, transfer: downloadTransfer)
+        let readerContentClient: any ContentClient = usesContentFixture
             ? ContentUITestFixture.makeContentClient()
             : ContentCompositionRoot.makeClient(cookieStore: cookieStore)
+        contentClient = readerContentClient
+        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
+            cookieStore: cookieStore, completedDownloads: managedDownloads, downloads: downloadCenter,
+            contentClient: readerContentClient, coverCache: coverCache
+        )
         shelfClient = usesContentFixture
             ? ContentUITestFixture.makeShelfClient()
             : ShelfCompositionRoot.makeClient(cookieStore: cookieStore)
@@ -55,10 +57,7 @@ struct ErmaoLibraryApp: App {
             : nil
         self.coverCache = coverCache
         _downloadCenter = StateObject(
-            wrappedValue: DownloadCenterStore(
-                repository: managedDownloads,
-                transfer: downloadTransfer
-            )
+            wrappedValue: downloadCenter
         )
         _sessionStore = StateObject(
             wrappedValue: SessionStore(

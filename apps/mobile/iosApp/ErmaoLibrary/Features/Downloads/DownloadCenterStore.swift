@@ -11,6 +11,7 @@ struct ManagedDownloadBatchResult: Sendable {
 final class DownloadCenterStore: ObservableObject {
     @Published private(set) var records: [ManagedDownloadRecord] = []
     @Published private(set) var storageErrorCode: String?
+    @Published private(set) var readerFailures: [String: String] = [:]
     @Published var completedSearch = ""
     #if DEBUG
     @Published var uiTestResourceFilterID: String?
@@ -45,6 +46,9 @@ final class DownloadCenterStore: ObservableObject {
         runningTasks.values.forEach { $0.cancel() }
         runningTasks.removeAll()
         self.context = context
+        records = []
+        readerFailures = [:]
+        storageErrorCode = nil
         reload()
     }
 
@@ -72,6 +76,27 @@ final class DownloadCenterStore: ObservableObject {
     }
 
     func enqueue(book: BookCard, resource: BookResource) { start(resourceID: resource.id) }
+
+    func readerCoordinator(context: ContentRequestContext) async throws -> ReaderLaunchCoordinator {
+        guard isCurrent(context) else { throw ManagedDownloadTransferError.unauthorized }
+        return try await transfer.readerCoordinator(context: context, repository: repository) { [weak self] record in
+            await self?.project(record)
+        }
+    }
+
+    func isCurrent(_ context: ContentRequestContext) -> Bool { self.context?.namespaceKey == context.namespaceKey }
+
+    /// Returns ownership of the transfer, not ownership of the persisted download.
+    func beginReaderDownload(resourceID: String, descriptor: DownloadDescriptor) -> Bool {
+        let owned = runningTasks[resourceID] == nil
+        start(resourceID: resourceID, expectedDescriptor: descriptor)
+        return owned
+    }
+
+    func completedReaderRecord(resourceID: String, context: ContentRequestContext) async throws -> ManagedDownloadRecord? {
+        try await repository.records(namespace: context.namespaceKey).first { $0.resourceID == resourceID && $0.isVerifiedOfflineCopy }
+    }
+    func pauseReaderDownload(resourceID: String) { runningTasks[resourceID]?.cancel() }
 
     func performBatch(book: BookCard, resources: [BookResource],
                       completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void) {
@@ -106,15 +131,16 @@ final class DownloadCenterStore: ObservableObject {
     func remove(bookID: String) { records.filter { $0.bookID == bookID }.forEach(remove) }
     func localFileURL(for record: ManagedDownloadRecord) async -> URL? { await repository.fileURL(for: record) }
 
-    private func start(resourceID: String) {
+    private func start(resourceID: String, expectedDescriptor: DownloadDescriptor? = nil) {
         guard let context, runningTasks[resourceID] == nil else { return }
+        readerFailures[resourceID] = nil
         let task = Task { [weak self, repository, transfer] in
             guard let self else { return }
             defer {
                 if self.context?.namespaceKey == context.namespaceKey { self.runningTasks[resourceID] = nil }
             }
             do {
-                try await transfer.download(context: context, resourceID: resourceID, repository: repository) { [weak self] record in
+                try await transfer.download(context: context, resourceID: resourceID, repository: repository, expectedDescriptor: expectedDescriptor) { [weak self] record in
                     await self?.project(record)
                 }
             } catch is CancellationError {
@@ -122,9 +148,11 @@ final class DownloadCenterStore: ObservableObject {
             } catch let error as ManagedDownloadTransferError {
                 guard !Task.isCancelled, self.context?.namespaceKey == context.namespaceKey else { return }
                 self.storageErrorCode = error.stableCode
+                self.readerFailures[resourceID] = error.stableCode
             } catch {
                 guard !Task.isCancelled, self.context?.namespaceKey == context.namespaceKey else { return }
                 self.storageErrorCode = "DOWNLOAD_MANIFEST_WRITE_FAILED"
+                self.readerFailures[resourceID] = "DOWNLOAD_MANIFEST_WRITE_FAILED"
             }
         }
         runningTasks[resourceID] = task
@@ -137,6 +165,16 @@ final class DownloadCenterStore: ObservableObject {
         records.sort { $0.updatedAt > $1.updatedAt }
     }
 
+}
+
+extension ContentRequestContext {
+    var downloadRequestContext: DownloadRequestContext {
+        PublicKt.createDownloadRequestContext(
+            profileId: profileID, displayName: profileDisplayName, baseUrl: baseURL,
+            serverIdentity: serverIdentity, acceptsInsecureTls: acceptsInsecureTLS,
+            userId: userID, authorizationVersion: authorizationVersion
+        )
+    }
 }
 
 struct CompositePrivateContentCache: PrivateContentCacheClearing {

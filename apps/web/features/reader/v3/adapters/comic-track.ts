@@ -405,7 +405,7 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
           const failure = this.document.createElement('div');
           failure.setAttribute('role', 'alert');
           const message = this.document.createElement('p');
-          message.textContent = translateMessage(locale, '漫画页面加载失败');
+          message.textContent = translateMessage(locale, '漫画页面加载失败，浏览器未提供具体原因。');
           const retry = this.document.createElement('button');
           retry.type = 'button';
           retry.textContent = translateMessage(locale, '重试');

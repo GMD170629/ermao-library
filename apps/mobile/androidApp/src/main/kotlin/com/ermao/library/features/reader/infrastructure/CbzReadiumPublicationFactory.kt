@@ -71,9 +71,13 @@ internal class CbzReadiumPublicationFactory {
         archive: ArchiveCore,
         pageHints: List<ReaderComicPage>,
     ): List<ReaderComicPage> = archive.pages.map { page ->
-        val bytes = archive.readPage(page.index)
-        val mediaType = detectMediaType(bytes)
-            ?: throw IllegalArgumentException("Comic page content is unsupported")
+        val mediaType = when (page.path.substringAfterLast('.').lowercase(Locale.ROOT)) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            else -> "image/*"
+        }
         ReaderComicPage(
             pageIndex = page.index,
             resourceHref = "pages/${page.index}",
@@ -82,21 +86,6 @@ internal class CbzReadiumPublicationFactory {
         )
     }
 
-    private fun detectMediaType(bytes: ByteArray): String? = when {
-        bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte() ->
-            "image/jpeg"
-        bytes.size >= PNG_SIGNATURE.size && PNG_SIGNATURE.indices.all { bytes[it] == PNG_SIGNATURE[it] } ->
-            "image/png"
-        bytes.size >= 6 && bytes.copyOfRange(0, 6).decodeToString() in setOf("GIF87a", "GIF89a") ->
-            "image/gif"
-        bytes.size >= 12 && bytes.copyOfRange(0, 4).decodeToString() == "RIFF" &&
-            bytes.copyOfRange(8, 12).decodeToString() == "WEBP" -> "image/webp"
-        else -> null
-    }
-
-    private companion object {
-        val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-    }
 }
 
 private class ArchivePageResource(

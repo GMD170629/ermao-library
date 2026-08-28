@@ -1,6 +1,7 @@
 import Combine
 import CryptoKit
 import Foundation
+import OSLog
 @preconcurrency import ErmaoShared
 @preconcurrency import ReadiumNavigator
 @preconcurrency import ReadiumShared
@@ -67,7 +68,7 @@ enum IosPdfFit: String, CaseIterable, Codable, Identifiable, Sendable { case wid
 enum IosPdfCropMargins: String, CaseIterable, Codable, Identifiable, Sendable { case off, auto; var id: Self { self } }
 
 struct IosReaderPreferences: Codable, Equatable, Sendable {
-    var schemaVersion = 4
+    var schemaVersion = 5
     var theme = IosReaderTheme.warm
     var themeMode = IosReaderThemeMode.manual
     var progressStyle = IosReaderProgressStyle.auto
@@ -91,8 +92,6 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
     var paragraphSpacing = 0.0
     var textAlignment = IosReaderTextAlignment.publisher
     var preservePublisherStyles = false
-    var allowPublisherColors = false
-    var allowPublisherFonts = false
     var smartOptimization = true
     var deduplicateIndent = true
     var indentUnindented = true
@@ -102,7 +101,12 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
     var comicCoverSingle = false
     var comicPageGap = 0
     var comicZoom = 1.0
+    var comicPageWidth = 1350
+    var comicImageFit = "width"
+    var comicImageVariant = "original"
+    var comicPageTurnAnimation = "slide"
     var pdfZoom = 1.0
+    var pdfPageWidth = 1350
     var pdfFit = IosPdfFit.page
     var pdfRotation = 0
     var pdfCropMargins = IosPdfCropMargins.off
@@ -181,68 +185,19 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
 
     func load() -> IosReaderPreferences {
         guard let data = defaults.data(forKey: key),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let draft = root["iosDraft"],
-              let draftData = try? JSONSerialization.data(withJSONObject: draft),
-              let decoded = try? JSONDecoder().decode(IosReaderPreferences.self, from: draftData),
-              decoded.schemaVersion == 4
+              let source = String(data: data, encoding: .utf8),
+              let canonical = ReaderPreferencesJson().canonicalizeOrNull(payload: source),
+              let decoded = try? IosReaderPreferences(canonicalJSON: canonical)
         else { return IosReaderPreferences() }
+        // Do not overwrite an invalid record. Canonicalization succeeds before publication.
+        if data != Data(canonical.utf8) { defaults.set(Data(canonical.utf8), forKey: key) }
         return decoded
     }
 
     @discardableResult
     func save(_ preferences: IosReaderPreferences) -> Bool {
-        guard let draftData = try? JSONEncoder().encode(preferences),
-              let draft = try? JSONSerialization.jsonObject(with: draftData) else { return false }
-        let document: [String: Any] = [
-            "schemaVersion": 4,
-            "appearance": ["theme": preferences.theme.rawValue, "themeMode": preferences.themeMode.rawValue],
-            "display": ["progressStyle": preferences.progressStyle.rawValue, "showClock": preferences.showClock],
-            "interaction": [
-                "tapZones": preferences.tapZones.rawValue,
-                "swipePageTurn": preferences.swipePageTurn,
-                "keyboardPageTurn": preferences.keyboardPageTurn,
-                "volumeKeyPageTurn": preferences.volumeKeyPageTurn,
-                "keepScreenAwake": preferences.keepScreenAwake,
-            ],
-            "epub": [
-                "fontSize": preferences.fontSize, "lineHeight": preferences.lineHeight,
-                "pageWidth": preferences.pageWidth, "fontFamily": preferences.fontFamily.rawValue,
-                "fontWeight": preferences.fontWeight, "letterSpacing": preferences.letterSpacing,
-                "pageMargin": preferences.pageMargin.rawValue, "spreadMode": preferences.spreadMode.rawValue,
-                "pageTurnAnimation": preferences.pageTurnAnimation,
-                "flow": preferences.readingMode == .paged ? "paginated" : "scrolled",
-                "typography": [
-                    "paragraphIndent": preferences.paragraphIndent,
-                    "paragraphSpacing": preferences.paragraphSpacing,
-                    "textAlign": preferences.textAlignment.rawValue,
-                    "preservePublisherStyles": preferences.preservePublisherStyles,
-                    "allowPublisherColors": preferences.allowPublisherColors,
-                    "allowPublisherFonts": preferences.allowPublisherFonts,
-                ],
-                "optimization": [
-                    "enabled": preferences.smartOptimization,
-                    "deduplicateIndent": preferences.deduplicateIndent,
-                    "indentUnindented": preferences.indentUnindented,
-                ],
-            ],
-            "comic": [
-                "direction": preferences.comicDirection.rawValue,
-                "spreadMode": preferences.comicSpread.rawValue,
-                "pageTurnAnimation": "slide", "imageFit": "width", "imageVariant": "original",
-                "zoom": preferences.comicZoom, "pageWidth": 1350,
-                "flow": preferences.comicFlow.rawValue,
-                "coverSingle": preferences.comicCoverSingle, "pageGap": preferences.comicPageGap,
-            ],
-            "pdf": [
-                "zoom": preferences.pdfZoom, "pageWidth": 1350,
-                "fit": preferences.pdfFit.rawValue, "flow": "paged",
-                "rotation": preferences.pdfRotation, "cropMargins": preferences.pdfCropMargins.rawValue,
-            ],
-            "iosDraft": draft,
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: document)
-        else { return false }
+        guard let canonical = try? preferences.canonicalJSON() else { return false }
+        let data = Data(canonical.utf8)
         defaults.set(data, forKey: key)
         return defaults.data(forKey: key) == data
     }
@@ -431,6 +386,7 @@ struct IosReaderPersistenceGate: Equatable, Sendable {
 
 @MainActor
 final class IosReflowableReaderSession: NSObject, ObservableObject {
+    private static let logger = Logger(subsystem: "com.ermao.library", category: "MobileReader")
     static let progressSaveDebounceMilliseconds = 500
     @Published private(set) var phase: IosReaderSessionPhase = .opening
     @Published private(set) var navigator: EPUBNavigatorViewController?
@@ -441,6 +397,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     @Published private(set) var resumeActionFailed = false
     private var returningToResumeAlternative = false
     @Published private(set) var presentationError: IosReaderFailureCode?
+    @Published private(set) var onlineFailure: IosReaderFailure?
     @Published private(set) var tableOfContents: [IosReaderTocEntry] = []
     @Published private(set) var bookmarks: [IosReaderBookmarkRecord] = []
     @Published private(set) var bookmarkSyncPending = false
@@ -462,6 +419,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let bookmarkStore: IosReaderBookmarkStore?
     private let bookmarkRemote: IosReaderBookmarkRemote?
     private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
+    private(set) var pendingLaunchTargetPayload: String?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
     private let bookID: String
@@ -522,6 +480,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         }
         self.remoteSnapshot = remoteSnapshot
         self.initialTarget = initialTarget
+        pendingLaunchTargetPayload = initialTarget.map { ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: $0) }
         self.namespaceKey = namespaceKey
         self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
@@ -547,8 +506,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             let openedPublication: IosOpenedReadiumPublication
             let openedSource: any ErmaoShared.ReaderSource
             if let onlineSource, let onlinePublication {
-                let publication = try await IosOnlinePublicationFactory(session: onlinePublication) { [weak self] code in
-                    self?.presentationError = IosReaderFailureCode(rawValue: code) ?? .engineError
+                let publication = try await IosOnlinePublicationFactory(session: onlinePublication) { [weak self] failure in
+                    self?.recordOnlineFailure(failure)
+                    self?.presentationError = failure.code
                 }.open()
                 openedPublication = IosOpenedReadiumPublication(publication: publication) { publication.close() }
                 openedSource = onlineSource
@@ -584,28 +544,44 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             )
             self.publication = publication
             installControlNavigator(navigator)
-            renderedControlPreferences = preferences.readium(for: systemAppearance)
+            submittedControlPreferences = preferences.readium(for: systemAppearance)
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 self?.showRemoteProgress(snapshot)
             }
             tableOfContents = await mergedNavigation(publication: publication)
             phase = .reading
+            pendingLaunchTargetPayload = nil
             startBookmarkSynchronization()
             if let initial { reflectLocation(initial) }
             await progressCoordination?.checkForRemoteProgress()
         } catch let failure as IosReaderFailure {
-            onlinePublication?.close()
-            await openedPublication?.close()
-            openedPublication = nil
-            publication = nil
-            phase = .failed(failure.code)
+            await failOpening(failure)
         } catch {
-            onlinePublication?.close()
-            await openedPublication?.close()
-            openedPublication = nil
-            publication = nil
-            phase = .failed(.engineError)
+            await failOpening(IosReaderFailure(code: .engineError, underlyingError: error as NSError))
         }
+    }
+
+    func failureDescription(for code: IosReaderFailureCode) -> String {
+        guard let onlineFailure, onlineFailure.code == code else { return code.localizedDescription }
+        return onlineFailure.errorDescription ?? code.localizedDescription
+    }
+
+    private func failOpening(_ failure: IosReaderFailure) async {
+        onlinePublication?.close()
+        await openedPublication?.close()
+        openedPublication = nil
+        publication = nil
+        if failure.onlineContext != nil { recordOnlineFailure(failure) }
+        phase = .failed(failure.code)
+    }
+
+    private func recordOnlineFailure(_ failure: IosReaderFailure) {
+        onlineFailure = failure
+        let stage = failure.onlineContext?.stage ?? "unknown"
+        let code = failure.onlineContext?.sourceCode ?? failure.code.rawValue
+        Self.logger.error(
+            "reader_online_failed resource=\(self.resourceID, privacy: .public) stage=\(stage, privacy: .public) code=\(code, privacy: .public)"
+        )
     }
 
     func goPrevious() async {
@@ -644,9 +620,11 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             return true
         }
         beginUserNavigation()
+        pendingLaunchTargetPayload = ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: ErmaoShared.ReaderNavigationTargetReflowable(href: canonicalHref))
         guard await navigator?.go(to: link, options: navigationOptions) == true else { return false }
         for _ in 0 ..< 30 {
             if await navigationHrefMatches(canonicalHref) {
+                pendingLaunchTargetPayload = nil
                 return true
             }
             try? await Task.sleep(for: .milliseconds(50))
@@ -676,14 +654,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                navigator.currentLocation?.href.normalized == target.href.normalized {
                 if let position = target.locations.position, navigator.viewport?.positions?.contains(position) == true { return true }
                 if let progression = target.locations.progression,
-                   navigator.viewport?.progressions[target.href]?.contains(progression) == true { return true }
+                   navigator.viewport?.resources.first(where: { $0.href.isEquivalentTo(target.href) })?.progression.contains(progression) == true { return true }
             }
             do { try await Task.sleep(for: .milliseconds(75)) } catch { return false }
         }
         return false
     }
 
-    private var applyingControlPreferences = false
     private var controlInputToken: InputObservableToken?
     private var undoBookmarks: [IosReaderBookmarkRecord]?
 
@@ -699,92 +676,45 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     private var systemAppearance: UIUserInterfaceStyle = .light
-    private var renderedControlPreferences: EPUBPreferences?
-    private let preferenceQueue = IosReaderNavigationQueue()
-    private var systemAppearanceTask: Task<Void, Never>?
+    private var submittedControlPreferences: EPUBPreferences?
 
     func refreshSystemAppearance(_ style: UIUserInterfaceStyle) {
         systemAppearance = style
-        guard preferences.themeMode == .system, navigator != nil, systemAppearanceTask == nil else { return }
-        systemAppearanceTask = Task { [weak self] in
-            guard let self else { return }
-            defer { self.systemAppearanceTask = nil }
-            while self.preferences.themeMode == .system,
-                  self.renderedControlPreferences != self.preferences.readium(for: self.systemAppearance) {
-                let applied = await self.preferenceQueue.enqueue {
-                    await self.executeControlPreferences(self.preferences)
-                }
-                if !applied { self.presentationError = .engineError; break }
-            }
+        guard preferences.themeMode == .system, navigator != nil,
+              submittedControlPreferences != preferences.readium(for: style) else { return }
+        if !executeControlPreferences(preferences) {
+            presentationError = .engineError
         }
     }
 
-    private func installControlNavigator(_ next: EPUBNavigatorViewController) {
-        if let controlInputToken { navigator?.removeObserver(controlInputToken) }
-        navigator?.delegate = nil
-        next.delegate = self
-        controlInputToken = next.addObserver(.drag(onStart: { [weak self] _ in
-            guard let self, self.activeControlPanel == nil, self.navigator?.currentSelection == nil,
-                  !self.applyingControlPreferences else { return false }
+    private func installControlNavigator(_ navigator: EPUBNavigatorViewController) {
+        navigator.delegate = self
+        controlInputToken = navigator.addObserver(.drag(onStart: { [weak self] _ in
+            guard let self, self.activeControlPanel == nil, self.navigator?.currentSelection == nil else { return false }
             self.beginUserNavigation()
             return false
         }))
-        navigator = next
+        self.navigator = navigator
     }
 
     func applyControlPreferences(_ updated: IosReaderPreferences) async -> Bool {
-        await preferenceQueue.enqueue { [weak self] in
-            guard let self else { return false }
-            return await self.executeControlPreferences(updated)
-        }
+        executeControlPreferences(updated)
     }
 
-    private func executeControlPreferences(_ updated: IosReaderPreferences) async -> Bool {
-        guard let previousNavigator = navigator, let publication,
-              controlReady, canApplyControlPreferences(updated) else { return false }
+    private func executeControlPreferences(_ updated: IosReaderPreferences) -> Bool {
+        guard let navigator, controlReady, canApplyControlPreferences(updated),
+              preferencesStore?.save(updated) != false else { return false }
         let native = updated.readium(for: systemAppearance)
-        if native == renderedControlPreferences {
-            guard preferencesStore?.save(updated) != false else { return false }
-            preferences = updated
-            renderedControlPreferences = native
-            return true
+        if native != submittedControlPreferences {
+            pendingSave?.cancel()
+            persistenceGate.suppressPreferenceReflow()
+            // Readium owns reflow and location retention. A changed first-visible
+            // paragraph after pagination is not a failed settings submission.
+            navigator.submitPreferences(native)
+            submittedControlPreferences = native
         }
-        guard let anchor = await previousNavigator.firstVisibleElementLocator(),
-              let expected = try? mapper.exactEnvelope(from: anchor) else { return false }
-        applyingControlPreferences = true
-        pendingSave?.cancel()
-        persistenceGate.suppressPreferenceReflow()
-        defer { applyingControlPreferences = false }
-        do {
-            // The pinned SDK caches HTML after CSS decoration. Its public submit API
-            // cannot invalidate that cache on a mode reload. A fresh native navigator
-            // retains the same Publication and exact locator, without editing content.
-            let next = try makeIosReflowableNavigator(publication: publication, preferences: native, location: anchor)
-            installControlNavigator(next)
-            var verified = false
-            for _ in 0 ..< 80 {
-                try Task.checkCancellation()
-                if let visible = await next.firstVisibleElementLocator(),
-                   let actual = try? mapper.exactEnvelope(from: visible),
-                   ErmaoShared.PublicKt.compareExactProgressReadiumLocators(expected: expected, recaptured: actual) == .exact {
-                    verified = true
-                    break
-                }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            guard verified, preferencesStore?.save(updated) != false else {
-                installControlNavigator(previousNavigator)
-                return false
-            }
-            preferences = updated
-            renderedControlPreferences = native
-            return true
-        } catch {
-            // This is the native command boundary: restore the old live renderer and
-            // leave durable settings unchanged, then let the common sheet show failure.
-            installControlNavigator(previousNavigator)
-            return false
-        }
+        preferences = updated
+        return true
     }
 
     func isCurrentLocationBookmarked() async -> Bool {
@@ -805,9 +735,14 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     func toggleCurrentBookmark() async {
         guard let locator = await navigator?.firstVisibleElementLocator(),
-              !(await isUnreadablePage(locator)),
-              let exactJSON = locator.jsonString
+              !(await isUnreadablePage(locator))
         else { return }
+        let exactJSON: String
+        do { exactJSON = try locator.jsonString() }
+        catch {
+            presentationError = .persistenceFailed
+            return
+        }
         let id = bookmarkID(locator)
         let next: [IosReaderBookmarkRecord]
         if bookmarks.contains(where: { $0.id == id }) {
@@ -913,6 +848,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     func dismissPresentationError() {
         presentationError = nil
+        onlineFailure = nil
     }
 
     func showControls() {
@@ -962,8 +898,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     func close() async throws {
-        await systemAppearanceTask?.value
-        _ = await preferenceQueue.enqueue { true }
         guard phase != .closed else { return }
         phase = .closing
         pendingSave?.cancel()
@@ -1130,7 +1064,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         guard let locator else { return false }
         return ErmaoShared.PublicKt.matchesReaderNavigationHref(
             currentHref: locator.href.normalized.string, expectedHref: expected,
-            fragments: Set(locator.locations.fragments), cssSelector: locator.locations["cssSelector"] as? String
+            fragments: Set(locator.locations.fragments), cssSelector: locator.locations["cssSelector"]?.string
         )
     }
 
@@ -1236,7 +1170,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     private func locationChanged(_ locator: Locator) {
         reflectLocation(locator)
-        guard !applyingControlPreferences else { return }
         guard persistenceGate.observeLocationChange(locationSignature(locator)) else { return }
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in

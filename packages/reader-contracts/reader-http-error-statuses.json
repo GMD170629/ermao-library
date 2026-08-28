@@ -1,0 +1,82 @@
+{
+  "publication": {
+    "UNAUTHORIZED": [
+      401
+    ],
+    "FORBIDDEN": [
+      403
+    ],
+    "PUBLICATION_NOT_FOUND": [
+      404
+    ],
+    "PUBLICATION_RESOURCE_NOT_FOUND": [
+      404
+    ],
+    "PUBLICATION_CORRUPT": [
+      404
+    ],
+    "PUBLICATION_SECURITY_REJECTED": [
+      404
+    ],
+    "PUBLICATION_MARKUP_INVALID": [
+      404
+    ],
+    "PUBLICATION_STRUCTURE_INVALID": [
+      404
+    ],
+    "PUBLICATION_PARSE_FAILED": [
+      404
+    ],
+    "PUBLICATION_DRM_PROTECTED": [
+      404
+    ],
+    "PUBLICATION_PARSER_LIMIT": [
+      404
+    ],
+    "PUBLICATION_PARSER_MEMORY": [
+      404
+    ],
+    "PUBLICATION_READ_FAILED": [
+      404
+    ],
+    "PUBLICATION_UNSUPPORTED": [
+      404
+    ],
+    "PUBLICATION_TXT_NUL_CHARACTER": [
+      404
+    ],
+    "PUBLICATION_TXT_ENCODING_UNSUPPORTED": [
+      404
+    ],
+    "PUBLICATION_TXT_EMPTY": [
+      404
+    ],
+    "PUBLICATION_RESOURCE_CHANGED": [
+      409,
+      412
+    ],
+    "PUBLICATION_RESOURCE_TOO_LARGE": [
+      413
+    ],
+    "PUBLICATION_ONLINE_LIMIT": [
+      413
+    ]
+  },
+  "comic": {
+    "ARCHIVE_PAGE_MISSING": [
+      404
+    ],
+    "ARCHIVE_ENCRYPTED": [
+      404
+    ],
+    "ARCHIVE_PART_MISSING": [
+      404
+    ],
+    "ARCHIVE_FORMAT_SETUP_FAILED": [
+      404
+    ],
+    "ARCHIVE_OPEN_FAILED": [
+      404
+    ]
+  }
+}

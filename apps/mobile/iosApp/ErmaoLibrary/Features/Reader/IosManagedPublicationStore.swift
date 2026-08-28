@@ -16,7 +16,7 @@ struct IosManagedPublication: Sendable, Equatable {
 actor IosManagedPublicationStore {
     static let parserVersion = "epub-package:1"
     static let normalizationVersion = "shuku-epub-locator-dom-v2"
-    static let maximumPublicationBytes: Int64 = 512 * 1_024 * 1_024
+    static let maximumPublicationBytes = ErmaoShared.ReaderAdmission.shared.maximumPublicationBytes
 
     private var completedPublication: IosManagedPublication?
     private let root: URL
@@ -120,7 +120,7 @@ actor IosManagedPublicationStore {
             throw IosReaderFailure(code: .corruptFile)
         }
         if Int64(sourceValues.fileSize ?? 0) > Self.maximumPublicationBytes {
-            throw IosReaderFailure(code: .outOfMemoryRisk)
+            throw IosReaderFailure(code: .publicationTooLarge)
         }
 
         let key = opaqueKey(resourceID)
@@ -148,17 +148,11 @@ actor IosManagedPublicationStore {
         while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
             byteCount += Int64(chunk.count)
             guard byteCount <= Self.maximumPublicationBytes else {
-                throw IosReaderFailure(code: .outOfMemoryRisk)
+                throw IosReaderFailure(code: .publicationTooLarge)
             }
             try output.write(contentsOf: chunk)
         }
         try output.synchronize()
-        try await validatePublication(
-            at: staging,
-            sourceFormat: sourceFormat,
-            parserVersion: parserVersion,
-            normalizationVersion: normalizationVersion
-        )
         let metadata = Metadata(
             resourceID: resourceID,
             displayTitle: displayTitle,
@@ -281,7 +275,7 @@ actor IosManagedPublicationStore {
         } else {
             let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
             guard values.isRegularFile == true, values.isSymbolicLink != true,
-                  Int64(values.fileSize ?? -1) > 0,
+                  Int64(values.fileSize ?? -1) >= 0,
                   Int64(values.fileSize ?? -1) <= Self.maximumPublicationBytes
             else {
                 throw IosReaderFailure(code: .corruptFile)
@@ -409,115 +403,6 @@ actor IosManagedPublicationStore {
         guard path.hasPrefix(rootPath) else { throw IosReaderFailure(code: .corruptFile) }
     }
 
-    private func validatePublication(
-        at url: URL,
-        sourceFormat: ErmaoShared.ReaderSourceFormat,
-        parserVersion: String,
-        normalizationVersion: String,
-        validateWithReaderParser: Bool = false
-    ) async throws {
-        switch sourceFormat {
-        case .epub:
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            let header = try handle.read(upToCount: 58) ?? Data()
-            guard Self.hasValidEpubMimetypeEntry(header)
-            else {
-                throw IosReaderFailure(code: .corruptFile)
-            }
-        case .mobi, .azw, .azw3, .prc:
-            _ = parserVersion
-            _ = normalizationVersion
-            do {
-                let book = try IosMobiBook.open(fileURL: url)
-                do {
-                    let info = try await book.info()
-                    await book.close()
-                    guard info.resourceCount > 0, info.readingOrderCount > 0 else {
-                        throw IosReaderFailure(code: .corruptFile)
-                    }
-                } catch {
-                    await book.close()
-                    throw error
-                }
-            } catch let error as IosMobiCoreError {
-                switch error.status {
-                case .drmProtected:
-                    throw IosReaderFailure(code: .drmProtected)
-                case .unsupported, .noContent:
-                    throw IosReaderFailure(code: .unsupportedFormat)
-                case .limitExceeded, .outOfMemory:
-                    throw IosReaderFailure(code: .outOfMemoryRisk)
-                case .fileNotFound, .notFound:
-                    throw IosReaderFailure(code: .resourceMissing)
-                case .io:
-                    throw IosReaderFailure(code: .engineError)
-                default:
-                    throw IosReaderFailure(code: .corruptFile)
-                }
-            }
-        case .txt:
-            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-            guard data.count <= 64 * 1_024 * 1_024,
-                  IosStrictTxtDecoder.decode(data) != nil
-            else {
-                throw IosReaderFailure(code: .corruptFile)
-            }
-        case .fb2:
-            let probe = IosManagedPublication(
-                resourceID: "fb2-validation",
-                displayTitle: url.deletingPathExtension().lastPathComponent,
-                fileURL: url,
-                byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
-                bookID: nil,
-                assetID: nil,
-                namespace: nil,
-                sourceFormat: .fb2
-            )
-            do {
-                let publication = try IosFb2PublicationFactory().open(probe)
-                publication.close()
-            } catch IosFb2PublicationError.limitExceeded {
-                throw IosReaderFailure(code: .outOfMemoryRisk)
-            } catch {
-                throw IosReaderFailure(code: .corruptFile)
-            }
-        case .pdf:
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
-            guard try handle.read(upToCount: 5) == Data("%PDF-".utf8) else {
-                throw IosReaderFailure(code: .corruptFile)
-            }
-        case .cbz, .zip, .cbr, .rar:
-            do {
-                _ = try IosCbzArchiveIndex(fileURL: url)
-            } catch IosCbzError.limitExceeded {
-                throw IosReaderFailure(code: .outOfMemoryRisk)
-            } catch IosCbzError.encrypted {
-                throw IosReaderFailure(code: .drmProtected)
-            } catch {
-                throw IosReaderFailure(code: .corruptFile)
-            }
-        default:
-            throw IosReaderFailure(code: .unsupportedFormat)
-        }
-        guard validateWithReaderParser, sourceFormat == .epub || sourceFormat == .pdf else { return }
-        let probe = IosManagedPublication(
-            resourceID: "reader-validation",
-            displayTitle: "reader-validation",
-            fileURL: url,
-            byteCount: Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0),
-            bookID: nil,
-            assetID: nil,
-            namespace: nil,
-            sourceFormat: sourceFormat
-        )
-        try await Task { @MainActor in
-            let opened = try await IosReadiumRuntime().open(probe)
-            await opened.close()
-        }.value
-    }
-
     private struct Metadata: Codable {
         let resourceID: String
         let displayTitle: String
@@ -526,20 +411,6 @@ actor IosManagedPublicationStore {
         let assetID: String?
         let namespace: String?
         let sourceFormat: String
-    }
-
-    private static func hasValidEpubMimetypeEntry(_ header: Data) -> Bool {
-        guard header.count >= 58,
-              Array(header[0 ..< 4]) == [0x50, 0x4B, 0x03, 0x04]
-        else { return false }
-        let compression = UInt16(header[8]) | UInt16(header[9]) << 8
-        let nameLength = UInt16(header[26]) | UInt16(header[27]) << 8
-        let extraLength = UInt16(header[28]) | UInt16(header[29]) << 8
-        guard compression == 0, nameLength == 8, extraLength == 0,
-              String(data: header[30 ..< 38], encoding: .ascii) == "mimetype",
-              String(data: header[38 ..< 58], encoding: .ascii) == "application/epub+zip"
-        else { return false }
-        return true
     }
 
     private static func pathExtension(for sourceFormat: ErmaoShared.ReaderSourceFormat) -> String {

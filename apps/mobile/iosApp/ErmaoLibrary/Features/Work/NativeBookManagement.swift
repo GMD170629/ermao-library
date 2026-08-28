@@ -64,9 +64,12 @@ final class NativeBookManagementStore: ObservableObject {
             displayName: context.profileDisplayName, baseUrl: context.baseURL, serverIdentity: context.serverIdentity,
             acceptsInsecureTls: context.acceptsInsecureTLS, userId: context.userID, authorizationVersion: context.authorizationVersion)
         session = ErmaoShared.BookManagementSession(repository: repository, context: sharedContext, canManage: canManage,
-            newOperationId: { UUID().uuidString })
+            newOperationId: Self.makeOperationID)
         state = session.current
     }
+
+    // KMP may request an operation ID after resuming on a background executor.
+    nonisolated private static func makeOperationID() -> String { UUID().uuidString }
 
     func completed(_ target: NativeManagementTarget) -> Bool? {
         target.completed ?? session.bookCompleted(bookId: target.bookID)?.boolValue
@@ -162,7 +165,7 @@ private struct NativeManagementMenuItems: View {
             kindleSendAvailable: target.kindleEligible, hasRepresentativeResource: target.hasRepresentative), id: \.action.name) { item in
             Button(role: item.action.name == "Delete" ? .destructive : nil) { store.invoke(target, item.action) } label: {
                 if item.action.name == "ReadingStatus" && completed == nil { Text("nativeManagement.readingStatus") }
-                else { Text(managementActionKey(item.action.name, kind: target.kind, completed: completed == true)) }
+                else { managementText(managementActionKey(item.action.name, kind: target.kind, completed: completed == true)) }
             }.disabled(!item.enabled || store.running || (item.action.name == "ReadingStatus" && completed == nil))
         }
     }
@@ -213,7 +216,7 @@ struct NativeBookManagementHost<Content: View>: View {
             .overlay(alignment: .bottom) {
 
                 if let notice = store.state.notice {
-                    HStack { Text(LocalizedStringKey("nativeManagement.notice.\(notice)")); Button("common.close") { store.edit { store.session.clearFeedback() } } }
+                    HStack { managementText("nativeManagement.notice.\(notice)"); Button("common.close") { store.edit { store.session.clearFeedback() } } }
                         .padding(.space2).background(.regularMaterial).accessibilityElement(children: .contain)
                 }
             }
@@ -242,18 +245,18 @@ private struct NativeManagementSheet: View {
             Form {
                 if store.running { ProgressView() }
                 if store.transportFailed || state.error != nil {
-                    Text(LocalizedStringKey("nativeManagement.failure.\(state.saveStage?.name ?? "General")")).foregroundStyle(.red)
+                    managementText("nativeManagement.failure.\(state.saveStage?.name ?? "General")").foregroundStyle(.red)
                 }
                 switch state.phase.name {
                 case "Result":
                     if let outcome = state.metadataOutcome {
                         Section("nativeManagement.appliedFields") {
-                            ForEach(outcome.appliedFields, id: \.self) { field in Text(LocalizedStringKey("nativeManagement.field.\(field.split(separator: ".").last.map(String.init) ?? "title")")) }
+                            ForEach(outcome.appliedFields, id: \.self) { field in managementText("nativeManagement.field.\(field.split(separator: ".").last.map(String.init) ?? "title")") }
                         }
                         Section("nativeManagement.skippedFields") {
-                            ForEach(outcome.skippedFields, id: \.self) { field in Text(LocalizedStringKey("nativeManagement.field.\(field.split(separator: ".").last.map(String.init) ?? "title")")) }
+                            ForEach(outcome.skippedFields, id: \.self) { field in managementText("nativeManagement.field.\(field.split(separator: ".").last.map(String.init) ?? "title")") }
                         }
-                        Text(LocalizedStringKey("nativeManagement.coverResult.\(outcome.coverStatus)"))
+                        managementText("nativeManagement.coverResult.\(outcome.coverStatus)")
                     }
                 case "Executing":
                     Button("common.retry") { store.run { try await session.retryAction() } }.disabled(store.running)
@@ -268,11 +271,11 @@ private struct NativeManagementSheet: View {
                     Text(state.target?.title ?? "")
                     if let target = state.target, target.kind == .resource,
                        let resource = state.snapshot?.resources.first(where: { $0.id == target.id }) {
-                        Text(String(format: String(localized: "nativeManagement.sourceCount"), resource.assets.count))
+                        Text("nativeManagement.sourceCount \(resource.assets.count)")
                     }
                     TextField(state.target?.title ?? "", text: Binding(get: { state.confirmation }, set: { value in store.edit { session.setConfirmation(value: value) } }))
                         .disabled(store.running)
-                    Button("management.delete", role: .destructive) { deleteConfirmation = true }
+                    Button("nativeManagement.action.Delete", role: .destructive) { deleteConfirmation = true }
                         .disabled(store.running || state.confirmation != state.target?.title)
                 case "Loading", "Menu": EmptyView()
                 default:
@@ -290,8 +293,8 @@ private struct NativeManagementSheet: View {
             .confirmationDialog("nativeManagement.discardTitle", isPresented: $discard, titleVisibility: .visible) {
                 Button("nativeManagement.discard", role: .destructive) { store.close() }
             }
-            .alert("management.delete", isPresented: $deleteConfirmation) {
-                Button("management.delete", role: .destructive) { store.run { try await session.confirmDelete() } }
+            .alert("nativeManagement.action.Delete", isPresented: $deleteConfirmation) {
+                Button("nativeManagement.action.Delete", role: .destructive) { store.run { try await session.confirmDelete() } }
                 Button("common.cancel", role: .cancel) {}
             } message: { Text("nativeManagement.deleteIrreversible") }
         }
@@ -300,14 +303,15 @@ private struct NativeManagementSheet: View {
     private var editor: some View {
         Group {
             ForEach(state.draft, id: \.field.wireName) { field in
-                TextField(LocalizedStringKey("nativeManagement.field.\(field.field.wireName)"),
-                    text: Binding(get: { field.value }, set: { value in store.edit { session.setField(field: field.field, value: value) } }),
-                    axis: ["description", "tags"].contains(field.field.wireName) ? .vertical : .horizontal)
+                TextField(text: Binding(get: { field.value }, set: { value in store.edit { session.setField(field: field.field, value: value) } }),
+                    axis: ["description", "tags"].contains(field.field.wireName) ? .vertical : .horizontal) {
+                    managementText("nativeManagement.field.\(field.field.wireName)")
+                }
                     .disabled(store.running)
             }
             if state.target?.kind != .resource {
                 if state.target?.kind == .book { Text("nativeManagement.tagsLines") }
-                Text(LocalizedStringKey("nativeManagement.cover.\(state.coverEdit.name)"))
+                managementText("nativeManagement.cover.\(state.coverEdit.name)")
                 if let upload = state.coverUpload { Text(upload.fileName) }
                 Button("management.chooseCoverFile") { pickerInteraction = session.interactionId; importing = true }.disabled(store.running)
                 Button("nativeManagement.removeCover") { store.edit { session.setCover(edit: .remove, upload: nil) } }.disabled(store.running)
@@ -337,9 +341,9 @@ private struct NativeManagementSheet: View {
                     ForEach(session.recognitionFields, id: \.wireValue) { field in
                         Toggle(isOn: Binding(get: { state.selectedFields.contains(field) }, set: { selected in store.edit { session.setRecognizedField(field: field, selected: selected) } })) {
                             VStack(alignment: .leading) {
-                                Text(LocalizedStringKey("nativeManagement.field.\(field.field.wireName)"))
-                                Text(String(format: String(localized: "nativeManagement.current"), session.currentValue(field: field)))
-                                Text(String(format: String(localized: "nativeManagement.candidate"), ErmaoShared.PublicKt.managementCandidateValue(candidate: candidate, field: field.field)))
+                                managementText("nativeManagement.field.\(field.field.wireName)")
+                                Text("nativeManagement.current \(session.currentValue(field: field))")
+                                Text("nativeManagement.candidate \(ErmaoShared.PublicKt.managementCandidateValue(candidate: candidate, field: field.field))")
                             }
                         }.disabled(store.running)
                     }
@@ -372,10 +376,15 @@ private struct NativeManagementSheet: View {
     }
 }
 
-private func managementActionKey(_ action: String, kind: ErmaoShared.ManagementObject, completed: Bool) -> LocalizedStringKey {
+private func managementText(_ key: String) -> Text {
+    // Resolve the complete runtime key, not a LocalizedStringKey interpolation pattern.
+    Text(LocalizedStringKey(key))
+}
+
+func managementActionKey(_ action: String, kind: ErmaoShared.ManagementObject, completed: Bool) -> String {
     if action == "ReadingStatus" { return completed ? "nativeManagement.markUnread" : "nativeManagement.markRead" }
     if action == "Regenerate" { return kind == .book ? "nativeManagement.regenerateImages" : "management.regenerateCover" }
-    return LocalizedStringKey("nativeManagement.action.\(action)")
+    return "nativeManagement.action.\(action)"
 }
 
 struct OptionalManagementCover: ViewModifier {

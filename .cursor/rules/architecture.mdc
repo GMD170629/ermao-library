@@ -46,5 +46,7 @@ composition root -> 各层（仅装配）
 2. 不把一次改动混入架构迁移、产品改版、依赖升级和无关格式化。
 3. 临时兼容代码必须有 owner 和明确退出条件。
 
-- 在线阅读只按需获取原章节/页/PDF Range；正文窗口为当前及前后一个单元，总量 ≤64 MiB、文本章节 ≤8 MiB、PDF 请求 ≤1 MiB。收到错误状态、长度或超限时立即停止响应流；禁止整文件、后台补齐和磁盘正文缓存。允许必要服务端首次解析，不增设导入索引门槛。
+- 普通在线阅读只按需获取原章节/页/PDF Range；应用缓存总量 ≤64 MiB、文本章节 ≤8 MiB、PDF 请求 ≤1 MiB。原生 App 准入为 2 GiB（含边界），明确在线限制可经独立过渡页复用 Downloads 后本地打开；普通网络、鉴权、损坏、版本变化不分流。允许原生 SDK 常规缓存，不深改 SDK，不拆章、不转换、不新增索引。Web 保持原严格策略和依赖补丁；所有平台禁止在线后台补齐原文件。详见 AGENTS.md 和 ADR 0024。
 - Downloads 的共享应用用例是唯一显式下载入口。平台只适配存储、通知与生命周期；文件与多页下载复用传输机制。迁移全部调用后删除旧实现、别名、提示、测试预期及冲突规范。
+
+- iOS Reader 当前批准基线为官方 Readium Swift Toolkit **3.9.0**，覆盖旧 3.8.0 冻结说明；不得为消除编译或迁移错误回退 SDK。精确 revision、SwiftPM 锁和运行时版本须通过 `python3 apps/mobile/iosApp/verify_readium.py`。遵守 `docs/mobile-reader-architecture.md` 第 10 节，不改 SDK 源码、不用私有 API、不恢复排版校验或加载 UI；Android/Web 版本不变。

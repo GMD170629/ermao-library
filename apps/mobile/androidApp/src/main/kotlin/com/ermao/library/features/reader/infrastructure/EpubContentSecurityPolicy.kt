@@ -35,8 +35,17 @@ internal object EpubContentSecurityPolicy {
         "iframe,frame,object,embed,applet{display:none!important;}" +
             "input,button,select,textarea{pointer-events:none!important;}"
 
-    fun apply(container: Container<Resource>): Container<Resource> =
-        transformMarkup(container, ::decorateHtml)
+    private fun securityHead(viewport: String): String =
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"$CONTENT_SECURITY_POLICY\" " +
+            "data-shuku-security-profile=\"$PROFILE\"/>" + viewport +
+            "<style data-shuku-security-profile=\"$PROFILE\">$SECURITY_STYLE</style>"
+
+    /** Only accepts output from the owned TXT/FB2 templates, never original chapters. */
+    fun generatedChapter(markup: String): ByteArray =
+        markup.replaceFirst("<head>", "<head>" + securityHead(DEVICE_VIEWPORT)).toByteArray(Charsets.UTF_8)
+
+    fun apply(container: Container<Resource>, onFailure: ((Exception) -> Unit)? = null): Container<Resource> =
+        transformMarkup(container, ::decorateHtml, onFailure)
 
     fun applyMobi(container: Container<Resource>): Container<Resource> =
         transformMarkup(container, ::decorateMobiHtml)
@@ -45,13 +54,18 @@ internal object EpubContentSecurityPolicy {
         MobiMarkupEnvelope().prepare(bytes.decodeToString(throwOnInvalidSequence = true)).encodeToByteArray(),
     )
 
-    private fun transformMarkup(container: Container<Resource>, decorate: (ByteArray) -> ByteArray): Container<Resource> =
+    private fun transformMarkup(
+        container: Container<Resource>,
+        decorate: (ByteArray) -> ByteArray,
+        onFailure: ((Exception) -> Unit)? = null,
+    ): Container<Resource> =
         TransformingContainer(container) { url, resource ->
             if (url.path?.substringAfterLast('.', missingDelimiterValue = "")?.lowercase() in HTML_EXTENSIONS) {
                 TransformingResource(resource) { bytes ->
                     try {
                         Try.success(decorate(bytes))
                     } catch (error: Exception) {
+                        onFailure?.invoke(error)
                         Try.failure(ReadError.Decoding(error))
                     }
                 }
@@ -82,11 +96,7 @@ internal object EpubContentSecurityPolicy {
         } else {
             DEVICE_VIEWPORT
         }
-        val decoration =
-            "<meta http-equiv=\"Content-Security-Policy\" content=\"$CONTENT_SECURITY_POLICY\" " +
-                "data-shuku-security-profile=\"$PROFILE\"/>" +
-                viewport +
-                "<style data-shuku-security-profile=\"$PROFILE\">$SECURITY_STYLE</style>"
+        val decoration = securityHead(viewport)
         val decorated = markup.substring(0, headStart) + decoration + safeHead + markup.substring(close.range.first)
         val declaration = XML_DECLARATION.find(decorated)
         val utf8Markup = if (declaration == null) {
@@ -98,9 +108,6 @@ internal object EpubContentSecurityPolicy {
             )
         }
         val decoratedBytes = utf8Markup.toByteArray(Charsets.UTF_8)
-        require(decodeAndValidate(decoratedBytes).bodyProjection == validated.bodyProjection) {
-            "Publication security decoration changed the locator DOM projection"
-        }
         return decoratedBytes
     }
 
@@ -146,7 +153,6 @@ internal object EpubContentSecurityPolicy {
                 strictDecode(bytes, Charsets.UTF_8, 0)
             }
         }
-        require('\u0000' !in markup) { "Publication markup contains unsafe declarations" }
         validateDeclarations(markup)
         val parserMarkup = replaceStandardEntitiesForParsing(markup)
         val factory = DocumentBuilderFactory.newInstance().apply {

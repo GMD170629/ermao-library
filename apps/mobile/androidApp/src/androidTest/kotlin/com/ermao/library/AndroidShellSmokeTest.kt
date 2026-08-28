@@ -2,6 +2,7 @@ package com.ermao.library
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertCountEquals
@@ -57,6 +58,9 @@ import com.ermao.library.shared.modules.library.LibraryPage
 import com.ermao.library.shared.modules.library.domain.BookSummary
 import com.ermao.library.shared.modules.library.domain.BookDetailSummary
 import com.ermao.library.features.shelves.ui.ShelfCatalogScreen
+import com.ermao.library.features.library.ui.LibraryScreen
+import com.ermao.library.features.library.application.LibraryUiState
+import com.ermao.library.features.content.model.WorksFilters
 import com.ermao.library.features.shelves.application.ShelfCatalogUiState
 import com.ermao.library.features.shelves.application.ShelfLoadState
 import com.ermao.library.shared.modules.shelf.ShelfCatalogEntry
@@ -68,6 +72,62 @@ import com.ermao.library.shared.modules.shelf.ShelfBookPreview
 class AndroidShellSmokeTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun libraryFilterOpensOnlyFromOverflowAndPreservesDraftActions() {
+        val application = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as ErmaoLibraryApplication
+        val session = authenticatedSession()
+        val state = mutableStateOf(LibraryUiState())
+        val applied = mutableStateOf(WorksFilters())
+        var applications = 0
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                LibraryScreen(
+                    state = state.value,
+                    repository = application.contentRepository,
+                    context = ContentRequestContext(session.profile, session.identity.namespace),
+                    onSelectLibrary = {}, onQueryChanged = {}, onClearQuery = {},
+                    onSelectSort = {}, onSelectViewMode = {},
+                    onOpenFilter = { state.value = state.value.copy(filterDraft = applied.value) },
+                    onUpdateFilterDraft = { state.value = state.value.copy(filterDraft = it) },
+                    onRemoveReadingFilter = {},
+                    onClearFilters = { state.value = state.value.copy(filterDraft = WorksFilters()) },
+                    onApplyFilter = {
+                        applied.value = requireNotNull(state.value.filterDraft)
+                        applications += 1
+                        state.value = state.value.copy(filterDraft = null)
+                    },
+                    onDismissFilter = { state.value = state.value.copy(filterDraft = null) },
+                    onOpenWork = {}, onOpenFacet = { _, _ -> }, onRetry = {}, onLoadNextPage = {},
+                    onScrollAnchorChanged = { _, _ -> },
+                )
+            }
+        }
+        val filterLabel = application.getString(R.string.library_filter_action)
+        val unreadLabel = application.getString(R.string.reading_unread)
+        composeRule.onNodeWithTag("library-filter").assertDoesNotExist()
+        composeRule.onNodeWithText(filterLabel).assertDoesNotExist()
+        composeRule.onNodeWithTag("library-more").performClick()
+        composeRule.onNodeWithText(filterLabel).performClick()
+        composeRule.onNodeWithTag("library-filter-sheet").assertIsDisplayed()
+        composeRule.onNodeWithText(filterLabel).assertDoesNotExist()
+        composeRule.onNodeWithText(unreadLabel).performClick()
+        composeRule.onNodeWithTag("library-filter-cancel").performClick()
+        composeRule.runOnIdle { assertEquals(0, applications); assertEquals(WorksFilters(), applied.value) }
+        composeRule.onNodeWithTag("library-more").performClick()
+        composeRule.onNodeWithText(filterLabel).performClick()
+        composeRule.onNodeWithText(unreadLabel).performClick()
+        composeRule.onNodeWithTag("library-filter-apply").performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, applications)
+            assertEquals(com.ermao.library.features.content.model.ReadingFilter.Unread, applied.value.reading)
+        }
+        composeRule.onNodeWithTag("library-more").performClick()
+        composeRule.onNodeWithText(filterLabel).performClick()
+        composeRule.onNodeWithTag("library-filter-clear").performClick()
+        composeRule.onNodeWithTag("library-filter-apply").performClick()
+        composeRule.runOnIdle { assertEquals(2, applications); assertEquals(WorksFilters(), applied.value) }
+    }
 
     @Test
     fun shelfRowsForwardEachBooksOwnIdentity() {

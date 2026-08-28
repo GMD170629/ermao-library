@@ -6,16 +6,49 @@ import Foundation
 /** Only bridges shared resource access to native Readium; it owns no download or cache policy. */
 struct IosOnlinePublicationFactory {
     let session: ErmaoShared.OnlinePublicationSession
-    let onFailure: @MainActor @Sendable (String) -> Void
+    let onFailure: @MainActor @Sendable (IosReaderFailure) -> Void
 
     func open() async throws -> Publication {
-        let metadata = try await session.open()
-        let manifest = try Manifest(json: JSONSerialization.jsonObject(with: Data(metadata.manifestJson.utf8)))
-        guard let payload = try JSONSerialization.jsonObject(with: Data(metadata.positionsJson.utf8)) as? [String: Any],
-              let items = payload["positions"] as? [[String: Any]] else {
-            throw IosReaderFailure(code: .corruptFile)
+        let metadata: ErmaoShared.OnlinePublicationMetadata
+        do { metadata = try await session.open() }
+        catch {
+            if let failure = (error as NSError).kotlinException as? ErmaoShared.OnlinePublicationFailure {
+                throw iosOnlineReaderFailure(
+                    code: failure.code, errorCode: failure.errorCode,
+                    stage: failure.stage, cause: error
+                )
+            }
+            throw error
         }
-        let positions = try items.map { try Locator(json: $0) }
+        let manifest: Manifest
+        do {
+            manifest = try Manifest(jsonString: metadata.manifestJson)
+        } catch {
+            let failure = try ErmaoShared.OnlinePublicationFailure.companion.invalidMetadata(stage: .manifest, cause: nil)
+            throw iosOnlineReaderFailure(
+                code: failure.code, errorCode: failure.errorCode,
+                stage: failure.stage, cause: error
+            )
+        }
+        let positions: [Locator]
+        do {
+            let payload = try JSONValue(jsonString: metadata.positionsJson)
+            guard let items = payload.object?["positions"]?.array else {
+                throw IosReaderFailure(code: .invalidResponse)
+            }
+            positions = try items.map { item in
+                guard let locator = try Locator(json: item, warnings: nil) else {
+                    throw IosReaderFailure(code: .invalidResponse)
+                }
+                return locator
+            }
+        } catch {
+            let failure = try ErmaoShared.OnlinePublicationFailure.companion.invalidMetadata(stage: .positions, cause: nil)
+            throw iosOnlineReaderFailure(
+                code: failure.code, errorCode: failure.errorCode,
+                stage: failure.stage, cause: error
+            )
+        }
         let container = try IosOnlinePublicationContainer(session: session, metadata: metadata, onFailure: onFailure)
         return Publication(
             manifest: manifest,
@@ -29,7 +62,7 @@ struct IosOnlinePublicationFactory {
                         positions.filter { $0.href.string == link.href }
                     }
                 ),
-                search: StringSearchService.makeFactory()
+                search: ContentSearchService.makeFactory()
             )
         )
     }
@@ -39,10 +72,10 @@ private final class IosOnlinePublicationContainer: Container, @unchecked Sendabl
     let sourceURL: AbsoluteURL? = nil
     let entries: Set<AnyURL>
     private let session: ErmaoShared.OnlinePublicationSession
-    private let onFailure: @MainActor @Sendable (String) -> Void
+    private let onFailure: @MainActor @Sendable (IosReaderFailure) -> Void
 
     init(session: ErmaoShared.OnlinePublicationSession, metadata: ErmaoShared.OnlinePublicationMetadata,
-         onFailure: @escaping @MainActor @Sendable (String) -> Void) throws {
+         onFailure: @escaping @MainActor @Sendable (IosReaderFailure) -> Void) throws {
         self.session = session
         self.onFailure = onFailure
         entries = try Set((metadata.readingOrder + metadata.resources).map {
@@ -56,10 +89,20 @@ private final class IosOnlinePublicationContainer: Container, @unchecked Sendabl
         guard entries.contains(href) else { return nil }
         let resource = IosOnlinePublicationResource(session: session, href: href.string, onFailure: onFailure)
         guard IosPublicationSecurityPolicy.isMarkup(href.string) else { return resource }
-        return TransformingResource(resource) { result in
-            result.flatMap { bytes in
+        return TransformingResource(resource) { [onFailure] result in
+            switch result {
+            case let .failure(error): return .failure(error)
+            case let .success(bytes):
                 do { return .success(try IosPublicationSecurityPolicy.decorate(data: bytes)) }
-                catch { return .failure(.decoding("Invalid publication markup", cause: error)) }
+                catch {
+                    let failure = IosReaderFailure(
+                        code: .securityRejected,
+                        onlineContext: IosReaderOnlineFailureContext(sourceCode: "PUBLICATION_SECURITY_REJECTED", stage: .chapter),
+                        underlyingError: error as NSError
+                    )
+                    await onFailure(failure)
+                    return .failure(.decoding(failure.code.rawValue, cause: error))
+                }
             }
         }
     }
@@ -70,11 +113,11 @@ private final class IosOnlinePublicationContainer: Container, @unchecked Sendabl
 private final class IosOnlinePublicationResource: ReadiumShared.Resource, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
     private let session: ErmaoShared.OnlinePublicationSession
-    private let onFailure: @MainActor @Sendable (String) -> Void
+    private let onFailure: @MainActor @Sendable (IosReaderFailure) -> Void
     private let href: String
 
     init(session: ErmaoShared.OnlinePublicationSession, href: String,
-         onFailure: @escaping @MainActor @Sendable (String) -> Void) {
+         onFailure: @escaping @MainActor @Sendable (IosReaderFailure) -> Void) {
         self.session = session
         self.onFailure = onFailure
         self.href = href
@@ -88,9 +131,13 @@ private final class IosOnlinePublicationResource: ReadiumShared.Resource, @unche
             let result = try await session.read(href: href)
             guard let content = result as? ErmaoShared.OnlinePublicationReadResultContent else {
                 let failure = result as? ErmaoShared.OnlinePublicationReadResultFailure
-                let code = failure?.errorCode.wireValue ?? "READER_ENGINE_ERROR"
-                await onFailure(code)
-                return .failure(.decoding(code))
+                let nativeFailure = iosOnlineReaderFailure(
+                    code: failure?.code ?? "PUBLICATION_RESPONSE_INVALID",
+                    errorCode: failure?.errorCode ?? .invalidresponse,
+                    stage: failure?.stage
+                )
+                await onFailure(nativeFailure)
+                return .failure(.decoding(nativeFailure.code.rawValue))
             }
             let bytes = content.bytes.foundationData()
             let lower = Int(min(range?.lowerBound ?? 0, UInt64(bytes.count)))
@@ -98,7 +145,28 @@ private final class IosOnlinePublicationResource: ReadiumShared.Resource, @unche
             if lower < upper { consume(bytes[lower ..< upper]) }
             return .success(())
         } catch {
+            if let failure = (error as NSError).kotlinException as? ErmaoShared.OnlinePublicationFailure {
+                let nativeFailure = iosOnlineReaderFailure(
+                    code: failure.code, errorCode: failure.errorCode,
+                    stage: failure.stage, cause: error
+                )
+                await onFailure(nativeFailure)
+                return .failure(.decoding(nativeFailure.code.rawValue, cause: error))
+            }
             return .failure(.decoding("Publication read failed", cause: error))
         }
     }
+}
+
+private func iosOnlineReaderFailure(
+    code: String,
+    errorCode: ErmaoShared.ReaderErrorCode,
+    stage: ErmaoShared.OnlinePublicationStage?,
+    cause: (any Error)? = nil
+) -> IosReaderFailure {
+    IosReaderFailure(
+        code: IosReaderFailureCode(sharedCode: errorCode),
+        onlineContext: IosReaderOnlineFailureContext(sourceCode: code, stage: stage),
+        underlyingError: cause.map { $0 as NSError }
+    )
 }

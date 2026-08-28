@@ -43,11 +43,11 @@ struct IosCbzArchiveIndex: Sendable {
         do {
             core = try IosArchiveCore(fileURL: fileURL)
         } catch let failure as IosArchiveCoreFailure {
-            throw Self.map(failure)
+            throw iosArchiveReaderFailure(failure)
         }
         defer { core.close() }
-        pages = try core.pages.map { page in
-            guard let mediaType = Self.imageMediaType(page.path) else { throw IosCbzError.invalidArchive }
+        pages = core.pages.map { page in
+            let mediaType = Self.imageMediaType(page.path) ?? "image/*"
             return IosCbzPage(
                 pageIndex: page.index,
                 resourceHref: "pages/\(page.index)",
@@ -65,7 +65,7 @@ struct IosCbzArchiveIndex: Sendable {
         else { throw IosCbzError.invalidArchive }
     }
 
-    private static func imageMediaType(_ name: String) -> String? {
+    static func imageMediaType(_ name: String) -> String? {
         switch name.split(separator: ".").last?.lowercased() {
         case "jpg", "jpeg": "image/jpeg"
         case "png": "image/png"
@@ -75,12 +75,7 @@ struct IosCbzArchiveIndex: Sendable {
         }
     }
 
-    private static func map(_ failure: IosArchiveCoreFailure) -> IosCbzError {
-        if failure.stableCode.contains("ENCRYPTED") { return .encrypted }
-        if failure.stableCode.contains("LIMIT") || failure.stableCode.contains("MEMORY") { return .limitExceeded }
-        if failure.stableCode.contains("PATH") || failure.stableCode.contains("ENTRY_TYPE") { return .unsafeEntry }
-        return .invalidArchive
-    }
+
 }
 
 @MainActor
@@ -93,12 +88,12 @@ struct IosCbzPublicationFactory {
         do {
             core = try IosArchiveCore(fileURL: managed.fileURL)
         } catch let failure as IosArchiveCoreFailure {
-            throw Self.map(failure)
+            throw iosArchiveReaderFailure(failure)
         } catch {
-            throw IosReaderFailure(code: .comicArchiveCorrupt)
+            throw IosReaderFailure(code: .comicArchiveOpenFailed, underlyingError: error as NSError)
         }
         let localPages = core.pages.map { page in
-            let mediaType = Self.mediaType(for: page.path) ?? "application/octet-stream"
+            let mediaType = IosCbzArchiveIndex.imageMediaType(page.path) ?? "image/*"
             return IosCbzPage(
                 pageIndex: page.index,
                 resourceHref: "pages/\(page.index)",
@@ -110,16 +105,12 @@ struct IosCbzPublicationFactory {
                     : page.path.split(separator: "/").last.map(String.init)
             )
         }
-        guard !localPages.contains(where: { $0.mediaType == "application/octet-stream" }) else {
-            core.close()
-            throw IosReaderFailure(code: .comicArchiveCorrupt)
-        }
         let container: IosArchiveComicContainer
         do {
             container = try IosArchiveComicContainer(core: core, pages: localPages)
         } catch {
             core.close()
-            throw IosReaderFailure(code: .comicArchiveCorrupt)
+            throw IosReaderFailure(code: .comicArchiveOpenFailed, underlyingError: error as NSError)
         }
         let links = localPages.compactMap { page -> Link? in
             guard let mediaType = MediaType(page.mediaType) else { return nil }
@@ -157,25 +148,9 @@ struct IosCbzPublicationFactory {
         }
     }
 
-    private static func mediaType(for path: String) -> String? {
-        switch path.split(separator: ".").last?.lowercased() {
-        case "jpg", "jpeg": "image/jpeg"
-        case "png": "image/png"
-        case "gif": "image/gif"
-        case "webp": "image/webp"
-        default: nil
-        }
-    }
 
-    private static func map(_ failure: IosArchiveCoreFailure) -> IosReaderFailure {
-        if failure.stableCode.contains("ENCRYPTED") {
-            return IosReaderFailure(code: .comicArchiveEncrypted)
-        }
-        if failure.stableCode.contains("LIMIT") || failure.stableCode.contains("MEMORY") {
-            return IosReaderFailure(code: .comicOutOfMemoryRisk)
-        }
-        return IosReaderFailure(code: .comicArchiveCorrupt)
-    }
+
+
 }
 
 private final class IosArchiveComicContainer: Container, @unchecked Sendable {
@@ -189,7 +164,7 @@ private final class IosArchiveComicContainer: Container, @unchecked Sendable {
         pageByHref = Dictionary(uniqueKeysWithValues: pages.map { ($0.resourceHref, $0) })
         entries = try Set(pages.map { page in
             guard let url = AnyURL(string: page.resourceHref) else {
-                throw IosReaderFailure(code: .comicArchiveCorrupt)
+                throw IosReaderFailure(code: .invalidResponse)
             }
             return url
         })
@@ -200,9 +175,6 @@ private final class IosArchiveComicContainer: Container, @unchecked Sendable {
         return DataResource { [core] in
             do {
                 let bytes = try core.readPage(at: page.pageIndex)
-                guard detectComicMediaType(bytes) == page.mediaType else {
-                    return .failure(.decoding("COMIC_PAGE_MIME_MISMATCH"))
-                }
                 return .success(bytes)
             } catch {
                 return .failure(.decoding(error))
@@ -213,23 +185,11 @@ private final class IosArchiveComicContainer: Container, @unchecked Sendable {
     func close() { core.close() }
 }
 
-private func detectComicMediaType(_ data: Data) -> String? {
-    if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return "image/jpeg" }
-    if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
-    if data.count >= 6,
-       String(data: data.prefix(6), encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true {
-        return "image/gif"
-    }
-    if data.count >= 12,
-       String(data: data.prefix(4), encoding: .ascii) == "RIFF",
-       String(data: data[8 ..< 12], encoding: .ascii) == "WEBP" { return "image/webp" }
-    return nil
-}
-
 private final class IosRemoteComicContainer: Container, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
     let entries: Set<AnyURL>
 
+    private let onFailure: @MainActor @Sendable (IosReaderFailure) -> Void
     private let source: ErmaoShared.RemoteComicReaderSource
     private let server: any ErmaoShared.ComicPageServerPort
     private let imageVariant: ErmaoShared.ReaderComicImageVariant
@@ -239,8 +199,10 @@ private final class IosRemoteComicContainer: Container, @unchecked Sendable {
         source: ErmaoShared.RemoteComicReaderSource,
         pages: [IosCbzPage],
         server: any ErmaoShared.ComicPageServerPort,
-        imageVariant: ErmaoShared.ReaderComicImageVariant
+        imageVariant: ErmaoShared.ReaderComicImageVariant,
+        onFailure: @escaping @MainActor @Sendable (IosReaderFailure) -> Void
     ) throws {
+        self.onFailure = onFailure
         self.source = source
         self.server = server
         self.imageVariant = imageVariant
@@ -256,7 +218,7 @@ private final class IosRemoteComicContainer: Container, @unchecked Sendable {
     subscript(url: any URLConvertible) -> (any ReadiumShared.Resource)? {
         let href = url.anyURL.string
         guard let pageIndex = pageByHref[href] else { return nil }
-        return DataResource { [source, server, imageVariant] in
+        return DataResource { [source, server, imageVariant, onFailure] in
             do {
                 let result = try await server.read(
                     source: source,
@@ -265,12 +227,17 @@ private final class IosRemoteComicContainer: Container, @unchecked Sendable {
                 )
                 guard let content = result as? ErmaoShared.ComicPageReadResultContent else {
                     let failure = result as? ErmaoShared.ComicPageReadResultFailure
-                    return .failure(.decoding(failure?.code ?? "COMIC_PAGE_LOAD_FAILED"))
+                    let native = IosReaderFailure(
+                        code: failure.map { IosReaderFailureCode(sharedCode: $0.readerError.code) } ?? .engineError
+                    )
+                    await onFailure(native)
+                    return .failure(.decoding(native))
                 }
                 return .success(Data((0 ..< Int(content.bytes.size)).map {
                     UInt8(bitPattern: content.bytes.get(index: Int32($0)))
                 }))
             } catch {
+                await onFailure(IosReaderFailure(code: .engineError, underlyingError: error as NSError))
                 return .failure(.decoding(error))
             }
         }
@@ -283,13 +250,15 @@ struct IosRemoteComicPublicationFactory {
         source: ErmaoShared.RemoteComicReaderSource,
         pages: [IosCbzPage],
         server: any ErmaoShared.ComicPageServerPort,
-        imageVariant: ErmaoShared.ReaderComicImageVariant = .original
+        imageVariant: ErmaoShared.ReaderComicImageVariant = .original,
+        onFailure: @escaping @MainActor @Sendable (IosReaderFailure) -> Void
     ) throws -> IosOpenedReadiumPublication {
         let container = try IosRemoteComicContainer(
             source: source,
             pages: pages,
             server: server,
-            imageVariant: imageVariant
+            imageVariant: imageVariant,
+            onFailure: onFailure
         )
         let links = pages.compactMap { page -> Link? in
             guard let mediaType = MediaType(page.mediaType) else { return nil }
@@ -316,4 +285,9 @@ struct IosRemoteComicPublicationFactory {
         )
         return IosOpenedReadiumPublication(publication: publication) { publication.close() }
     }
+}
+
+private func iosArchiveReaderFailure(_ failure: IosArchiveCoreFailure) -> IosReaderFailure {
+    let code = ErmaoShared.PublicKt.readerErrorCodeForFailure(failureCode: failure.stableCode, recoverable: false)
+    return IosReaderFailure(code: IosReaderFailureCode(sharedCode: code), underlyingError: failure as NSError)
 }

@@ -10,9 +10,12 @@ enum IosTxtPublicationError: Error, Sendable {
 
 struct IosTxtPublicationFactory: Sendable {
     func open(_ managed: IosManagedPublication) throws -> Publication {
+        let bytes = Int64(try managed.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0)
+        if let failure = ErmaoShared.ReaderAdmission.shared.localFailure(format: "txt", bytes: bytes) {
+            throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: failure))
+        }
         let data = try Data(contentsOf: managed.fileURL, options: [.mappedIfSafe])
-        guard data.count <= 64 * 1_024 * 1_024,
-              let decoded = IosStrictTxtDecoder.decode(data)
+        guard let decoded = IosStrictTxtDecoder.decode(data)
         else { throw IosTxtPublicationError.invalidEncoding }
 
         // Chapter boundaries, hrefs, block IDs, escaping and CSS are owned by KMP.
@@ -23,9 +26,7 @@ struct IosTxtPublicationFactory: Sendable {
         var resources: [String: Data] = [:]
         var readingOrder: [Link] = []
         for resource in normalized.resources {
-            resources[resource.href] = try IosPublicationSecurityPolicy.decorate(
-                data: Data(resource.xhtml.utf8)
-            )
+            resources[resource.href] = IosPublicationSecurityPolicy.generatedChapter(resource.xhtml)
             readingOrder.append(
                 Link(href: resource.href, mediaType: .xhtml, title: resource.title)
             )
@@ -53,7 +54,7 @@ struct IosTxtPublicationFactory: Sendable {
                 positions: EPUBPositionsService.makeFactory(
                     reflowableStrategy: .archiveEntryLength(pageLength: 1024)
                 ),
-                search: StringSearchService.makeFactory()
+                search: ContentSearchService.makeFactory()
             )
         )
     }
@@ -73,11 +74,6 @@ enum IosStrictTxtDecoder {
             decoded = String(data: data, encoding: .utf8)
                 ?? String(data: data, encoding: String.Encoding(rawValue: 0x8000_0632))
         }
-        guard var decoded else { return nil }
-        while decoded.last == "\0" {
-            decoded.removeLast()
-        }
-        guard !decoded.isEmpty, !decoded.contains("\0") else { return nil }
         return decoded
     }
 }

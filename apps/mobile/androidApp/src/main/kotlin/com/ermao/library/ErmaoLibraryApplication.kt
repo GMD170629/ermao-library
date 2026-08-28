@@ -22,6 +22,45 @@ import com.ermao.library.shared.modules.workmanagement.application.WorkManagemen
 import com.ermao.library.platform.persistence.AndroidMobileStorageContract
 
 class ErmaoLibraryApplication : Application() {
+    private val downloadsViewModelStore = androidx.lifecycle.ViewModelStore()
+    private var downloadsNamespace: String? = null
+    private var downloadsInstance: com.ermao.library.features.downloads.AccountDownloads? = null
+    private var downloadsObservation: com.ermao.library.shared.modules.auth.Observation? = null
+    private val lifecycleHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    fun accountDownloads(session: com.ermao.library.shared.modules.auth.domain.AppSession.Authenticated):
+        com.ermao.library.features.downloads.AccountDownloads {
+        val namespace = session.identity.namespace
+        val key = "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
+        if (downloadsNamespace == key) downloadsInstance?.let { return it }
+        if (downloadsNamespace != key) {
+            downloadsViewModelStore.clear()
+            downloadsInstance = null
+            downloadsNamespace = key
+        }
+        val factory = com.ermao.library.features.downloads.AccountDownloads.factory(
+            downloadCatalog, sharedDownloadCatalog, downloadFiles,
+            com.ermao.library.shared.modules.downloads.createDownloadsGateway(
+                com.ermao.library.shared.core.network.ApiClientFactory(
+                    com.ermao.library.shared.core.network.AndroidEncryptedCookieVault(this),
+                    requestTimeoutMillis = 30L * 60L * 1000L,
+                ), session.profile,
+            ),
+            com.ermao.library.shared.modules.downloads.DownloadRequestContext(
+                session.profile,
+                com.ermao.library.shared.modules.downloads.DownloadNamespace(namespace.serverIdentity, namespace.userId, namespace.authorizationVersion),
+            ),
+        )
+        return androidx.lifecycle.ViewModelProvider(downloadsViewModelStore, factory)[com.ermao.library.features.downloads.AccountDownloads::class.java]
+            .also { downloadsInstance = it }
+    }
+
+    private fun releaseAccountDownloads(downloads: com.ermao.library.features.downloads.AccountDownloads) {
+        if (downloadsInstance !== downloads) return
+        downloadsViewModelStore.clear()
+        downloadsInstance = null
+        downloadsNamespace = null
+    }
     lateinit var mobileRuntime: MobileRuntime
         private set
     lateinit var loginCredentialStore: LoginCredentialStore
@@ -62,9 +101,19 @@ class ErmaoLibraryApplication : Application() {
             profileRepository = mobileStore,
             verifiedSessionRepository = mobileStore,
         )
+        downloadsObservation = mobileRuntime.observeSession {
+            lifecycleHandler.post {
+                val current = mobileRuntime.currentSession as? com.ermao.library.shared.modules.auth.domain.AppSession.Authenticated
+                val key = current?.identity?.namespace?.let { "${it.serverIdentity}|${it.userId}|${it.authorizationVersion}" }
+                if (key != downloadsNamespace) downloadsInstance?.let(::releaseAccountDownloads)
+            }
+        }
     }
 
     override fun onTerminate() {
+        downloadsObservation?.cancel()
+        lifecycleHandler.removeCallbacksAndMessages(null)
+        downloadsViewModelStore.clear()
         mobileRuntime.close()
         super.onTerminate()
     }

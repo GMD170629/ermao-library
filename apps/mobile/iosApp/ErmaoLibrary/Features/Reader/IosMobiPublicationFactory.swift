@@ -170,9 +170,9 @@ struct IosMobiPublicationFactory: Sendable {
             readingProgression: Self.readingProgression(info.readingDirection),
             description: description,
             otherMetadata: [
-                "https://shuku.app/reader/decoded-format": Self.decodedFormat(info.format),
-                "https://shuku.app/reader/adapter": IosMobiBook.parserIdentifier,
-                "https://shuku.app/reader/normalization": IosMobiPublicationIdentity.normalizationIdentifier,
+                "https://shuku.app/reader/decoded-format": .string(Self.decodedFormat(info.format)),
+                "https://shuku.app/reader/adapter": .string(IosMobiBook.parserIdentifier),
+                "https://shuku.app/reader/normalization": .string(IosMobiPublicationIdentity.normalizationIdentifier),
             ]
         )
         let publication = Publication(
@@ -192,7 +192,7 @@ struct IosMobiPublicationFactory: Sendable {
                 positions: EPUBPositionsService.makeFactory(
                     reflowableStrategy: .archiveEntryLength(pageLength: 1024)
                 ),
-                search: StringSearchService.makeFactory()
+                search: ContentSearchService.makeFactory()
             )
         )
         return IosMobiPublicationResult(

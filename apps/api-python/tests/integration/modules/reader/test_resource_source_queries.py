@@ -26,7 +26,7 @@ from app.modules.media.infrastructure.resource_repository import (
     SqlAlchemyMediaResourceRepository,
 )
 from app.modules.publications.application.ports import PublicationAccessScope
-from app.modules.publications.domain.model import PublicationCorruptError
+from app.modules.publications.domain.model import PublicationNotFoundError
 from app.modules.publications.infrastructure.source_files import (
     resolve_publication_source,
 )
@@ -476,8 +476,10 @@ def test_missing_source_file_keeps_unavailable_error(
     )
 
     assert source is not None
-    with pytest.raises(PublicationCorruptError, match="unavailable"):
+    with pytest.raises(PublicationNotFoundError) as missing_error:
         resolve_publication_source(source.path, test_settings.resolved_storage_root)
+    assert isinstance(missing_error.value.__cause__, FileNotFoundError)
+    assert missing_error.value.code == "PUBLICATION_NOT_FOUND"
     assert (
         SqlAlchemyReaderResourceRepository(db_session)
         .list_visible_resources_for_book("book-missing", _ADMIN_READER)[0]

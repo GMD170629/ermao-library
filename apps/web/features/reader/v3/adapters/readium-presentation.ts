@@ -47,7 +47,7 @@ export function projectReadiumEffectivePreferences(
       // Keep the stored wire value compatible, but require an explicit user
       // choice before enabling a two-page layout.
       spreadMode: preferences.epub.spreadMode === 'double' ? 'double' : 'single',
-      typography: { ...preferences.epub.typography },
+      typography: { ...preferences.epub.typography, preservePublisherStyles: false },
       optimization: { ...preferences.epub.optimization }
     },
     comic: { ...preferences.comic },
@@ -86,18 +86,15 @@ export function createReadiumEpubPreferences(
   const effective = projectReadiumEffectivePreferences(preferences);
   const layout = resolveReadiumViewportPresentation(effective, viewportWidth);
   const colors = readerThemeSurfaces[effective.appearance.theme];
-  const allowPublisherColors = effective.epub.typography.allowPublisherColors;
-  const allowPublisherFonts = effective.epub.typography.allowPublisherFonts;
-  const preservePublisherStyles = effective.epub.typography.preservePublisherStyles;
 
   return {
-    backgroundColor: allowPublisherColors ? null : colors.background,
-    textColor: allowPublisherColors ? null : colors.color,
-    linkColor: allowPublisherColors ? null : colors.link,
-    visitedColor: allowPublisherColors ? null : colors.link,
-    selectionBackgroundColor: allowPublisherColors ? null : colors.accent,
-    selectionTextColor: allowPublisherColors ? null : colors.background,
-    fontFamily: allowPublisherFonts ? null : resolvedFont.stack,
+    backgroundColor: colors.background,
+    textColor: colors.color,
+    linkColor: colors.link,
+    visitedColor: colors.link,
+    selectionBackgroundColor: colors.accent,
+    selectionTextColor: colors.background,
+    fontFamily: resolvedFont.stack,
     fontSize: effective.epub.fontSize / BASE_EPUB_FONT_SIZE,
     fontWeight: effective.epub.fontWeight,
     // Readium rejects negative values. A null here clears any preceding native
@@ -105,7 +102,7 @@ export function createReadiumEpubPreferences(
     letterSpacing: effective.epub.letterSpacing < 0
       ? null
       : effective.epub.letterSpacing,
-    lineHeight: preservePublisherStyles ? null : effective.epub.lineHeight,
+    lineHeight: effective.epub.lineHeight,
     pageGutter: layout.pageGutter,
     paragraphIndent: effective.epub.typography.paragraphIndent,
     paragraphSpacing: effective.epub.typography.paragraphSpacing,
@@ -141,19 +138,13 @@ export function createReadiumResidualStyle(
   const fontFace = resolvedFont.embedded
     ? `@font-face { font-family: "${resolvedFont.embedded.family}"; src: url("${resolvedFont.embedded.url}") format("woff2"); font-display: swap; font-style: normal; font-weight: 400; }`
     : '';
-  const colorOverride = effective.epub.typography.allowPublisherColors
-    ? ''
-    : `
+  const colorOverride = `
       html, ${protectedBody} { background: ${colors.background} !important; color: ${colors.color} !important; }
       ${protectedBody} * { background-color: transparent !important; color: inherit !important; }
       ${protectedBody} a, ${protectedBody} a * { color: ${colors.link} !important; }
     `;
-  const fontOverride = effective.epub.typography.allowPublisherFonts
-    ? ''
-    : `${protectedBody}, ${protectedBody} * { font-family: ${resolvedFont.stack} !important; }`;
-  const lineHeightOverride = effective.epub.typography.preservePublisherStyles
-    ? ''
-    : `${protectedBody} { line-height: ${effective.epub.lineHeight} !important; } ${protectedBody} * { line-height: inherit !important; }`;
+  const fontOverride = `${protectedBody}, ${protectedBody} * { font-family: ${resolvedFont.stack} !important; }`;
+  const lineHeightOverride = `${protectedBody} { line-height: ${effective.epub.lineHeight} !important; } ${protectedBody} * { line-height: inherit !important; }`;
   const negativeLetterSpacing = effective.epub.letterSpacing < 0
     ? `${protectedBody}, ${protectedBody} * { letter-spacing: ${effective.epub.letterSpacing}em !important; }`
     : '';

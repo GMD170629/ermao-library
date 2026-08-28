@@ -20,15 +20,21 @@ from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
     PublicationLink,
+    PublicationMarkupError,
+    PublicationOnlineLimitError,
+    PublicationParserLimitError,
+    PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
     PublicationRevision,
+    PublicationSecurityError,
+    PublicationStructureError,
     PublicationTocEntry,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.locator_dom import (
     WEB_SECURITY_PROFILE,
-    decorate_markup_head,
+    publication_security_head,
 )
 from app.modules.publications.infrastructure.snapshot_cache import (
     PublicationSnapshotCache,
@@ -123,17 +129,17 @@ def _normalized_text(element: ElementTree.Element | None) -> str:
 
 
 def _xml_root(content: bytes) -> ElementTree.Element:
-    if not content or len(content) > MAX_FB2_SOURCE_BYTES:
-        raise PublicationCorruptError("FB2 source exceeds the size limit")
+    if len(content) > MAX_FB2_SOURCE_BYTES:
+        raise PublicationOnlineLimitError("FB2 source exceeds the size limit")
     if _UNSAFE_XML_DECLARATION.search(content):
-        raise PublicationCorruptError("active XML declarations are not allowed")
+        raise PublicationSecurityError("active XML declarations are not allowed")
     content = _normalize_legacy_link_prefix(content)
     try:
         root = ElementTree.fromstring(content)
     except ElementTree.ParseError as error:
-        raise PublicationCorruptError("FB2 XML is invalid") from error
+        raise PublicationMarkupError("FB2 XML is invalid") from error
     if _local_name(root.tag) != "FictionBook":
-        raise PublicationCorruptError("FB2 root element is invalid")
+        raise PublicationStructureError("FB2 root element is invalid")
     _validate_tree_shape(root)
     return root
 
@@ -164,9 +170,9 @@ def _validate_tree_shape(root: ElementTree.Element) -> None:
         element, depth = stack.pop()
         count += 1
         if count > MAX_XML_ELEMENTS:
-            raise PublicationCorruptError("FB2 contains too many XML elements")
+            raise PublicationParserLimitError("FB2 contains too many XML elements")
         if depth > MAX_XML_DEPTH:
-            raise PublicationCorruptError("FB2 XML nesting is too deep")
+            raise PublicationParserLimitError("FB2 XML nesting is too deep")
         stack.extend((child, depth + 1) for child in element)
 
 
@@ -223,27 +229,19 @@ def _binary_resources(
             or estimated_size < 1
             or estimated_size > MAX_BINARY_RESOURCE_BYTES
         ):
-            raise PublicationCorruptError("FB2 binary resource exceeds the size limit")
+            raise PublicationParserLimitError(
+                "FB2 binary resource exceeds the size limit"
+            )
         total_size += estimated_size
         if total_size > MAX_TOTAL_BINARY_BYTES:
-            raise PublicationCorruptError("FB2 binary resources exceed the size limit")
+            raise PublicationParserLimitError(
+                "FB2 binary resources exceed the size limit"
+            )
         safe_identifier = hashlib.sha256(identifier.encode()).hexdigest()[:20]
         href = f"fb2/images/{safe_identifier}.{extension}"
         resources[href] = (media_type, encoded)
         href_by_identifier[identifier] = href
     return resources, href_by_identifier
-
-
-def _matches_image_type(content: bytes, media_type: str) -> bool:
-    if media_type == "image/jpeg":
-        return content.startswith(b"\xff\xd8\xff")
-    if media_type == "image/png":
-        return content.startswith(b"\x89PNG\r\n\x1a\n")
-    if media_type == "image/gif":
-        return content.startswith((b"GIF87a", b"GIF89a"))
-    if media_type == "image/webp":
-        return content.startswith(b"RIFF") and content[8:12] == b"WEBP"
-    return False
 
 
 def _section_title(element: ElementTree.Element, fallback: str) -> str:
@@ -269,7 +267,9 @@ def _build_sections(
             return current
         sequence += 1
         if sequence > MAX_SECTIONS * 20:
-            raise PublicationCorruptError("FB2 document has too many addressable nodes")
+            raise PublicationParserLimitError(
+                "FB2 document has too many addressable nodes"
+            )
         anchor = f"fb2-node-{sequence:06d}"
         element_anchors[element] = anchor
         original_identifier = (_attribute(element, "id") or "").strip()
@@ -289,7 +289,7 @@ def _build_sections(
         nonlocal section_count
         section_count += 1
         if section_count > MAX_SECTIONS:
-            raise PublicationCorruptError("FB2 contains too many sections")
+            raise PublicationParserLimitError("FB2 contains too many sections")
         anchor = allocate_anchor(element, resource_href)
         title = _section_title(element, fallback)
         children = tuple(
@@ -443,10 +443,10 @@ def _section_xhtml(
     )
     document = f"""<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{_escape(language or "und")}">
-<head><meta charset="utf-8"/><title>{_escape(section.title)}</title>
+<head>{publication_security_head(WEB_SECURITY_PROFILE)}<meta charset="utf-8"/><title>{_escape(section.title)}</title>
 <link rel="stylesheet" type="text/css" href="reader.css"/></head>
 <body>{body}</body></html>""".encode()
-    return decorate_markup_head(document, WEB_SECURITY_PROFILE)
+    return document
 
 
 def _toc_entry(section: _Fb2Section) -> PublicationTocEntry:
@@ -468,7 +468,7 @@ def _snapshot(
     try:
         content = source_path.read_bytes()
     except OSError as error:
-        raise PublicationCorruptError("FB2 source is unavailable") from error
+        raise PublicationReadError("FB2 source is unavailable") from error
     root = _xml_root(content)
     description = _first_descendant(root, "description")
     title_info = _first_descendant(description, "title-info")
@@ -485,7 +485,7 @@ def _snapshot(
     binary_resources, image_hrefs = _binary_resources(root)
     sections, element_anchors, original_targets = _build_sections(root, title)
     if not sections:
-        raise PublicationCorruptError("FB2 reading order is empty")
+        raise PublicationStructureError("FB2 reading order is empty")
     resources_by_href: dict[str, tuple[str, bytes | str]] = {
         _STYLESHEET_HREF: ("text/css", _STYLESHEET),
         **binary_resources,
@@ -565,10 +565,6 @@ class Fb2PublicationAdapter(PublicationAdapter):
                     raise PublicationCorruptError(
                         "FB2 binary resource is invalid"
                     ) from error
-                if not _matches_image_type(content, media_type):
-                    raise PublicationCorruptError(
-                        "FB2 image resource content is invalid"
-                    )
             else:
                 content = payload
         else:
@@ -589,7 +585,7 @@ class Fb2PublicationAdapter(PublicationAdapter):
         )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_FB2_SOURCE_BYTES:
-            raise PublicationCorruptError("FB2 source exceeds the size limit")
+            raise PublicationOnlineLimitError("FB2 source exceeds the size limit")
         key = (
             str(source_path),
             stat_result.st_size,

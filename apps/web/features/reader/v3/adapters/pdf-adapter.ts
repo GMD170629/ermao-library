@@ -1,3 +1,4 @@
+import { ReaderResourceError } from '../../api/client';
 import {
   PDF_RANGE_CHUNK_BYTES,
   quantizePageProgression,
@@ -904,13 +905,13 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private pdfErrorCode(reason: unknown) {
-    if (reason instanceof PdfRangeError) return reason.code;
+    if (reason instanceof PdfRangeError || reason instanceof ReaderResourceError) return reason.code;
     if (reason instanceof PdfAdapterFailure) return reason.code;
     const pdfjs = this.pdfjs;
     if (pdfjs && reason instanceof pdfjs.InvalidPDFException) return 'PDF_INVALID';
     if (pdfjs && reason instanceof pdfjs.PasswordException) return 'PDF_ENCRYPTED';
-    if (pdfjs && reason instanceof pdfjs.ResponseException) return 'NETWORK_UNAVAILABLE';
-    return 'PDF_INVALID';
+    if (pdfjs && reason instanceof pdfjs.ResponseException) return 'PUBLICATION_RESPONSE_INVALID';
+    return 'READER_ENGINE_ERROR';
   }
 
   private pdfErrorMessage(reason: unknown) {
@@ -922,7 +923,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     if (code === 'PDF_RENDER_FAILED') return 'PDF 页面渲染失败';
     if (code === 'OUT_OF_MEMORY_RISK') return 'PDF 页面尺寸过大，无法安全渲染';
     if (reason instanceof PdfRangeError) return reason.message;
-    return errorMessage(reason, 'PDF 加载失败');
+    return '阅读引擎失败，未提供详细原因。';
   }
 
   private viewModel(): PdfViewModel {

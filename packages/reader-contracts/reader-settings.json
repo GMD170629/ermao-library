@@ -1,0 +1,1423 @@
+{
+  "version": 1,
+  "preferenceVersion": 5,
+  "sections": [
+    {
+      "id": "top",
+      "panel": "appearance",
+      "label": {
+        "zh-CN": "",
+        "en-US": ""
+      },
+      "advanced": false
+    },
+    {
+      "id": "textAppearance",
+      "panel": "appearance",
+      "label": {
+        "zh-CN": "文字外观",
+        "en-US": "Text Appearance"
+      },
+      "advanced": false
+    },
+    {
+      "id": "comicAppearance",
+      "panel": "appearance",
+      "label": {
+        "zh-CN": "画面外观",
+        "en-US": "Image Appearance"
+      },
+      "advanced": false
+    },
+    {
+      "id": "pdfAppearance",
+      "panel": "appearance",
+      "label": {
+        "zh-CN": "页面外观",
+        "en-US": "Page Appearance"
+      },
+      "advanced": false
+    },
+    {
+      "id": "interface",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "阅读界面",
+        "en-US": "Reader Interface"
+      },
+      "advanced": false
+    },
+    {
+      "id": "turning",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "翻页设置",
+        "en-US": "Page Turning"
+      },
+      "advanced": false
+    },
+    {
+      "id": "layout",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "排版",
+        "en-US": "Layout"
+      },
+      "advanced": false
+    },
+    {
+      "id": "optimization",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "智能优化",
+        "en-US": "Smart Optimization"
+      },
+      "advanced": false
+    },
+    {
+      "id": "paragraph",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "段落与内容样式",
+        "en-US": "Paragraph and Content Styles"
+      },
+      "advanced": true
+    },
+    {
+      "id": "comicImage",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "漫画画面",
+        "en-US": "Comic Images"
+      },
+      "advanced": true
+    },
+    {
+      "id": "operations",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "操作方式",
+        "en-US": "Controls"
+      },
+      "advanced": true
+    },
+    {
+      "id": "reset",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "",
+        "en-US": ""
+      },
+      "advanced": false
+    }
+  ],
+  "optionGroups": {
+    "READER_THEME_OPTIONS": [
+      {
+        "value": "day",
+        "label": {
+          "zh-CN": "白天",
+          "en-US": "Light"
+        }
+      },
+      {
+        "value": "warm",
+        "label": {
+          "zh-CN": "暖色",
+          "en-US": "Warm"
+        }
+      },
+      {
+        "value": "green",
+        "label": {
+          "zh-CN": "护眼绿",
+          "en-US": "Sage green"
+        }
+      },
+      {
+        "value": "night",
+        "label": {
+          "zh-CN": "夜间",
+          "en-US": "Dark"
+        }
+      },
+      {
+        "value": "black",
+        "label": {
+          "zh-CN": "纯黑",
+          "en-US": "Black"
+        }
+      }
+    ],
+    "READER_FONT_SIZE_OPTIONS": [
+      {
+        "value": "16",
+        "label": {
+          "zh-CN": "小",
+          "en-US": "Small"
+        }
+      },
+      {
+        "value": "18",
+        "label": {
+          "zh-CN": "中",
+          "en-US": "Medium"
+        }
+      },
+      {
+        "value": "22",
+        "label": {
+          "zh-CN": "大",
+          "en-US": "Large"
+        }
+      }
+    ],
+    "READER_LINE_HEIGHT_OPTIONS": [
+      {
+        "value": "1.6",
+        "label": {
+          "zh-CN": "小",
+          "en-US": "Small"
+        }
+      },
+      {
+        "value": "1.9",
+        "label": {
+          "zh-CN": "中",
+          "en-US": "Medium"
+        }
+      },
+      {
+        "value": "2.2",
+        "label": {
+          "zh-CN": "大",
+          "en-US": "Large"
+        }
+      }
+    ],
+    "READER_FONT_FAMILY_OPTIONS": [
+      {
+        "value": "pingfang",
+        "label": {
+          "zh-CN": "苹方",
+          "en-US": "PingFang"
+        }
+      },
+      {
+        "value": "heiti",
+        "label": {
+          "zh-CN": "黑体",
+          "en-US": "Heiti"
+        }
+      },
+      {
+        "value": "songti",
+        "label": {
+          "zh-CN": "宋体",
+          "en-US": "Songti"
+        }
+      },
+      {
+        "value": "yahei",
+        "label": {
+          "zh-CN": "微软雅黑",
+          "en-US": "Microsoft YaHei"
+        }
+      },
+      {
+        "value": "kaiti",
+        "label": {
+          "zh-CN": "楷体",
+          "en-US": "Kaiti"
+        }
+      }
+    ],
+    "READER_FLOW_OPTIONS": [
+      {
+        "value": "paginated",
+        "label": {
+          "zh-CN": "分页",
+          "en-US": "Paginated"
+        }
+      },
+      {
+        "value": "scrolled",
+        "label": {
+          "zh-CN": "滚动",
+          "en-US": "Scroll"
+        }
+      }
+    ],
+    "READER_SPREAD_MODE_OPTIONS": [
+      {
+        "value": "single",
+        "label": {
+          "zh-CN": "单页",
+          "en-US": "Single Page"
+        }
+      },
+      {
+        "value": "double",
+        "label": {
+          "zh-CN": "双页",
+          "en-US": "Double"
+        }
+      }
+    ],
+    "READER_FONT_WEIGHT_OPTIONS": [
+      {
+        "value": "400",
+        "label": {
+          "zh-CN": "常规",
+          "en-US": "Regular"
+        }
+      },
+      {
+        "value": "500",
+        "label": {
+          "zh-CN": "中等",
+          "en-US": "Medium"
+        }
+      },
+      {
+        "value": "700",
+        "label": {
+          "zh-CN": "粗体",
+          "en-US": "Bold"
+        }
+      }
+    ],
+    "READER_LETTER_SPACING_OPTIONS": [
+      {
+        "value": "-0.02",
+        "label": {
+          "zh-CN": "紧凑",
+          "en-US": "Compact"
+        }
+      },
+      {
+        "value": "0",
+        "label": {
+          "zh-CN": "标准",
+          "en-US": "Standard"
+        }
+      },
+      {
+        "value": "0.04",
+        "label": {
+          "zh-CN": "舒展",
+          "en-US": "Expanded"
+        }
+      },
+      {
+        "value": "0.08",
+        "label": {
+          "zh-CN": "宽松",
+          "en-US": "Loose"
+        }
+      }
+    ],
+    "READER_PAGE_MARGIN_OPTIONS": [
+      {
+        "value": "narrow",
+        "label": {
+          "zh-CN": "窄",
+          "en-US": "narrow"
+        }
+      },
+      {
+        "value": "standard",
+        "label": {
+          "zh-CN": "标准",
+          "en-US": "Standard"
+        }
+      },
+      {
+        "value": "wide",
+        "label": {
+          "zh-CN": "宽",
+          "en-US": "width"
+        }
+      }
+    ],
+    "READER_PROGRESS_STYLE_OPTIONS": [
+      {
+        "value": "auto",
+        "label": {
+          "zh-CN": "自动",
+          "en-US": "Auto"
+        }
+      },
+      {
+        "value": "percent",
+        "label": {
+          "zh-CN": "百分比",
+          "en-US": "Percentage"
+        }
+      },
+      {
+        "value": "position",
+        "label": {
+          "zh-CN": "当前位置",
+          "en-US": "Current Location"
+        }
+      },
+      {
+        "value": "remaining",
+        "label": {
+          "zh-CN": "剩余量",
+          "en-US": "Remaining"
+        }
+      },
+      {
+        "value": "hidden",
+        "label": {
+          "zh-CN": "隐藏",
+          "en-US": "Hidden"
+        }
+      }
+    ],
+    "READER_COMIC_FLOW_OPTIONS": [
+      {
+        "value": "paginated",
+        "label": {
+          "zh-CN": "分页",
+          "en-US": "Paginated"
+        }
+      },
+      {
+        "value": "scrolled",
+        "label": {
+          "zh-CN": "竖向连续",
+          "en-US": "Vertical Continuous"
+        }
+      }
+    ],
+    "READER_PAGE_GAP_OPTIONS": [
+      {
+        "value": "0",
+        "label": {
+          "zh-CN": "无",
+          "en-US": "None"
+        }
+      },
+      {
+        "value": "8",
+        "label": {
+          "zh-CN": "8px",
+          "en-US": "8px"
+        }
+      },
+      {
+        "value": "16",
+        "label": {
+          "zh-CN": "16px",
+          "en-US": "16px"
+        }
+      },
+      {
+        "value": "24",
+        "label": {
+          "zh-CN": "24px",
+          "en-US": "24px"
+        }
+      }
+    ],
+    "READER_PAGE_TURN_ANIMATION_OPTIONS": [
+      {
+        "value": "slide",
+        "label": {
+          "zh-CN": "平移",
+          "en-US": "Slide"
+        }
+      },
+      {
+        "value": "off",
+        "label": {
+          "zh-CN": "关闭",
+          "en-US": "Close"
+        }
+      }
+    ],
+    "READER_COMIC_IMAGE_FIT_OPTIONS": [
+      {
+        "value": "width",
+        "label": {
+          "zh-CN": "宽度",
+          "en-US": "Width"
+        }
+      },
+      {
+        "value": "height",
+        "label": {
+          "zh-CN": "高度",
+          "en-US": "Height"
+        }
+      },
+      {
+        "value": "contain",
+        "label": {
+          "zh-CN": "完整",
+          "en-US": "Complete"
+        }
+      },
+      {
+        "value": "original",
+        "label": {
+          "zh-CN": "原始",
+          "en-US": "Original"
+        }
+      }
+    ],
+    "READER_COMIC_IMAGE_VARIANT_OPTIONS": [
+      {
+        "value": "original",
+        "label": {
+          "zh-CN": "原图",
+          "en-US": "Original Chart"
+        }
+      },
+      {
+        "value": "data-saver",
+        "label": {
+          "zh-CN": "省流",
+          "en-US": "Save"
+        }
+      }
+    ],
+    "READER_COMIC_DIRECTION_OPTIONS": [
+      {
+        "value": "ltr",
+        "label": {
+          "zh-CN": "左至右",
+          "en-US": "Left to Right"
+        }
+      },
+      {
+        "value": "rtl",
+        "label": {
+          "zh-CN": "右至左",
+          "en-US": "Right to Left"
+        }
+      }
+    ],
+    "READER_PDF_FIT_OPTIONS": [
+      {
+        "value": "width",
+        "label": {
+          "zh-CN": "宽度",
+          "en-US": "Width"
+        }
+      },
+      {
+        "value": "page",
+        "label": {
+          "zh-CN": "整页",
+          "en-US": "Full Page"
+        }
+      }
+    ],
+    "READER_TAP_ZONE_OPTIONS": [
+      {
+        "value": "standard",
+        "label": {
+          "zh-CN": "标准",
+          "en-US": "Standard"
+        }
+      },
+      {
+        "value": "reversed",
+        "label": {
+          "zh-CN": "反向",
+          "en-US": "Reversed"
+        }
+      },
+      {
+        "value": "disabled",
+        "label": {
+          "zh-CN": "关闭",
+          "en-US": "Close"
+        }
+      }
+    ],
+    "READER_TEXT_ALIGN_OPTIONS": [
+      {
+        "value": "publisher",
+        "label": {
+          "zh-CN": "原书",
+          "en-US": "Publisher Default"
+        }
+      },
+      {
+        "value": "left",
+        "label": {
+          "zh-CN": "左对齐",
+          "en-US": "Left aligned"
+        }
+      },
+      {
+        "value": "justify",
+        "label": {
+          "zh-CN": "两端对齐",
+          "en-US": "Justified"
+        }
+      }
+    ],
+    "READER_PARAGRAPH_INDENT_OPTIONS": [
+      {
+        "value": "0",
+        "label": {
+          "zh-CN": "关闭",
+          "en-US": "Close"
+        }
+      },
+      {
+        "value": "1",
+        "label": {
+          "zh-CN": "一字",
+          "en-US": "1 character"
+        }
+      },
+      {
+        "value": "2",
+        "label": {
+          "zh-CN": "两字",
+          "en-US": "2 characters"
+        }
+      },
+      {
+        "value": "3",
+        "label": {
+          "zh-CN": "三字",
+          "en-US": "3 characters"
+        }
+      }
+    ],
+    "READER_PARAGRAPH_SPACING_OPTIONS": [
+      {
+        "value": "0",
+        "label": {
+          "zh-CN": "原书",
+          "en-US": "Publisher Default"
+        }
+      },
+      {
+        "value": "0.4",
+        "label": {
+          "zh-CN": "小",
+          "en-US": "Small"
+        }
+      },
+      {
+        "value": "0.8",
+        "label": {
+          "zh-CN": "中",
+          "en-US": "Medium"
+        }
+      },
+      {
+        "value": "1.2",
+        "label": {
+          "zh-CN": "大",
+          "en-US": "Large"
+        }
+      }
+    ],
+    "READER_PDF_ROTATION_OPTIONS": [
+      {
+        "value": "0",
+        "label": {
+          "zh-CN": "0°",
+          "en-US": "0°"
+        }
+      },
+      {
+        "value": "90",
+        "label": {
+          "zh-CN": "90°",
+          "en-US": "90°"
+        }
+      },
+      {
+        "value": "180",
+        "label": {
+          "zh-CN": "180°",
+          "en-US": "180°"
+        }
+      },
+      {
+        "value": "270",
+        "label": {
+          "zh-CN": "270°",
+          "en-US": "270°"
+        }
+      }
+    ],
+    "READER_PDF_CROP_OPTIONS": [
+      {
+        "value": "off",
+        "label": {
+          "zh-CN": "关闭",
+          "en-US": "Off"
+        }
+      },
+      {
+        "value": "auto",
+        "label": {
+          "zh-CN": "自动",
+          "en-US": "Auto"
+        }
+      }
+    ]
+  },
+  "settings": [
+    {
+      "id": "theme",
+      "label": {
+        "zh-CN": "主题",
+        "en-US": "Theme"
+      },
+      "section": "top",
+      "path": "appearance.theme",
+      "control": "Theme",
+      "kind": "choice",
+      "options": "READER_THEME_OPTIONS",
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "themeMode",
+      "label": {
+        "zh-CN": "跟随系统明暗",
+        "en-US": "Follow System Appearance"
+      },
+      "section": "top",
+      "path": "appearance.themeMode",
+      "control": "SystemTheme",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "fontSize",
+      "label": {
+        "zh-CN": "字号",
+        "en-US": "Font Size"
+      },
+      "section": "textAppearance",
+      "path": "epub.fontSize",
+      "control": "FontSize",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        14,
+        30,
+        1
+      ]
+    },
+    {
+      "id": "quickFontSize",
+      "label": {
+        "zh-CN": "快捷字号",
+        "en-US": "Quick Font Size"
+      },
+      "section": "textAppearance",
+      "path": "epub.fontSize",
+      "control": "FontSize",
+      "kind": "choice",
+      "options": "READER_FONT_SIZE_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "lineHeight",
+      "label": {
+        "zh-CN": "行距",
+        "en-US": "Line Height"
+      },
+      "section": "textAppearance",
+      "path": "epub.lineHeight",
+      "control": "LineHeight",
+      "kind": "choice",
+      "options": "READER_LINE_HEIGHT_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        1.4,
+        2.4,
+        0.1
+      ]
+    },
+    {
+      "id": "fontFamily",
+      "label": {
+        "zh-CN": "字体",
+        "en-US": "Font"
+      },
+      "section": "textAppearance",
+      "path": "epub.fontFamily",
+      "control": "FontFamily",
+      "kind": "choice",
+      "options": "READER_FONT_FAMILY_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "fontWeight",
+      "label": {
+        "zh-CN": "字重",
+        "en-US": "Font Weight"
+      },
+      "section": "textAppearance",
+      "path": "epub.fontWeight",
+      "control": "FontWeight",
+      "kind": "choice",
+      "options": "READER_FONT_WEIGHT_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "letterSpacing",
+      "label": {
+        "zh-CN": "字间距",
+        "en-US": "Letter Spacing"
+      },
+      "section": "textAppearance",
+      "path": "epub.letterSpacing",
+      "control": "LetterSpacing",
+      "kind": "choice",
+      "options": "READER_LETTER_SPACING_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        -0.02,
+        0.08,
+        0.01
+      ]
+    },
+    {
+      "id": "pageMargin",
+      "label": {
+        "zh-CN": "页边距",
+        "en-US": "Page Margins"
+      },
+      "section": "textAppearance",
+      "path": "epub.pageMargin",
+      "control": "PageMargins",
+      "kind": "choice",
+      "options": "READER_PAGE_MARGIN_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "textPageWidth",
+      "label": {
+        "zh-CN": "页宽",
+        "en-US": "Page Width"
+      },
+      "section": "textAppearance",
+      "path": "epub.pageWidth",
+      "control": "PageWidth",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        600,
+        1350,
+        10
+      ]
+    },
+    {
+      "id": "comicPageWidth",
+      "label": {
+        "zh-CN": "页宽",
+        "en-US": "Page Width"
+      },
+      "section": "comicAppearance",
+      "path": "comic.pageWidth",
+      "control": "PageWidth",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "comic"
+      ],
+      "limits": [
+        600,
+        1350,
+        10
+      ]
+    },
+    {
+      "id": "comicZoom",
+      "label": {
+        "zh-CN": "缩放",
+        "en-US": "Zoom"
+      },
+      "section": "comicAppearance",
+      "path": "comic.zoom",
+      "control": "ComicZoom",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "comic"
+      ],
+      "limits": [
+        0.6,
+        2.4,
+        0.1
+      ]
+    },
+    {
+      "id": "pdfPageWidth",
+      "label": {
+        "zh-CN": "页宽",
+        "en-US": "Page Width"
+      },
+      "section": "pdfAppearance",
+      "path": "pdf.pageWidth",
+      "control": "PageWidth",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "pdf"
+      ],
+      "limits": [
+        600,
+        1350,
+        10
+      ]
+    },
+    {
+      "id": "pdfZoom",
+      "label": {
+        "zh-CN": "缩放",
+        "en-US": "Zoom"
+      },
+      "section": "pdfAppearance",
+      "path": "pdf.zoom",
+      "control": "PdfZoom",
+      "kind": "number",
+      "options": null,
+      "formats": [
+        "pdf"
+      ],
+      "limits": [
+        0.6,
+        2.4,
+        0.1
+      ]
+    },
+    {
+      "id": "progressStyle",
+      "label": {
+        "zh-CN": "进度显示",
+        "en-US": "Progress Display"
+      },
+      "section": "interface",
+      "path": "display.progressStyle",
+      "control": "ProgressStyle",
+      "kind": "choice",
+      "options": "READER_PROGRESS_STYLE_OPTIONS",
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "showClock",
+      "label": {
+        "zh-CN": "常显时钟",
+        "en-US": "Always Show Clock"
+      },
+      "section": "interface",
+      "path": "display.showClock",
+      "control": "Clock",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "keepScreenAwake",
+      "label": {
+        "zh-CN": "保持屏幕唤醒",
+        "en-US": "Keep Screen Awake"
+      },
+      "section": "interface",
+      "path": "interaction.keepScreenAwake",
+      "control": "KeepAwake",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "epubAnimation",
+      "label": {
+        "zh-CN": "动画",
+        "en-US": "Animation"
+      },
+      "section": "turning",
+      "path": "epub.pageTurnAnimation",
+      "control": "CommandAnimation",
+      "kind": "choice",
+      "options": "READER_PAGE_TURN_ANIMATION_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicAnimation",
+      "label": {
+        "zh-CN": "动画",
+        "en-US": "Animation"
+      },
+      "section": "turning",
+      "path": "comic.pageTurnAnimation",
+      "control": "CommandAnimation",
+      "kind": "choice",
+      "options": "READER_PAGE_TURN_ANIMATION_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "tapZones",
+      "label": {
+        "zh-CN": "点击区域",
+        "en-US": "Tap Zones"
+      },
+      "section": "turning",
+      "path": "interaction.tapZones",
+      "control": "TapZones",
+      "kind": "choice",
+      "options": "READER_TAP_ZONE_OPTIONS",
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "swipePageTurn",
+      "label": {
+        "zh-CN": "滑动翻页",
+        "en-US": "Swipe to Turn Pages"
+      },
+      "section": "turning",
+      "path": "interaction.swipePageTurn",
+      "control": "Swipe",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "textFlow",
+      "label": {
+        "zh-CN": "阅读方式",
+        "en-US": "Reading Mode"
+      },
+      "section": "layout",
+      "path": "epub.flow",
+      "control": "ReadingMode",
+      "kind": "choice",
+      "options": "READER_FLOW_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "textSpread",
+      "label": {
+        "zh-CN": "页面",
+        "en-US": "Pages"
+      },
+      "section": "layout",
+      "path": "epub.spreadMode",
+      "control": "Spread",
+      "kind": "choice",
+      "options": "READER_SPREAD_MODE_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicFlow",
+      "label": {
+        "zh-CN": "阅读方式",
+        "en-US": "Reading Mode"
+      },
+      "section": "layout",
+      "path": "comic.flow",
+      "control": "ReadingMode",
+      "kind": "choice",
+      "options": "READER_COMIC_FLOW_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicSpread",
+      "label": {
+        "zh-CN": "模式",
+        "en-US": "Mode"
+      },
+      "section": "layout",
+      "path": "comic.spreadMode",
+      "control": "Spread",
+      "kind": "choice",
+      "options": "READER_SPREAD_MODE_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicDirection",
+      "label": {
+        "zh-CN": "方向",
+        "en-US": "Direction"
+      },
+      "section": "layout",
+      "path": "comic.direction",
+      "control": "ComicDirection",
+      "kind": "choice",
+      "options": "READER_COMIC_DIRECTION_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicFit",
+      "label": {
+        "zh-CN": "适配",
+        "en-US": "Fit"
+      },
+      "section": "layout",
+      "path": "comic.imageFit",
+      "control": "ComicFit",
+      "kind": "choice",
+      "options": "READER_COMIC_IMAGE_FIT_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicCoverSingle",
+      "label": {
+        "zh-CN": "双页时封面单独显示",
+        "en-US": "Show Cover Separately in Two-page Mode"
+      },
+      "section": "layout",
+      "path": "comic.coverSingle",
+      "control": "ComicCoverSingle",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicPageGap",
+      "label": {
+        "zh-CN": "页间距",
+        "en-US": "Page Gap"
+      },
+      "section": "layout",
+      "path": "comic.pageGap",
+      "control": "ComicPageGap",
+      "kind": "choice",
+      "options": "READER_PAGE_GAP_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "pdfFit",
+      "label": {
+        "zh-CN": "适配",
+        "en-US": "Fit"
+      },
+      "section": "layout",
+      "path": "pdf.fit",
+      "control": "PdfFit",
+      "kind": "choice",
+      "options": "READER_PDF_FIT_OPTIONS",
+      "formats": [
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "pdfRotation",
+      "label": {
+        "zh-CN": "页面旋转",
+        "en-US": "Page Rotation"
+      },
+      "section": "layout",
+      "path": "pdf.rotation",
+      "control": "PdfRotation",
+      "kind": "choice",
+      "options": "READER_PDF_ROTATION_OPTIONS",
+      "formats": [
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "pdfCrop",
+      "label": {
+        "zh-CN": "自动裁白边",
+        "en-US": "Auto Crop Margins"
+      },
+      "section": "layout",
+      "path": "pdf.cropMargins",
+      "control": "PdfCrop",
+      "kind": "choice",
+      "options": "READER_PDF_CROP_OPTIONS",
+      "formats": [
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "optimization",
+      "label": {
+        "zh-CN": "安全优化",
+        "en-US": "Safe Optimization"
+      },
+      "section": "optimization",
+      "path": "epub.optimization.enabled",
+      "control": "SmartOptimization",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "deduplicateIndent",
+      "label": {
+        "zh-CN": "重复缩进去重",
+        "en-US": "Remove Duplicate Indentation"
+      },
+      "section": "optimization",
+      "path": "epub.optimization.deduplicateIndent",
+      "control": "DeduplicateIndent",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "indentUnindented",
+      "label": {
+        "zh-CN": "无缩进正文补齐",
+        "en-US": "Indent Unindented Paragraphs"
+      },
+      "section": "optimization",
+      "path": "epub.optimization.indentUnindented",
+      "control": "IndentUnindented",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "paragraphIndent",
+      "label": {
+        "zh-CN": "段首缩进",
+        "en-US": "First-line Indent"
+      },
+      "section": "paragraph",
+      "path": "epub.typography.paragraphIndent",
+      "control": "ParagraphIndent",
+      "kind": "choice",
+      "options": "READER_PARAGRAPH_INDENT_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        0,
+        4,
+        0.1
+      ]
+    },
+    {
+      "id": "paragraphSpacing",
+      "label": {
+        "zh-CN": "段间距",
+        "en-US": "Paragraph Spacing"
+      },
+      "section": "paragraph",
+      "path": "epub.typography.paragraphSpacing",
+      "control": "ParagraphSpacing",
+      "kind": "choice",
+      "options": "READER_PARAGRAPH_SPACING_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": [
+        0,
+        1.5,
+        0.1
+      ]
+    },
+    {
+      "id": "textAlign",
+      "label": {
+        "zh-CN": "文本对齐",
+        "en-US": "Text Alignment"
+      },
+      "section": "paragraph",
+      "path": "epub.typography.textAlign",
+      "control": "TextAlignment",
+      "kind": "choice",
+      "options": "READER_TEXT_ALIGN_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "preservePublisherStyles",
+      "label": {
+        "zh-CN": "出版方样式",
+        "en-US": "Publisher Styles"
+      },
+      "section": "paragraph",
+      "path": "epub.typography.preservePublisherStyles",
+      "control": "PublisherStyles",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "comicQuality",
+      "label": {
+        "zh-CN": "画质",
+        "en-US": "Image Quality"
+      },
+      "section": "comicImage",
+      "path": "comic.imageVariant",
+      "control": "ComicQuality",
+      "kind": "choice",
+      "options": "READER_COMIC_IMAGE_VARIANT_OPTIONS",
+      "formats": [
+        "comic"
+      ],
+      "limits": null
+    },
+    {
+      "id": "keyboardPageTurn",
+      "label": {
+        "zh-CN": "键盘翻页",
+        "en-US": "Keyboard Page Turning"
+      },
+      "section": "operations",
+      "path": "interaction.keyboardPageTurn",
+      "control": "Keyboard",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "volumeKeyPageTurn",
+      "label": {
+        "zh-CN": "音量键翻页",
+        "en-US": "Volume Key Page Turning"
+      },
+      "section": "operations",
+      "path": "interaction.volumeKeyPageTurn",
+      "control": "VolumeKeys",
+      "kind": "toggle",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    },
+    {
+      "id": "reset",
+      "label": {
+        "zh-CN": "恢复阅读默认设置",
+        "en-US": "Restore Default Reading Settings"
+      },
+      "section": "reset",
+      "path": "",
+      "control": null,
+      "kind": "action",
+      "options": null,
+      "formats": [
+        "reflowable",
+        "comic",
+        "pdf"
+      ],
+      "limits": null
+    }
+  ]
+}

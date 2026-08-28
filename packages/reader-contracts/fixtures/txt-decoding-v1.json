@@ -1,0 +1,146 @@
+{
+  "schema": "ermao.txt-decoding",
+  "version": 1,
+  "cases": [
+    {
+      "id": "utf8",
+      "sourceHex": "e7acace4b880e7aba00ae6ada3e696872041e380820a",
+      "expectedText": "第一章\n正文 A。\n"
+    },
+    {
+      "id": "utf8_bom",
+      "sourceHex": "efbbbf4368617074657220310a546578742e0a",
+      "expectedText": "Chapter 1\nText.\n"
+    },
+    {
+      "id": "utf8_trailing_nul",
+      "sourceHex": "e6ada3e69687e380820a000000",
+      "expectedText": "正文。\n\u0000\u0000\u0000"
+    },
+    {
+      "id": "utf8_bom_trailing_nul",
+      "sourceHex": "efbbbf4368617074657220310a546578742e0000",
+      "expectedText": "Chapter 1\nText.\u0000\u0000"
+    },
+    {
+      "id": "gb18030",
+      "sourceHex": "d6d0cec4c4dac8dd",
+      "expectedText": "中文内容"
+    },
+    {
+      "id": "gb18030_trailing_160_nul",
+      "sourceHex": "b5dad2bbd5c20ad3d0d0a7d5fdcec4a1a300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "expectedText": "第一章\n有效正文。\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+    },
+    {
+      "id": "utf16le_bom",
+      "sourceHex": "fffe4300680061007000740065007200200031000a004100",
+      "expectedText": "Chapter 1\nA"
+    },
+    {
+      "id": "utf16be_bom",
+      "sourceHex": "feff004300680061007000740065007200200031000a0100",
+      "expectedText": "Chapter 1\nĀ"
+    },
+    {
+      "id": "utf16le_bom_trailing_nul",
+      "sourceHex": "fffe2c7b004ee07a0a00540065007800740020004100000000000000",
+      "expectedText": "第一章\nText A\u0000\u0000\u0000"
+    },
+    {
+      "id": "utf16be_bom_trailing_nul",
+      "sourceHex": "feff7b2c4e007ae0000a6b6365870100000000000000",
+      "expectedText": "第一章\n正文Ā\u0000\u0000\u0000"
+    },
+    {
+      "id": "utf8_leading_nul",
+      "sourceHex": "00e6ada3e69687",
+      "expectedText": "\u0000正文"
+    },
+    {
+      "id": "utf8_interior_nul",
+      "sourceHex": "410042",
+      "expectedText": "A\u0000B"
+    },
+    {
+      "id": "utf8_interior_and_trailing_nul",
+      "sourceHex": "4100420000",
+      "expectedText": "A\u0000B\u0000\u0000"
+    },
+    {
+      "id": "gb18030_interior_nul",
+      "sourceHex": "d5fdcec400bde1caf8",
+      "expectedText": "正文\u0000结束"
+    },
+    {
+      "id": "utf16le_bom_interior_nul",
+      "sourceHex": "fffe410000004200",
+      "expectedText": "A\u0000B"
+    },
+    {
+      "id": "utf16be_bom_interior_nul",
+      "sourceHex": "feff004100000042",
+      "expectedText": "A\u0000B"
+    },
+    {
+      "id": "unsupported_encoding",
+      "sourceHex": "41ff42",
+      "expectedText": null
+    },
+    {
+      "id": "utf8_bom_invalid_encoding",
+      "sourceHex": "efbbbfd5fdcec4",
+      "expectedText": null
+    },
+    {
+      "id": "gb18030_truncated_character",
+      "sourceHex": "d6d0ce",
+      "expectedText": null
+    },
+    {
+      "id": "utf16le_bom_truncated_character",
+      "sourceHex": "fffe410042",
+      "expectedText": null,
+      "decoderOverrides": {
+        "apple-foundation": {
+          "expectedText": "A"
+        }
+      }
+    },
+    {
+      "id": "utf16be_bom_truncated_character",
+      "sourceHex": "feff004100",
+      "expectedText": null,
+      "decoderOverrides": {
+        "apple-foundation": {
+          "expectedText": "A"
+        }
+      }
+    },
+    {
+      "id": "utf16le_bom_unpaired_surrogate",
+      "sourceHex": "fffe410000d8",
+      "expectedText": null
+    },
+    {
+      "id": "utf16be_bom_unpaired_surrogate",
+      "sourceHex": "feff0041d800",
+      "expectedText": null
+    },
+    {
+      "id": "empty",
+      "sourceHex": "",
+      "expectedText": ""
+    },
+    {
+      "id": "only_nul",
+      "sourceHex": "000000",
+      "expectedText": "\u0000\u0000\u0000"
+    },
+    {
+      "id": "whitespace",
+      "sourceHex": "200d0a09",
+      "expectedText": " \r\n\t"
+    }
+  ]
+}

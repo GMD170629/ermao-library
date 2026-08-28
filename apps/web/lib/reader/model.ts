@@ -1,5 +1,6 @@
 import {
   READER_SCHEMA_VERSION,
+  READER_PREFERENCES_VERSION,
   comparePublicationLocations,
   type PublicationLocation,
   type ReaderLocation,
@@ -17,7 +18,7 @@ export type ReaderPreferenceSnapshot = {
   key: string;
   userId: string;
   bookId: string;
-  schemaVersion: typeof READER_SCHEMA_VERSION;
+  schemaVersion: typeof READER_PREFERENCES_VERSION;
   preferences: ReaderPreferences;
   updatedAt: number;
 };

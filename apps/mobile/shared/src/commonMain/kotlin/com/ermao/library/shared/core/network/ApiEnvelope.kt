@@ -78,7 +78,7 @@ internal object ApiErrorMapper {
             401 -> AppErrorKind.Unauthorized
             403 -> AppErrorKind.Forbidden
             404 -> AppErrorKind.NotFoundOrUnavailable
-            409 -> AppErrorKind.Conflict
+            409, 412 -> AppErrorKind.Conflict
             410 -> AppErrorKind.Gone
             413 -> AppErrorKind.PayloadTooLarge
             422 -> AppErrorKind.Validation
@@ -111,7 +111,7 @@ internal object ApiErrorMapper {
         401 -> "UNAUTHORIZED"
         403 -> "FORBIDDEN"
         404 -> "NOT_FOUND"
-        409 -> "CONFLICT"
+        409, 412 -> "CONFLICT"
         410 -> "GONE"
         413 -> "PAYLOAD_TOO_LARGE"
         422 -> "VALIDATION"

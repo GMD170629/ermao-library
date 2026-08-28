@@ -93,24 +93,11 @@ test('Readium maps every native typography preference and always paginates', () 
   assert.equal(mapped.scroll, false);
 });
 
-test('Readium emits null resets when publisher presentation is restored', () => {
-  const mapped = createReadiumEpubPreferences(preferencesWith({}, {
-    allowPublisherColors: true,
-    allowPublisherFonts: true,
-    preservePublisherStyles: true,
-    textAlign: 'publisher'
-  }), 900);
-
-  assert.equal(mapped.backgroundColor, null);
-  assert.equal(mapped.textColor, null);
-  assert.equal(mapped.linkColor, null);
-  assert.equal(mapped.visitedColor, null);
-  assert.equal(mapped.selectionBackgroundColor, null);
-  assert.equal(mapped.selectionTextColor, null);
-  assert.equal(mapped.fontFamily, null);
-  assert.equal(mapped.lineHeight, null);
-  assert.equal(mapped.textAlign, null);
-
+test('unsupported publisher master never changes Web font, color or line-height mapping', () => {
+  const regular = createReadiumEpubPreferences(preferencesWith({}, { textAlign: 'publisher' }), 900);
+  const requested = createReadiumEpubPreferences(preferencesWith({}, { preservePublisherStyles: true, textAlign: 'publisher' }), 900);
+  assert.deepEqual(requested, regular);
+  assert.equal(projectReadiumEffectivePreferences(preferencesWith({}, { preservePublisherStyles: true })).epub.typography.preservePublisherStyles, false);
 });
 
 test('negative letter spacing clears the native value and uses residual CSS', () => {
@@ -172,8 +159,6 @@ test('residual style stays small and only overrides publisher-owned surfaces whe
     embedded: { family: 'Shuku Test', url: 'blob:shuku-font' }
   });
   const publisher = createReadiumResidualStyle(preferencesWith({}, {
-    allowPublisherColors: true,
-    allowPublisherFonts: true,
     preservePublisherStyles: true
   }));
 
@@ -183,7 +168,7 @@ test('residual style stays small and only overrides publisher-owned surfaces whe
   assert.match(strict, /font-family: "Shuku Test", serif !important/);
   assert.doesNotMatch(strict, /padding-block/);
   assert.doesNotMatch(strict, /data-shuku-readium-media-only/);
-  assert.doesNotMatch(publisher, /background: #FDF6EA !important/);
-  assert.doesNotMatch(publisher, /font-family: .* !important/);
-  assert.doesNotMatch(publisher, /line-height: .* !important/);
+  assert.match(publisher, /background: #FDF6EA !important/);
+  assert.match(publisher, /font-family: .* !important/);
+  assert.match(publisher, /line-height: .* !important/);
 });

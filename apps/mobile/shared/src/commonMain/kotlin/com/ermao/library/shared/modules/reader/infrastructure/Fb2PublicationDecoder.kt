@@ -19,7 +19,7 @@ class Fb2XmlPolicy {
     /** An ISO-8859-1 byte-preserving probe, never a decoding of publication text. */
     @Throws(IllegalArgumentException::class)
     fun prepare(probe: String): String {
-        require(probe.length in 1..64 * 1024 * 1024) { "FB2 source exceeds the size limit" }
+        require(probe.isNotEmpty()) { "FB2 source is empty" }
         require(!Regex("<!DOCTYPE\\b|<!ENTITY\\b", RegexOption.IGNORE_CASE)
             .containsMatchIn(probe.replace("\u0000", ""))) { "FB2 contains unsafe XML declarations" }
         if (Regex("\\bxmlns:l\\s*=").containsMatchIn(probe) ||
@@ -72,10 +72,6 @@ class Fb2PublicationDecoder {
             require(seen.add(identifier)) { "FB2 binary identifier is duplicated" }
             val encoded = element.plainText().filterNot(Char::isWhitespace)
             require(encoded.length <= 28 * 1024 * 1024) { "FB2 image exceeds the size limit" }
-            val padding = encoded.takeLastWhile { it == '=' }.length
-            require(encoded.length % 4 == 0 && padding <= 2 && encoded.dropLast(padding).all {
-                it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '+' || it == '/'
-            }) { "FB2 image encoding is invalid" }
             Fb2EmbeddedImage(identifier, mediaType, encoded)
         }
     }

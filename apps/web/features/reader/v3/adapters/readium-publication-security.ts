@@ -1,5 +1,6 @@
 import { readBoundedResponse } from '../../../../shared/api/bounded-response';
 import type { FetchImplementation } from '@readium/shared';
+import { readerResourceFailure, type ReaderResourceStage } from '../../api/client';
 
 class PublicationReadError extends Error {
   constructor(readonly code: 'PUBLICATION_CHANGED' | 'PUBLICATION_RESOURCE_TOO_LARGE'
@@ -39,10 +40,10 @@ export function createSecurePublicationFetch(fetchImplementation: FetchImplement
     if (revision) headers.set('X-Publication-Revision', revision);
     const response = await fetchImplementation(input, { ...init, headers });
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new PublicationReadError(response.status === 409 || response.status === 412
-        ? 'PUBLICATION_CHANGED' : response.status === 413
-          ? 'PUBLICATION_RESOURCE_TOO_LARGE' : 'PUBLICATION_RESOURCE_UNAVAILABLE');
+      const path = (input instanceof Request ? input.url : String(input)).split(/[?#]/, 1)[0];
+      const stage: ReaderResourceStage = path.endsWith('manifest.json') ? 'manifest'
+        : path.endsWith('positions.json') ? 'positions' : /\.(xhtml|html|htm)$/.test(path) ? 'chapter' : 'resource';
+      throw await readerResourceFailure(response, stage);
     }
     const observedRevision = response.headers.get('X-Publication-Revision');
     if (revision && observedRevision !== revision) {

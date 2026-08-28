@@ -1,5 +1,5 @@
 import Foundation
-import PDFKit
+@preconcurrency import ErmaoShared
 @preconcurrency import ReadiumShared
 @preconcurrency import ReadiumStreamer
 
@@ -48,8 +48,14 @@ final class IosReadiumRuntime {
             do {
                 let publication = try IosTxtPublicationFactory().open(managed)
                 return IosOpenedReadiumPublication(publication: publication) { publication.close() }
+            } catch IosTxtPublicationError.invalidEncoding {
+                throw IosReaderFailure(code: .txtEncodingUnsupported)
+            } catch let failure as IosReaderFailure {
+                throw failure
             } catch {
-                throw IosReaderFailure(code: .corruptFile)
+                let code: IosReaderFailureCode = (error as NSError).kotlinException is ErmaoShared.TxtPublicationEmptyException
+                    ? .txtEmpty : .parseFailed
+                throw IosReaderFailure(code: code, underlyingError: error as NSError)
             }
         case .fb2:
             do {
@@ -57,8 +63,10 @@ final class IosReadiumRuntime {
                 return IosOpenedReadiumPublication(publication: publication) { publication.close() }
             } catch IosFb2PublicationError.limitExceeded {
                 throw IosReaderFailure(code: .outOfMemoryRisk)
+            } catch let failure as IosReaderFailure {
+                throw failure
             } catch {
-                throw IosReaderFailure(code: .corruptFile)
+                throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
             }
         case .pdf:
             return try await openPDF(managed)
@@ -71,20 +79,10 @@ final class IosReadiumRuntime {
         guard let fileURL = FileURL(url: managed.fileURL) else {
             throw IosReaderFailure(code: .resourceMissing)
         }
-        let preflight = await Task.detached(priority: .userInitiated) {
-            guard let document = PDFKit.PDFDocument(url: managed.fileURL) else { return PdfPreflight.invalid }
-            if document.isLocked || document.isEncrypted { return PdfPreflight.protected }
-            return document.pageCount > 0 ? .readable : .invalid
-        }.value
-        switch preflight {
-        case .readable: break
-        case .protected: throw IosReaderFailure(code: .drmProtected)
-        case .invalid: throw IosReaderFailure(code: .corruptFile)
-        }
-        let asset: Asset
+        let asset: ReadiumShared.Asset
         switch await assetRetriever.retrieve(url: fileURL) {
         case let .success(value): asset = value
-        case .failure: throw IosReaderFailure(code: .resourceMissing)
+        case let .failure(error): throw IosReaderFailure(code: .engineError, underlyingError: error as NSError)
         }
         let publication: Publication
         switch await publicationOpener.open(asset: asset, allowUserInteraction: false) {
@@ -94,9 +92,7 @@ final class IosReadiumRuntime {
             case .formatNotSupported:
                 throw IosReaderFailure(code: .unsupportedFormat)
             case .reading:
-                // Readium deliberately does not prompt for PDF passwords. Encrypted,
-                // malformed and unreadable documents all stay behind a stable app error.
-                throw IosReaderFailure(code: .corruptFile)
+                throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
             }
         }
         guard publication.conforms(to: .pdf) else {
@@ -110,25 +106,19 @@ final class IosReadiumRuntime {
         return IosOpenedReadiumPublication(publication: publication) { publication.close() }
     }
 
-    private enum PdfPreflight: Sendable {
-        case readable
-        case protected
-        case invalid
-    }
-
     private func openEPUB(_ managed: IosManagedPublication) async throws -> IosOpenedReadiumPublication {
         guard let fileURL = FileURL(url: managed.fileURL) else {
             throw IosReaderFailure(code: .resourceMissing)
         }
-        let asset: Asset
+        let asset: ReadiumShared.Asset
         switch await assetRetriever.retrieve(url: fileURL) {
         case let .success(value): asset = value
-        case .failure: throw IosReaderFailure(code: .corruptFile)
+        case let .failure(error): throw IosReaderFailure(code: .engineError, underlyingError: error as NSError)
         }
         let publication: Publication
         switch await publicationOpener.open(asset: asset, allowUserInteraction: false) {
         case let .success(value): publication = value
-        case .failure: throw IosReaderFailure(code: .parseFailed)
+        case let .failure(error): throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
         }
         guard publication.conforms(to: .epub) else {
             publication.close()
@@ -156,14 +146,14 @@ final class IosReadiumRuntime {
                 await result.close()
             }
         } catch let error as IosMobiCoreError {
-            throw IosReaderFailure(code: Self.failureCode(error.status))
+            throw IosReaderFailure(code: Self.failureCode(error.status), underlyingError: error as NSError)
         } catch let error as IosMobiPublicationError {
             switch error {
             case .closed, .invalidResourceIndex, .invalidResourcePath,
                  .duplicateResourcePath, .invalidTableOfContents, .invalidTextEncoding:
-                throw IosReaderFailure(code: .corruptFile)
+                throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
             case .invalidSourceIdentity:
-                throw IosReaderFailure(code: .corruptFile)
+                throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
             case .missingReadingOrder, .unsupportedMediaType:
                 throw IosReaderFailure(code: .unsupportedFormat)
             }
@@ -174,7 +164,7 @@ final class IosReadiumRuntime {
         switch status {
         case .drmProtected:
             .drmProtected
-        case .unsupported, .noContent:
+        case .unsupported:
             .unsupportedFormat
         case .limitExceeded, .outOfMemory:
             .outOfMemoryRisk
@@ -182,9 +172,11 @@ final class IosReadiumRuntime {
             .resourceMissing
         case .io:
             .engineError
-        case .invalidArgument, .corrupt, .parseFailed, .outOfRange,
+        case .corrupt, .parseFailed, .noContent:
+            .parseFailed
+        case .invalidArgument, .outOfRange,
              .bufferTooSmall, .internalFailure:
-            .corruptFile
+            .engineError
         }
     }
 

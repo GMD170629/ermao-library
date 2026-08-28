@@ -7,7 +7,6 @@ import com.ermao.library.shared.modules.reader.domain.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.domain.ReaderTextAlignment
 import com.ermao.library.shared.modules.reader.domain.ReaderTheme
 import com.ermao.library.shared.modules.reader.domain.ReaderThemeMode
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -19,35 +18,37 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.roundToInt
 
-class ReaderPreferencesJson(
-    private val json: Json = Json {
+class ReaderPreferencesJson(private val json: Json) {
+    constructor() : this(Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
         explicitNulls = false
-    },
-) {
+    })
+
     fun encode(preferences: ReaderPreferences): String = json.encodeToString(preferences)
 
+    fun canonicalizeOrNull(payload: String): String? = runCatching { encode(decode(payload)) }.getOrNull()
+
+    @Throws(IllegalArgumentException::class)
     fun decode(payload: String): ReaderPreferences {
         val document = json.decodeFromString<JsonObject>(payload)
-        if (document["schemaVersion"]?.jsonPrimitive?.contentOrNull == "3") {
-            val migrated = JsonObject(
-                document.toMutableMap().apply {
-                    put("schemaVersion", JsonPrimitive(ReaderPreferences.SCHEMA_VERSION))
-                },
-            )
-            return json.decodeFromJsonElement<ReaderPreferences>(migrated)
-        }
-        if ("schemaVersion" !in document && document.keys.any(LEGACY_KEYS::contains)) {
-            return decodeLegacy(document)
-        }
-        try {
-            return json.decodeFromString<ReaderPreferences>(payload)
-        } catch (_: SerializationException) {
-            return decodeLegacy(document)
-        } catch (_: IllegalArgumentException) {
-            return decodeLegacy(document)
-        }
+        val version = document["schemaVersion"]?.jsonPrimitive?.contentOrNull
+        if (version == null && document.keys.any(LEGACY_KEYS::contains)) return decodeLegacy(document)
+        require(version in setOf("3", "4", "5")) { "Unsupported reader preferences schema" }
+        val migrated = if (version != "5") {
+            val epub = document["epub"] as? JsonObject
+            val typography = epub?.get("typography") as? JsonObject
+            JsonObject(document.toMutableMap().apply {
+                put("schemaVersion", JsonPrimitive(ReaderPreferences.SCHEMA_VERSION))
+                remove("iosDraft")
+                if (epub != null && typography != null) put("epub", JsonObject(epub.toMutableMap().apply {
+                    put("typography", JsonObject(typography.filterKeys {
+                        it != "allowPublisherColors" && it != "allowPublisherFonts"
+                    }))
+                }))
+            })
+        } else document
+        return json.decodeFromJsonElement<ReaderPreferences>(migrated)
     }
 
     private fun decodeLegacy(document: JsonObject): ReaderPreferences {

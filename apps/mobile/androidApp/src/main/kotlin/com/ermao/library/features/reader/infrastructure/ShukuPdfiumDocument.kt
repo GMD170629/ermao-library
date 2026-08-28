@@ -163,7 +163,7 @@ internal class ShukuPdfiumDocument private constructor(
                 else -> status.throwOnFailure()
             }
         }
-        throw ShukuPdfiumFailure(PdfReaderErrorCode.RangeInvalid)
+        throw ShukuPdfiumFailure(PdfReaderErrorCode.PdfEngineLimit)
     }
 
     private fun requireOpen() = check(!closed) { "PDFium document is closed" }
@@ -191,7 +191,7 @@ internal class ShukuPdfiumDocument private constructor(
                             else -> status.throwOnFailure()
                         }
                     }
-                    throw ShukuPdfiumFailure(PdfReaderErrorCode.RangeInvalid)
+                    throw ShukuPdfiumFailure(PdfReaderErrorCode.PdfEngineLimit)
                 } catch (error: Throwable) {
                     native.close()
                     dataSource.close()

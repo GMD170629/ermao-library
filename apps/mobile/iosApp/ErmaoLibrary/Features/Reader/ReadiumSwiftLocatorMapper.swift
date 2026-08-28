@@ -15,8 +15,7 @@ struct ReadiumSwiftLocatorMapper {
             text.before = text.before.map { String($0.unicodeScalars.prefix(256)) }
             text.after = text.after.map { String($0.unicodeScalars.prefix(256)) }
         })
-        guard let locatorJSON = bounded.jsonString else { throw IosReaderFailure(code: .engineError) }
-        let canonicalLocator = try canonicalizeJSONObject(locatorJSON)
+        let canonicalLocator = try bounded.jsonString()
         let quote = bounded.text.highlight.flatMap { exact -> ErmaoShared.TextQuote? in
             guard !exact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
             return ErmaoShared.TextQuote(
@@ -34,7 +33,7 @@ struct ReadiumSwiftLocatorMapper {
             engineLocator: ErmaoShared.PublicKt.createEngineLocator(
                 engine: .readium,
                 platform: .ios,
-                version: "readium-swift:3.8.0",
+                version: "readium-swift:3.9.0",
                 payloadJson: canonicalLocator
             )
         )
@@ -66,25 +65,12 @@ struct ReadiumSwiftLocatorMapper {
         from envelope: ErmaoShared.ReadiumLocatorEnvelope,
         publication: Publication
     ) throws -> Locator? {
-        guard let decoded = try Locator(jsonString: envelope.payload.canonicalJson),
-              publication.readingOrder.contains(where: {
-                  $0.url().normalized.isEquivalentTo(decoded.href.normalized)
-              })
+        let decoded = try Locator(jsonString: envelope.payload.canonicalJson)
+        guard publication.readingOrder.contains(where: {
+            $0.url().normalized.isEquivalentTo(decoded.href.normalized)
+        })
         else { return nil }
         return decoded
-    }
-
-    private func canonicalizeJSONObject(_ json: String) throws -> String {
-        let object = try JSONSerialization.jsonObject(with: Data(json.utf8))
-        guard object is [String: Any] else { throw IosReaderFailure(code: .engineError) }
-        let data = try JSONSerialization.data(
-            withJSONObject: object,
-            options: [.sortedKeys, .withoutEscapingSlashes]
-        )
-        guard let result = String(data: data, encoding: .utf8) else {
-            throw IosReaderFailure(code: .engineError)
-        }
-        return result
     }
 }
 

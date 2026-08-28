@@ -14,11 +14,16 @@ test('Python i18n extraction follows user-visible call boundaries', () => {
       `import re
 
 from app.contracts.http import MessageError
+from app.modules.auth.application.user_management import UserAdministrationError
 from app.schemas.responses import fail
 
 fail("用户可见错误")
 MessageError(message=f"参数值：{value}")
 prepare_system_event(message="系统事件")
+_prepared_event(message="管理员审计事件")
+UserAdministrationError("ADMIN_REQUIRED", "管理员操作失败")
+UserAdministrationError(message=f"管理员操作失败：{action}", code="ADMIN_ACTION_FAILED")
+UserAdministrationError("DYNAMIC_FAILURE", "动态错误：" + str(error))
 _catalog_text(locale, "显式中文", "Explicit English")
 health_check_item("database", "error", f"数据库不可用：{error}")
 ExampleErrorBody(message="HTTP 错误正文")
@@ -32,6 +37,7 @@ _finish_without_match(db, task, "FAILED", [], "任务结果消息")
 re.compile(r"内部正则 [\\u3400-\\u9fff]")
 prompt = "内部提示词，不是 Web 文案"
 raise ValueError("普通内部异常")
+raise InternalError("INTERNAL", "内部异常说明")
 `,
       'utf8'
     );
@@ -40,6 +46,9 @@ raise ValueError("普通内部异常")
     assert.equal(messages.has('用户可见错误'), true);
     assert.equal(messages.has('参数值：{value0}'), true);
     assert.equal(messages.has('系统事件'), true);
+    assert.equal(messages.has('管理员审计事件'), true);
+    assert.equal(messages.has('管理员操作失败'), true);
+    assert.equal(messages.has('管理员操作失败：{value0}'), true);
     assert.equal(messages.has('显式中文'), true);
     assert.equal(messages.has('数据库不可用：{value0}'), true);
     assert.equal(messages.has('HTTP 错误正文'), true);
@@ -55,6 +64,8 @@ raise ValueError("普通内部异常")
     assert.equal(messages.has('内部正则 [\\u3400-\\u9fff]'), false);
     assert.equal(messages.has('内部提示词，不是 Web 文案'), false);
     assert.equal(messages.has('普通内部异常'), false);
+    assert.equal(messages.has('内部异常说明'), false);
+    assert.equal(messages.has('动态错误：'), false);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }

@@ -86,75 +86,10 @@ static ErmaoMobiStatus ermao_status_from_libmobi(MOBI_RET result, bool parsing) 
     }
 }
 
-static bool ermao_is_textread(const MOBIData *mobi) {
-    return mobi != NULL && mobi->ph != NULL
-        && strcmp(mobi->ph->type, "TEXt") == 0
-        && strcmp(mobi->ph->creator, "REAd") == 0;
-}
-
 static bool ermao_header_is_encrypted(const MOBIData *mobi) {
     return mobi != NULL && mobi->rh != NULL
         && (mobi->rh->encryption_type == MOBI_ENCRYPTION_V1
             || mobi->rh->encryption_type == MOBI_ENCRYPTION_V2);
-}
-
-static uint16_t ermao_read_be16(const unsigned char *bytes) {
-    return (uint16_t) (((uint16_t) bytes[0] << 8u) | bytes[1]);
-}
-
-static uint32_t ermao_read_be32(const unsigned char *bytes) {
-    return ((uint32_t) bytes[0] << 24u)
-        | ((uint32_t) bytes[1] << 16u)
-        | ((uint32_t) bytes[2] << 8u)
-        | bytes[3];
-}
-
-static ErmaoMobiStatus ermao_preflight(const char *path, uint64_t file_size) {
-    unsigned char pdb_header[86];
-    FILE *file = fopen(path, "rb");
-    if (file == NULL) {
-        return errno == ENOENT ? ERMAO_MOBI_FILE_NOT_FOUND : ERMAO_MOBI_IO_ERROR;
-    }
-    const size_t header_read = fread(pdb_header, 1u, sizeof(pdb_header), file);
-    if (ferror(file)) {
-        fclose(file);
-        return ERMAO_MOBI_IO_ERROR;
-    }
-    if (header_read < 78u) {
-        fclose(file);
-        return ERMAO_MOBI_UNSUPPORTED;
-    }
-    const bool mobipocket = memcmp(pdb_header + 60u, "BOOKMOBI", 8u) == 0;
-    const bool textread = memcmp(pdb_header + 60u, "TEXtREAd", 8u) == 0;
-    if (!mobipocket && !textread) {
-        fclose(file);
-        return ERMAO_MOBI_UNSUPPORTED;
-    }
-    if (ermao_read_be16(pdb_header + 76u) == 0u || header_read < 86u) {
-        fclose(file);
-        return ERMAO_MOBI_CORRUPT;
-    }
-    const uint32_t record_zero_offset = ermao_read_be32(pdb_header + 78u);
-    if ((uint64_t) record_zero_offset + 16u > file_size
-        || fseek(file, (long) record_zero_offset, SEEK_SET) != 0) {
-        fclose(file);
-        return ERMAO_MOBI_CORRUPT;
-    }
-    unsigned char record_zero[16];
-    if (fread(record_zero, 1u, sizeof(record_zero), file) != sizeof(record_zero)) {
-        const ErmaoMobiStatus status = ferror(file) ? ERMAO_MOBI_IO_ERROR : ERMAO_MOBI_CORRUPT;
-        fclose(file);
-        return status;
-    }
-    fclose(file);
-    const uint16_t encryption = ermao_read_be16(record_zero + 12u);
-    if (encryption == MOBI_ENCRYPTION_V1 || encryption == MOBI_ENCRYPTION_V2) {
-        return ERMAO_MOBI_DRM_PROTECTED;
-    }
-    if (ermao_read_be32(record_zero + 4u) == 0u || ermao_read_be16(record_zero + 8u) == 0u) {
-        return ERMAO_MOBI_NO_CONTENT;
-    }
-    return ERMAO_MOBI_OK;
 }
 
 static ErmaoMobiStatus ermao_copy_out(
@@ -723,7 +658,6 @@ ErmaoMobiStatus ermao_mobi_open(
     if (options != NULL) {
         if (options->struct_size < sizeof(*options)
             || options->max_file_bytes == 0u
-            || options->max_file_bytes > ERMAO_MOBI_MAX_FILE_BYTES
             || options->max_read_bytes == 0u
             || options->max_read_bytes > ERMAO_MOBI_MAX_READ_BYTES) {
             return ERMAO_MOBI_INVALID_ARGUMENT;
@@ -739,12 +673,8 @@ ErmaoMobiStatus ermao_mobi_open(
     if (!S_ISREG(file_stat.st_mode)) {
         return ERMAO_MOBI_UNSUPPORTED;
     }
-    if (file_stat.st_size <= 0 || (uint64_t) file_stat.st_size > effective.max_file_bytes) {
+    if (file_stat.st_size < 0 || (uint64_t) file_stat.st_size > effective.max_file_bytes) {
         return ERMAO_MOBI_LIMIT_EXCEEDED;
-    }
-    const ErmaoMobiStatus preflight_status = ermao_preflight(path, (uint64_t) file_stat.st_size);
-    if (preflight_status != ERMAO_MOBI_OK) {
-        return preflight_status;
     }
 
     ErmaoMobiBook *book = calloc(1u, sizeof(*book));
@@ -760,17 +690,7 @@ ErmaoMobiStatus ermao_mobi_open(
     }
     MOBI_RET result = mobi_load_filename(book->mobi, path);
     if (result != MOBI_SUCCESS) {
-        ErmaoMobiStatus status = ermao_status_from_libmobi(result, false);
-        if (ermao_header_is_encrypted(book->mobi)) {
-            status = ERMAO_MOBI_DRM_PROTECTED;
-        } else if (book->mobi->rh != NULL
-                   && (book->mobi->rh->text_length == 0u
-                       || book->mobi->rh->text_record_count == 0u)) {
-            status = ERMAO_MOBI_NO_CONTENT;
-        } else if (result == MOBI_FILE_UNSUPPORTED
-                   && (mobi_is_mobipocket(book->mobi) || ermao_is_textread(book->mobi))) {
-            status = ERMAO_MOBI_CORRUPT;
-        }
+        const ErmaoMobiStatus status = ermao_status_from_libmobi(result, false);
         ermao_free_book(book);
         return status;
     }
@@ -778,12 +698,6 @@ ErmaoMobiStatus ermao_mobi_open(
         ermao_free_book(book);
         return ERMAO_MOBI_DRM_PROTECTED;
     }
-    if ((!mobi_is_mobipocket(book->mobi) && !ermao_is_textread(book->mobi))
-        || mobi_is_replica(book->mobi)) {
-        ermao_free_book(book);
-        return ERMAO_MOBI_UNSUPPORTED;
-    }
-
     const bool hybrid = mobi_is_hybrid(book->mobi);
     book->rawml = mobi_init_rawml(book->mobi);
     if (book->rawml == NULL) {

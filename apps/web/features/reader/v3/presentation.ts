@@ -1,4 +1,4 @@
-import { READER_SCHEMA_VERSION, type ReaderLocation, type ReaderPreferences } from '@shuku/reader-core';
+import { READER_PREFERENCES_VERSION, type ReaderLocation, type ReaderPreferences } from '@shuku/reader-core';
 import type { ReaderProgress, ReaderSettings } from '../reader-shell';
 
 export function preferencesToReaderSettings(preferences: ReaderPreferences): ReaderSettings {
@@ -27,8 +27,6 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     paragraphSpacing: preferences.epub.typography.paragraphSpacing,
     textAlign: preferences.epub.typography.textAlign,
     preservePublisherStyles: preferences.epub.typography.preservePublisherStyles,
-    allowPublisherColors: preferences.epub.typography.allowPublisherColors,
-    allowPublisherFonts: preferences.epub.typography.allowPublisherFonts,
     smartOptimization: preferences.epub.optimization.enabled,
     deduplicateIndent: preferences.epub.optimization.deduplicateIndent,
     indentUnindented: preferences.epub.optimization.indentUnindented,
@@ -53,7 +51,7 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
 
 export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPreferences {
   return {
-    schemaVersion: READER_SCHEMA_VERSION,
+    schemaVersion: READER_PREFERENCES_VERSION,
     appearance: { theme: settings.theme, themeMode: settings.themeMode },
     display: { progressStyle: settings.progressStyle, showClock: settings.showClock },
     interaction: {
@@ -79,8 +77,6 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
         paragraphSpacing: settings.paragraphSpacing,
         textAlign: settings.textAlign,
         preservePublisherStyles: settings.preservePublisherStyles,
-        allowPublisherColors: settings.allowPublisherColors,
-        allowPublisherFonts: settings.allowPublisherFonts
       },
       optimization: {
         enabled: settings.smartOptimization,

@@ -204,9 +204,9 @@ internal class MobiCoreBook private constructor(
         val normalizationIdentifier: String
             get() = MobiCoreNative.normalizationIdentifier()
 
-        fun open(file: File): MobiCoreBook {
+        fun open(file: File, maximumFileBytes: Long = Long.MAX_VALUE): MobiCoreBook {
             val canonicalFile = file.canonicalFile
-            return MobiCoreBook(MobiCoreNative.open(canonicalFile.path.encodeToByteArray()))
+            return MobiCoreBook(MobiCoreNative.open(canonicalFile.path.encodeToByteArray(), maximumFileBytes))
         }
 
         private fun checkNativeShape(values: LongArray, expectedSize: Int) {
@@ -257,7 +257,7 @@ private object MobiCoreNative {
     external fun abiVersion(): Int
     external fun parserIdentifier(): String
     external fun normalizationIdentifier(): String
-    external fun open(pathUtf8: ByteArray): Long
+    external fun open(pathUtf8: ByteArray, maximumFileBytes: Long): Long
     external fun close(handle: Long)
     external fun bookInfo(handle: Long): LongArray
     external fun metadata(handle: Long, field: Int): String?

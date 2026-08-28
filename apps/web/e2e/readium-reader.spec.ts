@@ -4,9 +4,10 @@ test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
 });
 
+const publicationCsp = "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; script-src blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:";
+const publicationHeaders = { 'content-security-policy': publicationCsp, 'x-content-type-options': 'nosniff' };
 function secureXhtml(markup: string) {
-  const policy = "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; script-src blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:";
-  return markup.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${policy}" data-shuku-security-profile="web-v2"/><style data-shuku-security-profile="web-v2">iframe,frame,object,embed,applet{display:none!important}</style>`);
+  return markup.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${publicationCsp}" data-shuku-security-profile="web-v2"/><style data-shuku-security-profile="web-v2">iframe,frame,object,embed,applet{display:none!important}</style>`);
 }
 
 const chapterOne = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
@@ -63,8 +64,8 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
     { href: 'chapter1.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0, position: 1 } },
     { href: 'chapter2.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 1, position: 2 } }
   ] } });
-  if (pathname.endsWith('/publication/chapter1.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', body: chapterOne });
-  if (pathname.endsWith('/publication/chapter2.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', body: chapterTwo });
+  if (pathname.endsWith('/publication/chapter1.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', headers: publicationHeaders, body: chapterOne });
+  if (pathname.endsWith('/publication/chapter2.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', headers: publicationHeaders, body: chapterTwo });
   if (pathname.endsWith('/progress')) {
     if (request.method() === 'GET') {
       const revision = typeof snapshot?.revision === 'number' ? snapshot.revision : 0;
@@ -168,11 +169,11 @@ test('Readium starts at the first reader navigation unit instead of blank front 
     ] }
   }));
   await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head><body><p id="front-cover">封面前置页</p></body></html>')
   }));
   await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
   }));
 
@@ -212,15 +213,15 @@ test('Readium applies block margins to every page viewport without special-casin
     ] }
   }));
   await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title><style>body{text-align:center;padding:0;margin:0}</style></head><body><div><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 521 751" preserveAspectRatio="none"><rect id="cover-art" width="521" height="751" fill="#315b48"/></svg></div></body></html>')
   }));
   await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
   }));
   await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>')
   }));
 
@@ -280,7 +281,7 @@ test('Readium applies block margins to every page viewport without special-casin
 test('Readium iframe routes center and jittered edge mouse taps without leaving a blue selection', async ({ page }) => {
   await installReaderRoutes(page);
   await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml',
+    contentType: 'application/xhtml+xml', headers: publicationHeaders,
     body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>')
   }));
   await page.goto('/reader/epub-resource');
@@ -500,6 +501,20 @@ test('Readium settings expose unsupported pagination controls without accepting 
   await expect(swipe).toBeChecked();
   await expect(swipe).toBeDisabled();
   await expect(page.getByText('Readium 使用原生触摸滑动，当前无法关闭。')).toBeVisible();
+
+  await page.getByRole('button', { name: '高级设置', exact: true }).click();
+  const publisher = page.getByRole('checkbox', { name: /出版方样式/ });
+  await expect(publisher).toBeDisabled();
+  await expect(publisher).not.toBeChecked();
+  await expect(page.getByText('当前 Web 引擎未提供出版方样式总开关接口，此设置不可用。')).toBeVisible();
+  await expect(page.getByText('保留出版方行高', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('允许出版方颜色', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('允许出版方字体', { exact: true })).toHaveCount(0);
+  await expect(page.locator('#reader-advanced-settings')).toHaveCSS('opacity', '1');
+  const publisherLabel = page.getByText('出版方样式', { exact: true });
+  await publisherLabel.scrollIntoViewIfNeeded();
+  await expect(publisherLabel).toBeInViewport();
+  await page.screenshot({ path: 'test-results/reader-settings-publisher-master.png' });
 });
 
 test('Readium applies reader themes inside the publication without persisting a reflow as progress', async ({ page }) => {
@@ -544,4 +559,25 @@ test('Readium iframe keyboard input reaches first and last publication positions
   });
   frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
+});
+
+test('Reader preserves an HTTP parser-stage failure and reopens without requesting the original', async ({ page }) => {
+  const originalRequests: string[] = [];
+  let manifests = 0;
+  await page.route('**/api/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.startsWith('/api/assets/')) originalRequests.push(path);
+    if (path.endsWith('/publication/manifest.json')) {
+      manifests += 1;
+      return route.fulfill({ status: 403, headers: { 'X-Error-Code': 'FORBIDDEN' }, body: 'private-response-body' });
+    }
+    return fulfillApi(route, null, 0, []);
+  });
+  await page.goto('/reader/epub-resource');
+  await expect(page.getByText('在线阅读失败：服务器拒绝访问。')).toBeVisible();
+  await expect(page.getByText('private-response-body')).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText('在线阅读失败：服务器拒绝访问。')).toBeVisible();
+  expect(manifests).toBeGreaterThanOrEqual(2);
+  expect(originalRequests).toEqual([]);
 });

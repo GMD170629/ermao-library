@@ -7,12 +7,24 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
+import com.ermao.library.features.reader.infrastructure.ReaderOpenFailure
+import com.ermao.library.features.reader.infrastructure.RemoteReflowableReadiumPublicationFactory
 import com.ermao.library.features.reader.infrastructure.TxtReadiumPublicationFactory
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
+import com.ermao.library.shared.modules.reader.OnlinePublicationFailure
+import com.ermao.library.shared.modules.reader.OnlinePublicationReadContent
+import com.ermao.library.shared.modules.reader.OnlinePublicationReadResult
+import com.ermao.library.shared.modules.reader.OnlinePublicationSession
+import com.ermao.library.shared.modules.reader.OnlinePublicationStage
+import com.ermao.library.shared.modules.reader.PublicationResourcePort
+import com.ermao.library.shared.modules.reader.ReaderAdmission
+import com.ermao.library.shared.modules.reader.ReaderErrorCode
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.RemoteReflowableReaderSource
 import java.io.ByteArrayInputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -22,6 +34,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -69,6 +82,56 @@ class ReaderTxtInstrumentedTest {
             assertNotNull(positions.last().locations.totalProgression)
         } finally {
             publication.close()
+        }
+    }
+
+    @Test
+    fun onlineMetadataRejectedByReadiumPreservesTheCauseAndStage() = runBlocking {
+        for (stage in listOf(OnlinePublicationStage.Manifest, OnlinePublicationStage.Positions)) {
+            val mediaType = if (stage == OnlinePublicationStage.Positions) "not-a-media-type" else "application/xhtml+xml"
+            val link = """{"href":"text/chapter-0001.xhtml","type":"$mediaType"}"""
+            val title = if (stage == OnlinePublicationStage.Manifest) "" else """"metadata":{"title":"Reading"},"""
+            val responses = mapOf(
+                "manifest.json" to """{$title"readingOrder":[$link]}""",
+                "positions.json" to """{"positions":[$link]}""",
+            )
+            val requests = mutableListOf<String>()
+            val port = object : PublicationResourcePort {
+                override suspend fun read(apiPath: String, maximumBytes: Int, mediaTypes: Set<String>): OnlinePublicationReadResult {
+                    val name = apiPath.substringAfterLast('/')
+                    requests += name
+                    return OnlinePublicationReadContent(responses.getValue(name).encodeToByteArray())
+                }
+                override fun close() = Unit
+            }
+            val online = OnlinePublicationSession(RemoteReflowableReaderSource(
+                "resource", "Reading", "book", "asset", ReaderSourceFormat.Txt,
+                ReaderSyncNamespace("server", "user", 1),
+                "/api/reader/v4/resources/resource/publication/manifest.json",
+                "/api/reader/v4/resources/resource/publication/positions.json",
+            ), port)
+            try {
+                // The shared transport contract accepts these inputs; the SDK owns
+                // the missing metadata / invalid Locator media-type rejection.
+                online.open()
+                try {
+                    RemoteReflowableReadiumPublicationFactory(online) {
+                        throw AssertionError("Metadata opening must not request chapter content")
+                    }.open().close()
+                    throw AssertionError("Readium must reject $stage metadata")
+                } catch (failure: ReaderOpenFailure) {
+                    val translated = failure.cause as? OnlinePublicationFailure
+                        ?: throw AssertionError("The shared metadata failure must be retained", failure)
+                    assertEquals(stage, translated.stage)
+                    assertTrue(translated.cause is IllegalArgumentException)
+                    assertEquals(ReaderErrorCode.InvalidResponse, failure.readerError.code)
+                    assertEquals(OnlinePublicationFailure.invalidMetadata(stage).readerError, failure.readerError)
+                    assertFalse(ReaderAdmission.permitsDownload(failure.readerError.code))
+                }
+                assertEquals(listOf("manifest.json", "positions.json"), requests)
+            } finally {
+                online.close()
+            }
         }
     }
 

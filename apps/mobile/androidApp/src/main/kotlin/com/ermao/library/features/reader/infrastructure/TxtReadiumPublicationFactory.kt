@@ -27,7 +27,9 @@ internal class TxtReadiumPublicationFactory(
     private val normalizer: TxtPublicationNormalizer = TxtPublicationNormalizer(),
 ) {
     fun open(file: File, title: String): Publication {
-        require(file.length() in 1..64L * 1024 * 1024) { "TXT source exceeds the size limit" }
+        com.ermao.library.shared.modules.reader.ReaderAdmission.localFailure("txt", file.length())?.let {
+            throw ReaderOpenFailure(com.ermao.library.shared.modules.reader.ReaderError(it))
+        }
         val bytes = file.readBytes()
         val decoded = StrictTxtDecoder.decode(bytes)
         val normalized = normalizer.normalize(decoded, title)
@@ -46,7 +48,7 @@ internal class TxtReadiumPublicationFactory(
             SingleResourceContainer(
                 requireNotNull(Url(resource.href)),
                 StringResource(
-                    EpubContentSecurityPolicy.decorateHtml(resource.xhtml.toByteArray())
+                    EpubContentSecurityPolicy.generatedChapter(resource.xhtml)
                         .toString(Charsets.UTF_8),
                 ),
             )
@@ -78,7 +80,6 @@ internal class TxtReadiumPublicationFactory(
 
 internal object StrictTxtDecoder {
     fun decode(bytes: ByteArray): String {
-        require(bytes.isNotEmpty()) { "TXT publication is empty" }
         val candidates = when {
             bytes.startsWith(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())) ->
                 listOf(Charsets.UTF_8 to 3)
@@ -88,25 +89,21 @@ internal object StrictTxtDecoder {
                 listOf(Charsets.UTF_16BE to 2)
             else -> listOf(Charsets.UTF_8 to 0, Charset.forName("GB18030") to 0)
         }
-        val decoded = candidates.firstNotNullOfOrNull { (charset, offset) ->
-            decodeOrNull(bytes, charset, offset)
-        } ?: throw IllegalArgumentException("TXT publication encoding is unsupported")
-        val withoutTrailingPadding = decoded.trimEnd('\u0000')
-        require(withoutTrailingPadding.isNotEmpty() && '\u0000' !in withoutTrailingPadding) {
-            "TXT publication contains NUL characters"
+        var lastFailure: CharacterCodingException? = null
+        for ((charset, offset) in candidates) {
+            try {
+                return charset.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes, offset, bytes.size - offset))
+                    .toString()
+            } catch (failure: CharacterCodingException) {
+                lastFailure = failure
+            }
         }
-        return withoutTrailingPadding
+        throw IllegalArgumentException("TXT publication encoding is unsupported", lastFailure)
     }
 
-    private fun decodeOrNull(bytes: ByteArray, charset: Charset, offset: Int): String? = try {
-        charset.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes, offset, bytes.size - offset))
-            .toString()
-    } catch (_: CharacterCodingException) {
-        null
-    }
 }
 
 private fun ByteArray.startsWith(prefix: ByteArray): Boolean =

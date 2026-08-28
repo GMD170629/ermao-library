@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.app/contracts/txt-decoding-v1.schema.json",
+  "title": "Shuku TXT Decoding v1 Conformance Fixtures",
+  "description": "BOM-aware decoding delegates acceptance to the selected native codec. Decoded text, including NUL, is preserved. Verified codec differences are explicit overrides; publication-level empty-content handling is outside this contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "version",
+    "cases"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ermao.txt-decoding"
+    },
+    "version": {
+      "const": 1
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    }
+  },
+  "$defs": {
+    "expectedText": {
+      "description": "Exact native codec output, or null only when the codec rejects the bytes.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 0,
+      "maxLength": 4096
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceHex",
+        "expectedText"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
+        },
+        "sourceHex": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 8192,
+          "pattern": "^(?:[0-9a-f]{2})*$"
+        },
+        "expectedText": {
+          "description": "The expected result for decoders without an explicit override.",
+          "$ref": "#/$defs/expectedText"
+        },
+        "decoderOverrides": {
+          "description": "Verified outcomes for named native codecs. The presence of an override selects its expectedText, including an explicit null result.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "apple-foundation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expectedText"
+              ],
+              "properties": {
+                "expectedText": {
+                  "$ref": "#/$defs/expectedText"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

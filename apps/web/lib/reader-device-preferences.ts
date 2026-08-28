@@ -1,5 +1,6 @@
 import {
   inheritReaderPreferences,
+  migrateWebReaderPreferences,
   normalizeReaderPreferences,
   type ReaderPreferences
 } from '@shuku/reader-core';
@@ -11,8 +12,13 @@ export function readDeviceReaderPreferences(userId: string, fallback: unknown): 
   const inherited = inheritReaderPreferences(fallback);
   if (typeof window === 'undefined' || !userId) return inherited;
   try {
-    const stored = window.localStorage.getItem(userDevicePreferenceKey(READER_DEVICE_PREFERENCES_KEY, userId));
-    return stored ? normalizeReaderPreferences(JSON.parse(stored), inherited) : inherited;
+    const key = userDevicePreferenceKey(READER_DEVICE_PREFERENCES_KEY, userId);
+    const stored = window.localStorage.getItem(key);
+    if (!stored) return inherited;
+    const preferences = migrateWebReaderPreferences(JSON.parse(stored), inherited);
+    const encoded = JSON.stringify(preferences);
+    if (encoded !== stored) window.localStorage.setItem(key, encoded);
+    return preferences;
   } catch {
     return inherited;
   }

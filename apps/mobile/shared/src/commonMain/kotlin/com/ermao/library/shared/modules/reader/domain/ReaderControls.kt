@@ -8,10 +8,10 @@ enum class ReaderControl {
     Theme, SystemTheme, FontSize, FontFamily, FontWeight, LineHeight,
     LetterSpacing, NegativeLetterSpacing, PageMargins, PageWidth,
     ReadingMode, Spread, ParagraphIndent, ParagraphSpacing, TextAlignment,
-    PublisherStyles, PublisherColors, PublisherFonts, SmartOptimization,
+    PublisherStyles, SmartOptimization,
     DeduplicateIndent, IndentUnindented, ProgressStyle, Clock, KeepAwake,
-    TapZones, Swipe, CommandAnimation, GestureAnimation, Keyboard, VolumeKeys,
-    ComicDirection, ComicCoverSingle, ComicPageGap, PdfZoom, PdfFit, PdfRotation, PdfCrop,
+    TapZones, Swipe, CommandAnimation, Keyboard, VolumeKeys,
+    ComicZoom, ComicFit, ComicQuality, ComicDirection, ComicCoverSingle, ComicPageGap, PdfZoom, PdfFit, PdfRotation, PdfCrop,
 }
 
 enum class ReaderControlAvailability {
@@ -31,7 +31,7 @@ fun resolveReaderControl(
 ): ReaderControlAvailability = resolveReaderControlContext(
     control, morphology, capabilities, ready,
     preferences.epub.flow == ReaderReadingMode.ContinuousScroll,
-    preferences.epub.typography.preservePublisherStyles, nativeUnavailable,
+    nativeUnavailable,
 )
 
 fun resolveReaderControlContext(
@@ -40,7 +40,6 @@ fun resolveReaderControlContext(
     capabilities: ReaderCapabilities,
     ready: Boolean,
     scrolling: Boolean,
-    publisherStyles: Boolean,
     nativeUnavailable: Set<ReaderControl>,
 ): ReaderControlAvailability {
     if (control in REFLOW_CONTROLS && morphology != ReaderMorphology.Reflowable ||
@@ -53,25 +52,12 @@ fun resolveReaderControlContext(
         if (control == ReaderControl.Spread && scrolling) {
             return ReaderControlAvailability.TemporarilyUnavailable
         }
-        if (publisherStyles && control in PUBLISHER_CONFLICTS) {
-            return ReaderControlAvailability.TemporarilyUnavailable
-        }
     }
     return ReaderControlAvailability.Available
 }
 
-/** Reset never changes another morphology's preferences. */
-fun resetReaderPreferences(preferences: ReaderPreferences, morphology: ReaderMorphology): ReaderPreferences {
-    val defaults = ReaderPreferences()
-    return preferences.copy(
-        appearance = defaults.appearance,
-        display = defaults.display,
-        interaction = defaults.interaction,
-        epub = if (morphology == ReaderMorphology.Reflowable) defaults.epub else preferences.epub,
-        comic = if (morphology == ReaderMorphology.Comic) defaults.comic else preferences.comic,
-        pdf = if (morphology == ReaderMorphology.Pdf) defaults.pdf else preferences.pdf,
-    )
-}
+/** Reset all reading formats in the current local account namespace. */
+fun resetReaderPreferences(): ReaderPreferences = ReaderPreferences()
 
 private fun ReaderCapabilities.supports(control: ReaderControl): Boolean = when (control) {
     ReaderControl.Previous -> canGoPrevious
@@ -94,7 +80,6 @@ private fun ReaderCapabilities.supports(control: ReaderControl): Boolean = when 
     ReaderControl.Spread -> supportsSpreadMode
     ReaderControl.ParagraphIndent, ReaderControl.ParagraphSpacing, ReaderControl.TextAlignment -> supportsParagraphLayout
     ReaderControl.PublisherStyles -> supportsPublisherStyles
-    ReaderControl.PublisherColors, ReaderControl.PublisherFonts -> supportsIndependentPublisherStyles
     ReaderControl.SmartOptimization, ReaderControl.DeduplicateIndent, ReaderControl.IndentUnindented -> supportsSmartOptimization
     ReaderControl.ProgressStyle -> supportsProgressStyles
     ReaderControl.Clock -> supportsClock
@@ -102,12 +87,12 @@ private fun ReaderCapabilities.supports(control: ReaderControl): Boolean = when 
     ReaderControl.TapZones -> supportsTapZones
     ReaderControl.Swipe -> supportsSwipeToggle
     ReaderControl.CommandAnimation -> supportsPageTurnAnimation
-    ReaderControl.GestureAnimation -> false
     ReaderControl.Keyboard -> supportsKeyboardPageTurn
     ReaderControl.VolumeKeys -> supportsVolumeKeyPageTurn
     ReaderControl.ComicDirection -> supportsComicDirection
     ReaderControl.ComicCoverSingle -> supportsComicCoverSingle
     ReaderControl.ComicPageGap -> supportsComicPageGap
+    ReaderControl.ComicZoom, ReaderControl.ComicFit, ReaderControl.ComicQuality -> false
     ReaderControl.PdfZoom -> supportsPdfZoomPreference
     ReaderControl.PdfFit -> supportsPdfFit
     ReaderControl.PdfRotation -> supportsPdfRotation
@@ -117,14 +102,10 @@ private fun ReaderCapabilities.supports(control: ReaderControl): Boolean = when 
 private val REFLOW_CONTROLS = setOf(
     ReaderControl.FontSize, ReaderControl.FontFamily, ReaderControl.FontWeight, ReaderControl.LineHeight,
     ReaderControl.LetterSpacing, ReaderControl.NegativeLetterSpacing, ReaderControl.PageMargins,
-    ReaderControl.PageWidth, ReaderControl.ParagraphIndent, ReaderControl.ParagraphSpacing,
-    ReaderControl.TextAlignment, ReaderControl.PublisherStyles, ReaderControl.PublisherColors,
-    ReaderControl.PublisherFonts, ReaderControl.SmartOptimization, ReaderControl.DeduplicateIndent,
+    ReaderControl.ParagraphIndent, ReaderControl.ParagraphSpacing,
+    ReaderControl.TextAlignment, ReaderControl.PublisherStyles,
+    ReaderControl.SmartOptimization, ReaderControl.DeduplicateIndent,
     ReaderControl.IndentUnindented,
 )
 private val COMIC_CONTROLS = setOf(ReaderControl.ComicDirection, ReaderControl.ComicCoverSingle, ReaderControl.ComicPageGap)
 private val PDF_CONTROLS = setOf(ReaderControl.PdfZoom, ReaderControl.PdfFit, ReaderControl.PdfRotation, ReaderControl.PdfCrop)
-private val PUBLISHER_CONFLICTS = setOf(
-    ReaderControl.LineHeight, ReaderControl.LetterSpacing, ReaderControl.ParagraphIndent,
-    ReaderControl.ParagraphSpacing, ReaderControl.TextAlignment,
-)

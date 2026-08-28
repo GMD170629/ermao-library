@@ -101,15 +101,9 @@ export function createEpubThemeSnapshot(
   // matches. This lets one late snapshot beat hostile author !important rules
   // without walking and rewriting the whole document on every theme change.
   const protectedBody = 'body:is(#shuku-theme-guard#shuku-theme-guard#shuku-theme-guard, *)';
-  const fontOverride = preferences.epub.typography.allowPublisherFonts
-    ? ''
-    : `${protectedBody}, ${protectedBody} * { font-family: var(--shuku-reader-font-family) !important; }`;
-  const lineHeightOverride = preferences.epub.typography.preservePublisherStyles
-    ? ''
-    : `${protectedBody} * { line-height: inherit !important; }`;
-  const colorOverride = preferences.epub.typography.allowPublisherColors
-    ? ''
-    : `
+  const fontOverride = `${protectedBody}, ${protectedBody} * { font-family: var(--shuku-reader-font-family) !important; }`;
+  const lineHeightOverride = `${protectedBody} * { line-height: inherit !important; }`;
+  const colorOverride = `
       ${protectedBody} * { background-color: transparent !important; color: inherit !important; }
       ${protectedBody} > div, ${protectedBody} > section, ${protectedBody} > article, ${protectedBody} > main,
       ${protectedBody} .calibre, ${protectedBody} .chapter, ${protectedBody} .section,

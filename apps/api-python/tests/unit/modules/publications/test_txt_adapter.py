@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,10 @@ from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationResourceNotFoundError,
 )
-from app.modules.publications.infrastructure.txt_adapter import TxtPublicationAdapter
+from app.modules.publications.infrastructure.txt_adapter import (
+    TxtPublicationAdapter,
+    _decode_txt,
+)
 
 
 def _source(path: Path) -> PublicationSource:
@@ -23,6 +27,25 @@ def _source(path: Path) -> PublicationSource:
         title="确定性文本",
         author="测试作者",
     )
+
+
+def test_txt_decoding_matches_shared_cross_language_contract() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[6]
+        / "packages/reader-contracts/fixtures/txt-decoding-v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert fixture["schema"] == "ermao.txt-decoding"
+    assert fixture["version"] == 1
+
+    for case in fixture["cases"]:
+        content = bytes.fromhex(case["sourceHex"])
+        expected = case["expectedText"]
+        if expected is None:
+            with pytest.raises(PublicationCorruptError):
+                _decode_txt(content)
+        else:
+            assert _decode_txt(content) == expected, case["id"]
 
 
 @pytest.mark.parametrize(
@@ -51,6 +74,8 @@ def test_txt_adapter_has_fixed_encoding_and_newline_policy(
     assert publication.toc[0].href == ("text/chapter-0001.xhtml#heading-000001")
     assert marker in resource.content.decode("utf-8")
     assert "\r" not in resource.content.decode("utf-8")
+    assert b"\x00" not in resource.content
+    assert path.read_bytes() == encoded
 
 
 def test_txt_adapter_golden_chapters_hrefs_and_dom_ids_are_stable(
@@ -94,13 +119,17 @@ def test_txt_adapter_golden_chapters_hrefs_and_dom_ids_are_stable(
     assert "&gt;<br/>第二行" in second_xhtml.decode()
 
 
-def test_txt_adapter_rejects_binary_and_unindexed_resources(tmp_path: Path) -> None:
+def test_txt_adapter_preserves_nul_and_rejects_unindexed_resources(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "binary.txt"
     path.write_bytes(b"valid\x00binary")
     adapter = TxtPublicationAdapter(tmp_path)
 
-    with pytest.raises(PublicationCorruptError):
-        adapter.open(_source(path))
+    adapter.open(_source(path))
+    chapter = adapter.read_resource(_source(path), "text/chapter-0001.xhtml")
+    assert b"valid\x00binary" in chapter.content
+    assert path.read_bytes() == b"valid\x00binary"
 
     path.write_text("正文", encoding="utf-8")
     source = _source(path)
@@ -108,3 +137,28 @@ def test_txt_adapter_rejects_binary_and_unindexed_resources(tmp_path: Path) -> N
         adapter.read_resource(source, "../secret")
     with pytest.raises(PublicationResourceNotFoundError):
         adapter.read_resource(source, "text/not-indexed.xhtml")
+
+
+@pytest.mark.parametrize(
+    ("encoded", "code"),
+    [
+        (b"\xef\xbb\xbf\xff", "PUBLICATION_TXT_ENCODING_UNSUPPORTED"),
+        (b" \r\n\t", "PUBLICATION_TXT_EMPTY"),
+    ],
+)
+def test_txt_parser_failures_have_stable_codes_without_changing_the_source(
+    tmp_path: Path, encoded: bytes, code: str
+) -> None:
+    path = tmp_path / "invalid.txt"
+    path.write_bytes(encoded)
+    adapter = TxtPublicationAdapter(tmp_path)
+    try:
+        with pytest.raises(PublicationCorruptError) as caught:
+            adapter.open(_source(path))
+
+        assert caught.value.code == code
+        assert path.read_bytes() == encoded
+        if code == "PUBLICATION_TXT_ENCODING_UNSUPPORTED":
+            assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+    finally:
+        adapter.close()

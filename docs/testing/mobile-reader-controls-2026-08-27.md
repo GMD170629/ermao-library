@@ -1,5 +1,13 @@
 # Mobile Reader controls — 2026-08-27
 
+> The 2026-08-28 user decision supersedes this record's fresh-Navigator workaround:
+> iOS settings now use the existing Navigator's public `submitPreferences` API.
+> Readium owns reflow and location retention; the application does not verify or
+> roll back the resulting layout. The earlier results below are historical
+> evidence, not acceptance of the current submission path. See
+> [the current Reader architecture](../mobile-reader-architecture.md#13-unified-reader-settings-2026-08-28)
+> and [the unified settings implementation and verification](reader-settings-unification-2026-08-28.md).
+
 ## Scope and evidence policy
 
 Android Compose and iOS SwiftUI share the KMP Reader control contract, not UI.
@@ -9,9 +17,10 @@ rewriting or derived EPUB cache is introduced.
 
 An enabled control requires a native implementation. A preferences-object
 assertion alone is not rendering evidence. Unsupported controls remain disabled;
-controls for other morphologies are omitted. Implementation is present, but acceptance is **not complete**. The final iOS
-native-layout fix was built after the physical device disconnected and has not
-been run. Earlier passing results must not be attributed to that final revision.
+controls for other morphologies are omitted. At the time of this record,
+acceptance was **not complete**: the final iOS remount workaround was built after
+the physical device disconnected and was not run. That workaround has since been
+removed. Earlier passing results must not be attributed to another revision.
 
 ### Delivery decision
 
@@ -33,8 +42,8 @@ Web i18n and Android lint retain the blockers recorded below.
 | Font family | `Configuration.addFontFamilyDeclaration`, `EpubPreferences.fontFamily` | `fontFamilyDeclarations`, `EPUBPreferences.fontFamily` | Licensed Sans/Songti/Kaiti assets; three sans labels map to the same licensed font. iPhone all three font families loaded in the earlier render run, verified using `document.fonts` and computed paragraph font. Android render assertion added, device pending. |
 | Font size / weight | `fontSize`, `fontWeight` | `fontSize`, `fontWeight` | Reflowable publication; font size uses a 16px CSS root on both platforms. iPhone 24px paragraph size verified. |
 | Line height, positive letter spacing, margins, paragraph indentation/spacing, alignment | public preferences and `createPreferencesEditor` | public preferences and `editor(of:)` | Editor effectiveness checks language, writing direction and layout. Publisher-style conflicts disabled; values retained. iPhone line-height ratio verified. |
-| Paged / scroll / columns | `scroll`, `columnCount` | `scroll`, `columnCount` | Columns disabled while scrolling; chosen paginated columns retained. Vertical-text restrictions come from the editor. The dynamic iPhone scroll assertion found stale native resource caching. The public-constructor fix below is awaiting physical-device verification. |
-| Five themes / system theme | public colors/theme and native Compose chrome | public colors/theme and SwiftUI chrome | All five paragraph foreground colors passed in the earlier physical render run; final native remount path needs revalidation. System mode resolves Day/Night; choosing a theme exits system mode. |
+| Paged / scroll / columns | `scroll`, `columnCount` | `scroll`, `columnCount` | Columns disabled while scrolling; chosen paginated columns retained. Vertical-text restrictions come from the editor. The dynamic iPhone scroll assertion found stale native resource caching; the current direct-submit result is recorded in the 2026-08-28 verification. |
+| Five themes / system theme | public colors/theme and native Compose chrome | public colors/theme and SwiftUI chrome | All five paragraph foreground colors passed in the earlier physical render run. System mode resolves Day/Night; choosing a theme exits system mode. Current direct-submit evidence is recorded separately. |
 | Publisher styles | `publisherStyles` | `publisherStyles` | One overall native switch; no independent style/color/font implementation. |
 | Command animation | `goForward/goBackward/go(animated:)` | `NavigatorGoOptions` | Buttons, tap zones and keyboard commands only; reduced motion respected. Does not control native swipe animation. |
 | Contents / progress / bookmarks | public navigation and positions, existing bookmark store | public navigation and positions, existing bookmark store | TOC adapters verify target; bookmark sheets retain failure state. Existing account-scoped bookmark sync retained. |
@@ -55,7 +64,7 @@ now allows **only `readium://assets` for styles and fonts**, while keeping
 unchanged author body projection. The physical-device rendering test failed
 before the fix and passed afterwards. No script permission was added.
 
-## Pinned Swift SDK cache and native adapter ownership
+## Historical pinned Swift SDK cache investigation
 
 The pinned Swift SDK's internal `WebViewServer` buffers already decorated HTML.
 A `scroll` change invalidates pagination without committing CSS to the old view,
@@ -64,22 +73,15 @@ and the reload can read that earlier buffered document. Physical tests observed
 `--USER__view: readium-paged-on` and horizontal overflow. Foreground-state checks
 ruled out deferred background layout.
 
-The iOS Reader adapter now creates a fresh **public**
-`EPUBNavigatorViewController` with the same live `Publication`, the new
-`EPUBPreferences`, the same registered fonts and a captured public exact Locator.
-The SwiftUI host is keyed to navigator identity. It verifies the recaptured block
-before saving settings; failure restores the prior live navigator and settings.
-System appearance updates and user updates share a serial queue. No publication
-copy, conversion, script injection, SDK patch or private cache access is used.
-
-Owner: Mobile Reader native adapter (`makeIosReflowableNavigator` and
-`executeControlPreferences`). Removal condition: a separately authorized pinned
-SDK update fixes resource invalidation, and the existing physical render test
-passes through public `submitPreferences`, including mode changes, rotation,
-resource revisits and semantic-location preservation. Until then, recreation is
-the single application path for native text preference changes. This path is
-**compiled but not runtime accepted** because the phone disconnected before the
-next test run could launch.
+The earlier adapter attempted to work around this by recreating the Navigator
+and requiring the first visible block to remain identical. That path was only
+compiled, not runtime accepted. It could reject valid repagination and is now
+removed together with its locator checks, polling, renderer rollback, extra queue
+and identity-based SwiftUI remount. The user's 2026-08-28 instruction requires
+direct public `submitPreferences` on the existing Navigator. The SDK owns layout;
+the app retains its preference store and progress-observation suppression. The
+historical scrolling cache failure remains a separate SDK rendering finding and
+does not justify restoring the removed workaround.
 
 ## Checks run
 
@@ -124,9 +126,10 @@ notification banners also affected tests; no notification settings were changed.
 
 ## Deferred runtime acceptance and explicit exclusions
 
-- In a future authorized device run, reconnect the physical iPhone and rerun the final native render test, the nine
-  format UI matrix, theme/system changes, native remount/rollback and semantic
-  position preservation. The new scroll assertion must pass; it is not skipped.
+- In a future authorized device run, reconnect the physical iPhone and rerun the native render test through the
+  current public settings submission path, the nine-format UI matrix, themes,
+  system changes and preference persistence. The scroll rendering assertion
+  remains an independent SDK check; it is not skipped or replaced by an app reflow workaround.
 - No physical Android device was available. All Android rendering/instrumentation,
   fonts, hardware keys, system Back, TalkBack, rotation and lifecycle gates remain
   pending. Compilation is not a substitute.
@@ -148,3 +151,71 @@ notification banners also affected tests; no notification settings were changed.
 `/tmp/reader-controls-ios-native-factory.log` (interrupted before launch),
 `/tmp/reader-controls-ios-device-build.log`,
 `/tmp/reader-controls-web-i18n-final.log`.
+
+## 2026-08-28 follow-up: Web i18n and Android lint
+
+This follow-up closes the catalog and lint blockers only. It does not change the
+Reader/Shelves flows, public API contracts, dependency versions, or the pending
+physical-device acceptance above. The earlier failed runs remain historical evidence.
+
+### Root causes and bounded fixes
+
+- Commit `9fcadcda` already supplied the four administrator audit-event translations,
+  switched cover selection to AndroidX ExifInterface, and removed the two unused
+  resources in both Android locales. Those four historical lint errors no longer
+  reproduce.
+- The six administrator errors reported as stale were still user-visible:
+  `UserAdministrationError(code, message)` flows through `CodedMessageBody` to
+  the Web page's `t(reason.message)`. The Python collector did not recognize that
+  constructor, so deleting those entries made the check pass while English error
+  toasts retained Chinese text. The existing collector now reads its `message`
+  keyword or second positional argument through the existing argument/static-text
+  helpers. Both catalogs restore the six entries and their previous English
+  translations; the four audit-event translations remain intact.
+- Current Android lint reproduced one `LogNotTimber` error in the download task
+  failure boundary. That call now uses the existing project logging approach,
+  `java.util.logging.Logger`, retaining the `Downloads` logger name and
+  `download_task_failed` event, resource ID, and error code. Cancellation,
+  failure-state updates, and recovery behavior are unchanged. No second logger
+  implementation, logging dependency, suppression, or lint baseline was added.
+- Local Web dependencies predated the committed PDF.js patch, causing two missing
+  `setReadingWindow` type errors and one PDF integration-test failure. Running
+  `pnpm install --frozen-lockfile` with Node `22.23.1` and pnpm `9.12.2` applied the
+  existing dependency patches; neither the lockfile nor Reader code was changed.
+
+### Verification
+
+The added extraction and translation assertions failed before the fix. After the
+fix, all eight focused i18n tests pass, including positional/keyword arguments,
+interpolation, exclusion of internal/dynamic-only messages, and both locales for
+the six errors and four audit events.
+
+| Gate | Result |
+| --- | --- |
+| Web `pnpm lint` / `pnpm typecheck` | Passed |
+| Web `pnpm test` | 400 passed, zero failures/skips |
+| Web `pnpm i18n:check` | 2053 messages; no missing/stale keys, untranslated English, or placeholder mismatches |
+| `verifyMobileOfflineContract` / `verifyDesignTokens` | Passed |
+| `:shared:testAndroidHostTest` | 322 passed in the baseline run; unchanged shared sources were up-to-date in the final run |
+| `:androidApp:testDebugUnitTest` | 146 passed after the logging change, zero failures/errors/skips |
+| `:androidApp:lintDebug` | Passed; report: `No issues found.` |
+| `git diff --check` | Passed |
+
+Android tasks ran in one invocation with JDK 17, the configured local Android SDK,
+and `--no-parallel --console=plain`; no competing Gradle invocation was started.
+Local logs: `/tmp/ermao-i18n-lint-install.log`,
+`/tmp/ermao-i18n-lint-web-lint.log`, `/tmp/ermao-i18n-lint-web-typecheck.log`,
+`/tmp/ermao-i18n-lint-web-test.log`, and `/tmp/ermao-i18n-lint-android-gates.log`.
+The Android report is `apps/mobile/androidApp/build/reports/lint-results-debug.txt`.
+
+### Still unverified
+
+- `adb devices -l` returned no devices. No APK installation, cold launch, physical
+  download-failure logging/recovery, bilingual UI, TalkBack, or lifecycle test was
+  performed. No emulator was started; the earlier Reader/Shelves device matrix
+  remains pending. This follow-up did not run iOS or Web browser UI acceptance.
+- The initial diagnostic Gradle run emitted an SDK XML v3/v4 compatibility warning.
+  It did not recur in the final incremental gate log, but no SDK tooling change was
+  made, so this is not evidence of a clean-environment tooling repair.
+
+Follow-up result: catalog and lint blockers resolved; runtime acceptance remains pending.

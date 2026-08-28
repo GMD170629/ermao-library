@@ -19,13 +19,15 @@ internal data class ParsedFb2Source(val document: Fb2PublicationDocument, val im
 
 internal object Fb2SourceParser {
     fun read(file: File, fallbackTitle: String): ParsedFb2Source {
-        require(file.length() in 1..64L * 1024 * 1024) { "FB2 source exceeds the size limit" }
+        com.ermao.library.shared.modules.reader.ReaderAdmission.localFailure("fb2", file.length())?.let {
+            throw ReaderOpenFailure(com.ermao.library.shared.modules.reader.ReaderError(it))
+        }
         val bytes = file.inputStream().use { input ->
             val output = ByteArrayOutputStream()
             val buffer = ByteArray(8192)
             var count = input.read(buffer)
             while (count != -1) {
-                require(output.size().toLong() + count <= 64L * 1024 * 1024) { "FB2 source exceeds the size limit" }
+                require(output.size().toLong() + count <= Int.MAX_VALUE - 8L) { "FB2 allocation limit exceeded" }
                 output.write(buffer, 0, count)
                 count = input.read(buffer)
             }
@@ -59,7 +61,7 @@ internal object Fb2SourceParser {
         val images = mutableMapOf<String, ByteArray>()
         val links = decoder.embeddedImages().map { image ->
             val content = Base64.getDecoder().decode(image.encoded)
-            require(content.size <= 20 * 1024 * 1024 && matchesImage(content, image.mediaType)) {
+            require(content.size <= 20 * 1024 * 1024) {
                 "FB2 image content is invalid"
             }
             totalBytes += content.size
@@ -80,15 +82,5 @@ internal object Fb2SourceParser {
         return ParsedFb2Source(decoder.finish(fallbackTitle, links), images)
     }
 
-    private fun matchesImage(bytes: ByteArray, mediaType: String): Boolean = when (mediaType) {
-        "image/jpeg" -> bytes.startsWith(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte()))
-        "image/png" -> bytes.startsWith(byteArrayOf(0x89.toByte(), 80, 78, 71, 13, 10, 26, 10))
-        "image/gif" -> bytes.startsWith("GIF87a".toByteArray()) || bytes.startsWith("GIF89a".toByteArray())
-        "image/webp" -> bytes.startsWith("RIFF".toByteArray()) && bytes.size >= 12 &&
-            bytes.copyOfRange(8, 12).contentEquals("WEBP".toByteArray())
-        else -> false
-    }
 
-    private fun ByteArray.startsWith(prefix: ByteArray): Boolean = size >= prefix.size &&
-        prefix.indices.all { this[it] == prefix[it] }
 }

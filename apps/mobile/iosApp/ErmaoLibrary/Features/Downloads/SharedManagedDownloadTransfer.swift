@@ -8,34 +8,45 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring {
     private var activeNamespace: String?
     private var runtime: DownloadResourceRuntime?
     private var catalog: IosDownloadCatalog?
+    private var gateway: KtorDownloadsGateway?
 
     init(cookieStore: KeychainCookiePayloadStore) { self.cookieStore = cookieStore }
 
-    func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
-                  changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
-        let requestContext = PublicKt.createDownloadRequestContext(
-            profileId: context.profileID, displayName: context.profileDisplayName, baseUrl: context.baseURL,
-            serverIdentity: context.serverIdentity, acceptsInsecureTls: context.acceptsInsecureTLS,
-            userId: context.userID, authorizationVersion: context.authorizationVersion
-        )
+    private func activate(context: ContentRequestContext, repository: ManagedDownloadStore,
+                          changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
         if activeNamespace != context.namespaceKey {
+            gateway?.close()
             let catalog = IosDownloadCatalog(context: context, repository: repository, changed: changed)
             let gateway = IosCompositionKt.createIosDownloadsGateway(
                 cookieStore: cookieStore, profileId: context.profileID, displayName: context.profileDisplayName,
                 baseUrl: context.baseURL, serverIdentity: context.serverIdentity, acceptsInsecureTls: context.acceptsInsecureTLS
             )
             self.catalog = catalog
+            self.gateway = gateway
             runtime = PublicKt.createDownloadResourceRuntime(catalog: catalog, gateway: gateway)
-            try await runtime?.recoverInterrupted(namespace: requestContext.namespace)
             activeNamespace = context.namespaceKey
+            try await runtime?.recoverInterrupted(namespace: context.downloadRequestContext.namespace_)
         }
+    }
+
+    func readerCoordinator(context: ContentRequestContext, repository: ManagedDownloadStore,
+                           changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws -> ReaderLaunchCoordinator {
+        try await activate(context: context, repository: repository, changed: changed)
+        guard let catalog, let gateway else { throw ManagedDownloadTransferError.invalidResponse }
+        return ReaderLaunchCoordinator(catalog: catalog, gateway: gateway)
+    }
+
+    func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  expectedDescriptor: DownloadDescriptor? = nil,
+                  changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
+        try await activate(context: context, repository: repository, changed: changed)
         guard let runtime, let catalog else { throw ManagedDownloadTransferError.invalidResponse }
         let cancellation = DownloadCancellation()
         try await withTaskCancellationHandler {
             let result = try await runtime.download(
-                context: requestContext, resourceId: resourceID, taskId: UUID().uuidString,
+                context: context.downloadRequestContext, resourceId: resourceID, taskId: UUID().uuidString,
                 sink: IosDownloadFileSink(catalog: catalog, repository: repository), observer: nil,
-                cancellation: cancellation
+                cancellation: cancellation, expectedDescriptor: expectedDescriptor
             )
             try Task.checkCancellation()
             if let failure = result as? DownloadResourceResultFailure {
@@ -46,7 +57,8 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring {
     }
 
     private static func map(_ error: ErmaoShared.AppError) -> ManagedDownloadTransferError {
-        switch error.kind {
+        if error.code == "ASSET_VERSION_CHANGED" { return .versionChanged }
+        return switch error.kind {
         case .unauthorized: .unauthorized
         case .forbidden, .notfoundorunavailable, .gone: .inaccessible
         case .storagefailure: .insufficientSpace
@@ -83,7 +95,7 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
         return try await repository.records(namespace: context.namespaceKey).compactMap { record in
             guard let encoded = record.sharedTaskJSON else { return nil }
             let task = try DownloadCatalogCodec.shared.decode(serialized: encoded)
-            try requireNamespace(task.descriptor.identity.namespace)
+            try requireNamespace(task.descriptor.identity.namespace_)
             return Self.validated(task: task, record: record)
         }
     }
@@ -95,7 +107,7 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
     }
 
     func findTask(descriptor: DownloadDescriptor) async throws -> DownloadTask? {
-        try requireNamespace(descriptor.identity.namespace)
+        try requireNamespace(descriptor.identity.namespace_)
         let candidates = try await repository.records(namespace: context.namespaceKey)
         for record in candidates where record.resourceID == descriptor.identity.resourceId && record.assetID == descriptor.identity.assetId {
             if let encoded = record.sharedTaskJSON {
@@ -122,7 +134,7 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
     }
 
     func saveTask(task: DownloadTask) async throws {
-        try requireNamespace(task.descriptor.identity.namespace)
+        try requireNamespace(task.descriptor.identity.namespace_)
         let previous = try await repository.records(namespace: context.namespaceKey).first { $0.id == task.id }
         let descriptor = task.descriptor
         guard let readerType = ManagedDownloadReaderType(rawValue: descriptor.readerType.name.lowercased()) else {
@@ -307,19 +319,19 @@ private final class SharedPageSetSinkSession: NSObject, DownloadBundleByteSinkSe
             guard bytes == request.expectedBytes else { throw ManagedDownloadTransferError.invalidResponse }
             try FileManager.default.moveItem(at: partURL, to: finalURL)
             guard let self else { throw ManagedDownloadTransferError.invalidResponse }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            guard !self.closed, self.committedMembers[index] == nil else {
-                throw ManagedDownloadTransferError.invalidResponse
+            return try self.lock.withLock {
+                guard !self.closed, self.committedMembers[index] == nil else {
+                    throw ManagedDownloadTransferError.invalidResponse
+                }
+                self.committedMembers[index] = SharedPageSetMember(
+                    assetId: request.assetId,
+                    sequenceIndex: index,
+                    mimeType: request.mimeType,
+                    sizeBytes: request.expectedBytes,
+                    fileName: fileName
+                )
+                return fileName
             }
-            self.committedMembers[index] = SharedPageSetMember(
-                assetId: request.assetId,
-                sequenceIndex: index,
-                mimeType: request.mimeType,
-                sizeBytes: request.expectedBytes,
-                fileName: fileName
-            )
-            return fileName
         }
     }
 

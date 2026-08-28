@@ -12,6 +12,7 @@ from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
     PublicationNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationUnsupportedError,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "PublicationAccessScope",
     "PublicationCorruptError",
     "PublicationNotFoundError",
+    "PublicationResourceTooLargeError",
     "PublicationUnsupportedError",
 ]

@@ -16,18 +16,19 @@ data class NormalizedTxtPublication(
 const val TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
 const val TXT_PUBLICATION_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
 
+class TxtPublicationEmptyException : IllegalArgumentException("TXT publication is empty")
+
 /** Deterministic TXT -> in-memory Readium publication resources shared by every platform. */
 class TxtPublicationNormalizer {
     @Throws(IllegalArgumentException::class)
     fun normalize(decodedText: String, publicationTitle: String): NormalizedTxtPublication {
         require(publicationTitle.isNotBlank()) { "TXT publication title is blank" }
-        require('\u0000' !in decodedText) { "TXT publication contains NUL" }
         val normalized = decodedText
             .replace("\r\n", "\n")
             .replace('\r', '\n')
             .replace('\u2028', '\n')
             .replace('\u2029', '\n')
-        require(normalized.isNotBlank()) { "TXT publication is empty" }
+        if (normalized.isBlank()) throw TxtPublicationEmptyException()
         val lines = normalized.split('\n').map(String::trimEnd)
         val starts = lines.indices.filter { isChapterHeading(lines[it]) }
         val ranges = chapterRanges(lines, starts)

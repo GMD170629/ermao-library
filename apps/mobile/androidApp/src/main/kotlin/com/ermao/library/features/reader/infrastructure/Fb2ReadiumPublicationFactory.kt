@@ -26,7 +26,7 @@ internal class Fb2ReadiumPublicationFactory {
         val containers: List<Container<Resource>> = document.resources.map { resource ->
             SingleResourceContainer(
                 requireNotNull(Url(resource.href)),
-                InMemoryResource(EpubContentSecurityPolicy.decorateHtml(resource.xhtml.toByteArray())),
+                InMemoryResource(EpubContentSecurityPolicy.generatedChapter(resource.xhtml)),
             )
         } + listOf(SingleResourceContainer(
             requireNotNull(Url(document.stylesheetHref)),

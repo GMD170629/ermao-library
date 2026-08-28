@@ -35,8 +35,6 @@ fun mergeReaderPreferenceChanges(base: ReaderPreferences, requested: ReaderPrefe
                 paragraphSpacing = select(base.epub.typography.paragraphSpacing, requested.epub.typography.paragraphSpacing, current.epub.typography.paragraphSpacing),
                 textAlign = select(base.epub.typography.textAlign, requested.epub.typography.textAlign, current.epub.typography.textAlign),
                 preservePublisherStyles = select(base.epub.typography.preservePublisherStyles, requested.epub.typography.preservePublisherStyles, current.epub.typography.preservePublisherStyles),
-                allowPublisherColors = select(base.epub.typography.allowPublisherColors, requested.epub.typography.allowPublisherColors, current.epub.typography.allowPublisherColors),
-                allowPublisherFonts = select(base.epub.typography.allowPublisherFonts, requested.epub.typography.allowPublisherFonts, current.epub.typography.allowPublisherFonts),
             ),
             optimization = current.epub.optimization.copy(
                 enabled = select(base.epub.optimization.enabled, requested.epub.optimization.enabled, current.epub.optimization.enabled),
@@ -90,8 +88,6 @@ fun changedReaderControls(before: ReaderPreferences, after: ReaderPreferences): 
     if (before.epub.typography.paragraphSpacing != after.epub.typography.paragraphSpacing) add(ReaderControl.ParagraphSpacing)
     if (before.epub.typography.textAlign != after.epub.typography.textAlign) add(ReaderControl.TextAlignment)
     if (before.epub.typography.preservePublisherStyles != after.epub.typography.preservePublisherStyles) add(ReaderControl.PublisherStyles)
-    if (before.epub.typography.allowPublisherColors != after.epub.typography.allowPublisherColors) add(ReaderControl.PublisherColors)
-    if (before.epub.typography.allowPublisherFonts != after.epub.typography.allowPublisherFonts) add(ReaderControl.PublisherFonts)
     if (before.epub.optimization.enabled != after.epub.optimization.enabled) add(ReaderControl.SmartOptimization)
     if (before.epub.optimization.deduplicateIndent != after.epub.optimization.deduplicateIndent) add(ReaderControl.DeduplicateIndent)
     if (before.epub.optimization.indentUnindented != after.epub.optimization.indentUnindented) add(ReaderControl.IndentUnindented)

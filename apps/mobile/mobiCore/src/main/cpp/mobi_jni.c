@@ -123,10 +123,11 @@ JNIEXPORT jlong JNICALL
 Java_com_ermao_library_mobi_infrastructure_MobiCoreNative_open(
     JNIEnv *env,
     jobject receiver,
-    jbyteArray path
+    jbyteArray path,
+    jlong maximum_file_bytes
 ) {
     (void) receiver;
-    if (path == NULL) {
+    if (path == NULL || maximum_file_bytes <= 0) {
         throw_status(env, ERMAO_MOBI_INVALID_ARGUMENT);
         return 0;
     }
@@ -148,7 +149,10 @@ Java_com_ermao_library_mobi_infrastructure_MobiCoreNative_open(
         return 0;
     }
     ErmaoMobiBook *book = NULL;
-    const ErmaoMobiStatus status = ermao_mobi_open(utf8_path, NULL, &book);
+    ErmaoMobiOpenOptions options;
+    ermao_mobi_default_options(&options);
+    options.max_file_bytes = (uint64_t) maximum_file_bytes;
+    const ErmaoMobiStatus status = ermao_mobi_open(utf8_path, &options, &book);
     free(utf8_path);
     if (status != ERMAO_MOBI_OK) {
         throw_status(env, status);

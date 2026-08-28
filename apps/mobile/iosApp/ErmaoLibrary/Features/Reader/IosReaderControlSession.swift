@@ -62,12 +62,12 @@ extension IosReaderControlSession {
             control: control, morphology: controlMorphology,
             capabilities: ErmaoShared.PublicKt.readerPlatformCapabilities(morphology: controlMorphology, volumeKeys: false, pdfFit: false),
             ready: controlReady, scrolling: preferences.readingMode == .continuousScroll,
-            publisherStyles: preferences.preservePublisherStyles, nativeUnavailable: unavailable
+            nativeUnavailable: unavailable
         ) == .available
     }
 
     func canApplyControlPreferences(_ updated: IosReaderPreferences) -> Bool {
-        if updated == preferences.reset(for: controlMorphology) { return true }
+        if updated == IosReaderPreferences() { return true }
         return updated.changedControls(from: preferences).allSatisfy(isEnabled)
     }
 
@@ -87,7 +87,6 @@ extension IosReaderControlSession {
 final class IosReaderPreferenceEditor: ObservableObject {
     @Published private(set) var draft: IosReaderPreferences
     @Published private(set) var applyFailed = false
-    @Published private(set) var isApplying = false
     private var committed: IosReaderPreferences
     private var pending: IosReaderPreferences?
     private var writer: Task<Void, Never>?
@@ -107,7 +106,6 @@ final class IosReaderPreferenceEditor: ObservableObject {
         mutation(&draft)
         pending = draft
         guard writer == nil else { return }
-        isApplying = true
         writer = Task { [self] in
             while let requested = pending {
                 pending = nil
@@ -122,39 +120,19 @@ final class IosReaderPreferenceEditor: ObservableObject {
                 }
             }
             writer = nil
-            isApplying = false
         }
     }
 
     func flush() async { await writer?.value }
 
-    func reset(morphology: ErmaoShared.ReaderMorphology) {
-        change { $0 = $0.reset(for: morphology) }
+    func changeSetting(_ setting: ReaderSettingDefinition, value: String) {
+        do {
+            let updated = try draft.changing(setting, value: value)
+            change { $0 = updated }
+        } catch { applyFailed = true }
     }
-}
 
-extension IosReaderPreferences {
-    func reset(for morphology: ErmaoShared.ReaderMorphology) -> Self {
-        var result = Self()
-        // Explicit morphology-owned preference groups; shared preferences always reset.
-        if morphology != .reflowable {
-            result.fontSize = fontSize; result.lineHeight = lineHeight; result.pageWidth = pageWidth
-            result.fontFamily = fontFamily; result.fontWeight = fontWeight; result.letterSpacing = letterSpacing
-            result.pageMargin = pageMargin; result.spreadMode = spreadMode; result.pageTurnAnimation = pageTurnAnimation
-            result.readingMode = readingMode; result.paragraphIndent = paragraphIndent; result.paragraphSpacing = paragraphSpacing
-            result.textAlignment = textAlignment; result.preservePublisherStyles = preservePublisherStyles
-            result.allowPublisherColors = allowPublisherColors; result.allowPublisherFonts = allowPublisherFonts
-            result.smartOptimization = smartOptimization; result.deduplicateIndent = deduplicateIndent; result.indentUnindented = indentUnindented
-        }
-        if morphology != .comic {
-            result.comicDirection = comicDirection; result.comicSpread = comicSpread; result.comicFlow = comicFlow
-            result.comicCoverSingle = comicCoverSingle; result.comicPageGap = comicPageGap; result.comicZoom = comicZoom
-        }
-        if morphology != .pdf {
-            result.pdfZoom = pdfZoom; result.pdfFit = pdfFit; result.pdfRotation = pdfRotation; result.pdfCropMargins = pdfCropMargins
-        }
-        return result
-    }
+    func reset() { change { $0 = IosReaderPreferences() } }
 }
 
 extension IosReaderPreferences {
@@ -182,12 +160,15 @@ extension IosReaderPreferences {
             (paragraphSpacing != previous.paragraphSpacing, .paragraphspacing),
             (textAlignment != previous.textAlignment, .textalignment),
             (preservePublisherStyles != previous.preservePublisherStyles, .publisherstyles),
-            (allowPublisherColors != previous.allowPublisherColors, .publishercolors),
-            (allowPublisherFonts != previous.allowPublisherFonts, .publisherfonts),
             (smartOptimization != previous.smartOptimization, .smartoptimization),
             (deduplicateIndent != previous.deduplicateIndent, .deduplicateindent),
             (indentUnindented != previous.indentUnindented, .indentunindented),
             (comicDirection != previous.comicDirection, .comicdirection),
+            (comicZoom != previous.comicZoom, .comiczoom),
+            (comicPageWidth != previous.comicPageWidth || pdfPageWidth != previous.pdfPageWidth, .pagewidth),
+            (comicImageFit != previous.comicImageFit, .comicfit),
+            (comicImageVariant != previous.comicImageVariant, .comicquality),
+            (comicPageTurnAnimation != previous.comicPageTurnAnimation, .commandanimation),
             (comicFlow != previous.comicFlow, .readingmode),
             (comicSpread != previous.comicSpread, .spread),
             (comicPageGap != previous.comicPageGap, .comicpagegap),
@@ -199,5 +180,101 @@ extension IosReaderPreferences {
             (letterSpacing != previous.letterSpacing, letterSpacing < 0 ? .negativeletterspacing : .letterspacing),
         ]
         return Set(changes.filter { $0.0 }.map { $0.1 })
+    }
+}
+
+/// Native editable field names adapt to the shared, validated storage contract.
+extension IosReaderPreferences {
+    private static let wireFields: [String: String] = [
+        "appearance.theme": "theme",
+        "appearance.themeMode": "themeMode",
+        "comic.coverSingle": "comicCoverSingle",
+        "comic.direction": "comicDirection",
+        "comic.flow": "comicFlow",
+        "comic.imageFit": "comicImageFit",
+        "comic.imageVariant": "comicImageVariant",
+        "comic.pageGap": "comicPageGap",
+        "comic.pageTurnAnimation": "comicPageTurnAnimation",
+        "comic.pageWidth": "comicPageWidth",
+        "comic.spreadMode": "comicSpread",
+        "comic.zoom": "comicZoom",
+        "display.progressStyle": "progressStyle",
+        "display.showClock": "showClock",
+        "epub.flow": "readingMode",
+        "epub.fontFamily": "fontFamily",
+        "epub.fontSize": "fontSize",
+        "epub.fontWeight": "fontWeight",
+        "epub.letterSpacing": "letterSpacing",
+        "epub.lineHeight": "lineHeight",
+        "epub.optimization.deduplicateIndent": "deduplicateIndent",
+        "epub.optimization.enabled": "smartOptimization",
+        "epub.optimization.indentUnindented": "indentUnindented",
+        "epub.pageMargin": "pageMargin",
+        "epub.pageTurnAnimation": "pageTurnAnimation",
+        "epub.pageWidth": "pageWidth",
+        "epub.spreadMode": "spreadMode",
+        "epub.typography.paragraphIndent": "paragraphIndent",
+        "epub.typography.paragraphSpacing": "paragraphSpacing",
+        "epub.typography.preservePublisherStyles": "preservePublisherStyles",
+        "epub.typography.textAlign": "textAlignment",
+        "interaction.keepScreenAwake": "keepScreenAwake",
+        "interaction.keyboardPageTurn": "keyboardPageTurn",
+        "interaction.swipePageTurn": "swipePageTurn",
+        "interaction.tapZones": "tapZones",
+        "interaction.volumeKeyPageTurn": "volumeKeyPageTurn",
+        "pdf.cropMargins": "pdfCropMargins",
+        "pdf.fit": "pdfFit",
+        "pdf.pageWidth": "pdfPageWidth",
+        "pdf.rotation": "pdfRotation",
+        "pdf.zoom": "pdfZoom"
+    ]
+
+    func canonicalJSON() throws -> String {
+        let flat = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as? [String: Any] ?? [:]
+        var root: [String: Any] = ["schemaVersion": 5, "pdf": ["flow": "paged"]]
+        for (path, field) in Self.wireFields {
+            var value = flat[field]
+            if field == "readingMode" { value = readingMode == .paged ? "paginated" : "scrolled" }
+            Self.setWireValue(value, parts: path.split(separator: ".").map(String.init), in: &root)
+        }
+        let data = try JSONSerialization.data(withJSONObject: root)
+        guard let input = String(data: data, encoding: .utf8),
+              let canonical = ReaderPreferencesJson().canonicalizeOrNull(payload: input)
+        else { throw CocoaError(.coderInvalidValue) }
+        return canonical
+    }
+
+    init(canonicalJSON: String) throws {
+        let root = try JSONSerialization.jsonObject(with: Data(canonicalJSON.utf8)) as? [String: Any] ?? [:]
+        var flat = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Self())) as? [String: Any] ?? [:]
+        for (path, field) in Self.wireFields {
+            var value: Any? = root
+            for part in path.split(separator: ".") { value = (value as? [String: Any])?[String(part)] }
+            if field == "readingMode", let flow = value as? String { value = flow == "paginated" ? "paged" : "continuousScroll" }
+            if let value { flat[field] = value }
+        }
+        self = try JSONDecoder().decode(Self.self, from: JSONSerialization.data(withJSONObject: flat))
+    }
+
+    private static func setWireValue(_ value: Any?, parts: [String], in root: inout [String: Any]) {
+        guard let first = parts.first else { return }
+        if parts.count == 1 { root[first] = value; return }
+        var nested = root[first] as? [String: Any] ?? [:]
+        setWireValue(value, parts: Array(parts.dropFirst()), in: &nested)
+        root[first] = nested
+    }
+
+    func settingValue(_ setting: ReaderSettingDefinition) -> String {
+        guard let json = try? canonicalJSON(),
+              let preferences = try? ReaderPreferencesJson().decode(payload: json) else { return "" }
+        return setting.value(preferences: preferences)
+    }
+
+    func changing(_ setting: ReaderSettingDefinition, value: String) throws -> Self {
+        let preferences = try ReaderPreferencesJson().decode(payload: canonicalJSON())
+        let changed = try setting.change(preferences: preferences, value: value)
+        var result = try Self(canonicalJSON: ReaderPreferencesJson().encode(preferences: changed))
+        if setting.id == "theme" { result.themeMode = .manual }
+        return result
     }
 }

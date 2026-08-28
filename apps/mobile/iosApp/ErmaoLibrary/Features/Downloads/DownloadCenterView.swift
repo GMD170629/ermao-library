@@ -55,7 +55,7 @@ struct DownloadCenterView: View {
             }
             if let storageErrorCode = store.storageErrorCode {
                 Label {
-                    Text(errorMessage(storageErrorCode))
+                    Text(downloadFailureMessage(storageErrorCode))
                 } icon: {
                     Image(systemName: "exclamationmark.triangle")
                 }
@@ -144,7 +144,7 @@ struct DownloadCenterView: View {
                         Text("\(record.resourceTitle) · \(record.format)")
                             .appTextStyle(.caption)
                             .foregroundStyle(theme.textSecondary)
-                        Text(errorMessage(record.stableErrorCode))
+                        Text(downloadFailureMessage(record.stableErrorCode))
                             .appTextStyle(.caption)
                             .foregroundStyle(.red)
                         HStack {
@@ -236,18 +236,19 @@ struct DownloadCenterView: View {
         return "\(received) / \(expected)"
     }
 
-    private func errorMessage(_ code: String?) -> LocalizedStringKey {
-        switch code {
-        case "DOWNLOAD_UNAUTHORIZED": "downloads.error.unauthorized"
-        case "DOWNLOAD_CONTENT_UNAVAILABLE": "downloads.error.inaccessible"
-        case "DOWNLOAD_INSUFFICIENT_SPACE": "downloads.error.space"
-        case "DOWNLOAD_INVALID_RESPONSE", "DOWNLOAD_LOCAL_FILE_INVALID": "downloads.error.invalid"
-        case "DOWNLOAD_TRANSPORT_UNAVAILABLE": "downloads.error.transportUnavailable"
-        case "DOWNLOAD_MANIFEST_READ_FAILED", "DOWNLOAD_MANIFEST_WRITE_FAILED": "downloads.error.storage"
-        default: "downloads.error.generic"
-        }
-    }
+}
 
+func downloadFailureMessage(_ code: String?) -> LocalizedStringKey {
+    switch code {
+    case "DOWNLOAD_UNAUTHORIZED": "downloads.error.unauthorized"
+    case "DOWNLOAD_CONTENT_UNAVAILABLE": "downloads.error.inaccessible"
+    case "DOWNLOAD_INSUFFICIENT_SPACE": "downloads.error.space"
+    case "ASSET_VERSION_CHANGED": "reader.error.PUBLICATION_CHANGED"
+    case "DOWNLOAD_INVALID_RESPONSE", "DOWNLOAD_LOCAL_FILE_INVALID": "downloads.error.invalid"
+    case "DOWNLOAD_TRANSPORT_UNAVAILABLE": "downloads.error.transportUnavailable"
+    case "DOWNLOAD_MANIFEST_READ_FAILED", "DOWNLOAD_MANIFEST_WRITE_FAILED": "downloads.error.storage"
+    default: "downloads.error.generic"
+    }
 }
 
 struct ReaderHandoffView: View {

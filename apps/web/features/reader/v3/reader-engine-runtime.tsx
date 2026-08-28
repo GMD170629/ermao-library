@@ -57,11 +57,31 @@ function bootstrapNavigationItems(bootstrap: ReaderBootstrap): ReaderNavigationI
 }
 
 function readerErrorMessage(code: string | undefined, translate: (source: string) => string) {
+  if (code === 'UNAUTHORIZED') return translate('在线阅读失败：登录凭据已失效。');
+  if (code === 'FORBIDDEN') return translate('在线阅读失败：服务器拒绝访问。');
+  if (code === 'PUBLICATION_NOT_FOUND' || code === 'PUBLICATION_RESOURCE_NOT_FOUND') return translate('服务器未提供所请求的阅读资源。');
+  if (code === 'SERVER_UNAVAILABLE') return translate('服务器处理阅读请求失败，请稍后重试。');
+  if (code === 'RATE_LIMITED') return translate('阅读请求过于频繁，请稍后重试。');
+  if (code === 'PUBLICATION_RESPONSE_INVALID') return translate('服务器返回的阅读响应无效。');
+  if (code === 'PUBLICATION_UNSUPPORTED') return translate('格式解析器不支持此出版物。');
+  if (code === 'REQUEST_TIMEOUT') return translate('读取阅读资源超时。');
+  if (code === 'TLS_FAILURE') return translate('阅读连接的 TLS 验证失败。');
+  if (code === 'PUBLICATION_ONLINE_LIMIT') return translate('原文件超过当前在线解析的资源限额。');
+  if (code === 'PUBLICATION_TXT_NUL_CHARACTER') return translate('服务器的 TXT 解析实现拒绝了 NUL 字符。');
+  if (code === 'PUBLICATION_TXT_ENCODING_UNSUPPORTED') return translate('TXT 解码器无法解码此文件。');
+  if (code === 'PUBLICATION_TXT_EMPTY') return translate('TXT 解析器未找到可读文本。');
+  if (code === 'PUBLICATION_CORRUPT' || code === 'PUBLICATION_PARSE_FAILED' || code === 'PUBLICATION_MARKUP_INVALID') return translate('格式解析器解析失败。');
+  if (code === 'PUBLICATION_STRUCTURE_INVALID') return translate('格式解析器无法生成阅读顺序。');
+  if (code === 'PUBLICATION_SECURITY_REJECTED') return translate('阅读内容无法通过当前安全隔离边界。');
+  if (code === 'PUBLICATION_DRM_PROTECTED') return translate('解析器报告此出版物受 DRM 保护。');
+  if (code === 'PUBLICATION_PARSER_LIMIT' || code === 'PUBLICATION_PARSER_MEMORY') return translate('解析器达到资源限制，无法继续读取。');
+  if (code === 'PUBLICATION_READ_FAILED') return translate('解析器读取原文件失败。');
+  if (code === 'READER_ENGINE_ERROR') return translate('阅读引擎失败，未提供详细原因。');
   if (code === 'PUBLICATION_CHANGED' || code === 'PUBLICATION_RESOURCE_CHANGED') return translate('出版物已更新，请重新打开。');
   if (code === 'PUBLICATION_RESOURCE_TOO_LARGE' || code === 'RESPONSE_TOO_LARGE') return translate('当前章节超过在线阅读的安全上限，无法打开。');
   if (code === 'RESPONSE_LENGTH_INVALID' || code === 'RESPONSE_STREAM_MISSING') return translate('章节响应无效，请重试。');
   if (code === 'PUBLICATION_RESOURCE_UNAVAILABLE') return translate('章节资源无法读取，请检查网络后重试。');
-  if (code === 'READIUM_PUBLICATION_SECURITY_PROFILE_MISSING') return translate('文件包含不安全的内容，已停止打开。');
+  if (code === 'READIUM_PUBLICATION_SECURITY_PROFILE_MISSING') return translate('阅读响应缺少必需的安全策略，已停止打开。');
   if (code === 'READER_EXACT_RESTORE_UNVERIFIED') return translate('无法精确恢复到另一设备的位置');
   if (code === 'READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE') return translate('服务器尚未提供 Readium Publication，无法打开此书。');
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
@@ -73,11 +93,11 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'RESOURCE_FORMAT_UNSUPPORTED') return translate('当前文件格式尚未开放阅读支持。');
   if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
   if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
-  if (code === 'PDF_INVALID') return translate('PDF 文件已损坏或格式无效。');
+  if (code === 'PDF_INVALID') return translate('PDF 引擎无法解析文档。');
   if (code === 'PDF_RANGE_UNSUPPORTED') return translate('服务器不支持 PDF 按需读取，无法在线打开。');
   if (code === 'PDF_RANGE_INVALID') return translate('PDF 字节区间响应无效，请重试。');
   if (code === 'PDF_RESOURCE_CHANGED') return translate('PDF 文件已更新，请重新打开。');
-  if (code === 'NETWORK_UNAVAILABLE') return translate('网络不可用，无法加载 PDF 页面。');
+  if (code === 'NETWORK_UNAVAILABLE') return translate('网络请求失败，无法读取阅读资源。');
   if (code === 'PDF_CACHE_IO') return translate('PDF 缓存读写失败。');
   if (code === 'PDF_PAGE_LOAD_FAILED') return translate('PDF 页面加载失败。');
   if (code === 'PDF_RENDER_FAILED') return translate('PDF 页面渲染失败。');

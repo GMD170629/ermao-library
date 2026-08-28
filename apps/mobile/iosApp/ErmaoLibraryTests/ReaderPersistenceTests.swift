@@ -60,10 +60,10 @@ final class ReaderPersistenceTests: XCTestCase {
     @MainActor
     func testPreferenceWriterCoalescesAndRollsBackFailure() async {
         var stored: [IosReaderPreferences] = []
-        var shouldFail = false
+        let failureState = PreferenceFailureState()
         let writer = IosReaderPreferenceEditor(preferences: IosReaderPreferences()) { requested in
             await Task.yield()
-            if shouldFail { return false }
+            if failureState.shouldFail { return false }
             stored.append(requested)
             return true
         }
@@ -74,7 +74,7 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(stored.last?.fontSize, 24)
         XCTAssertEqual(stored.last?.lineHeight, 2.2)
         XCTAssertEqual(stored.count, 1)
-        shouldFail = true
+        failureState.shouldFail = true
         writer.change { $0.fontSize = 30 }
         await writer.flush()
         XCTAssertTrue(writer.applyFailed)
@@ -82,19 +82,54 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(stored.count, 1)
     }
 
-    func testScopedResetPreservesOtherReaderPreferences() {
+    func testPreferenceVersionFiveMigratesNativeMasterAndKeepsInvalidRecord() throws {
+        let suite = "reader-preference-migration-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "alice", defaults: defaults)
+        let other = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "bob", defaults: defaults)
+        let digest = SHA256.hash(data: Data("server-a\0alice".utf8))
+        let key = "reader.preferences.v5." + digest.map { String(format: "%02x", $0) }.joined()
+        var preferences = IosReaderPreferences()
+        preferences.fontSize = 20
+        preferences.lineHeight = 1.85
+        preferences.letterSpacing = 0.03
+        preferences.preservePublisherStyles = true
+        preferences.comicZoom = 1.7
+        preferences.pdfZoom = 1.3
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(preferences.canonicalJSON().utf8)) as? [String: Any])
+        legacy["schemaVersion"] = 4
+        legacy["iosDraft"] = ["schemaVersion": 4]
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        defaults.set(legacyData, forKey: key)
+        XCTAssertEqual(store.load(), preferences)
+        let migrated = try XCTUnwrap(defaults.data(forKey: key))
+        XCTAssertNotEqual(migrated, legacyData)
+        XCTAssertEqual(store.load(), preferences)
+        XCTAssertEqual(defaults.data(forKey: key), migrated)
+        XCTAssertEqual(other.load(), IosReaderPreferences())
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: migrated) as? [String: Any])
+        XCTAssertEqual(document["schemaVersion"] as? Int, 5)
+        XCTAssertNil(document["iosDraft"])
+        let invalid = Data("{invalid".utf8)
+        defaults.set(invalid, forKey: key)
+        XCTAssertEqual(store.load(), IosReaderPreferences())
+        XCTAssertEqual(defaults.data(forKey: key), invalid)
+    }
+
+    @MainActor
+    func testResetClearsEveryReaderFormat() async {
         var preferences = IosReaderPreferences()
         preferences.fontSize = 24
         preferences.comicPageGap = 16
         preferences.pdfRotation = 90
         preferences.theme = .night
-        let text = preferences.reset(for: .reflowable)
-        XCTAssertEqual(text.fontSize, 18)
-        XCTAssertEqual(text.comicPageGap, 16)
-        XCTAssertEqual(text.pdfRotation, 90)
-        XCTAssertEqual(text.theme, .warm)
-        XCTAssertEqual(preferences.reset(for: .comic).fontSize, 24)
-        XCTAssertEqual(preferences.reset(for: .pdf).comicPageGap, 16)
+        var saved: IosReaderPreferences?
+        let editor = IosReaderPreferenceEditor(preferences: preferences) { saved = $0; return true }
+        editor.reset()
+        await editor.flush()
+        XCTAssertEqual(editor.draft, IosReaderPreferences())
+        XCTAssertEqual(saved, IosReaderPreferences())
     }
 
     func testEveryReflowCallbackAndFlushRemainSuppressedUntilUserNavigation() {
@@ -826,3 +861,6 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServer
         return operation()
     }
 }
+
+@MainActor
+private final class PreferenceFailureState { var shouldFail = false }

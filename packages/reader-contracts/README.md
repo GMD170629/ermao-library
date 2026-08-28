@@ -31,3 +31,38 @@ pre-Navigator `body` element tree, preserving element paths, author IDs and
 normalized locator-block text. Platform CSP, `head` decoration and Readium
 runtime nodes are deliberately excluded. Equal normalization identifiers are
 valid only when this projection is equal.
+
+`schemas/txt-decoding-v1.schema.json` and `fixtures/txt-decoding-v1.json`
+record the native TXT decoder output, including internal/trailing NUL and empty
+text. Applications must not reject or remove NUL before the actual parser.
+Verified Foundation codec differences use explicit decoder overrides. Empty
+publication and renderer failures are separate from decoding failures.
+
+`reader-http-error-statuses.json` is the authoritative status/code allowlist for
+bounded publication and comic resource requests. Web consumes it directly;
+`generate-reader-http-errors.py` generates the KMP constants. Run it with
+`--check` to verify drift. The matching JSON schema lives under `schemas/`.
+A code must match its HTTP status; error response bodies are cancelled without
+waiting for EOF. `PUBLICATION_TXT_NUL_CHARACTER` is receive-only compatibility
+for older servers; new parsers never emit it. Remove this compatibility entry
+only when support for those server versions ends.
+
+See `docs/testing/reader-parser-implementation-2026-08-28.md` for migrated
+callers, security/SDK limitations and verification evidence. Format inference,
+script isolation, protocol validity and resource budgets have separate owners.
+
+## Reading preferences and setting catalog
+
+`reader-settings.json` (schema `schemas/reader-settings-v1.schema.json`) owns
+ordered panels/sections, stable setting IDs, bilingual labels, options and
+numeric constraints. `generate-reader-settings.py` generates literal Web
+constants and typed KMP access/edit metadata plus iOS native localization keys.
+Do not edit generated files or add platform-owned setting lists. Run the generator
+then `python3 packages/reader-contracts/generate-reader-settings.py --check`.
+The check also verifies that iOS maps every catalog field. Web pretest runs it.
+
+Preference storage version 5 is **not** a new Reader progress protocol. Progress
+remains v4. Web migration owns the legacy line-height flag → off conversion;
+KMP owns native migration (including iOS), preserving the native publisher
+master. Retired partial publisher fields exist only in storage migration and
+migration regression inputs, never in runtime rendering.

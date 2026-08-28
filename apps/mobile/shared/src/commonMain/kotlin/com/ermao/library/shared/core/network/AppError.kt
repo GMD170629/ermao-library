@@ -10,6 +10,8 @@ data class AppError(
     val parameters: Map<String, String> = emptyMap(),
     /** Untrusted structured details; feature adapters must validate before mapping. */
     val details: JsonElement? = null,
+    /** Internal only; never serialize the original exception or show it as UI copy. */
+    val cause: Throwable? = null,
 )
 
 enum class AppErrorKind {

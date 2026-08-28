@@ -170,14 +170,14 @@ class ApiClient internal constructor(
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
             return ApiResult.Failure(
-                AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message),
+                AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message, cause = timeout),
             )
         } catch (error: PlatformStorageException) {
             return ApiResult.Failure(
-                AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message),
+                AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message, cause = error),
             )
         } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
         }
     }
 
@@ -229,11 +229,11 @@ class ApiClient internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
-            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT"))
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", cause = timeout))
         } catch (error: PlatformStorageException) {
-            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE"))
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", cause = error))
         } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
         }
     }
 
@@ -324,11 +324,11 @@ class ApiClient internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
-            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message, cause = timeout))
         } catch (error: PlatformStorageException) {
-            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message, cause = error))
         } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
         }
     }
 
@@ -421,11 +421,11 @@ class ApiClient internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
-            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message, cause = timeout))
         } catch (error: PlatformStorageException) {
-            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message, cause = error))
         } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
         }
     }
 
@@ -435,6 +435,7 @@ class ApiClient internal constructor(
         allowedMimeTypes: Set<String>,
         requestHeaders: Map<String, String> = emptyMap(),
         expectedResponseHeaders: Map<String, String> = emptyMap(),
+        errorCodeStatuses: Map<String, Set<Int>> = emptyMap(),
     ): ApiResult<AuthenticatedBinary> {
         try {
             require(apiPath.startsWith("/api/")) { "Binary path must start with /api/" }
@@ -448,16 +449,14 @@ class ApiClient internal constructor(
                 return@execute redirectFailure("BINARY_REDIRECT_REJECTED")
             }
             if (response.status.value !in 200..299) {
-                val errorBody = response.bodyAsChannel().readBounded(ERROR_BODY_LIMIT_BYTES)
-                    ?: return@execute redirectFailure("ERROR_BODY_TOO_LARGE")
-                return@execute when (val decoded = decoder.decode(
-                    response.status.value,
-                    errorBody.decodeToString(),
-                    JsonElement.serializer(),
-                )) {
-                    is ApiResult.Failure -> decoded
-                    is ApiResult.Success -> redirectFailure("UNEXPECTED_BINARY_RESPONSE")
+                // Endpoint adapters declare their error-code/status contract. Read
+                // only this bounded header, never wait for an error body's EOF.
+                val headerCode = response.headers.getAll("X-Error-Code")?.singleOrNull()
+                val code = headerCode?.takeIf {
+                    STABLE_ERROR_CODE.matches(it) && response.status.value in errorCodeStatuses[it].orEmpty()
                 }
+                response.bodyAsChannel().cancel(null)
+                return@execute ApiResult.Failure(ApiErrorMapper.fromHttp(response.status.value, ApiErrorWire(code = code)))
             }
             if (expectedResponseHeaders.any { (name, expected) -> response.headers[name] != expected }) {
                 response.bodyAsChannel().cancel(null)
@@ -473,7 +472,7 @@ class ApiClient internal constructor(
             }
             val declaredLength = response.headers[HttpHeaders.ContentLength]
             val declaredSize = declaredLength?.toLongOrNull()
-            if (declaredLength != null && declaredSize == null) {
+            if (declaredLength != null && (declaredSize == null || declaredSize < 0)) {
                 response.bodyAsChannel().cancel(null)
                 return@execute redirectFailure("BINARY_LENGTH_INVALID")
             }
@@ -500,11 +499,11 @@ class ApiClient internal constructor(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (timeout: HttpRequestTimeoutException) {
-            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message))
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", timeout.message, cause = timeout))
         } catch (error: PlatformStorageException) {
-            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message))
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", error.message, cause = error))
         } catch (error: Throwable) {
-            return ApiResult.Failure(mapTransportError(error))
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
         }
     }
 
@@ -566,15 +565,6 @@ class ApiClient internal constructor(
         return result
     }
 
-    /** Rejected bodies are intentionally abandoned; cleanup failure must not replace the protocol result. */
-    private fun ByteReadChannel.cancelQuietly() {
-        try {
-            cancel()
-        } catch (_: Throwable) {
-            // The response has already been classified and no body bytes are retained.
-        }
-    }
-
     private companion object {
         val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
         const val MAX_REDIRECTS = 3
@@ -582,6 +572,7 @@ class ApiClient internal constructor(
         const val DEFAULT_MAXIMUM_JSON_BYTES = 196_608
         const val BINARY_READ_BUFFER_BYTES = 64 * 1024
         const val ERROR_BODY_LIMIT_BYTES = 64 * 1024
+        val STABLE_ERROR_CODE = Regex("[A-Z][A-Z0-9_]{0,63}")
     }
 }
 

@@ -36,7 +36,10 @@ internal data class ReaderBookmarkChange(
     val added: Boolean,
 )
 
+internal class ReaderPreferenceSaveFailure(cause: Throwable? = null) : RuntimeException("Reader preference persistence failed", cause)
+
 internal interface ReaderScreenController {
+    val requestedNavigationTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? get() = null
     val morphology: ReaderMorphology
     val capabilities: ReaderCapabilities
     val currentLocation: StateFlow<ReaderLocation?>
@@ -84,23 +87,17 @@ internal interface ReaderScreenController {
     fun updatePreferences(updated: ReaderPreferences)
 
     suspend fun applyPreferences(updated: ReaderPreferences): ReaderCommandResult {
-        val previous = preferences.value
         if (!canApplyPreferences(updated)) return ReaderCommandRejected("READER_CONTROL_UNAVAILABLE")
         return try {
             updatePreferences(updated)
             ReaderCommandCompleted
-        } catch (_: RuntimeException) {
-            try {
-                updatePreferences(previous)
-                ReaderCommandRejected("READER_PREFERENCES_APPLY_FAILED")
-            } catch (_: RuntimeException) {
-                ReaderCommandRejected("READER_PREFERENCES_ROLLBACK_FAILED")
-            }
+        } catch (error: RuntimeException) {
+            ReaderCommandRejected(if (error is ReaderPreferenceSaveFailure) "READER_PREFERENCES_SAVE_FAILED" else "READER_PREFERENCES_ENGINE_FAILED", error)
         }
     }
 
     fun canApplyPreferences(updated: ReaderPreferences): Boolean {
-        if (updated == com.ermao.library.shared.modules.reader.resetReaderPreferences(preferences.value, morphology)) return true
+        if (updated == com.ermao.library.shared.modules.reader.resetReaderPreferences()) return true
         return com.ermao.library.shared.modules.reader.changedReaderControls(preferences.value, updated).all { control ->
             com.ermao.library.shared.modules.reader.resolveReaderControl(
                 control, morphology, capabilities, preferences.value, true, unavailableControls(preferences.value),

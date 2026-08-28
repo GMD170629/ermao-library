@@ -15,16 +15,22 @@ internal class AndroidReaderPreferencesStore(
     private val preferences = context.applicationContext.getSharedPreferences(STORE_NAME, Context.MODE_PRIVATE)
     private val key = "reader-${sha256("$serverIdentity\u0000$userId")}"
 
-    fun load(): ReaderPreferences = preferences.getString(key, null)
-        ?.let { runCatching { codec.decode(it) }.getOrNull() }
-        ?: ReaderPreferences()
+    fun load(): ReaderPreferences {
+        val stored = preferences.getString(key, null) ?: return ReaderPreferences()
+        val decoded = runCatching { codec.decode(stored) }.getOrElse { return ReaderPreferences() }
+        val canonical = codec.encode(decoded)
+        if (canonical != stored) save(decoded)
+        return decoded
+    }
 
     fun save(value: ReaderPreferences) {
         val encodedPreferences = codec.encode(value)
-        preferences.edit(commit = true) { putString(key, encodedPreferences) }
-        check(preferences.getString(key, null) == encodedPreferences) {
-            "Reader preferences could not be saved"
+        try {
+            preferences.edit(commit = true) { putString(key, encodedPreferences) }
+        } catch (error: RuntimeException) {
+            throw com.ermao.library.features.reader.application.ReaderPreferenceSaveFailure(error)
         }
+        if (preferences.getString(key, null) != encodedPreferences) throw com.ermao.library.features.reader.application.ReaderPreferenceSaveFailure()
     }
 
     fun reset(): ReaderPreferences = ReaderPreferences().also(::save)

@@ -1,7 +1,7 @@
-import { READER_SCHEMA_VERSION, type ReaderFontFamily, type ReaderPreferences, type ReaderTheme } from './types';
+import { READER_PREFERENCES_VERSION, type ReaderFontFamily, type ReaderPreferences, type ReaderTheme } from './types';
 
 export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.freeze({
-  schemaVersion: READER_SCHEMA_VERSION,
+  schemaVersion: READER_PREFERENCES_VERSION,
   appearance: Object.freeze({ theme: 'warm', themeMode: 'manual' }),
   display: Object.freeze({ progressStyle: 'auto', showClock: false }),
   interaction: Object.freeze({
@@ -27,8 +27,6 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
       paragraphSpacing: 0,
       textAlign: 'publisher',
       preservePublisherStyles: false,
-      allowPublisherColors: false,
-      allowPublisherFonts: false
     }),
     optimization: Object.freeze({
       enabled: true,
@@ -68,8 +66,9 @@ function finiteNumber(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
-function clamp(value: unknown, minimum: number, maximum: number, fallback: number, precision = 0) {
+function clamp(value: unknown, minimum: number, maximum: number, fallback: number, precision?: number) {
   const normalized = Math.max(minimum, Math.min(maximum, finiteNumber(value, fallback)));
+  if (precision === undefined) return normalized;
   const scale = 10 ** precision;
   return Math.round(normalized * scale) / scale;
 }
@@ -107,7 +106,7 @@ function normalizePdfFlow(value: unknown): 'paged' {
 
 function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences {
   return {
-    schemaVersion: READER_SCHEMA_VERSION,
+    schemaVersion: READER_PREFERENCES_VERSION,
     appearance: { ...value.appearance },
     display: { ...value.display },
     interaction: { ...value.interaction },
@@ -121,11 +120,11 @@ function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences
   };
 }
 
-/** Normalizes a partial current V4 preference snapshot into a complete value. */
+/** Normalizes a partial current V5 preference snapshot into a complete value. */
 export function normalizeReaderPreferences(value: unknown, base: Readonly<ReaderPreferences> = DEFAULT_READER_PREFERENCES): ReaderPreferences {
   const source = record(value);
-  if (source.schemaVersion !== undefined && source.schemaVersion !== READER_SCHEMA_VERSION) {
-    throw new TypeError('Reader preferences must use schema version 4');
+  if (source.schemaVersion !== undefined && source.schemaVersion !== READER_PREFERENCES_VERSION) {
+    throw new TypeError('Reader preferences must use schema version 5');
   }
   assertOnlyKeys(source, ['schemaVersion', 'appearance', 'display', 'interaction', 'epub', 'comic', 'pdf'], 'root');
   const appearance = record(source.appearance);
@@ -140,14 +139,14 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
   assertOnlyKeys(display, ['progressStyle', 'showClock'], 'display');
   assertOnlyKeys(interaction, ['tapZones', 'swipePageTurn', 'keyboardPageTurn', 'volumeKeyPageTurn', 'keepScreenAwake'], 'interaction');
   assertOnlyKeys(epub, ['fontSize', 'lineHeight', 'pageWidth', 'fontFamily', 'fontWeight', 'letterSpacing', 'pageMargin', 'spreadMode', 'pageTurnAnimation', 'flow', 'typography', 'optimization'], 'epub');
-  assertOnlyKeys(epubTypography, ['paragraphIndent', 'paragraphSpacing', 'textAlign', 'preservePublisherStyles', 'allowPublisherColors', 'allowPublisherFonts'], 'epub.typography');
+  assertOnlyKeys(epubTypography, ['paragraphIndent', 'paragraphSpacing', 'textAlign', 'preservePublisherStyles'], 'epub.typography');
   assertOnlyKeys(epubOptimization, ['enabled', 'deduplicateIndent', 'indentUnindented'], 'epub.optimization');
   assertOnlyKeys(comic, ['direction', 'spreadMode', 'pageTurnAnimation', 'imageFit', 'imageVariant', 'zoom', 'pageWidth', 'flow', 'coverSingle', 'pageGap'], 'comic');
   assertOnlyKeys(pdf, ['zoom', 'pageWidth', 'fit', 'flow', 'rotation', 'cropMargins'], 'pdf');
   const fallback = clonePreferences(base);
 
   return {
-    schemaVersion: READER_SCHEMA_VERSION,
+    schemaVersion: READER_PREFERENCES_VERSION,
     appearance: {
       theme: choice<ReaderTheme>(appearance.theme, ['day', 'warm', 'green', 'night', 'black'], fallback.appearance.theme),
       themeMode: choice(appearance.themeMode, ['manual', 'system'], fallback.appearance.themeMode)
@@ -164,23 +163,21 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       keepScreenAwake: boolean(interaction.keepScreenAwake, fallback.interaction.keepScreenAwake)
     },
     epub: {
-      fontSize: clamp(epub.fontSize, 14, 30, fallback.epub.fontSize),
-      lineHeight: clamp(epub.lineHeight, 1.4, 2.4, fallback.epub.lineHeight, 1),
-      pageWidth: clamp(epub.pageWidth, 600, 1350, fallback.epub.pageWidth),
+      fontSize: clamp(epub.fontSize, 14, 30, fallback.epub.fontSize, 0),
+      lineHeight: clamp(epub.lineHeight, 1.4, 2.4, fallback.epub.lineHeight),
+      pageWidth: clamp(epub.pageWidth, 600, 1350, fallback.epub.pageWidth, 0),
       fontFamily: choice<ReaderFontFamily>(epub.fontFamily, ['pingfang', 'heiti', 'songti', 'yahei', 'kaiti'], fallback.epub.fontFamily),
       fontWeight: choice(epub.fontWeight, [400, 500, 700] as const, fallback.epub.fontWeight),
-      letterSpacing: choice(epub.letterSpacing, [-0.02, 0, 0.04, 0.08] as const, fallback.epub.letterSpacing),
+      letterSpacing: clamp(epub.letterSpacing, -0.02, 0.08, fallback.epub.letterSpacing),
       pageMargin: choice(epub.pageMargin, ['narrow', 'standard', 'wide'], fallback.epub.pageMargin),
       spreadMode: choice(epub.spreadMode, ['auto', 'single', 'double'], fallback.epub.spreadMode),
       pageTurnAnimation: normalizePageTurnAnimation(epub.pageTurnAnimation, fallback.epub.pageTurnAnimation),
       flow: choice(epub.flow, ['paginated', 'scrolled'], fallback.epub.flow),
       typography: {
-        paragraphIndent: clamp(epubTypography.paragraphIndent, 0, 4, fallback.epub.typography.paragraphIndent, 1),
-        paragraphSpacing: clamp(epubTypography.paragraphSpacing, 0, 1.5, fallback.epub.typography.paragraphSpacing, 1),
+        paragraphIndent: clamp(epubTypography.paragraphIndent, 0, 4, fallback.epub.typography.paragraphIndent),
+        paragraphSpacing: clamp(epubTypography.paragraphSpacing, 0, 1.5, fallback.epub.typography.paragraphSpacing),
         textAlign: choice(epubTypography.textAlign, ['publisher', 'left', 'justify'], fallback.epub.typography.textAlign),
         preservePublisherStyles: boolean(epubTypography.preservePublisherStyles, fallback.epub.typography.preservePublisherStyles),
-        allowPublisherColors: boolean(epubTypography.allowPublisherColors, fallback.epub.typography.allowPublisherColors),
-        allowPublisherFonts: boolean(epubTypography.allowPublisherFonts, fallback.epub.typography.allowPublisherFonts)
       },
       optimization: {
         enabled: boolean(epubOptimization.enabled, fallback.epub.optimization.enabled),
@@ -194,15 +191,15 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       pageTurnAnimation: choice(comic.pageTurnAnimation, ['slide', 'off'], fallback.comic.pageTurnAnimation),
       imageFit: choice(comic.imageFit, ['width', 'height', 'contain', 'original'], fallback.comic.imageFit),
       imageVariant: choice(comic.imageVariant, ['original', 'data-saver'], fallback.comic.imageVariant),
-      zoom: clamp(comic.zoom, 0.6, 2.4, fallback.comic.zoom, 1),
-      pageWidth: clamp(comic.pageWidth, 600, 1350, fallback.comic.pageWidth),
+      zoom: clamp(comic.zoom, 0.6, 2.4, fallback.comic.zoom),
+      pageWidth: clamp(comic.pageWidth, 600, 1350, fallback.comic.pageWidth, 0),
       flow: normalizeComicFlow(comic.flow, fallback.comic.flow),
       coverSingle: boolean(comic.coverSingle, fallback.comic.coverSingle),
       pageGap: choice(comic.pageGap, [0, 8, 16, 24] as const, fallback.comic.pageGap)
     },
     pdf: {
-      zoom: clamp(pdf.zoom, 0.6, 2.4, fallback.pdf.zoom, 1),
-      pageWidth: clamp(pdf.pageWidth, 600, 1350, fallback.pdf.pageWidth),
+      zoom: clamp(pdf.zoom, 0.6, 2.4, fallback.pdf.zoom),
+      pageWidth: clamp(pdf.pageWidth, 600, 1350, fallback.pdf.pageWidth, 0),
       fit: choice(pdf.fit, ['width', 'page'], fallback.pdf.fit),
       flow: normalizePdfFlow(pdf.flow),
       rotation: choice(pdf.rotation, [0, 90, 180, 270] as const, fallback.pdf.rotation),

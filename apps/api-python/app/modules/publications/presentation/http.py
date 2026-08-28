@@ -35,6 +35,8 @@ from app.modules.publications.domain.model import (
     PublicationNotFoundError,
     PublicationResourceNotFoundError,
     PublicationResourceTooLargeError,
+    PublicationTxtEmptyError,
+    PublicationTxtEncodingError,
     PublicationUnsupportedError,
 )
 from app.modules.publications.domain.model import (
@@ -73,6 +75,21 @@ _EPUB_PROFILE = "https://readium.org/webpub-manifest/profiles/epub"
 _MANIFEST_MEDIA_TYPE = "application/webpub+json"
 _POSITIONS_MEDIA_TYPE = "application/vnd.readium.position-list+json"
 _ACTIVE_CONTENT_CSP = WEB_SECURITY_PROFILE.content_security_policy
+_PUBLICATION_ERROR_MESSAGES = {
+    PublicationNotFoundError.code: "The publication was not found or is unavailable.",
+    PublicationUnsupportedError.code: "The publication format is not supported.",
+    PublicationCorruptError.code: "The publication parser failed without a more specific reason.",
+    "PUBLICATION_SECURITY_REJECTED": "The publication security policy blocked active content.",
+    "PUBLICATION_MARKUP_INVALID": "The markup parser could not parse the publication resource.",
+    "PUBLICATION_STRUCTURE_INVALID": "The publication parser could not produce a reading order.",
+    "PUBLICATION_PARSE_FAILED": "The publication parser failed.",
+    "PUBLICATION_DRM_PROTECTED": "The publication parser reported DRM protection.",
+    "PUBLICATION_PARSER_LIMIT": "The publication parser resource limit was reached.",
+    "PUBLICATION_PARSER_MEMORY": "The publication parser could not allocate memory.",
+    "PUBLICATION_READ_FAILED": "The publication parser could not read the source.",
+    PublicationTxtEncodingError.code: "The TXT text encoding is not supported.",
+    PublicationTxtEmptyError.code: "The TXT file contains no readable text.",
+}
 
 
 def _access_scope(db: Session, user: User) -> PublicationAccessScope:
@@ -97,9 +114,21 @@ def _authenticated_scope(
     return user, _access_scope(db, user)
 
 
-def _not_found() -> BasicNotFoundError:
+def _publication_unavailable(
+    error: PublicationNotFoundError
+    | PublicationUnsupportedError
+    | PublicationCorruptError
+    | PublicationResourceNotFoundError,
+) -> BasicNotFoundError:
+    # Keep the established status and authorization ambiguity, while exposing
+    # only named, safe parser reasons for a source the actor may already access.
     return BasicNotFoundError(
-        MessageError(message="出版物不存在或不可用", code="PUBLICATION_NOT_FOUND")
+        MessageError(
+            message=_PUBLICATION_ERROR_MESSAGES.get(
+                error.code, _PUBLICATION_ERROR_MESSAGES[PublicationCorruptError.code]
+            ),
+            code=error.code,
+        )
     )
 
 
@@ -213,7 +242,7 @@ def publication_manifest(
         raise PayloadTooLargeError(
             MessageError(
                 message="Publication exceeds the online reading limit",
-                code="PUBLICATION_RESOURCE_TOO_LARGE",
+                code=error.code,
             )
         ) from error
     except (
@@ -221,7 +250,7 @@ def publication_manifest(
         PublicationUnsupportedError,
         PublicationCorruptError,
     ) as error:
-        raise _not_found() from error
+        raise _publication_unavailable(error) from error
     response.headers["X-Publication-Revision"] = publication.revision.token
     response.headers["Cache-Control"] = "private, no-store"
     return _manifest(publication)
@@ -251,7 +280,7 @@ def publication_positions(
         raise PayloadTooLargeError(
             MessageError(
                 message="Publication exceeds the online reading limit",
-                code="PUBLICATION_RESOURCE_TOO_LARGE",
+                code=error.code,
             )
         ) from error
     except (
@@ -259,7 +288,7 @@ def publication_positions(
         PublicationUnsupportedError,
         PublicationCorruptError,
     ) as error:
-        raise _not_found() from error
+        raise _publication_unavailable(error) from error
     total = len(publication.reading_order)
     positions = [
         PublicationPosition(
@@ -327,7 +356,7 @@ def publication_resource(
         raise PayloadTooLargeError(
             MessageError(
                 message="Publication chapter exceeds the online reading limit",
-                code="PUBLICATION_RESOURCE_TOO_LARGE",
+                code=error.code,
             )
         ) from error
     except (
@@ -336,7 +365,7 @@ def publication_resource(
         PublicationCorruptError,
         PublicationResourceNotFoundError,
     ) as error:
-        raise _not_found() from error
+        raise _publication_unavailable(error) from error
     headers = {
         "Cache-Control": "private, no-store",
         "Vary": "Cookie",

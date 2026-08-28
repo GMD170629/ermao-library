@@ -1,5 +1,5 @@
 import {
-  READER_SCHEMA_VERSION,
+  READER_PREFERENCES_VERSION,
   type ReaderPreferences
 } from '@shuku/reader-core';
 import {
@@ -23,7 +23,7 @@ export class MemoryReaderStorage implements ReaderStorage {
   private readonly diagnostics: ReaderSyncDiagnostic[] = [];
   private clientId = createId('web');
   async getPreference(userId: string, bookId: string) { return this.preferences.get(preferenceKey(userId, bookId)) ?? null; }
-  async putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt = Date.now()) { const value = { key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_SCHEMA_VERSION, preferences, updatedAt }; this.preferences.set(value.key, value); return value; }
+  async putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt = Date.now()) { const value = { key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_PREFERENCES_VERSION, preferences, updatedAt }; this.preferences.set(value.key, value); return value; }
   async deletePreference(userId: string, bookId: string) { this.preferences.delete(preferenceKey(userId, bookId)); }
   async getClientId() { return this.clientId; }
   async getExactProgress(identity: ExactProgressIdentity) {

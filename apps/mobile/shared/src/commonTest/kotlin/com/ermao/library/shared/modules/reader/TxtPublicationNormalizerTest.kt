@@ -27,8 +27,9 @@ class TxtPublicationNormalizerTest {
     }
 
     @Test
-    fun rejectsEmptyAndNulContent() {
+    fun rejectsEmptyButPreservesNulForTheRenderer() {
         assertFailsWith<IllegalArgumentException> { TxtPublicationNormalizer().normalize(" \n", "Book") }
-        assertFailsWith<IllegalArgumentException> { TxtPublicationNormalizer().normalize("a\u0000b", "Book") }
+        val publication = TxtPublicationNormalizer().normalize("a\u0000b\u0000", "Book")
+        assertTrue("a\u0000b\u0000" in publication.resources.single().xhtml)
     }
 }

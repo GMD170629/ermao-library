@@ -11,8 +11,6 @@ import java.io.InputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.util.zip.ZipFile
-import com.ermao.library.mobi.infrastructure.MobiReadiumPublicationFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -95,13 +93,13 @@ internal class AndroidReaderPublicationStore(
                     val count = input.read(buffer)
                     if (count < 0) break
                     written += count
-                    require(written <= MAX_PUBLICATION_BYTES) { "Reader publication exceeds the size limit" }
+                    if (written > MAX_PUBLICATION_BYTES) throw ReaderOpenFailure(
+                        com.ermao.library.shared.modules.reader.ReaderError(com.ermao.library.shared.modules.reader.ReaderErrorCode.PublicationTooLarge),
+                    )
                     output.write(buffer, 0, count)
                 }
                 output.fd.sync()
             }
-            require(written > 0) { "Reader publication is empty" }
-            validatePublication(temporary, sourceFormat)
             atomicReplace(temporary, target)
         } finally {
             temporary.delete()
@@ -128,16 +126,10 @@ internal class AndroidReaderPublicationStore(
         val rootPath = publicationRoot.canonicalFile.toPath()
         val targetPath = target.canonicalFile.toPath()
         require(targetPath.startsWith(rootPath)) { "Reader publication escaped the managed root" }
-        require(target.isFile && !Files.isSymbolicLink(targetPath)) { "Reader publication is missing" }
-        require(target.length() in 1..MAX_PUBLICATION_BYTES) { "Reader publication size is invalid" }
+        if (!target.exists()) throw java.io.FileNotFoundException("Reader publication is missing")
+        require(target.isFile && !Files.isSymbolicLink(targetPath)) { "Reader publication path is unsafe" }
+        require(target.length() in 0..MAX_PUBLICATION_BYTES) { "Reader publication size is invalid" }
         return target
-    }
-
-    suspend fun resolveVerified(source: LocalReaderSource): File = withContext(Dispatchers.IO) {
-        val target = resolve(source)
-        val sourceFormat = source.sourceFormat ?: ReaderSourceFormat.Epub
-        validatePublication(target, sourceFormat)
-        target
     }
 
     suspend fun delete(resourceId: String, assetId: String? = null): Unit = withContext(Dispatchers.IO) {
@@ -163,73 +155,6 @@ internal class AndroidReaderPublicationStore(
         }
     }
 
-    private fun validateEpubArchive(file: File) {
-        ZipFile(file).use { archive ->
-            val mimeEntry = archive.getEntry("mimetype") ?: error("EPUB mimetype entry is missing")
-            require(!mimeEntry.isDirectory && mimeEntry.size in 1..MAXIMUM_MIMETYPE_BYTES) {
-                "EPUB mimetype entry is invalid"
-            }
-            val mimeValue = archive.getInputStream(mimeEntry).bufferedReader(Charsets.US_ASCII).use { it.readText() }
-            require(mimeValue.trim() == EPUB_MIME_TYPE) { "EPUB mimetype entry is invalid" }
-            require(archive.getEntry("META-INF/container.xml")?.isDirectory == false) {
-                "EPUB container descriptor is missing"
-            }
-        }
-    }
-
-    private fun validatePublication(
-        file: File,
-        sourceFormat: ReaderSourceFormat,
-    ) {
-        when (sourceFormat) {
-            ReaderSourceFormat.Epub -> validateEpubArchive(file)
-            ReaderSourceFormat.ImageDir,
-            ReaderSourceFormat.AudiobookDir,
-            -> throw IllegalArgumentException("Reader source format is not a local publication")
-            ReaderSourceFormat.Fb2 -> Fb2ReadiumPublicationFactory().open(file, file.nameWithoutExtension).close()
-            ReaderSourceFormat.Txt -> validateText(file)
-            ReaderSourceFormat.Cbz,
-            ReaderSourceFormat.Zip,
-            ReaderSourceFormat.Cbr,
-            ReaderSourceFormat.Rar,
-            -> validateComicArchive(file)
-            ReaderSourceFormat.Pdf -> validatePdf(file)
-            ReaderSourceFormat.Mobi,
-            ReaderSourceFormat.Azw,
-            ReaderSourceFormat.Azw3,
-            ReaderSourceFormat.Prc,
-            -> MobiReadiumPublicationFactory().open(file).close()
-            ReaderSourceFormat.Audio,
-            ReaderSourceFormat.Audiobook,
-            ReaderSourceFormat.M4b,
-            ReaderSourceFormat.M4a,
-            ReaderSourceFormat.Mp3,
-            ReaderSourceFormat.Flac,
-            ReaderSourceFormat.Ogg,
-            ReaderSourceFormat.Opus,
-            ReaderSourceFormat.Wav,
-            -> throw IllegalArgumentException("Audio publications are opened by the native audio reader")
-        }
-    }
-
-    private fun validateText(file: File) {
-        require(file.length() <= MAX_TEXT_BYTES) { "TXT publication exceeds the size limit" }
-        StrictTxtDecoder.decode(file.readBytes())
-    }
-
-    private fun validateComicArchive(file: File) {
-        CbzReadiumPublicationFactory().indexPages(file)
-    }
-
-    private fun validatePdf(file: File) {
-        file.inputStream().use { input ->
-            val header = ByteArray(PDF_HEADER.size)
-            require(input.read(header) == header.size && header.contentEquals(PDF_HEADER)) {
-                "PDF signature is invalid"
-            }
-        }
-    }
-
     companion object {
         const val EPUB_PARSER_VERSION = "epub-package:1"
         const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v2"
@@ -237,11 +162,7 @@ internal class AndroidReaderPublicationStore(
         private const val COPY_BUFFER_BYTES = 64 * 1024
         private const val MAX_RESOURCE_ID_LENGTH = 256
         private const val MAX_TITLE_LENGTH = 512
-        private const val MAX_PUBLICATION_BYTES = 512L * 1024 * 1024
-        private const val MAXIMUM_MIMETYPE_BYTES = 64L
-        private const val MAX_TEXT_BYTES = 64L * 1024 * 1024
-        private const val EPUB_MIME_TYPE = "application/epub+zip"
-        private val PDF_HEADER = "%PDF-".toByteArray(Charsets.US_ASCII)
+        private const val MAX_PUBLICATION_BYTES = com.ermao.library.shared.modules.reader.ReaderAdmission.maximumPublicationBytes
         private val SUPPORTED_LOCAL_FORMATS = setOf(
             ReaderFormat.Epub,
             ReaderFormat.Mobi,

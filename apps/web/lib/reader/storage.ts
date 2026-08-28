@@ -1,6 +1,6 @@
 import {
-  READER_SCHEMA_VERSION,
-  normalizeReaderPreferences,
+  READER_PREFERENCES_VERSION,
+  migrateWebReaderPreferences,
   type ReaderPreferences
 } from '@shuku/reader-core';
 import {
@@ -119,17 +119,20 @@ async function withTransaction<T>(stores: ReaderStoreName | ReaderStoreName[], m
 
 export class IndexedDbReaderStorage implements ReaderStorage {
   async getPreference(userId: string, bookId: string) {
-    return withTransaction(PREFERENCES_STORE, 'readonly', async (stores) => {
+    return withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => {
       const stored = record(await requestResult(stores(PREFERENCES_STORE).get(preferenceKey(userId, bookId))));
-      return stored.preferences ? {
-        key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_SCHEMA_VERSION,
-        preferences: normalizeReaderPreferences(stored.preferences),
+      if (!stored.preferences) return null;
+      const migrated = {
+        key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_PREFERENCES_VERSION,
+        preferences: migrateWebReaderPreferences(stored.preferences),
         updatedAt: typeof stored.updatedAt === 'number' ? stored.updatedAt : Date.now()
-      } : null;
+      };
+      if (JSON.stringify(stored) !== JSON.stringify(migrated)) await requestResult(stores(PREFERENCES_STORE).put(migrated));
+      return migrated;
     });
   }
   async putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt = Date.now()) {
-    const value = { key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_SCHEMA_VERSION, preferences, updatedAt };
+    const value = { key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_PREFERENCES_VERSION, preferences, updatedAt };
     await withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => { await requestResult(stores(PREFERENCES_STORE).put(value)); });
     return value;
   }

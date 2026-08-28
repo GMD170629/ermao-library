@@ -25,6 +25,83 @@ import kotlin.test.assertTrue
 
 class ApiClientBoundedResponseTest {
     @Test
+    fun rejectsErrorHeadersWithoutWaitingForAnUnfinishedErrorBody(): Unit = runBlocking {
+        for ((status, code) in listOf(HttpStatusCode.Unauthorized to "UNAUTHORIZED",
+            HttpStatusCode.Forbidden to "FORBIDDEN", HttpStatusCode.NotFound to "NOT_FOUND",
+            HttpStatusCode.Conflict to "CONFLICT", HttpStatusCode.PreconditionFailed to "CONFLICT",
+            HttpStatusCode.PayloadTooLarge to "PAYLOAD_TOO_LARGE", HttpStatusCode.TooManyRequests to "RATE_LIMITED",
+            HttpStatusCode.InternalServerError to "SERVER_FAILURE", HttpStatusCode.ServiceUnavailable to "UNAVAILABLE")) {
+            val channel = ByteChannel(autoFlush = true)
+            val api = client(channel, status)
+            try {
+                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10, MIMES) }
+                assertEquals(code, assertIs<ApiResult.Failure>(result).error.code)
+            } finally { channel.cancel(null); api.close() }
+        }
+    }
+
+    @Test
+    fun preservesAnAllowedErrorHeaderWithoutWaitingForAnUnfinishedBody(): Unit = runBlocking {
+        val code = "PUBLICATION_TXT_NUL_CHARACTER"
+        val body = ByteChannel(autoFlush = true)
+        val api = client(body, HttpStatusCode.NotFound, extraHeaders = Headers.build { append("X-Error-Code", code) })
+        try {
+            val result = withTimeout(1000) {
+                api.loadAuthenticatedBinary(PATH, 10, MIMES, errorCodeStatuses = mapOf(code to setOf(404)))
+            }
+            val failure = assertIs<ApiResult.Failure>(result).error
+            assertEquals(code, failure.code)
+            assertEquals(AppErrorKind.NotFoundOrUnavailable, failure.kind)
+            assertEquals(null, failure.diagnosticMessage)
+        } finally { body.cancel(null); api.close() }
+    }
+
+    @Test
+    fun untrustedErrorHeadersCannotChangeTheHttpFailureCategory(): Unit = runBlocking {
+        val allowedCode = "PUBLICATION_TXT_NUL_CHARACTER"
+        val tooLongCode = "A".repeat(65)
+        val cases = listOf(
+            Triple(HttpStatusCode.Unauthorized, listOf(allowedCode), "UNAUTHORIZED"),
+            Triple(HttpStatusCode.NotFound, listOf(allowedCode, allowedCode), "NOT_FOUND"),
+            Triple(HttpStatusCode.NotFound, listOf("untrusted_lowercase"), "NOT_FOUND"),
+            Triple(HttpStatusCode.NotFound, listOf("UNKNOWN_MISSING"), "NOT_FOUND"),
+            Triple(HttpStatusCode.NotFound, listOf(tooLongCode), "NOT_FOUND"),
+        )
+        for ((status, codes, expected) in cases) {
+            val body = ByteChannel(autoFlush = true)
+            val api = client(body, status, extraHeaders = Headers.build {
+                codes.forEach { append("X-Error-Code", it) }
+            })
+            try {
+                val result = withTimeout(1000) {
+                    api.loadAuthenticatedBinary(PATH, 10, MIMES, errorCodeStatuses = mapOf(
+                        allowedCode to setOf(404), tooLongCode to setOf(404), "untrusted_lowercase" to setOf(404),
+                    ))
+                }
+                assertEquals(expected, assertIs<ApiResult.Failure>(result).error.code)
+            } finally { body.cancel(null); api.close() }
+        }
+    }
+
+    @Test
+    fun missingContentTypeAndInvalidLengthAreProtocolFailuresNotMissingBooks(): Unit = runBlocking {
+        for ((contentType, length, expected) in listOf(
+            Triple(null, null, "BINARY_CONTENT_TYPE_MISSING"),
+            Triple("text/plain", null, "BINARY_CONTENT_TYPE_INVALID"),
+            Triple("application/xhtml+xml", "-1", "BINARY_LENGTH_INVALID"),
+            Triple("application/xhtml+xml", "not-a-number", "BINARY_LENGTH_INVALID"),
+        )) {
+            val body = ByteChannel(autoFlush = true)
+            val api = client(body, length = length, contentType = contentType)
+            try {
+                val result = withTimeout(1000) { api.loadAuthenticatedBinary(PATH, 10, MIMES) }
+                val error = assertIs<ApiResult.Failure>(result).error
+                assertEquals(expected, error.code)
+                assertEquals(AppErrorKind.ProtocolViolation, error.kind)
+            } finally { body.cancel(null); api.close() }
+        }
+    }
+    @Test
     fun rejectsOversizeAndRedirectAtHeadersWhileBodyNeverCompletes(): Unit = runBlocking {
         for (status in listOf(HttpStatusCode.OK, HttpStatusCode.Found)) {
             val channel = ByteChannel(autoFlush = true)
@@ -100,11 +177,14 @@ class ApiClientBoundedResponseTest {
     }
 
     private fun client(body: ByteReadChannel, status: HttpStatusCode = HttpStatusCode.OK, length: String? = null,
+        contentType: String? = "application/xhtml+xml",
+        extraHeaders: Headers = Headers.Empty,
         onRequest: () -> Unit = {},
     ): ApiClient {
         val headers = Headers.build {
-            append(HttpHeaders.ContentType, "application/xhtml+xml")
+            contentType?.let { append(HttpHeaders.ContentType, it) }
             length?.let { append(HttpHeaders.ContentLength, it) }
+            appendAll(extraHeaders)
         }
         return ApiClient(profile(), HttpClient(MockEngine { onRequest(); respond(body, status, headers) }) {
             followRedirects = false

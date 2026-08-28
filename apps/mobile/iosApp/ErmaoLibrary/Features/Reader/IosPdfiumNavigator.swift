@@ -10,6 +10,7 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
     private let document: IosPdfiumDocument
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
+    private var preferredZoom = 1.0
     private var renderTask: Task<Void, Never>?
 
     init(document: IosPdfiumDocument, initialPageIndex: Int) {
@@ -27,7 +28,7 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.backgroundColor = .black
         scrollView.delegate = self
-        scrollView.minimumZoomScale = 1
+        scrollView.minimumZoomScale = 0.6
         scrollView.maximumZoomScale = 5
         scrollView.bouncesZoom = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -67,7 +68,7 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
             return index == pageIndex
         }
         pageIndex = index
-        scrollView.setZoomScale(1, animated: false)
+        scrollView.setZoomScale(CGFloat(preferredZoom), animated: false)
         renderCurrentPage()
         onPageChanged?(index)
         return true
@@ -79,6 +80,12 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
 
     func zoomOut() {
         scrollView.setZoomScale(max(scrollView.minimumZoomScale, scrollView.zoomScale / 1.25), animated: true)
+    }
+
+    func setZoom(_ factor: Double) {
+        preferredZoom = factor
+        loadViewIfNeeded()
+        scrollView.setZoomScale(CGFloat(factor), animated: false)
     }
 
     func zoomToFit() { scrollView.setZoomScale(1, animated: true) }

@@ -89,17 +89,12 @@ import com.ermao.library.features.administrativesettings.rememberAdministrativeS
 import com.ermao.library.BuildConfig
 import com.ermao.library.features.downloads.application.DownloadCenterViewModel
 import com.ermao.library.features.downloads.application.DownloadedBookViewModel
-import com.ermao.library.features.downloads.application.DownloadActionsViewModel
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadCatalog
 import com.ermao.library.features.downloads.infrastructure.AtomicDownloadFileSink
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.ui.DownloadCenterScreen
 import com.ermao.library.features.downloads.ui.DownloadedBookScreen
-import com.ermao.library.shared.core.network.AndroidEncryptedCookieVault
-import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
-import com.ermao.library.shared.modules.downloads.DownloadRequestContext
-import com.ermao.library.shared.modules.downloads.createDownloadsGateway
 import com.ermao.library.shared.modules.downloads.toDownloadNamespace
 import com.ermao.library.shared.modules.downloads.DownloadsRuntime
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
@@ -211,24 +206,11 @@ fun MainShell(
         session.identity.namespace.userId,
         session.identity.namespace.authorizationVersion,
     ).joinToString("-")
-    val downloadActionsViewModel: DownloadActionsViewModel = viewModel(
-        key = "download-actions-$contentKey",
-        factory = DownloadActionsViewModel.factory(
-            androidCatalog = downloadCatalog,
-            sharedCatalog = sharedDownloadCatalog,
-            sink = downloadFiles,
-            gateway = createDownloadsGateway(
-                ApiClientFactory(AndroidEncryptedCookieVault(appContext), requestTimeoutMillis = 30L * 60L * 1000L),
-                session.profile,
-            ),
-            context = DownloadRequestContext(session.profile, session.identity.namespace.toDownloadNamespace()),
-        ),
-    )
+    val downloadActionsViewModel = remember(contentKey) {
+        (appContext.applicationContext as com.ermao.library.ErmaoLibraryApplication).accountDownloads(session)
+    }
     val downloadRecordsByResource by downloadActionsViewModel.recordsByResource.collectAsStateWithLifecycle()
     val downloadFailuresByResource by downloadActionsViewModel.failureByResource.collectAsStateWithLifecycle()
-    DisposableEffect(downloadActionsViewModel) {
-        onDispose(downloadActionsViewModel::cancelAll)
-    }
     val meViewModel: com.ermao.library.features.me.application.MeViewModel = viewModel(
         key = "me-$contentKey",
         factory = AndroidMeFeatureFactory.viewModelFactory(

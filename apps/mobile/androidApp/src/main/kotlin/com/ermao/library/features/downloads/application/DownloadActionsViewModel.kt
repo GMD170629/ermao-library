@@ -17,11 +17,11 @@ import com.ermao.library.shared.modules.downloads.KtorDownloadsGateway
 import com.ermao.library.shared.modules.downloads.DownloadBatchPolicy
 import com.ermao.library.features.downloads.infrastructure.toShared
 import com.ermao.library.features.downloads.infrastructure.AndroidDownloadStorageException
-import android.util.Log
 import kotlinx.coroutines.CancellationException
 import java.io.IOException
 import com.ermao.library.shared.modules.downloads.DownloadBatchResult
 import java.util.UUID
+import java.util.logging.Logger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +49,10 @@ class DownloadActionsViewModel(
     val failureByResource: StateFlow<Map<String, String>> = mutableFailureByResource.asStateFlow()
     private val activeTransfers = mutableMapOf<String, Job>()
 
+    fun readerLaunchCoordinator() = com.ermao.library.shared.modules.reader.ReaderLaunchCoordinator(sharedCatalog, gateway)
+    val requestContext: DownloadRequestContext get() = context
+    fun isActive(resourceId: String): Boolean = activeTransfers[resourceId]?.isActive == true
+
     init {
         viewModelScope.launch {
             androidCatalog.observe(namespace).collect { records ->
@@ -60,12 +64,14 @@ class DownloadActionsViewModel(
         viewModelScope.launch { containTaskFailure("recovery") { runtime.recoverInterrupted(context.namespace) } }
     }
 
-    fun requestDownload(resourceId: String) {
+    fun requestDownload(resourceId: String) = requestDownload(resourceId, null)
+
+    fun requestDownload(resourceId: String, expectedDescriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor?) {
         if (resourceId.isBlank() || activeTransfers[resourceId]?.isActive == true) return
         mutableFailureByResource.value -= resourceId
         val job = viewModelScope.launch {
             containTaskFailure(resourceId) {
-                when (val result = runtime.download(context, resourceId, UUID.randomUUID().toString(), sink)) {
+                when (val result = runtime.download(context, resourceId, UUID.randomUUID().toString(), sink, expectedDescriptor = expectedDescriptor)) {
                     is DownloadResourceFailure -> saveBootstrapFailure(resourceId, result.error.code)
                     else -> Unit
                 }
@@ -94,6 +100,12 @@ class DownloadActionsViewModel(
 
     fun cancelAll() {
         activeTransfers.values.forEach(Job::cancel)
+    }
+
+    override fun onCleared() {
+        cancelAll()
+        gateway.close()
+        super.onCleared()
     }
 
     fun removeDownload(record: AndroidDownloadRecord) {
@@ -132,7 +144,7 @@ class DownloadActionsViewModel(
             val code = if (error is IOException || error is AndroidDownloadStorageException) {
                 "DOWNLOAD_STORAGE_FAILURE"
             } else "DOWNLOAD_TASK_FAILED"
-            Log.e("Downloads", "event=download_task_failed resource=$resourceId code=$code")
+            LOGGER.severe("event=download_task_failed resource=$resourceId code=$code")
             mutableFailureByResource.value += resourceId to code
         }
     }
@@ -142,6 +154,8 @@ class DownloadActionsViewModel(
     }
 
     companion object {
+        private val LOGGER = Logger.getLogger("Downloads")
+
         fun factory(
             androidCatalog: AndroidDownloadCatalog,
             sharedCatalog: DownloadCatalogRepository,

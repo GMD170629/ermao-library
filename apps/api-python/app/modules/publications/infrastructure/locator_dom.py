@@ -111,8 +111,6 @@ def _decode_markup(content: bytes) -> str:
         raise PublicationMarkupError(
             "publication markup encoding is invalid"
         ) from error
-    if "\x00" in decoded:
-        raise PublicationMarkupError("publication markup contains NUL characters")
     return decoded
 
 
@@ -282,6 +280,18 @@ def _remove_unsafe_head_elements(head: str) -> str:
     return _META_TAG.sub(remove_meta, without_base)
 
 
+def publication_security_head(profile: PublicationSecurityProfile) -> str:
+    """Trusted head markup for application-generated chapters and decoration."""
+
+    return (
+        '<meta http-equiv="Content-Security-Policy" '
+        f'content="{profile.content_security_policy}" '
+        f'data-shuku-security-profile="{profile.identifier}"/>'
+        f'<style data-shuku-security-profile="{profile.identifier}">'
+        f"{_SECURITY_STYLE}</style>"
+    )
+
+
 def decorate_markup_head(
     content: bytes,
     profile: PublicationSecurityProfile,
@@ -298,13 +308,7 @@ def decorate_markup_head(
         raise PublicationMarkupError("publication XHTML head cannot be decorated")
     original_head = markup[head_open.end() : head_close.start()]
     safe_head = _remove_unsafe_head_elements(original_head)
-    decoration = (
-        '<meta http-equiv="Content-Security-Policy" '
-        f'content="{profile.content_security_policy}" '
-        f'data-shuku-security-profile="{profile.identifier}"/>'
-        f'<style data-shuku-security-profile="{profile.identifier}">'
-        f"{_SECURITY_STYLE}</style>"
-    )
+    decoration = publication_security_head(profile)
     decorated = (
         markup[: head_open.end()]
         + decoration

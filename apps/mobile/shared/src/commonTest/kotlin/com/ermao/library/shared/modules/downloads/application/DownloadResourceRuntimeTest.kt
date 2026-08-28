@@ -25,6 +25,18 @@ import kotlin.test.assertIs
 
 class DownloadResourceRuntimeTest {
     @Test
+    fun readerExpectationRejectsChangedAssetBeforeTaskOrTransfer() = runBlocking {
+        val catalog = InMemoryDownloadCatalogRepository()
+        val changed = descriptor.copy(source = descriptor.source.copy(totalBytes = 20))
+        val gateway = SuccessfulGateway(changed)
+        val result = DownloadResourceRuntime(catalog, gateway, { 42 }).download(
+            context, "resource", "task", NoopSink, expectedDescriptor = descriptor,
+        )
+        assertEquals("ASSET_VERSION_CHANGED", assertIs<DownloadResourceResult.Failure>(result).error.code)
+        assertEquals(0, gateway.requests.size)
+        assertEquals(0, catalog.listTasks(namespace).size)
+    }
+    @Test
     fun emitsResourceProgressAndCompletionOnlyAfterCompletedArtifactIsPersisted() = runBlocking {
         val catalog = InMemoryDownloadCatalogRepository()
         val observations = mutableListOf<DownloadResourceObservation>()
@@ -86,6 +98,28 @@ class DownloadResourceRuntimeTest {
         assertIs<DownloadResourceResult.Completed>(runtime.download(context, "resource", "duplicate", NoopSink))
         assertEquals(listOf("task", "task"), gateway.requests.map { it.taskId })
         assertEquals(listOf(0L, 4L), gateway.requests.map { it.resumeFromBytes })
+    }
+
+    @Test
+    fun resumedTwoGiBDownloadKeepsLongCountersThroughCompletionAndPersistence() = runBlocking {
+        val total = 2L * 1024 * 1024 * 1024
+        val large = descriptor.copy(source = descriptor.source.copy(totalBytes = total))
+        val catalog = InMemoryDownloadCatalogRepository()
+        val gateway = SuccessfulGateway(large)
+        val observations = mutableListOf<DownloadResourceObservation>()
+        val sink = object : DownloadByteSink {
+            override suspend fun inspect(request: DownloadSinkRequest) = DownloadStoredBytes(total - 1)
+            override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession = error("Unused by fake gateway")
+        }
+        val result = DownloadResourceRuntime(catalog, gateway, { 42 }).download(
+            context, "resource", "large", sink, observer = DownloadResourceObserver(observations::add),
+        )
+        assertEquals(total - 1, gateway.requests.single().resumeFromBytes)
+        assertEquals(total, assertIs<DownloadResourceResult.Completed>(result).artifact.verifiedBytes)
+        assertEquals(listOf(total - 1, total), observations
+            .filter { it.kind == DownloadResourceObservationKind.Progress }.map { it.transferredBytes })
+        val completed = catalog.listTasks(namespace).single()
+        assertEquals(total, DownloadCatalogCodec.decode(DownloadCatalogCodec.encode(completed)).transferredBytes)
     }
 
     @Test
@@ -176,11 +210,11 @@ class DownloadResourceRuntimeTest {
             progressObserver: DownloadProgressObserver?,
         ): DownloadTransferResult {
             requests += request
-            progressObserver?.onProgress(maxOf(4, request.resumeFromBytes), 10)
+            progressObserver?.onProgress(maxOf(4, request.resumeFromBytes), descriptor.totalBytes)
             delay(1)
             if (failuresRemaining-- > 0) return DownloadTransferResult.Failure(AppError(AppErrorKind.NetworkUnavailable, "OFFLINE"))
-            progressObserver?.onProgress(10, 10)
-            return DownloadTransferResult.Success(CompletedTransfer("managed/asset.bin", 10, null, null))
+            progressObserver?.onProgress(descriptor.totalBytes, descriptor.totalBytes)
+            return DownloadTransferResult.Success(CompletedTransfer("managed/asset.bin", descriptor.totalBytes, null, null))
         }
     }
 

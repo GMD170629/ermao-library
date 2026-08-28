@@ -226,7 +226,7 @@ test('native image events replace the loading placeholder and expose retry on fa
 
   image.dispatch('error');
   const failure = placeholder.children[0];
-  assert.equal(failure.children[0].textContent, '漫画页面加载失败');
+  assert.equal(failure.children[0].textContent, '漫画页面加载失败，浏览器未提供具体原因。');
   failure.children[1].dispatch('click');
   assert.deepEqual(harness.retriedPages, [2]);
 

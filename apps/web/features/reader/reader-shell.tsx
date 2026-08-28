@@ -1,37 +1,17 @@
 'use client';
 
+import { READER_SETTINGS_CATALOG, readerSettingValue, changeReaderSetting, type ReaderSettingId } from '@shuku/reader-core';
+import { preferencesToReaderSettings, readerSettingsToPreferences } from './v3/presentation';
+
 import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
-import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, Highlighter, LayoutTemplate, ListTree, Minus, MousePointer2, NotebookPen, Palette, Plus, RotateCcw, Rows2, Rows3, Rows4, Settings, SlidersHorizontal, Sparkles, Trash2, Type, X, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Highlighter, ListTree, Minus, NotebookPen, Palette, Plus, Settings, SlidersHorizontal, Trash2, Type, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
 import { ResourceSelect } from '../../components/ui/resource-select';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
 import {
-  READER_COMIC_DIRECTION_OPTIONS,
-  READER_COMIC_IMAGE_FIT_OPTIONS,
-  READER_COMIC_IMAGE_VARIANT_OPTIONS,
-  READER_FLOW_OPTIONS,
-  READER_FONT_FAMILY_OPTIONS,
-  READER_FONT_WEIGHT_OPTIONS,
-  READER_FONT_SIZE_OPTIONS,
-  READER_LINE_HEIGHT_OPTIONS,
-  READER_LETTER_SPACING_OPTIONS,
-  READER_PAGE_MARGIN_OPTIONS,
-  READER_PROGRESS_STYLE_OPTIONS,
-  READER_COMIC_FLOW_OPTIONS,
-  READER_PAGE_GAP_OPTIONS,
-  READER_PDF_ROTATION_OPTIONS,
-  READER_PDF_CROP_OPTIONS,
-  READER_PARAGRAPH_INDENT_OPTIONS,
-  READER_PARAGRAPH_SPACING_OPTIONS,
-  READER_PAGE_TURN_ANIMATION_OPTIONS,
-  READER_PDF_FIT_OPTIONS,
-  READER_SPREAD_MODE_OPTIONS,
   READER_THEME_OPTIONS,
-  READER_TAP_ZONE_OPTIONS,
-  READER_TEXT_ALIGN_OPTIONS,
-  closestReaderOptionValue,
   type ReaderFontFamily
 } from './reader-preference-options';
 import type { ReaderBookmark } from './v3/bookmarks';
@@ -40,7 +20,6 @@ import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
 import { hasActiveTextSelection, isReaderControlTarget, isReaderKeyboardControlTarget, ReaderKeyboardNavigationController, readerKeyIntent, readerPinchZoom, readerPointerIntentInViewport, readerSwipeIntent, type ReaderInputIntent } from './v3/input-router';
 import {
   MOBILE_READER_VIEWPORT_MAXIMUM,
-  READER_PAGE_WIDTH_MINIMUM,
   readerPageWidthSliderMaximum
 } from './v3/page-width';
 import { I18nText } from '@/i18n/provider';
@@ -55,12 +34,6 @@ type ComicImageFit = ReaderPreferences['comic']['imageFit'];
 type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
 
 export type ReaderTheme = ReaderPreferences['appearance']['theme'];
-export const readerFontFamilyOptions = READER_FONT_FAMILY_OPTIONS;
-const readerFontSizeOptions = READER_FONT_SIZE_OPTIONS;
-const readerLineHeightOptions = READER_LINE_HEIGHT_OPTIONS.map((option, index) => ({
-  ...option,
-  icon: [Rows2, Rows3, Rows4][index]
-}));
 export type { ReaderFontFamily };
 export type EbookPageTurnAnimation = ReaderPreferences['epub']['pageTurnAnimation'];
 export type EbookSpreadMode = ReaderPreferences['epub']['spreadMode'];
@@ -108,8 +81,6 @@ export type ReaderSettings = {
   paragraphSpacing: number;
   textAlign: ReaderPreferences['epub']['typography']['textAlign'];
   preservePublisherStyles: boolean;
-  allowPublisherColors: boolean;
-  allowPublisherFonts: boolean;
   smartOptimization: boolean;
   deduplicateIndent: boolean;
   indentUnindented: boolean;
@@ -296,7 +267,6 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const [panel, setPanel] = useState<ReaderPanel | null>(null);
   const [annotationTab, setAnnotationTab] = useState<'book' | 'mine'>('book');
   const [notesTab, setNotesTab] = useState<'bookmarks' | 'annotations'>('bookmarks');
-  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [bookmarkNotice, setBookmarkNotice] = useState('');
   const [clockTime, setClockTime] = useState(() => new Date());
   const [readerViewportWidth, setReaderViewportWidth] = useState(1350);
@@ -1080,186 +1050,13 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 </div>
               ) : null}
 
-              {panel === 'appearance' ? (
-                <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
-                  <ThemeSwatches
-                    value={settings.theme}
-                    onChange={(value) => updateSettings({ theme: value as ReaderTheme, themeMode: 'manual' })}
-                    dark={dark}
-                  />
-                  <ReaderToggleRow
-                    label={i18nAttribute("跟随系统明暗")}
-                    description={i18nAttribute("浅色使用白天主题，深色使用夜间主题")}
-                    checked={settings.themeMode === 'system'}
-                    onChange={(checked) => updateSettings({ themeMode: checked ? 'system' : 'manual', theme: checked ? settings.theme : settings.manualTheme })}
-                    dark={dark}
-                  />
-                  {readerType === 'reflowable' ? (
-                    <ReaderSettingsSection icon={Type} title={i18nAttribute("文字外观")} dark={dark}>
-                      <CompactStepper label={i18nAttribute("字号")} value={`${settings.fontSize}px`} onMinus={() => updateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })} onPlus={() => updateSettings({ fontSize: Math.min(30, settings.fontSize + 1) })} dark={dark} />
-                      <CompactSettingOptions label={i18nAttribute("快捷字号")} value={closestReaderOptionValue(settings.fontSize, readerFontSizeOptions)} options={readerFontSizeOptions} disambiguateLabels onChange={(value) => updateSettings({ fontSize: Number(value) })} dark={dark} />
-                      <CompactSettingOptions
-                        label={i18nAttribute("行距")}
-                        value={closestReaderOptionValue(settings.lineHeight, readerLineHeightOptions)}
-                        options={readerLineHeightOptions}
-                        disambiguateLabels
-                        onChange={(value) => updateSettings({ lineHeight: Number(value) })}
-                        dark={dark}
-                      />
-                      <CompactSettingOptions
-                        label={i18nAttribute("字体")}
-                        value={settings.fontFamily}
-                        options={READER_FONT_FAMILY_OPTIONS}
-                        onChange={(value) => updateSettings({ fontFamily: value as ReaderFontFamily })}
-                        dark={dark}
-                      />
-                      <CompactSettingOptions label={i18nAttribute("字重")} value={String(settings.fontWeight)} options={READER_FONT_WEIGHT_OPTIONS} onChange={(value) => updateSettings({ fontWeight: Number(value) as ReaderSettings['fontWeight'] })} dark={dark} />
-                      <CompactSettingOptions label={i18nAttribute("字间距")} value={String(settings.letterSpacing)} options={READER_LETTER_SPACING_OPTIONS} onChange={(value) => updateSettings({ letterSpacing: Number(value) as ReaderSettings['letterSpacing'] })} dark={dark} />
-                      <CompactSettingOptions label={i18nAttribute("页边距")} value={settings.pageMargin} options={READER_PAGE_MARGIN_OPTIONS} onChange={(value) => updateSettings({ pageMargin: value as ReaderSettings['pageMargin'] })} dark={dark} />
-                      <CompactRangeSetting
-                        label={i18nAttribute("页宽")}
-                        value={Math.min(pageWidth, pageWidthMaximum)}
-                        minimum={READER_PAGE_WIDTH_MINIMUM}
-                        maximum={pageWidthMaximum}
-                        step={10}
-                        suffix="px"
-                        disabled={mobilePageWidth}
-                        description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined}
-                        onChange={(value) => updateSettings({ pageWidth: value })}
-                        dark={dark}
-                      />
-                    </ReaderSettingsSection>
-                  ) : readerType === 'comic' ? (
-                    <ReaderSettingsSection icon={Palette} title={i18nAttribute("画面外观")} dark={dark}>
-                      <CompactRangeSetting label={i18nAttribute("页宽")} value={Math.min(pageWidth, pageWidthMaximum)} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={pageWidthMaximum} step={10} suffix="px" disabled={mobilePageWidth} description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined} onChange={(value) => updateSettings({ comicPageWidth: value })} dark={dark} />
-                      {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.comicZoom * 100)}%`} onMinus={() => updateSettings({ comicZoom: Math.max(0.6, Number((settings.comicZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ comicZoom: Math.min(2.4, Number((settings.comicZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
-                    </ReaderSettingsSection>
-                  ) : (
-                    <ReaderSettingsSection icon={Palette} title={i18nAttribute("页面外观")} dark={dark}>
-                      <CompactRangeSetting label={i18nAttribute("页宽")} value={Math.min(pageWidth, pageWidthMaximum)} minimum={READER_PAGE_WIDTH_MINIMUM} maximum={pageWidthMaximum} step={10} suffix="px" disabled={mobilePageWidth} description={mobilePageWidth ? i18nAttribute("手机模式下自动使用可视区域宽度") : undefined} onChange={(value) => updateSettings({ pdfPageWidth: value })} dark={dark} />
-                      {capabilities?.canZoom !== false ? <CompactStepper label={i18nAttribute("缩放")} value={`${Math.round(settings.pdfZoom * 100)}%`} onMinus={() => updateSettings({ pdfZoom: Math.max(0.6, Number((settings.pdfZoom - 0.1).toFixed(1))) })} onPlus={() => updateSettings({ pdfZoom: Math.min(2.4, Number((settings.pdfZoom + 0.1).toFixed(1))) })} dark={dark} /> : null}
-                    </ReaderSettingsSection>
-                  )}
-                </div>
+              {panel === 'appearance' || panel === 'settings' ? (
+                <ReaderPreferencesPanel panel={panel} settings={settings} readerType={readerType} dark={dark}
+                  updateSettings={updateSettings} onResetSettings={onResetSettings} keepControlsOpen={keepControlsOpen}
+                  pageWidthMaximum={pageWidthMaximum} mobilePageWidth={mobilePageWidth} wakeLockSupported={wakeLockSupported}
+                  canZoom={capabilities?.canZoom !== false} />
               ) : null}
 
-              {panel === 'settings' ? (
-                <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
-                  <div className="grid items-start gap-3">
-                    <ReaderSettingsSection icon={Clock3} title={i18nAttribute("阅读界面")} dark={dark}>
-                      <CompactSettingOptions label={i18nAttribute("进度显示")} value={settings.progressStyle} options={READER_PROGRESS_STYLE_OPTIONS} onChange={(value) => updateSettings({ progressStyle: value as ReaderSettings['progressStyle'] })} dark={dark} />
-                      <div className="grid gap-2.5">
-                        <ReaderToggleRow label={i18nAttribute("常显时钟")} checked={settings.showClock} onChange={(checked) => updateSettings({ showClock: checked })} dark={dark} />
-                        <ReaderToggleRow label={i18nAttribute("保持屏幕唤醒")} description={wakeLockSupported ? undefined : i18nAttribute("当前浏览器不支持保持屏幕唤醒")} checked={settings.keepScreenAwake} disabled={!wakeLockSupported} onChange={(checked) => updateSettings({ keepScreenAwake: checked })} dark={dark} />
-                      </div>
-                    </ReaderSettingsSection>
-                    <ReaderSettingsSection icon={BookOpen} title={i18nAttribute("翻页设置")} dark={dark}>
-                      {readerType === 'reflowable' ? (
-                        <CompactSettingOptions
-                          label={i18nAttribute("动画")}
-                          value={settings.ebookPageTurnAnimation}
-                          options={READER_PAGE_TURN_ANIMATION_OPTIONS}
-                          disabled
-                          description={i18nAttribute("Readium 暂不支持可配置翻页动画，此设置当前不生效。")}
-                          onChange={(value) => updateSettings({ ebookPageTurnAnimation: value as EbookPageTurnAnimation })}
-                          dark={dark}
-                        />
-                      ) : readerType === 'comic' ? (
-                        <CompactSettingOptions label={i18nAttribute("动画")} value={settings.comicPageTurnAnimation} options={READER_PAGE_TURN_ANIMATION_OPTIONS} onChange={(value) => updateSettings({ comicPageTurnAnimation: value as ComicPageTurnAnimation })} dark={dark} />
-                      ) : null}
-                      <CompactSettingOptions label={i18nAttribute("点击区域")} value={settings.tapZones} options={READER_TAP_ZONE_OPTIONS} onChange={(value) => updateSettings({ tapZones: value as ReaderSettings['tapZones'] })} dark={dark} />
-                      <ReaderToggleRow
-                        label={i18nAttribute("滑动翻页")}
-                        description={readerType === 'reflowable' ? i18nAttribute("Readium 使用原生触摸滑动，当前无法关闭。") : undefined}
-                        checked={readerType === 'reflowable' ? true : settings.swipePageTurn}
-                        disabled={readerType === 'reflowable'}
-                        onChange={(checked) => updateSettings({ swipePageTurn: checked })}
-                        dark={dark}
-                      />
-                    </ReaderSettingsSection>
-                  </div>
-
-                  <ReaderSettingsSection icon={LayoutTemplate} title={i18nAttribute("排版")} dark={dark}>
-                    {readerType === 'reflowable' ? (
-                      <>
-                        <CompactSettingOptions
-                          label={i18nAttribute("阅读方式")}
-                          value="paginated"
-                          options={READER_FLOW_OPTIONS.map((option) => ({ ...option, disabled: option.value === 'scrolled' }))}
-                          description={i18nAttribute("滚动模式暂未适配，当前使用分页阅读。")}
-                          onChange={(value) => updateSettings({ ebookFlow: value as EbookFlow })}
-                          dark={dark}
-                        />
-                        <CompactSettingOptions label={i18nAttribute("页面")} value={settings.ebookSpreadMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} onChange={(value) => updateSettings({ ebookSpreadMode: value as EbookSpreadMode })} dark={dark} />
-                      </>
-                    ) : readerType === 'comic' ? (
-                      <>
-                        <CompactSettingOptions label={i18nAttribute("阅读方式")} value={settings.comicFlow} options={READER_COMIC_FLOW_OPTIONS} onChange={(value) => updateSettings({ comicFlow: value as ReaderSettings['comicFlow'] })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("模式")} value={settings.comicMode} options={READER_SPREAD_MODE_OPTIONS.filter((option) => option.value !== 'auto')} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicMode: value as ComicMode })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("方向")} value={settings.comicDirection} options={READER_COMIC_DIRECTION_OPTIONS} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicDirection: value as ComicDirection })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("适配")} value={settings.imageFit} options={READER_COMIC_IMAGE_FIT_OPTIONS} onChange={(value) => updateSettings({ imageFit: value as ComicImageFit })} dark={dark} />
-                        <ReaderToggleRow label={i18nAttribute("双页时封面单独显示")} checked={settings.comicCoverSingle} disabled={settings.comicFlow === 'scrolled' || settings.comicMode !== 'double'} onChange={(checked) => updateSettings({ comicCoverSingle: checked })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("页间距")} value={String(settings.comicPageGap)} options={READER_PAGE_GAP_OPTIONS} disabled={settings.comicFlow === 'scrolled'} onChange={(value) => updateSettings({ comicPageGap: Number(value) as ReaderSettings['comicPageGap'] })} dark={dark} />
-                      </>
-                    ) : (
-                      <>
-                        <CompactSettingOptions label={i18nAttribute("适配")} value={settings.pdfFit} options={READER_PDF_FIT_OPTIONS} onChange={(value) => updateSettings({ pdfFit: value as PdfFit })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("页面旋转")} value={String(settings.pdfRotation)} options={READER_PDF_ROTATION_OPTIONS} onChange={(value) => updateSettings({ pdfRotation: Number(value) as ReaderSettings['pdfRotation'] })} dark={dark} />
-                        <CompactSettingOptions label={i18nAttribute("自动裁白边")} value={settings.pdfCropMargins} options={READER_PDF_CROP_OPTIONS} onChange={(value) => updateSettings({ pdfCropMargins: value as ReaderSettings['pdfCropMargins'] })} dark={dark} />
-                      </>
-                    )}
-                  </ReaderSettingsSection>
-
-                  {readerType === 'reflowable' ? (
-                    <ReaderSettingsSection icon={Sparkles} title={i18nAttribute("智能优化")} dark={dark}>
-                      <ReaderToggleRow label={i18nAttribute("安全优化")} description={i18nAttribute("避免重复缩进，并为普通正文补齐段首缩进")} checked={settings.smartOptimization} onChange={(checked) => updateSettings({ smartOptimization: checked })} dark={dark} />
-                      <ReaderToggleRow label={i18nAttribute("重复缩进去重")} checked={settings.deduplicateIndent} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ deduplicateIndent: checked })} dark={dark} />
-                      <ReaderToggleRow label={i18nAttribute("无缩进正文补齐")} checked={settings.indentUnindented} disabled={!settings.smartOptimization} onChange={(checked) => updateSettings({ indentUnindented: checked })} dark={dark} />
-                    </ReaderSettingsSection>
-                  ) : null}
-
-                  <section className={cn('shuku-reader-control-border overflow-hidden rounded-2xl border', dark ? 'bg-white/[0.035]' : 'bg-white/45')}>
-                    <button type="button" className="flex min-h-14 w-full items-center gap-3 px-4 text-left" aria-expanded={advancedSettingsOpen} aria-controls="reader-advanced-settings" onClick={() => setAdvancedSettingsOpen((open) => !open)}>
-                      <SlidersHorizontal size={18} className="shrink-0 opacity-70" />
-                      <span className="min-w-0 flex-1 font-semibold"><I18nText>高级设置</I18nText></span>
-                      <ChevronDown size={18} className={cn('shrink-0 transition-transform duration-300 motion-reduce:transition-none', advancedSettingsOpen ? 'rotate-180' : '')} />
-                    </button>
-                    <div id="reader-advanced-settings" className="shuku-reader-advanced-settings" data-expanded={advancedSettingsOpen ? 'true' : 'false'}>
-                      <div className="shuku-reader-control-border min-h-0 space-y-3 border-t p-3">
-                        {readerType === 'reflowable' ? (
-                          <ReaderSettingsSection icon={Type} title={i18nAttribute("段落与内容样式")} dark={dark} nested>
-                            <CompactSettingOptions label={i18nAttribute("段首缩进")} value={String(settings.paragraphIndent)} options={READER_PARAGRAPH_INDENT_OPTIONS} onChange={(value) => updateSettings({ paragraphIndent: Number(value) })} dark={dark} />
-                            <CompactSettingOptions label={i18nAttribute("段间距")} value={String(settings.paragraphSpacing)} options={READER_PARAGRAPH_SPACING_OPTIONS} onChange={(value) => updateSettings({ paragraphSpacing: Number(value) })} dark={dark} />
-                            <CompactSettingOptions label={i18nAttribute("文本对齐")} value={settings.textAlign} options={READER_TEXT_ALIGN_OPTIONS} onChange={(value) => updateSettings({ textAlign: value as ReaderSettings['textAlign'] })} dark={dark} />
-                            <ReaderToggleRow label={i18nAttribute("保留出版方行高")} checked={settings.preservePublisherStyles} onChange={(checked) => updateSettings({ preservePublisherStyles: checked })} dark={dark} />
-                            <ReaderToggleRow label={i18nAttribute("允许出版方颜色")} checked={settings.allowPublisherColors} onChange={(checked) => updateSettings({ allowPublisherColors: checked })} dark={dark} />
-                            <ReaderToggleRow label={i18nAttribute("允许出版方字体")} checked={settings.allowPublisherFonts} onChange={(checked) => updateSettings({ allowPublisherFonts: checked })} dark={dark} />
-                          </ReaderSettingsSection>
-                        ) : readerType === 'comic' ? (
-                          <ReaderSettingsSection icon={Palette} title={i18nAttribute("漫画画面")} dark={dark} nested>
-                            <CompactSettingOptions label={i18nAttribute("画质")} value={settings.imageVariant} options={READER_COMIC_IMAGE_VARIANT_OPTIONS} onChange={(value) => updateSettings({ imageVariant: value as ComicImageVariant })} dark={dark} />
-                          </ReaderSettingsSection>
-                        ) : null}
-                        <ReaderSettingsSection icon={MousePointer2} title={i18nAttribute("操作方式")} dark={dark} nested>
-                          <ReaderToggleRow label={i18nAttribute("键盘翻页")} checked={settings.keyboardPageTurn} onChange={(checked) => updateSettings({ keyboardPageTurn: checked })} dark={dark} />
-                          <ReaderToggleRow label={i18nAttribute("音量键翻页")} description={i18nAttribute("默认关闭，部分浏览器可能不会转发音量键事件")} checked={settings.volumeKeyPageTurn} onChange={(checked) => updateSettings({ volumeKeyPageTurn: checked })} dark={dark} />
-                        </ReaderSettingsSection>
-                      </div>
-                    </div>
-                  </section>
-
-                  {onResetSettings ? (
-                    <button
-                      type="button"
-                      onClick={() => { void onResetSettings(); keepControlsOpen(); }}
-                      aria-label={i18nAttribute("恢复阅读默认设置")}
-                      className={cn('shuku-reader-control-border flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border px-3 text-xs font-medium transition active:scale-[0.98]', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
-                    >
-                      <RotateCcw size={15} />
-                      <I18nText>恢复阅读默认设置</I18nText></button>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -1437,22 +1234,23 @@ function CompactSettingOptions({ label, value, options, onChange, dark, disabled
           className={cn('flex-1', options.length <= 3 && 'min-[900px]:max-w-[32rem]')}
         />
       </div>
+      {!options.some((option) => option.value === value) ? <p className="pl-12 text-xs">{value}</p> : null}
       {description ? <p id={descriptionId} className="pl-12 text-[11px] leading-4 opacity-55">{description}</p> : null}
     </div>
   );
 }
 
-function CompactStepper({ label, value, onMinus, onPlus, dark }: { label: string; value: string; onMinus: () => void; onPlus: () => void; dark: boolean }) {
+function CompactStepper({ label, value, onMinus, onPlus, dark, disabled = false }: { label: string; value: string; onMinus: () => void; onPlus: () => void; dark: boolean; disabled?: boolean }) {
   const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div className="flex items-center gap-3 min-[900px]:max-w-[32rem]">
       <span className="w-9 shrink-0 text-xs font-medium opacity-55">{i18nAttribute(label)}</span>
       <div className={cn('shuku-reader-control-border flex min-w-0 flex-1 items-center rounded-xl border p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]')}>
-        <button type="button" onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}减少", { value0: label })}>
+        <button type="button" disabled={disabled} onClick={onMinus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}减少", { value0: label })}>
           <Minus size={14} />
         </button>
         <span className="min-w-14 flex-1 text-center text-xs tabular-nums">{value}</span>
-        <button type="button" onClick={onPlus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}增加", { value0: label })}>
+        <button type="button" disabled={disabled} onClick={onPlus} className={cn('flex h-9 w-9 items-center justify-center rounded-lg transition active:scale-[0.97]', dark ? 'hover:bg-white/10' : 'hover:bg-white/60')} aria-label={i18nAttribute("{value0}增加", { value0: label })}>
           <Plus size={14} />
         </button>
       </div>
@@ -1632,4 +1430,75 @@ function comicNavButtonClass(selected: boolean, dark: boolean) {
     'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60',
     selected ? 'shuku-reader-accent-solid' : dark ? 'hover:bg-white/10' : 'hover:bg-stone-100'
   );
+}
+
+function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSettings, onResetSettings, keepControlsOpen, pageWidthMaximum, mobilePageWidth, wakeLockSupported, canZoom }: {
+  panel: 'appearance' | 'settings'; settings: ReaderSettings; readerType: ReaderKind; dark: boolean;
+  updateSettings: (value: Partial<ReaderSettings>) => void;
+  onResetSettings?: () => void | Promise<void>; keepControlsOpen: () => void;
+  pageWidthMaximum: number; mobilePageWidth: boolean; wakeLockSupported: boolean; canZoom: boolean;
+}) {
+  const { t } = useAttributeI18n();
+  const [advanced, setAdvanced] = useState(false);
+  const preferences = readerSettingsToPreferences(settings);
+  const sections = READER_SETTINGS_CATALOG.sections.filter((section) => section.panel === panel);
+  function update(id: ReaderSettingId, value: string) {
+    if (id === 'theme') {
+      const next = changeReaderSetting(preferences, id, value);
+      updateSettings({ theme: next.appearance.theme, themeMode: 'manual' });
+    } else if (id === 'themeMode') {
+      updateSettings({ themeMode: value === 'system' ? 'system' : 'manual', theme: value === 'system' ? settings.theme : settings.manualTheme });
+    } else {
+      updateSettings(preferencesToReaderSettings(changeReaderSetting(preferences, id, value)));
+    }
+  }
+  function control(setting: typeof READER_SETTINGS_CATALOG.settings[number]) {
+    const id = setting.id;
+    const label = t(setting.label['zh-CN']);
+    const saved = readerSettingValue(preferences, id);
+    const pageWidth = id === 'textPageWidth' || id === 'comicPageWidth' || id === 'pdfPageWidth';
+    const zoom = id === 'comicZoom' || id === 'pdfZoom';
+    const disabled = id === 'preservePublisherStyles' || id === 'epubAnimation' ||
+      (id === 'swipePageTurn' && readerType === 'reflowable') ||
+      (id === 'keepScreenAwake' && !wakeLockSupported) || (pageWidth && mobilePageWidth) || (zoom && !canZoom) ||
+      (['comicSpread', 'comicDirection', 'comicPageGap', 'comicCoverSingle'].includes(id) && settings.comicFlow === 'scrolled') ||
+      (id === 'comicCoverSingle' && settings.comicMode !== 'double') ||
+      (['deduplicateIndent', 'indentUnindented'].includes(id) && !settings.smartOptimization);
+    const description = id === 'preservePublisherStyles' ? t('当前 Web 引擎未提供出版方样式总开关接口，此设置不可用。')
+      : id === 'epubAnimation' ? t('Readium 暂不支持可配置翻页动画，此设置当前不生效。')
+      : id === 'textFlow' ? t('滚动模式暂未适配，当前使用分页阅读。')
+      : id === 'swipePageTurn' && readerType === 'reflowable' ? t('Readium 使用原生触摸滑动，当前无法关闭。')
+      : id === 'keepScreenAwake' && !wakeLockSupported ? t('当前浏览器不支持保持屏幕唤醒')
+      : pageWidth && mobilePageWidth ? t('手机模式下自动使用可视区域宽度')
+      : id === 'volumeKeyPageTurn' ? t('默认关闭，部分浏览器可能不会转发音量键事件')
+      : undefined;
+    if (id === 'theme') return <ThemeSwatches key={id} value={settings.theme} onChange={(value) => update(id, value)} dark={dark} />;
+    if (setting.kind === 'action') return onResetSettings ? <button key={id} type="button" onClick={() => { void onResetSettings(); keepControlsOpen(); }} className="min-h-11 w-full" aria-label={label}>{label}</button> : null;
+    if (setting.kind === 'toggle') {
+      const checked = id === 'preservePublisherStyles' ? false : id === 'swipePageTurn' && readerType === 'reflowable' ? true : saved === 'true' || saved === 'system';
+      return <ReaderToggleRow key={id} label={label} description={description} checked={checked} disabled={disabled} onChange={(value) => update(id, id === 'themeMode' ? value ? 'system' : 'manual' : String(value))} dark={dark} />;
+    }
+    if (setting.kind === 'number' && setting.limits) {
+      const [minimum, maximum, step] = setting.limits;
+      if (pageWidth) return <CompactRangeSetting key={id} label={label} value={Math.min(Number(saved), pageWidthMaximum)} minimum={minimum} maximum={pageWidthMaximum} step={10} suffix="px" disabled={disabled} description={description} onChange={(value) => update(id, String(value))} dark={dark} />;
+      return <CompactStepper key={id} label={label} value={zoom ? `${Math.round(Number(saved) * 100)}%` : `${saved}px`} disabled={disabled} onMinus={() => update(id, String(Math.max(minimum, Number((Number(saved) - step).toFixed(2)))))} onPlus={() => update(id, String(Math.min(maximum, Number((Number(saved) + step).toFixed(2)))))} dark={dark} />;
+    }
+    if (!setting.options) return null;
+    const options = READER_SETTINGS_CATALOG.optionGroups[setting.options].map((option) => ({ value: option.value, label: option.label['zh-CN'], disabled: id === 'textFlow' && option.value === 'scrolled' }));
+    return <CompactSettingOptions key={id} label={label} value={id === 'textFlow' ? 'paginated' : saved} options={options} disabled={disabled} description={description} disambiguateLabels={id === 'quickFontSize' || id === 'lineHeight'} onChange={(value) => update(id, value)} dark={dark} />;
+  }
+  function sectionView(section: typeof sections[number]) {
+    const entries = READER_SETTINGS_CATALOG.settings.filter((setting) => setting.section === section.id && setting.formats.some((format) => format === readerType));
+    if (!entries.length) return null;
+    if (section.id === 'top' || section.id === 'reset') return <div key={section.id} className="space-y-3">{entries.map(control)}</div>;
+    return <ReaderSettingsSection key={section.id} title={t(section.label['zh-CN'])} icon={section.id === 'textAppearance' || section.id === 'paragraph' ? Type : SlidersHorizontal} dark={dark} nested={section.advanced}>{entries.map(control)}</ReaderSettingsSection>;
+  }
+  return <div data-pwa-scroll="true" className="mt-3 min-h-0 flex-1 space-y-3 overflow-auto overscroll-contain pr-1 text-sm">
+    {sections.filter((section) => !section.advanced && section.id !== 'reset').map(sectionView)}
+    {panel === 'settings' ? <section className="shuku-reader-control-border overflow-hidden rounded-2xl border">
+      <button type="button" className="flex min-h-14 w-full items-center gap-3 px-4" aria-expanded={advanced} aria-controls="reader-advanced-settings" onClick={() => setAdvanced(!advanced)}><SlidersHorizontal size={18} /><span className="flex-1 text-left">{t('高级设置')}</span><ChevronDown size={18} /></button>
+      <div id="reader-advanced-settings" className="shuku-reader-advanced-settings" data-expanded={advanced ? 'true' : 'false'}><div className="min-h-0 overflow-hidden space-y-3 p-3">{sections.filter((section) => section.advanced).map(sectionView)}</div></div>
+    </section> : null}
+    {sections.filter((section) => section.id === 'reset').map(sectionView)}
+  </div>;
 }

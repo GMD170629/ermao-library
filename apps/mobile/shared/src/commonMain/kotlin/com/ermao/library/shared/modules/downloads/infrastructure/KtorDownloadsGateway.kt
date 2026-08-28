@@ -43,6 +43,8 @@ import kotlinx.serialization.json.JsonObject
 class KtorDownloadsGateway(
     private val apiClient: ApiClient,
 ) : DownloadsGateway {
+    fun close() = apiClient.close()
+
     override suspend fun load(
         context: DownloadRequestContext,
         resourceId: String,
@@ -55,14 +57,14 @@ class KtorDownloadsGateway(
                 is ApiResult.Failure -> return DownloadBootstrapResult.Failure(resourceResponse.error)
                 is ApiResult.Success -> com.ermao.library.shared.modules.library.LibraryContract.resourcePayload(resourceResponse.value)
             }
-            require(resource.id == resourceId)
+            require(resource.id == resourceId) { "DOWNLOAD_RESOURCE_ID_MISMATCH" }
             val bookResponse = apiClient.execute(ApiRequest(ApiMethod.Get,
                 "/api/books/${resource.bookId.encodePathSegment()}", JsonObject.serializer()))
             val book = when (bookResponse) {
                 is ApiResult.Failure -> return DownloadBootstrapResult.Failure(bookResponse.error)
                 is ApiResult.Success -> com.ermao.library.shared.modules.library.LibraryContract.bookPayload(bookResponse.value)
             }
-            require(book.id == resource.bookId)
+            require(book.id == resource.bookId) { "DOWNLOAD_BOOK_ID_MISMATCH" }
             DownloadBootstrapResult.Success(DownloadBootstrap(toDescriptor(context, resource, book)))
         } catch (error: IllegalArgumentException) {
             DownloadBootstrapResult.Failure(AppError(AppErrorKind.ProtocolViolation, "DOWNLOAD_DESCRIPTOR_INVALID", error.message))
@@ -232,12 +234,12 @@ class KtorDownloadsGateway(
     ): DownloadDescriptor {
         val readerType = parseDownloadReaderType(resource.readerType)
         val assets = resource.assets.sortedWith(compareBy({ it.sortOrder ?: 0 }, { it.id }))
-        require(assets.isNotEmpty() && assets.all { it.resourceId == resource.id })
+        require(assets.isNotEmpty() && assets.all { it.resourceId == resource.id }) { "DOWNLOAD_ASSET_IDENTITY_INVALID" }
         val primary = assets.firstOrNull { it.role.equals("PRIMARY", true) } ?: assets.first()
         val format = requireNotNull(primary.sourceFormat).lowercase()
         fun source(asset: com.ermao.library.shared.modules.library.domain.Asset): DownloadSource {
             val mime = requireNotNull(asset.mimeType).substringBefore(';').lowercase()
-            require(mime in allowedMimeTypes(readerType) || (format == "image_dir" && mime in IMAGE_MIME_TYPES))
+            require(mime in allowedMimeTypes(readerType) || (format == "image_dir" && mime in IMAGE_MIME_TYPES)) { "DOWNLOAD_ASSET_MEDIA_TYPE_INVALID" }
             return DownloadSource(requireNotNull(asset.url), mime, asset.sizeBytes, asset.mtimeMillis)
         }
         val pages = if (format == "image_dir") assets.filter { it.role.equals("PAGE", true) }.mapIndexed { index, asset ->

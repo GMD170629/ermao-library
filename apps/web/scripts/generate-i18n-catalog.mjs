@@ -148,6 +148,9 @@ def message_arguments(call):
     name = call_name(call.func)
     if name == "fail" or name == "MessageError":
         return [argument(call, "message", 0)]
+    if name == "UserAdministrationError":
+        # The HTTP adapter exposes message; the first argument is an error code.
+        return [argument(call, "message", 1)]
     if name and name.endswith("Body") and argument(call, "message") is not None:
         return [argument(call, "message")]
     if name in {"prepare_system_event", "_prepared_event"}:
@@ -207,6 +210,13 @@ function sortedCatalog(messages) {
 
 function run() {
   const messages = collectTypeScriptMessages();
+  const readerCatalog = JSON.parse(readFileSync(join(repositoryRoot, 'packages/reader-contracts/reader-settings.json'), 'utf8'));
+  const readerLabels = [
+    ...readerCatalog.settings.map((setting) => setting.label),
+    ...readerCatalog.sections.map((section) => section.label),
+    ...Object.values(readerCatalog.optionGroups).flat().map((option) => option.label)
+  ];
+  for (const label of readerLabels) if (cjkPattern.test(label['zh-CN'])) messages.add(label['zh-CN']);
   for (const message of collectPythonMessages()) messages.add(message);
   const catalog = sortedCatalog(messages);
   const zhCatalogPath = join(webRoot, 'i18n/messages/zh-CN.json');

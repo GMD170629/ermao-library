@@ -136,6 +136,7 @@ enum ManagedDownloadTransferError: Error, Equatable, Sendable {
     case invalidResponse
     case transportUnavailable
     case cancelled
+    case versionChanged
 
     var stableCode: String {
         switch self {
@@ -145,6 +146,7 @@ enum ManagedDownloadTransferError: Error, Equatable, Sendable {
         case .invalidResponse: "DOWNLOAD_INVALID_RESPONSE"
         case .transportUnavailable: "DOWNLOAD_TRANSPORT_UNAVAILABLE"
         case .cancelled: "DOWNLOAD_CANCELLED"
+        case .versionChanged: "ASSET_VERSION_CHANGED"
         }
     }
 }
@@ -194,12 +196,23 @@ enum ManagedReaderAccessPolicy {
 
 @MainActor
 protocol ManagedDownloadTransferring: Sendable {
+    func readerCoordinator(context: ContentRequestContext, repository: ManagedDownloadStore,
+                           changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws -> ReaderLaunchCoordinator
     func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  expectedDescriptor: DownloadDescriptor?,
                   changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws
+}
+
+extension ManagedDownloadTransferring {
+    func readerCoordinator(context: ContentRequestContext, repository: ManagedDownloadStore,
+                           changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws -> ReaderLaunchCoordinator {
+        throw ManagedDownloadTransferError.transportUnavailable
+    }
 }
 
 struct UnavailableManagedDownloadTransfer: ManagedDownloadTransferring {
     func download(context: ContentRequestContext, resourceID: String, repository: ManagedDownloadStore,
+                  expectedDescriptor: DownloadDescriptor?,
                   changed: @escaping @Sendable (ManagedDownloadRecord) async -> Void) async throws {
         throw ManagedDownloadTransferError.transportUnavailable
     }
@@ -212,6 +225,7 @@ struct CompletedDownloadFile: Sendable {
     let bookID: String
     let resourceID: String
     let sourceFormat: String
+    let byteCount: Int64
 }
 
 protocol CompletedDownloadProviding: Sendable {

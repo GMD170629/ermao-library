@@ -34,7 +34,7 @@ class ReaderPreferencesTest {
         val publisher = preferences.copy(epub = preferences.epub.copy(
             typography = preferences.epub.typography.copy(preservePublisherStyles = true),
         ))
-        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.LineHeight, publisher))
+        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.LineHeight, publisher))
         assertEquals(ReaderControlAvailability.Available, state(ReaderControl.PublisherStyles, publisher))
         assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontSize, publisher))
         assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
@@ -44,26 +44,18 @@ class ReaderPreferencesTest {
     }
 
     @Test
-    fun resetPreservesOtherMorphologiesAndResetsCommonControls() {
-        val preferences = ReaderPreferences(
-            appearance = ReaderAppearancePreferences(theme = ReaderTheme.Night),
-            epub = ReaderEpubPreferences(fontSize = 24),
-            comic = ReaderComicPreferences(pageGap = 16),
-            pdf = ReaderPdfPreferences(rotation = 90),
-        )
-        ReaderMorphology.entries.forEach { morphology ->
-            val reset = resetReaderPreferences(preferences, morphology)
-            assertEquals(ReaderAppearancePreferences(), reset.appearance)
-            assertEquals(if (morphology == ReaderMorphology.Reflowable) ReaderEpubPreferences() else preferences.epub, reset.epub)
-            assertEquals(if (morphology == ReaderMorphology.Comic) ReaderComicPreferences() else preferences.comic, reset.comic)
-            assertEquals(if (morphology == ReaderMorphology.Pdf) ReaderPdfPreferences() else preferences.pdf, reset.pdf)
-        }
+    fun resetClearsAllReadingFormats() {
+        val defaults = resetReaderPreferences()
+        assertEquals(ReaderPreferences(), defaults)
+        val catalogReset = ReaderSettingsCatalog.settings.first { it.id == "reset" }
+        val changed = ReaderPreferences(epub = ReaderEpubPreferences(fontSize = 24), comic = ReaderComicPreferences(pageGap = 16), pdf = ReaderPdfPreferences(rotation = 90))
+        assertEquals(defaults, catalogReset.change(changed, ""))
     }
     @Test
     fun defaultsMatchWebReaderV3() {
         val preferences = ReaderPreferences()
 
-        assertEquals(4, preferences.schemaVersion)
+        assertEquals(5, preferences.schemaVersion)
         assertEquals(ReaderTheme.Warm, preferences.appearance.theme)
         assertEquals(ReaderThemeMode.Manual, preferences.appearance.themeMode)
         assertEquals(18, preferences.epub.fontSize)
@@ -108,7 +100,6 @@ class ReaderPreferencesTest {
         assertTrue(ios.supportsSpreadMode)
         assertTrue(ios.supportsParagraphLayout)
         assertFalse(ios.supportsNegativeLetterSpacing)
-        assertFalse(ios.supportsIndependentPublisherStyles)
         assertTrue(ios.supportsPageTurnAnimation)
         assertFalse(ios.supportsSwipeToggle)
         assertFalse(ios.supportsAnnotations)
@@ -117,19 +108,27 @@ class ReaderPreferencesTest {
     }
 
     @Test
-    fun controlProfilesMatchWebMorphologyRules() {
-        val reflowable = ReaderControlProfile.forMorphology(ReaderMorphology.Reflowable)
-        assertEquals(listOf(ReaderReadingMode.Paged, ReaderReadingMode.ContinuousScroll), reflowable.readingModes)
-        assertTrue(reflowable.disabledReadingModes.isEmpty())
-        assertEquals(listOf(ReaderSpreadMode.Single, ReaderSpreadMode.Double), reflowable.reflowableSpreadModes)
+    fun catalogPreservesCustomValuesAndExposesEveryMorphology() {
+        val preferences = ReaderPreferences(epub = ReaderEpubPreferences(lineHeight = 1.85, letterSpacing = 0.03))
+        val line = ReaderSettingsCatalog.settings.first { it.id == "lineHeight" }
+        assertEquals("1.85", line.value(preferences))
+        assertEquals(listOf("1.6", "1.9", "2.2"), line.options.map { it.value })
+        assertEquals(0.03, line.change(preferences, "2.2").epub.letterSpacing)
+        assertEquals(listOf("single", "double"), ReaderSettingsCatalog.settings.first { it.id == "textSpread" }.options.map { it.value })
+        ReaderMorphology.entries.forEach { format ->
+            assertTrue(ReaderSettingsCatalog.settings.any { format in it.formats && it.section.endsWith("Appearance") })
+        }
+    }
 
-        val comic = ReaderControlProfile.forMorphology(ReaderMorphology.Comic)
-        assertTrue(comic.showsComicDirection)
-        assertTrue(comic.showsComicCoverSingle)
-        assertTrue(comic.showsComicPageGap)
-
-        val pdf = ReaderControlProfile.forMorphology(ReaderMorphology.Pdf)
-        assertTrue(pdf.readingModes.isEmpty())
-        assertTrue(pdf.showsPdfControls)
+    @Test
+    fun versionFourMigrationRetainsMasterAndIsIdempotent() {
+        val codec = ReaderPreferencesJson()
+        val original = ReaderPreferences(epub = ReaderEpubPreferences(lineHeight = 1.85, letterSpacing = 0.03, typography = ReaderTypographyPreferences(preservePublisherStyles = true)))
+        val legacy = codec.encode(original).replace("\"schemaVersion\":5", "\"schemaVersion\":4")
+        val migrated = codec.decode(legacy)
+        assertEquals(original, migrated)
+        assertEquals(migrated, codec.decode(codec.encode(migrated)))
+        assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":99}"))
+        assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":5,\"epub\":{\"fontSize\":999}}"))
     }
 }

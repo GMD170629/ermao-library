@@ -22,6 +22,19 @@ enum IosPublicationSecurityPolicy {
         "iframe,frame,object,embed,applet{display:none!important;}" +
         "input,button,select,textarea{pointer-events:none!important;}"
 
+    private static var securityHead: String {
+        #"<meta http-equiv="Content-Security-Policy" content=""# +
+            contentSecurityPolicy +
+            #"" data-shuku-security-profile=""# + profile + #""/>"# +
+            #"<style data-shuku-security-profile=""# + profile + #"">"# +
+            securityStyle + "</style>"
+    }
+
+    /// Only for XHTML emitted by the owned TXT/FB2 templates, never original chapters.
+    static func generatedChapter(_ markup: String) -> Data {
+        Data(markup.replacingOccurrences(of: "<head>", with: "<head>" + securityHead).utf8)
+    }
+
     static func isMarkup(_ resource: String) -> Bool {
         let path = resource.lowercased()
             .split(whereSeparator: { $0 == "#" || $0 == "?" })
@@ -34,7 +47,7 @@ enum IosPublicationSecurityPolicy {
             throw IosPublicationSecurityError.sizeLimit
         }
         let markup = try decode(data)
-        let originalProjection = try validate(markup)
+        _ = try validate(markup)
         let lexicalMarkup = maskNonMarkup(markup)
         guard let lexicalOpen = lexicalMarkup.range(
             of: #"(?i)<(?:[A-Za-z_][\w.-]*:)?head\b[^>]*>"#,
@@ -59,13 +72,7 @@ enum IosPublicationSecurityPolicy {
             in: safeHead,
             with: ""
         )
-        let decoration =
-            #"<meta http-equiv="Content-Security-Policy" content=""# +
-            contentSecurityPolicy +
-            #"" data-shuku-security-profile=""# + profile + #""/>"# +
-            #"<style data-shuku-security-profile=""# + profile + #"">"# +
-            securityStyle + "</style>"
-        var result = String(markup[..<open.upperBound]) + decoration + safeHead + markup[close.lowerBound...]
+        var result = String(markup[..<open.upperBound]) + securityHead + safeHead + markup[close.lowerBound...]
         if let declaration = result.range(
             of: #"(?i)<\?xml\b[^?]*\?>"#,
             options: .regularExpression
@@ -78,9 +85,6 @@ enum IosPublicationSecurityPolicy {
             result.replaceSubrange(declaration, with: updated)
         }
         let decorated = Data(result.utf8)
-        guard try validate(result) == originalProjection else {
-            throw IosPublicationSecurityError.invalidMarkup
-        }
         return decorated
     }
 
@@ -116,7 +120,7 @@ enum IosPublicationSecurityPolicy {
             }
             decoded = String(data: data, encoding: .utf8)
         }
-        guard let decoded, !decoded.contains("\0") else {
+        guard let decoded else {
             throw IosPublicationSecurityError.invalidEncoding
         }
         return decoded

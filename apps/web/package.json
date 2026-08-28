@@ -14,7 +14,7 @@
     "pwa:ios": "pnpm build && pnpm start:ios",
     "generate:reader-api": "cd ../api-python && uv run python scripts/export_openapi.py ../web/.reader-openapi.json && cd ../web && node scripts/generate-reader-api.mjs .reader-openapi.json generated/reader-v4.ts",
     "lint": "eslint . --max-warnings=0",
-    "pretest": "node scripts/generate-i18n-catalog.mjs",
+    "pretest": "python3 ../../packages/reader-contracts/generate-reader-settings.py --check && node scripts/generate-i18n-catalog.mjs",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",

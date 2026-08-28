@@ -14,6 +14,7 @@ import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.fragment.app.Fragment
@@ -120,6 +121,8 @@ class ReaderActivity : AppCompatActivity() {
     private var navigatorBound = false
     private var closing = false
     private var openJob: Job? = null
+    private var launchNamespace: com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace? = null
+    private var accountObservation: com.ermao.library.shared.modules.auth.Observation? = null
     private val navigationCache by lazy { AndroidReaderNavigationCache(applicationContext) }
     private var syncingProgressStore: ReaderProgressSyncingStore? = null
     private var progressCoordinator: ReaderProgressSyncCoordinator? = null
@@ -150,6 +153,10 @@ class ReaderActivity : AppCompatActivity() {
         supportFragmentManager.fragmentFactory = readerNavigatorDummyFactory()
         super.onCreate(savedInstanceState)
         removeRestoredNavigator()
+        val runtime = (application as ErmaoLibraryApplication).mobileRuntime
+        accountObservation = runtime.observeSession {
+            runOnUiThread { if (launchNamespace != null && !isLaunchCurrent()) closeReader() }
+        }
         networkAvailable = getSystemService(ConnectivityManager::class.java).activeNetwork != null
 
         val source = runCatching { intent.readerSourceOrNull() }.getOrNull()
@@ -172,7 +179,8 @@ class ReaderActivity : AppCompatActivity() {
                     throw cancelled
                 } catch (failure: ReaderOpenFailure) {
                     showOpenError(failure.readerError.code)
-                } catch (_: RuntimeException) {
+                } catch (failure: Exception) {
+                    LOGGER.log(Level.WARNING, "reader_local_launch_failed", failure)
                     showOpenError(ReaderErrorCode.ReaderEngineError)
                 }
             }
@@ -184,7 +192,8 @@ class ReaderActivity : AppCompatActivity() {
                     throw cancelled
                 } catch (failure: ReaderOpenFailure) {
                     showOpenError(failure.readerError.code)
-                } catch (_: RuntimeException) {
+                } catch (failure: Exception) {
+                    LOGGER.log(Level.WARNING, "reader_online_launch_failed", failure)
                     showOpenError(ReaderErrorCode.ReaderEngineError)
                 }
             }
@@ -199,6 +208,22 @@ class ReaderActivity : AppCompatActivity() {
             if (selection != null) selection.finish() else closeReader()
         }
         setContent {
+            val transition = downloadTransition
+            val downloads = launchDownloads
+            if (transition != null && downloads != null) {
+                val records by downloads.recordsByResource.collectAsState()
+                val failures by downloads.failureByResource.collectAsState()
+                ReaderDownloadTransition(
+                    descriptor = transition.descriptor,
+                    record = records[transition.descriptor.identity.resourceId],
+                    failureCode = failures[transition.descriptor.identity.resourceId],
+                    preparing = preparingDownloadedFile,
+                    application = application as ErmaoLibraryApplication,
+                    context = downloads.requestContext,
+                    onCancel = ::closeReader,
+                    onRetry = { downloads.requestDownload(transition.descriptor.identity.resourceId, transition.descriptor) },
+                )
+            } else {
             ReaderScreen(
                 title = readerTitle,
                 controller = controller,
@@ -213,17 +238,12 @@ class ReaderActivity : AppCompatActivity() {
                     serverRequest != null -> { { retryServerReader(serverRequest) } }
                     else -> null
                 },
-                onReadOnline = managedRequest?.takeIf { networkAvailable }?.let { request ->
-                    {
-                        startActivity(createServerIntent(this, request.profileId, request.resourceId))
-                        finish()
-                    }
-                },
                 onNavigatorContainerReady = {
                     containerReady = true
                     attachNavigatorIfReady()
                 },
             )
+            }
         }
 
         if (source != null) {
@@ -362,11 +382,126 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        accountObservation?.cancel()
+        cancelLaunchDownload()
         openJob?.cancel()
         lifecycleScope.launch { progressCoordinator?.cancelWorker() }
         session?.release()
         session = null
         super.onDestroy()
+    }
+
+    private var launchDownloads: com.ermao.library.features.downloads.AccountDownloads? = null
+    private var launchCoordinator: com.ermao.library.shared.modules.reader.ReaderLaunchCoordinator? = null
+    private var launchDescriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor? = null
+    private var launchRequest: ServerReaderRequest? = null
+    private var downloadTransition by mutableStateOf<com.ermao.library.shared.modules.reader.ReaderLaunchDownload?>(null)
+    private var preparingDownloadedFile by mutableStateOf(false)
+    private var ownsLaunchDownload = false
+    private var downloadObservation: kotlinx.coroutines.Job? = null
+
+    private fun isLaunchCurrent(): Boolean {
+        if (closing) return false
+        val expected = launchNamespace ?: return true
+        val current = (application as ErmaoLibraryApplication).mobileRuntime.currentSession as? AppSession.Authenticated
+        return current?.identity?.namespace == expected
+    }
+
+    private fun cancelLaunchDownload() {
+        downloadObservation?.cancel()
+        if (ownsLaunchDownload) launchRequest?.resourceId?.let { launchDownloads?.cancelDownload(it) }
+        ownsLaunchDownload = false
+    }
+
+    private fun startDownloadFallback(code: ReaderErrorCode): Boolean {
+        if (closing || downloadTransition != null) return false
+        val descriptor = launchDescriptor ?: return false
+        val coordinator = launchCoordinator ?: return false
+        val originalRequest = launchRequest ?: return false
+        val target = session?.requestedNavigationTarget
+        val currentTarget = session?.currentLocation?.value?.let {
+            com.ermao.library.shared.modules.reader.ReaderNavigationTarget.from(it)
+        }
+        val request = originalRequest.copy(initialTarget = if (target != null && target != currentTarget) target
+            else if (currentTarget == null) originalRequest.initialTarget else null)
+        val downloads = launchDownloads ?: return false
+        val decision = coordinator.fallback(descriptor, code)
+        if (decision !is com.ermao.library.shared.modules.reader.ReaderLaunchDownload) {
+            if (decision is com.ermao.library.shared.modules.reader.ReaderLaunchUnavailable && decision.code != code) {
+                showOpenError(decision.code)
+                return true
+            }
+            return false
+        }
+        downloadTransition = decision
+        // Flush the existing progress owner before changing to the verified local source.
+        val previousSession = session
+        session = null
+        controller = null
+        pendingNavigator = null
+        navigatorBound = false
+        containerReady = false
+        removeRestoredNavigator()
+        ownsLaunchDownload = !downloads.isActive(request.resourceId)
+        downloads.requestDownload(request.resourceId, descriptor)
+        downloadObservation = lifecycleScope.launch {
+            try { previousSession?.close() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { LOGGER.log(Level.WARNING, "reader_transition_progress_flush_failed", failure) }
+            downloads.recordsByResource.first { it[request.resourceId]?.isReadable == true }
+            val completed = try {
+                coordinator.complete(descriptor)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                LOGGER.log(Level.WARNING, "reader_downloaded_validation_failed", failure)
+                downloadTransition = null
+                launchDescriptor = null
+                showOpenError(ReaderErrorCode.ResourceMissing)
+                return@launch
+            }
+            if (completed !is com.ermao.library.shared.modules.reader.ReaderLaunchLocal) {
+                downloadTransition = null
+                launchDescriptor = null
+                showOpenError((completed as? com.ermao.library.shared.modules.reader.ReaderLaunchUnavailable)?.code ?: ReaderErrorCode.PublicationChanged)
+                return@launch
+            }
+            val artifact = completed.artifact
+            val active = (application as ErmaoLibraryApplication).mobileRuntime.currentSession as? AppSession.Authenticated
+            if (closing || active?.identity?.namespace?.let {
+                    it.serverIdentity == downloads.requestContext.namespace.serverIdentity &&
+                        it.userId == downloads.requestContext.namespace.userId &&
+                        it.authorizationVersion == downloads.requestContext.namespace.authorizationVersion
+                } != true) return@launch
+            ownsLaunchDownload = false
+            preparingDownloadedFile = true
+            launchDescriptor = null // Local parse failure must never re-enter the online fallback.
+            try {
+                openLaunchArtifact(artifact, request)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: ReaderOpenFailure) {
+                showOpenError(failure.readerError.code)
+            } catch (failure: Exception) {
+                LOGGER.log(Level.WARNING, "reader_downloaded_open_failed", failure)
+                showOpenError(ReaderErrorCode.ReaderEngineError)
+            } finally {
+                downloadTransition = null
+                preparingDownloadedFile = false
+            }
+        }
+        return true
+    }
+
+    private suspend fun openLaunchArtifact(
+        artifact: com.ermao.library.shared.modules.downloads.CompletedDownloadArtifact,
+        request: ServerReaderRequest,
+    ) {
+        val descriptor = artifact.descriptor
+        openManagedDownload(ManagedDownloadReaderRequest(
+            request.profileId, descriptor.identity.bookId, request.resourceId, descriptor.identity.assetId,
+            descriptor.resourceTitle, artifact.localReference, descriptor.format, request.initialTarget,
+        ))
     }
 
     private suspend fun openServerReader(
@@ -378,6 +513,24 @@ class ReaderActivity : AppCompatActivity() {
         if (authenticated == null || authenticated.profile.id != request.profileId) {
             showOpenError(ReaderErrorCode.ResourceMissing)
             return
+        }
+        launchRequest = request
+        launchNamespace = authenticated.identity.namespace
+        val downloads = (application as ErmaoLibraryApplication).accountDownloads(authenticated)
+        launchDownloads = downloads
+        val coordinator = downloads.readerLaunchCoordinator()
+        launchCoordinator = coordinator
+        when (val launch = coordinator.prepare(downloads.requestContext, request.resourceId)) {
+            is com.ermao.library.shared.modules.reader.ReaderLaunchLocal -> {
+                openLaunchArtifact(launch.artifact, request)
+                return
+            }
+            is com.ermao.library.shared.modules.reader.ReaderLaunchUnavailable -> {
+                showOpenError(launch.code)
+                return
+            }
+            is com.ermao.library.shared.modules.reader.ReaderLaunchOnline -> launchDescriptor = launch.descriptor
+            is com.ermao.library.shared.modules.reader.ReaderLaunchDownload -> error("Unexpected initial download")
         }
         val privateNamespace = authenticated.identity.namespace
         val namespace = ReaderSyncNamespace(
@@ -531,6 +684,18 @@ class ReaderActivity : AppCompatActivity() {
             showOpenError(ReaderErrorCode.ResourceMissing)
             return
         }
+        val privateIdentity = activeSession.identity.namespace
+        launchNamespace = privateIdentity
+        val artifact = application.sharedDownloadCatalog.listArtifacts(
+            com.ermao.library.shared.modules.downloads.DownloadNamespace(privateIdentity.serverIdentity,
+                privateIdentity.userId, privateIdentity.authorizationVersion),
+        ).firstOrNull { it.identity.resourceId == request.resourceId && it.identity.assetId == request.assetId &&
+            it.localReference == request.localReference }
+        if (artifact == null) { showOpenError(ReaderErrorCode.ResourceMissing); return }
+        com.ermao.library.shared.modules.reader.ReaderAdmission.localFailure(request.sourceFormat, artifact.verifiedBytes)?.let {
+            showOpenError(it)
+            return
+        }
         val readerNamespace = activeSession.identity.namespace
         val preferencesStore = AndroidReaderPreferencesStore(
             applicationContext,
@@ -553,10 +718,6 @@ class ReaderActivity : AppCompatActivity() {
             format = exactSourceFormat.readerFormat, bookId = request.bookId,
             assetId = request.assetId, sourceFormat = exactSourceFormat,
         )
-        val authenticated = activeSession.authenticated
-        var progressStore: ReaderProgressStore = NonBlockingReaderProgressStore
-        var bookmarkSyncPort: ReaderBookmarkSyncPort? = null
-        var remoteSnapshot: com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4? = null
         val cachedNavigation = navigationCache.load(
             ReaderSyncNamespace(
                 readerNamespace.serverIdentity,
@@ -565,107 +726,17 @@ class ReaderActivity : AppCompatActivity() {
             ),
             request.resourceId,
         )
-        var comicPages: List<ReaderComicPage> = cachedNavigation?.comicPages.orEmpty()
-        var pdfPages: List<ReaderPdfPage> = cachedNavigation?.pdfPages.orEmpty()
-        var navigationUnits: List<ReaderNavigationUnit> = cachedNavigation?.units.orEmpty()
-        var pageCount: Int? = cachedNavigation?.pageCount
-        if (authenticated != null) {
-            val namespace = ReaderSyncNamespace(
-                activeSession.identity.namespace.serverIdentity,
-                activeSession.identity.namespace.userId,
-                activeSession.identity.namespace.authorizationVersion,
-            )
-            when (val bootstrap = createAndroidReaderBootstrapGateway(applicationContext).load(
-                ReaderBootstrapRequest(activeSession.profile, namespace, request.resourceId),
-            )) {
-                is ReaderBootstrapContent -> {
-                    navigationCache.save(
-                        namespace,
-                        request.resourceId,
-                        bootstrap.value,
-                    )
-                    comicPages = bootstrap.value.comicPages
-                    pdfPages = bootstrap.value.pdfPages
-                    navigationUnits = bootstrap.value.units
-                    pageCount = bootstrap.value.pageCount
-                    bookmarkSyncPort = createAndroidReaderBookmarkSyncPort(applicationContext, activeSession.profile)
-                    try {
-                        val clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId()
-                        val database = AndroidReaderProgressDatabase(
-                            applicationContext,
-                            ReaderLocalProgressIdentity(
-                                namespace,
-                                clientId,
-                                bootstrap.value.target.bookId,
-                                source.resourceId,
-                            ),
-                        )
-                        val startupDecision = decidePendingVsServerStartup(
-                            database.load(source.resourceId),
-                            database.loadSyncState(),
-                            bootstrap.value.remoteSnapshot,
-                            source,
-                        )
-                        val progressServer = createAndroidReaderProgressSyncPort(
-                            applicationContext,
-                            activeSession.profile,
-                        )
-                        val coordinator = ReaderProgressSyncCoordinator(
-                            stateStore = database,
-                            server = progressServer,
-                            scope = lifecycleScope,
-                        )
-                        val syncingStore = LocalFirstReaderProgressStore(
-                            database,
-                            bootstrap.value.target,
-                            coordinator,
-                        )
-                        progressCoordinator = coordinator
-                        coordinator.beginSession(bootstrap.value.remoteSnapshot)
-                        progressQueryPort = progressServer
-                        progressSyncTarget = bootstrap.value.target
-                        progressClientId = clientId
-                        progressEtag = bootstrap.value.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
-                            ?: "\"reader-progress-0\""
-                        if (startupDecision is PendingVsServerDecision.UseLocalPending) {
-                            remoteSnapshot = null
-                        }
-                        coordinator.applyStartupDecision(bootstrap.value.target, startupDecision)
-                        syncingProgressStore = syncingStore
-                        progressStore = syncingStore
-                        if (startupDecision !is PendingVsServerDecision.UseLocalPending) {
-                            remoteSnapshot = bootstrap.value.remoteSnapshot
-                        }
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                        throw cancelled
-                    } catch (failure: Exception) {
-                        LOGGER.log(Level.WARNING, "reader_progress_startup_ignored", failure)
-                        clearProgressRuntime()
-                        remoteSnapshot = null
-                    }
-                }
-                is ReaderBootstrapFailure -> {
-                    progressStore = createBestEffortManagedProgressStore(
-                        activeSession,
-                        request,
-                        source,
-                        exactSourceFormat,
-                    )
-                }
-            }
-        } else {
-            progressStore = createBestEffortManagedProgressStore(
-                activeSession,
-                request,
-                source,
-                exactSourceFormat,
-            )
-        }
+        val comicPages: List<ReaderComicPage> = cachedNavigation?.comicPages.orEmpty()
+        val pdfPages: List<ReaderPdfPage> = cachedNavigation?.pdfPages.orEmpty()
+        val navigationUnits: List<ReaderNavigationUnit> = cachedNavigation?.units.orEmpty()
+        val pageCount: Int? = cachedNavigation?.pageCount
+        // Verified Downloads are a local entry. Progress synchronization runs after opening.
+        val progressStore = createBestEffortManagedProgressStore(activeSession, request, source, exactSourceFormat)
         readerTitle = source.displayTitle
         session = createSession(
             source,
             progressStore,
-            remoteSnapshot,
+            null,
             progressCoordinator,
             preferencesStore,
             AndroidReaderBookmarkStore(
@@ -677,12 +748,13 @@ class ReaderActivity : AppCompatActivity() {
                 ),
                 source.resourceId,
             ),
-            bookmarkSyncPort,
+            createAndroidReaderBookmarkSyncPort(applicationContext, activeSession.profile),
             ReaderBookmarkSyncTarget(
                 readerNamespace.serverIdentity,
                 source.resourceId,
             ),
             namespaceKey = readerNamespace.presentationKey(),
+            initialTarget = request.initialTarget,
             navigationUnits = navigationUnits,
             comicPages = comicPages,
             pdfPages = pdfPages,
@@ -795,31 +867,44 @@ class ReaderActivity : AppCompatActivity() {
     private suspend fun prepareSession(readerSession: AndroidReaderNavigatorSession): Boolean {
         try {
             pendingNavigator = readerSession.prepare(classLoader)
+            if (!isLaunchCurrent()) {
+                readerSession.release()
+                pendingNavigator = null
+                return false
+            }
             attachNavigatorIfReady()
             return true
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            readerSession.release()
+            throw cancelled
         } catch (failure: ReaderOpenFailure) {
             readerSession.release()
-            opening = false
-            openError = failure.readerError
+            showOpenError(failure.readerError)
             LOGGER.log(
                 Level.SEVERE,
                 "reader_error platform=android format=unknown entry=reader stage=open " +
                     "code=${failure.readerError.code.wireValue}",
             )
             return false
-        } catch (_: RuntimeException) {
+        } catch (failure: Exception) {
             readerSession.release()
+            LOGGER.log(Level.WARNING, "reader_engine_prepare_failed", failure)
             showOpenError(ReaderErrorCode.ReaderEngineError)
             return false
         }
     }
 
-    private fun showOpenError(code: ReaderErrorCode) {
+    private fun showOpenError(code: ReaderErrorCode) = showOpenError(ReaderError(code))
+
+    private fun showOpenError(error: ReaderError) {
+        if (startDownloadFallback(error.code)) return
         opening = false
-        openError = ReaderError(code)
+        openError = error
         LOGGER.log(
             Level.SEVERE,
-            "reader_error platform=android format=unknown entry=reader stage=open code=${code.wireValue}",
+            "reader_error platform=android format=unknown entry=reader " +
+                "stage=${error.safeContext["stage"] ?: "open"} " +
+                "code=${error.safeContext["code"] ?: error.code.wireValue}",
         )
     }
 
@@ -975,7 +1060,7 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun attachNavigatorIfReady() {
-        if (!containerReady || navigatorBound || supportFragmentManager.isStateSaved) return
+        if (!isLaunchCurrent() || !containerReady || navigatorBound || supportFragmentManager.isStateSaved) return
         val navigator = pendingNavigator ?: return
         supportFragmentManager.commitNow {
             replace(READER_NAVIGATOR_CONTAINER_ID, navigator, NAVIGATOR_FRAGMENT_TAG)
@@ -984,12 +1069,17 @@ class ReaderActivity : AppCompatActivity() {
         navigatorBound = true
         controller = session
         opening = false
+        downloadTransition = null
+        session?.contentError?.let { errors ->
+            lifecycleScope.launch { errors.collect { error -> error?.let { startDownloadFallback(it.code) } } }
+        }
         lifecycleScope.launch { recoverPendingProgressAndCheckRemote() }
     }
 
     private fun closeReader() {
         if (closing) return
         closing = true
+        cancelLaunchDownload()
         lifecycleScope.launch {
             openJob?.cancel()
             try {
@@ -1149,6 +1239,7 @@ class ReaderActivity : AppCompatActivity() {
         val displayTitle: String,
         val localReference: String,
         val sourceFormat: String,
+        val initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
     )
     private data class ActiveReaderSession(
         val profile: com.ermao.library.shared.modules.servers.domain.ServerProfile,

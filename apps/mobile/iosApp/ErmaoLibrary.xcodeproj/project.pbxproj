@@ -166,6 +166,7 @@
 		A13800000000000000000138 /* DownloadStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E13800000000000000000138 /* DownloadStoreTests.swift */; };
 		C21000000000000000000210 /* reader-contract.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21000000000000000000210; };
 		C21100000000000000000211 /* reader-contract-bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = D21100000000000000000211; };
+		C22100000000000000000221 /* txt-decoding-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = D22100000000000000000221; };
 		C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21200000000000000000212; };
 /* End PBXBuildFile section */
 
@@ -343,6 +344,7 @@
 		E13800000000000000000138 /* DownloadStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStoreTests.swift; sourceTree = "<group>"; };
 		D21000000000000000000210 /* reader-contract.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract.fb2"; path = "../../../test-data/library/fb2/reader-contract.fb2"; sourceTree = SOURCE_ROOT; };
 		D21100000000000000000211 /* reader-contract-bodies.json */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract-bodies.json"; path = "../../../test-data/library/fb2/reader-contract-bodies.json"; sourceTree = SOURCE_ROOT; };
+		D22100000000000000000221 /* txt-decoding-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "txt-decoding-v1.json"; path = "../../../packages/reader-contracts/fixtures/txt-decoding-v1.json"; sourceTree = SOURCE_ROOT; };
 		D21200000000000000000212 /* source_test_book_fb2.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "source_test_book_fb2.fb2"; path = "../../../test-data/library/fb2/source_test_book_fb2.fb2"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -823,7 +825,7 @@
 			);
 			mainGroup = G00000000000000000000000;
 			packageReferences = (
-				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */,
+				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */,
 				PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */,
 				PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */,
 			);
@@ -856,6 +858,7 @@
 			files = (
 				C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */,
 				C21100000000000000000211 /* reader-contract-bodies.json in Resources */,
+				C22100000000000000000221 /* txt-decoding-v1.json in Resources */,
 				C21000000000000000000210 /* reader-contract.fb2 in Resources */,
 				B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */,
 				B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */,
@@ -914,7 +917,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\ncd \"$SRCROOT/..\"\n./gradlew generateDesignTokens :shared:embedAndSignAppleFrameworkForXcode\n";
+			shellScript = "set -euo pipefail\ncd \"$SRCROOT/..\"\npython3 iosApp/verify_readium.py\n./gradlew generateDesignTokens :shared:embedAndSignAppleFrameworkForXcode\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1309,12 +1312,12 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */ = {
+		PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/readium/swift-toolkit.git";
 			requirement = {
 				kind = revision;
-				revision = f7d10d2bf5876408feae14d634416f69d1473fd8;
+				revision = de07026e9f825a5791f27a7ac4cd6bb1a784ab8d;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -1322,22 +1325,22 @@
 /* Begin XCSwiftPackageProductDependency section */
 		PR0100000000000000000001 /* ReadiumShared */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */;
 			productName = ReadiumShared;
 		};
 		PR0200000000000000000002 /* ReadiumStreamer */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */;
 			productName = ReadiumStreamer;
 		};
 		PR0300000000000000000003 /* ReadiumNavigator */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */;
 			productName = ReadiumNavigator;
 		};
 		PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.8.0" */;
+			package = PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */;
 			productName = ReadiumAdapterGCDWebServer;
 		};
 		PR0500000000000000000005 /* ErmaoMobiCore */ = {

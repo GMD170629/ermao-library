@@ -141,6 +141,8 @@ internal class ReadiumEpubSession(
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
 ) : AndroidReaderNavigatorSession {
+    override var requestedNavigationTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = initialTarget
+        private set
     override val morphology = ReaderMorphology.Reflowable
     override val capabilities: ReaderCapabilities = ReaderCapabilities.epub(
         supportsVolumeKeys = true,
@@ -187,8 +189,6 @@ internal class ReadiumEpubSession(
     private var resumeTarget: ResumeTarget? = null
     private var returningToResumeTarget = false
     private var suppressNextPreferenceLocation = false
-    private var applyingPreferences = false
-    private val paginationRevision = MutableStateFlow(0L)
     private var currentPageUnreadable = false
     private var prepared = false
 
@@ -207,11 +207,12 @@ internal class ReadiumEpubSession(
             try {
                 Fb2ReadiumPublicationFactory().open(file, source.displayTitle)
             } catch (error: IllegalArgumentException) {
-                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), cause = error)
+                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ParseFailed), cause = error)
             }
         } else if (source.format == ReaderFormat.Mobi) {
             val opened = try {
-                MobiReadiumPublicationFactory().open(file, EpubContentSecurityPolicy::applyMobi)
+                MobiReadiumPublicationFactory().open(file, EpubContentSecurityPolicy::applyMobi,
+                    com.ermao.library.shared.modules.reader.ReaderAdmission.maximumPublicationBytes)
             } catch (error: MobiPublicationOpenException) {
                 throw ReaderOpenFailure(ReaderError(error.kind.toReaderErrorCode()), cause = error)
             }
@@ -220,8 +221,13 @@ internal class ReadiumEpubSession(
         } else if (source.format == ReaderFormat.Text) {
             try {
                 TxtReadiumPublicationFactory().open(file, source.displayTitle)
+            } catch (error: com.ermao.library.shared.modules.reader.TxtPublicationEmptyException) {
+                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.TxtEmpty), cause = error)
             } catch (error: IllegalArgumentException) {
-                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.CorruptFile), cause = error)
+                val code = if (error.cause is java.nio.charset.CharacterCodingException) {
+                    ReaderErrorCode.TxtEncodingUnsupported
+                } else ReaderErrorCode.ParseFailed
+                throw ReaderOpenFailure(ReaderError(code), cause = error)
             }
         } else {
             val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
@@ -249,7 +255,7 @@ internal class ReadiumEpubSession(
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
         val openedPublication = if (onlinePublication != null) {
-            RemoteReflowableReadiumPublicationFactory(onlinePublication) { _contentError.value = ReaderError(it) }.open()
+            RemoteReflowableReadiumPublicationFactory(onlinePublication) { _contentError.value = it }.open()
         } else {
             openLocalPublication()
         }
@@ -338,12 +344,6 @@ internal class ReadiumEpubSession(
             initialLocator = initialLocator,
             initialPreferences = preferencesMapper.toReadium(_preferences.value),
             configuration = readerNavigatorConfiguration(),
-            paginationListener = object : EpubNavigatorFragment.PaginationListener {
-                override fun onPageChanged(pageIndex: Int, totalPages: Int, locator: Locator) {
-                    paginationRevision.value += 1
-                }
-                override fun onPageLoaded() { paginationRevision.value += 1 }
-            },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onResourceLoadFailed(href: Url, error: ReadError) {
                     @Suppress("UNUSED_VARIABLE")
@@ -369,7 +369,7 @@ internal class ReadiumEpubSession(
                 return true
             }
             override fun onDrag(event: org.readium.r2.navigator.input.DragEvent): Boolean {
-                if (!applyingPreferences) suppressNextPreferenceLocation = false
+                suppressNextPreferenceLocation = false
                 return false
             }
         })
@@ -476,21 +476,18 @@ internal class ReadiumEpubSession(
     }
 
     override fun goPrevious(): Boolean {
-        if (applyingPreferences) return false
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
         return navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goNext(): Boolean {
-        if (applyingPreferences) return false
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
         return navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goTo(location: ReaderLocation): Boolean {
-        if (applyingPreferences) return false
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
         val openedPublication = publication ?: return false
@@ -498,11 +495,11 @@ internal class ReadiumEpubSession(
             ?.takeIf { locator -> openedPublication.contains(locator) }
             ?: locatorMapper.resourceProgressionLocator(location, openedPublication)
             ?: return false
+        requestedNavigationTarget = com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable(target.href.toString())
         return navigator?.go(target, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
-        if (applyingPreferences) return false
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
         require(totalProgression in 0.0..1.0) { "Total progression is outside 0..1" }
@@ -512,6 +509,7 @@ internal class ReadiumEpubSession(
                 abs(checkNotNull(locator.locations.totalProgression) - totalProgression)
             }
             ?: return false
+        requestedNavigationTarget = com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable(target.href.toString())
         return navigator?.go(target, animated = navigationAnimationsEnabled()) ?: false
     }
 
@@ -543,76 +541,16 @@ internal class ReadiumEpubSession(
     }
 
     override fun updatePreferences(updated: ReaderPreferences) {
-        if (_preferences.value == updated) return
-        suppressNextPreferenceLocation = true
-        navigator?.submitPreferences(preferencesMapper.toReadium(updated))
+        val active = checkNotNull(navigator) { "READER_NOT_READY" }
+        val previous = _preferences.value
+        if (previous == updated) return
+        // Persistence precedes SDK submission. Reflow is owned by Readium.
         persistPreferences(updated)
         _preferences.value = updated
-    }
-
-    override suspend fun applyPreferences(updated: ReaderPreferences): com.ermao.library.shared.modules.reader.ReaderCommandResult {
-        val active = navigator ?: return com.ermao.library.shared.modules.reader.ReaderCommandRejected("READER_NOT_READY")
-        if (!canApplyPreferences(updated)) return com.ermao.library.shared.modules.reader.ReaderCommandRejected("READER_CONTROL_UNAVAILABLE")
-        val previous = _preferences.value
-        if (previous == updated) return com.ermao.library.shared.modules.reader.ReaderCommandCompleted
-        val changesContent = preferencesMapper.toReadium(previous) != preferencesMapper.toReadium(updated)
-        val anchor = if (changesContent) active.firstVisibleElementLocator() else null
-        applyingPreferences = true
-        if (changesContent) suppressNextPreferenceLocation = true
-        try {
-            if (changesContent) {
-                val target = preferencesMapper.toReadium(updated)
-                val previousNative = preferencesMapper.toReadium(previous)
-                val repaginates = previousNative.copy(
-                    backgroundColor = target.backgroundColor, textColor = target.textColor, theme = target.theme,
-                ) != target
-                val beforePagination = paginationRevision.value
-                active.submitPreferences(target)
-                // Let the public settings stream deliver the requested values before restoring the anchor.
-                val accepted = kotlinx.coroutines.withTimeoutOrNull(3_000) {
-                    active.settings.first { settings ->
-                        settings.fontSize == target.fontSize && settings.fontFamily == target.fontFamily &&
-                            settings.scroll == target.scroll && settings.publisherStyles == target.publisherStyles
-                    }
-                }
-                checkNotNull(accepted) { "READER_PREFERENCES_VERIFICATION_FAILED" }
-                if (repaginates) {
-                    val laidOut = kotlinx.coroutines.withTimeoutOrNull(3_000) {
-                        paginationRevision.first { it > beforePagination }
-                    }
-                    checkNotNull(laidOut) { "READER_PREFERENCES_LAYOUT_FAILED" }
-                }
-                if (anchor != null) {
-                    check(active.go(anchor, animated = false)) { "READER_PREFERENCES_RESTORE_FAILED" }
-                    val expected = ReadiumLocatorEnvelope.from(locatorMapper.toDomain(anchor))
-                    val restored = kotlinx.coroutines.withTimeoutOrNull(3_000) {
-                        while (true) {
-                            val actual = active.firstVisibleElementLocator()
-                            if (actual != null && expected != null &&
-                                locatorMapper.compareExactBlock(expected, actual) == ExactBlockMatch.Exact
-                            ) break
-                            delay(50)
-                        }
-                        true
-                    }
-                    check(restored == true) { "READER_PREFERENCES_RESTORE_FAILED" }
-                }
-            }
-            persistPreferences(updated)
-            _preferences.value = updated
-            return com.ermao.library.shared.modules.reader.ReaderCommandCompleted
-        } catch (cancelled: CancellationException) {
-            active.submitPreferences(preferencesMapper.toReadium(previous))
-            if (anchor != null) active.go(anchor, animated = false)
-            throw cancelled
-        } catch (_: RuntimeException) {
-            active.submitPreferences(preferencesMapper.toReadium(previous))
-            val restored = anchor == null || active.go(anchor, animated = false)
-            return com.ermao.library.shared.modules.reader.ReaderCommandRejected(
-                if (restored) "READER_PREFERENCES_APPLY_FAILED" else "READER_PREFERENCES_ROLLBACK_FAILED",
-            )
-        } finally {
-            applyingPreferences = false
+        val target = preferencesMapper.toReadium(updated)
+        if (target != preferencesMapper.toReadium(previous)) {
+            suppressNextPreferenceLocation = true
+            active.submitPreferences(target)
         }
     }
 

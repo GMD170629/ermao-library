@@ -8,6 +8,14 @@ import com.ermao.library.shared.modules.reader.domain.toMutation
 import com.ermao.library.shared.modules.reader.domain.exactPublicationLocation
 import com.ermao.library.shared.modules.reader.domain.compareExactProgressLocations
 
+typealias ReaderAdmission = com.ermao.library.shared.modules.reader.application.ReaderAdmission
+typealias ReaderLaunchCoordinator = com.ermao.library.shared.modules.reader.application.ReaderLaunchCoordinator
+typealias ReaderLaunch = com.ermao.library.shared.modules.reader.application.ReaderLaunch
+typealias ReaderLaunchOnline = com.ermao.library.shared.modules.reader.application.ReaderLaunch.Online
+typealias ReaderLaunchLocal = com.ermao.library.shared.modules.reader.application.ReaderLaunch.Local
+typealias ReaderLaunchDownload = com.ermao.library.shared.modules.reader.application.ReaderLaunch.Download
+typealias ReaderLaunchUnavailable = com.ermao.library.shared.modules.reader.application.ReaderLaunch.Unavailable
+
 typealias Fb2PublicationDecoder = com.ermao.library.shared.modules.reader.infrastructure.Fb2PublicationDecoder
 typealias MobiMarkupEnvelope = com.ermao.library.shared.modules.reader.infrastructure.MobiMarkupEnvelope
 typealias Fb2XmlPolicy = com.ermao.library.shared.modules.reader.infrastructure.Fb2XmlPolicy
@@ -39,9 +47,9 @@ typealias ReaderControlState = com.ermao.library.shared.modules.reader.domain.Re
 
 fun resolveReaderControlContext(
     control: ReaderControl, morphology: ReaderMorphology, capabilities: ReaderCapabilities,
-    ready: Boolean, scrolling: Boolean, publisherStyles: Boolean, nativeUnavailable: Set<ReaderControl>,
+    ready: Boolean, scrolling: Boolean, nativeUnavailable: Set<ReaderControl>,
 ): ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.resolveReaderControlContext(
-    control, morphology, capabilities, ready, scrolling, publisherStyles, nativeUnavailable,
+    control, morphology, capabilities, ready, scrolling, nativeUnavailable,
 )
 
 fun resolveReaderControl(
@@ -55,8 +63,8 @@ fun resolveReaderControl(
     control, morphology, capabilities, preferences, ready, nativeUnavailable,
 )
 
-fun resetReaderPreferences(preferences: ReaderPreferences, morphology: ReaderMorphology): ReaderPreferences =
-    com.ermao.library.shared.modules.reader.domain.resetReaderPreferences(preferences, morphology)
+fun resetReaderPreferences(): ReaderPreferences =
+    com.ermao.library.shared.modules.reader.domain.resetReaderPreferences()
 
 fun readerPlatformCapabilities(
     morphology: ReaderMorphology,
@@ -70,7 +78,7 @@ fun readerPlatformCapabilities(
         supportsFontWeight = false, supportsLineHeight = false, supportsPositiveLetterSpacing = false,
         supportsPageMargins = false, supportsReadingMode = false, supportsSpreadMode = false,
         supportsParagraphLayout = false, supportsPublisherStyles = false,
-        supportsPageTurnAnimation = false, supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
+        supportsPageTurnAnimation = morphology == ReaderMorphology.Comic, supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
     )
 }
 typealias ReaderError = com.ermao.library.shared.modules.reader.domain.ReaderError
@@ -100,7 +108,6 @@ typealias ReaderPdfFit = com.ermao.library.shared.modules.reader.domain.ReaderPd
 typealias ReaderPdfFlow = com.ermao.library.shared.modules.reader.domain.ReaderPdfFlow
 typealias ReaderPdfCropMargins = com.ermao.library.shared.modules.reader.domain.ReaderPdfCropMargins
 typealias ReaderMorphology = com.ermao.library.shared.modules.reader.domain.ReaderMorphology
-typealias ReaderControlProfile = com.ermao.library.shared.modules.reader.domain.ReaderControlProfile
 typealias ReaderTypographyPreferences = com.ermao.library.shared.modules.reader.domain.ReaderTypographyPreferences
 typealias ReaderOptimizationPreferences = com.ermao.library.shared.modules.reader.domain.ReaderOptimizationPreferences
 typealias ReaderFontFamily = com.ermao.library.shared.modules.reader.domain.ReaderFontFamily
@@ -426,8 +433,13 @@ typealias ReaderPublicationAccess = com.ermao.library.shared.modules.reader.appl
 typealias ReaderPdfAccess = com.ermao.library.shared.modules.reader.application.ReaderPdfAccess
 
 typealias OnlinePublicationSession = com.ermao.library.shared.modules.reader.application.OnlinePublicationSession
+typealias PublicationResourcePort = com.ermao.library.shared.modules.reader.application.PublicationResourcePort
 typealias OnlinePublicationMetadata = com.ermao.library.shared.modules.reader.application.OnlinePublicationMetadata
 typealias OnlinePublicationReadResult = com.ermao.library.shared.modules.reader.application.OnlinePublicationReadResult
+typealias OnlinePublicationReadContent = com.ermao.library.shared.modules.reader.application.OnlinePublicationReadResult.Content
+typealias OnlinePublicationReadFailure = com.ermao.library.shared.modules.reader.application.OnlinePublicationReadResult.Failure
+typealias OnlinePublicationFailure = com.ermao.library.shared.modules.reader.application.OnlinePublicationFailure
+typealias OnlinePublicationStage = com.ermao.library.shared.modules.reader.application.OnlinePublicationStage
 
 typealias PdfRangeMemory = com.ermao.library.shared.modules.reader.application.PdfRangeMemory
 
@@ -435,3 +447,9 @@ typealias PdfRangeLoader = com.ermao.library.shared.modules.reader.application.P
 typealias PdfRangeFailure = com.ermao.library.shared.modules.reader.application.PdfRangeFailure
 
 typealias ReaderFormatSupport = com.ermao.library.shared.modules.reader.domain.ReaderFormatSupport
+
+typealias TxtPublicationEmptyException = com.ermao.library.shared.modules.reader.domain.TxtPublicationEmptyException
+
+typealias ReaderSettingDefinition = com.ermao.library.shared.modules.reader.domain.ReaderSettingDefinition
+typealias ReaderSettingSection = com.ermao.library.shared.modules.reader.domain.ReaderSettingSection
+typealias ReaderSettingsCatalog = com.ermao.library.shared.modules.reader.domain.ReaderSettingsCatalog

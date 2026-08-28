@@ -45,6 +45,12 @@ android {
         assets.directories.add(layout.buildDirectory.dir("generated/reader-assets").get().asFile.absolutePath)
     }
 
+    sourceSets.named("test") {
+        resources.directories.add(
+            rootProject.layout.projectDirectory.dir("../../packages/reader-contracts/fixtures").asFile.absolutePath,
+        )
+    }
+
     sourceSets.named("androidTest") {
         assets.directories.add(layout.buildDirectory.dir("generated/reader-test-assets").get().asFile.absolutePath)
         assets.directories.add(

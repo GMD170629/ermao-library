@@ -49,7 +49,7 @@ class ApiEnvelopeTest {
 
     @Test
     fun usesTheFrozenFallbackCodes() {
-        val expected = mapOf(404 to "NOT_FOUND", 422 to "VALIDATION", 503 to "UNAVAILABLE")
+        val expected = mapOf(404 to "NOT_FOUND", 412 to "CONFLICT", 422 to "VALIDATION", 503 to "UNAVAILABLE")
         expected.forEach { (status, code) ->
             val result = decoder.decode(
                 status,

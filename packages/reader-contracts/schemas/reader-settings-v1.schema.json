@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.local/contracts/reader-settings-v1.schema.json",
+  "title": "Reader settings catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "preferenceVersion", "sections", "optionGroups", "settings"],
+  "properties": {
+    "version": {"const": 1},
+    "preferenceVersion": {"const": 5},
+    "sections": {"type": "array", "items": {"$ref": "#/$defs/section"}},
+    "optionGroups": {"type": "object", "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/option"}}},
+    "settings": {"type": "array", "items": {"$ref": "#/$defs/setting"}}
+  },
+  "$defs": {
+    "label": {
+      "type": "object", "additionalProperties": false,
+      "required": ["zh-CN", "en-US"],
+      "properties": {"zh-CN": {"type": "string"}, "en-US": {"type": "string"}}
+    },
+    "section": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "panel", "label", "advanced"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "panel": {"enum": ["appearance", "settings"]},
+        "label": {"$ref": "#/$defs/label"},
+        "advanced": {"type": "boolean"}
+      }
+    },
+    "option": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {"value": {"type": "string"}, "label": {"$ref": "#/$defs/label"}}
+    },
+    "setting": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "label", "section", "path", "control", "kind", "options", "formats", "limits"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "label": {"$ref": "#/$defs/label"},
+        "section": {"type": "string"},
+        "path": {"type": "string"},
+        "control": {"type": ["string", "null"]},
+        "kind": {"enum": ["choice", "number", "toggle", "action"]},
+        "options": {"type": ["string", "null"]},
+        "formats": {"type": "array", "uniqueItems": true, "minItems": 1, "items": {"enum": ["reflowable", "comic", "pdf"]}},
+        "limits": {"oneOf": [{"type": "null"}, {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}]}
+      }
+    }
+  }
+}

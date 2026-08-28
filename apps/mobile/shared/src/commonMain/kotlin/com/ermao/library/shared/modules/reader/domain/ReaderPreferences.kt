@@ -114,40 +114,6 @@ enum class ReaderPdfCropMargins(val wireValue: String) {
 
 enum class ReaderMorphology { Reflowable, Comic, Pdf }
 
-data class ReaderControlProfile(
-    val readingModes: List<ReaderReadingMode>,
-    val disabledReadingModes: Set<ReaderReadingMode>,
-    val reflowableSpreadModes: List<ReaderSpreadMode> = emptyList(),
-    val comicSpreadModes: List<ReaderComicSpreadMode> = emptyList(),
-    val showsComicDirection: Boolean = false,
-    val showsComicCoverSingle: Boolean = false,
-    val showsComicPageGap: Boolean = false,
-    val showsPdfControls: Boolean = false,
-) {
-    companion object {
-        fun forMorphology(morphology: ReaderMorphology): ReaderControlProfile = when (morphology) {
-            ReaderMorphology.Reflowable -> ReaderControlProfile(
-                readingModes = ReaderReadingMode.entries,
-                disabledReadingModes = emptySet(),
-                reflowableSpreadModes = listOf(ReaderSpreadMode.Single, ReaderSpreadMode.Double),
-            )
-            ReaderMorphology.Comic -> ReaderControlProfile(
-                readingModes = ReaderReadingMode.entries,
-                disabledReadingModes = emptySet(),
-                comicSpreadModes = ReaderComicSpreadMode.entries,
-                showsComicDirection = true,
-                showsComicCoverSingle = true,
-                showsComicPageGap = true,
-            )
-            ReaderMorphology.Pdf -> ReaderControlProfile(
-                readingModes = emptyList(),
-                disabledReadingModes = emptySet(),
-                showsPdfControls = true,
-            )
-        }
-    }
-}
-
 @Serializable
 enum class ReaderTextAlignment(val wireValue: String) {
     @SerialName("publisher") PublisherDefault("publisher"),
@@ -182,8 +148,6 @@ data class ReaderTypographyPreferences(
     val paragraphSpacing: Double = 0.0,
     val textAlign: ReaderTextAlignment = ReaderTextAlignment.PublisherDefault,
     val preservePublisherStyles: Boolean = false,
-    val allowPublisherColors: Boolean = false,
-    val allowPublisherFonts: Boolean = false,
 ) {
     init {
         require(paragraphIndent.isFinite() && paragraphIndent in 0.0..4.0)
@@ -273,7 +237,7 @@ data class ReaderPreferences(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
     }
 }
 
@@ -297,7 +261,6 @@ data class ReaderCapabilities(
     val supportsReadingMode: Boolean,
     val supportsSpreadMode: Boolean,
     val supportsParagraphLayout: Boolean,
-    val supportsIndependentPublisherStyles: Boolean,
     val supportsProgressStyles: Boolean,
     val supportsClock: Boolean,
     val supportsKeepAwake: Boolean,
@@ -336,7 +299,6 @@ data class ReaderCapabilities(
             supportsReadingMode = true,
             supportsSpreadMode = true,
             supportsParagraphLayout = true,
-            supportsIndependentPublisherStyles = false,
             supportsProgressStyles = true,
             supportsClock = true,
             supportsKeepAwake = true,

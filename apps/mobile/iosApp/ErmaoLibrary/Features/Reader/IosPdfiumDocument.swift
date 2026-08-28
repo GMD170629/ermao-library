@@ -59,7 +59,8 @@ final class IosPdfiumDocument: @unchecked Sendable {
         }
         let loader = ErmaoShared.PdfRangeLoader(source: source,
             identity: ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId), cache: cache, server: server)
-        try await loader.probe()
+        do { try await loader.probe() }
+        catch { loader.close(); throw rangeFailure(error) }
         let context = IosPdfiumByteSourceContext(
             loader: loader,
             cache: cache,
@@ -223,9 +224,21 @@ final class IosPdfiumDocument: @unchecked Sendable {
             guard status == SHUKU_PDFIUM_NEED_DATA else {
                 throw IosReaderFailure(code: failureCode(status))
             }
-            guard try await context.loader.drainRequested().boolValue else { throw IosReaderFailure(code: .pdfRangeInvalid) }
+            do {
+                guard try await context.loader.drainRequested().boolValue else { throw IosReaderFailure(code: .engineError) }
+            } catch { throw rangeFailure(error) }
         }
-        throw IosReaderFailure(code: .pdfRangeInvalid)
+        throw IosReaderFailure(code: .pdfEngineLimit)
+    }
+
+    private static func rangeFailure(_ error: Error) -> Error {
+        if error is CancellationError || error is IosReaderFailure { return error }
+        let native = error as NSError
+        let failure = native.kotlinException as? ErmaoShared.PdfRangeFailure
+        return IosReaderFailure(
+            code: failure.map { IosReaderFailureCode(sharedCode: $0.code) } ?? .engineError,
+            underlyingError: native
+        )
     }
 
     private static func failureCode(_ status: ShukuPdfiumStatus) -> IosReaderFailureCode {

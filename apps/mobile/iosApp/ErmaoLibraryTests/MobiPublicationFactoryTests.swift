@@ -70,6 +70,13 @@ final class MobiPublicationFactoryTests: XCTestCase {
         let initialReadRequests = await book.readRequests()
         XCTAssertTrue(initialReadRequests.isEmpty)
 
+        let search = try await result.publication.search(query: "Chapter").get()
+        let matches = try await search.next().get()
+        let match = try XCTUnwrap(matches?.locators.first)
+        XCTAssertEqual(match.href.string, "text/chapter.xhtml")
+        XCTAssertEqual(match.text.highlight, "Chapter")
+        search.close()
+
         await result.close()
         await result.close()
         let closeCount = await book.closeCount()

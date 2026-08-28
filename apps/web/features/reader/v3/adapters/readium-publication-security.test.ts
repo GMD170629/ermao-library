@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSecurePublicationFetch } from './readium-publication-security';
+import readerHttpErrorStatuses from '../../../../../../packages/reader-contracts/reader-http-error-statuses.json';
 
 const secureMarkup = `<?xml version="1.0"?>
 <html><head></head><body><script>bookCode()</script><p>Text</p></body></html>`;
@@ -60,4 +61,42 @@ test('reports a chapter limit response without classifying it as a version chang
     : new Response(null, { status: 413 }));
   await fetcher('https://reader.test/manifest.json');
   await assert.rejects(fetcher('https://reader.test/chapter.xhtml'), { code: 'PUBLICATION_RESOURCE_TOO_LARGE' });
+});
+
+test('preserves each declared server error and cancels an unfinished body', async () => {
+  for (const [code, statuses] of Object.entries(readerHttpErrorStatuses.publication)) {
+    for (const status of statuses) {
+      let cancelled = false;
+      const fetcher = createSecurePublicationFetch(async () => new Response(
+        new ReadableStream({ cancel() { cancelled = true; } }),
+        { status, headers: { 'X-Error-Code': code } },
+      ));
+      await assert.rejects(fetcher('https://reader.test/manifest.json'), { code, stage: 'manifest', status });
+      assert.equal(cancelled, true);
+    }
+  }
+});
+
+test('a forged limit code cannot replace an authentication failure', async () => {
+  const fetcher = createSecurePublicationFetch(async () => new Response(null, {
+    status: 401, headers: { 'X-Error-Code': 'PUBLICATION_ONLINE_LIMIT' },
+  }));
+  await assert.rejects(fetcher('https://reader.test/chapter.xhtml'), { code: 'UNAUTHORIZED' });
+});
+
+test('passes malformed markup and NUL unchanged to the actual renderer', async () => {
+  const source = '<html><body>A\0B\0';
+  const fetcher = createSecurePublicationFetch(async () => new Response(source, { headers: secureHeaders }));
+  assert.equal(await (await fetcher('https://reader.test/chapter.xhtml')).text(), source);
+});
+
+test('failure to cancel an error body does not overwrite the server cause', async () => {
+  const cause = new Error('private-cleanup-details');
+  const fetcher = createSecurePublicationFetch(async () => new Response(
+    new ReadableStream({ cancel() { throw cause; } }),
+    { status: 403, headers: { 'X-Error-Code': 'FORBIDDEN' } },
+  ));
+  await assert.rejects(fetcher('https://reader.test/chapter.xhtml'), {
+    code: 'FORBIDDEN', stage: 'chapter', status: 403, source: 'server', cause,
+  });
 });

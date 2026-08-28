@@ -235,33 +235,38 @@ reading representation.
 
 ## 10. Platform adapters
 
-Android uses Readium Kotlin Toolkit 3.3.0. iOS pins Readium Swift Toolkit 3.8.0 to revision `f7d10d2bf5876408feae14d634416f69d1473fd8`. Both map a complete Readium Locator into the engine payload and expose semantic public anchors without leaking Readium types into shared domain code.
+Android uses Readium Kotlin Toolkit 3.3.0. iOS pins official Readium Swift Toolkit 3.9.0 to revision `de07026e9f825a5791f27a7ac4cd6bb1a784ab8d`. Both map a complete Readium Locator into the engine payload and expose semantic public anchors without leaking Readium types into shared domain code.
+
+The approved iOS baseline is **3.9.0** (authorized 2026-08-28), including upstream
+[HTML/CSS resource cache invalidation fix #781](https://github.com/readium/swift-toolkit/pull/781).
+This supersedes earlier instructions freezing iOS at 3.8.0; Android and Web pins
+are unchanged. Do not downgrade to 3.8.x to avoid migration or build errors.
+Further SDK changes require explicit authorization and a corresponding update to
+the project revision, SwiftPM lock, locator diagnostic version, this policy and
+`apps/mobile/iosApp/verify_readium.py`. The same check runs in the Xcode build and
+Mobile CI. Official SDK source remains unmodified: no private APIs, copied cache
+patches, preference reflow validation, Navigator replacement or layout compensation.
+Old locator SDK version metadata remains restorable and is not a rejection rule.
+Upgrade acceptance must exercise font changes and scroll/paged mode across newly
+loaded, preloaded and revisited chapters on a physical iOS device; compilation
+alone does not close a rendering defect.
+Evidence and outstanding paths: [iOS 3.9.0 upgrade record](testing/ios-readium-3.9.0-2026-08-28.md).
 
 Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter until the toolkit exposes a public first-visible-block API;
 failure to read the frame fails closed and disables exact sync.
 
-Online reflowable opening resolves manifest and positions, then binds only requested
-original chapters/resources to native Readium. Metadata and HEAD requests never
-read chapter bodies. The shared transport validates headers before consuming its
-response stream, applies an 8 MiB chapter limit and a 32 MiB auxiliary-resource
-limit, and rejects excess bytes while reading. One session retains at most the
-current chapter and its immediate neighbors, with a total body budget of 64 MiB.
-Changing chapters drops unrelated ancillary resources; closing, switching books
-or ending the account session releases the body cache and cancels requests.
+Online reflowable opening resolves manifest and positions, then binds requested original chapters/resources to native Readium. Metadata and HEAD never read chapter bodies. Application adapters keep their existing 8 MiB chapter, 32 MiB auxiliary-resource and 64 MiB body-cache limits; PDF requests remain at most 1 MiB and reject an ignored Range before body consumption. Native SDK ordinary caches are allowed: the product no longer requires deep SDK patches to enforce an exact aggregate cache budget. Owned sessions are closed on navigation/account changes.
 
-PDF uses authenticated Range only, at most 1 MiB per request. A 200 response to a
-Range request is cancelled before reading its body. Native PDF renderers use
-shared PdfRangeLoader and session-only PdfRangeMemory; no persistent PDF body store is permitted.
-Comics use the existing page endpoint and a bounded current/adjacent-page window.
+Native Reader uses `ReaderLaunchCoordinator` for online, verified-local, visible-download and unavailable decisions. The default application admission limit is `ReaderAdmission.maximumPublicationBytes`: 2 GiB inclusive, including IMAGE_DIR member totals. This is not a guarantee that every admitted file can open. Whole-array platform limits, XML/decompression/image safety limits and engine failures remain independent. No settings screen, synthetic chapter splitting, format conversion, new indexing or incremental parser is introduced.
 
-The server parses its existing original source when needed; first opening may wait
-for necessary parsing. No prior import-index prerequisite is imposed. EPUB uses
-its original ZIP structure; TXT/FB2 defer XHTML generation until a chapter request;
-MOBI snapshots are coalesced and owned by an explicit bounded runtime, invalidated
-by original-file revision, and released on eviction or shutdown. Chapters remain
-whole. An oversized chapter is an explicit error, never a reason to split content
-or fetch the complete original. Exact href, body and locator contracts are retained.
+An online parser/size limit or unsupported PDF Range can select download after checking known local limitations. Authentication, corruption, revision changes and network errors do not. The transition observes the existing account-owned Downloads runtime, shows cover/title/reason, queue/download/parse states, real bytes and percentage, cancel and retry. The only complete-file transfer remains `DownloadResourceRuntime` / `KtorDownloadsGateway`; Reader has no download adapter of its own. Verified artifacts open without network and remain managed by Downloads. Closing detaches the launch and pauses only its owned transfer; late completion cannot open a closed or different-account reader. Local parse failure never loops or redownloads.
+
+The original chapter target, or the latest persisted Reader progress, is restored after download using the existing progress owner. All file lengths, offsets and totals use 64-bit arithmetic. Product admission policy is passed to C through explicit open options; no duplicated 64/512 MiB file gate remains in native Reader. TXT/FB2 full materialization and MOBI parser memory behavior remain existing engine constraints; OS memory termination cannot be reliably recovered.
+
+The server still parses its existing original source when needed, without a prior import-index prerequisite. EPUB uses the original ZIP structure; TXT/FB2 defer XHTML generation until a chapter request; MOBI snapshots are coalesced and runtime-owned, invalidated by revision and released on eviction/shutdown. Parser budgets are unchanged. Only declared online source/cache admission failures use `PUBLICATION_ONLINE_LIMIT`; requested resource limits retain `PUBLICATION_RESOURCE_TOO_LARGE`. Actual format-parser resource failures use `PUBLICATION_PARSER_LIMIT`/`PUBLICATION_PARSER_MEMORY` and do not automatically select Downloads. Corruption and authentication remain distinct. Chapters remain whole.
+
+Web retains the existing online-only behavior, cache strategy and pinned dependency patches. The native download transition and ordinary SDK-cache concession do not apply to Web. See ADR 0024 and the native transition verification record for evidence and limitations.
 
 FB2 uses `shuku-fb2-parser-v1 / shuku-fb2-publication-v1` on every client.
 The native platform XML parsers feed a shared bounded mixed-content decoder.
@@ -269,10 +274,12 @@ It preserves the server's `fb2/section-NNNN.xhtml` resources, six-digit
 `fb2-node-NNNNNN` anchors, nested TOC, inline formatting, tables, poems,
 embedded images and internal note/return links. The server body golden in
 `test-data/library/fb2/reader-contract-bodies.json` is verified by Android,
-iOS and backend tests. FB2 binary resources are validated by encoding, MIME
-signature and size and stay in memory. DTD/entity declarations and undeclared
-prefixes fail closed; the documented `l:href`/`xmlns:xlink` repair only affects
-the parser input, never the original file.
+iOS and backend tests. FB2 binary resources use the actual Base64 decoder and
+explicit size budgets and stay in memory. Image signatures are not checked before
+the final image decoder. DTD/entity isolation remains; namespace acceptance is
+determined by the platform XML parser, without a second namespace validator.
+The documented `l:href`/`xmlns:xlink` repair only affects parser input, never the
+original file. This replaces the earlier MIME-signature and extra-prefix policy.
 
 Online native Publications bind the server-provided position list through an
 in-memory positions service without opening chapter bodies. Local imports and
@@ -309,8 +316,9 @@ or mismatched version header before opening a sink. This is independent of weak
 ETag cache validation and never falls back to a complete online Reader transfer.
 
 Reader can open completed original artifacts through Downloads' public contract.
-It cannot create or repair downloads. Online retries request the failed chapter,
-page or range again and never invoke an original-file transfer. Only obsolete
+Native Reader may select the visible Downloads transition only for the typed online
+limitations described above. Ordinary retries request the failed chapter/page/range.
+Web never invokes an original-file transfer from its online Reader. Only obsolete
 online body caches/partials with identifiable provenance are removed; manual
 Downloads, local imports, bookmarks and progress are preserved by this migration.
 
@@ -341,7 +349,10 @@ Automated contracts must cover:
   download task, complete-file artifact or continuing background transfer;
 - oversized/unstructured TXT chapters, ignored Range, malformed length, interrupted
   responses, concurrent reads, cancellation, revision changes and account isolation;
-- explicit download deduplication, resume, cancellation, storage failure and recovery;
+- native visible download fallback, deduplication, resume, cancellation, storage failure,
+  original target/progress restoration and no late opening after cancellation/account change;
+- 2 GiB minus one / exactly 2 GiB / plus one admission, 64-bit totals and known allocation guards;
+- local parse failure without automatic redownload or online/local loops;
 - actual novel EPUB plus independent TXT measurements: server parse, first body,
   first readable view, transferred bytes and peak body cache. Results must identify
   platform/device and distinguish measured evidence from pending acceptance.
@@ -357,73 +368,70 @@ navigation controls, table of contents, and preferences. Readium internals are
 engine implementation details and never become an unrestricted application
 bridge.
 
-## 13. Native EPUB controls and preferences
+## 13. Unified reader settings (2026-08-28)
 
-iOS and Android use the same native EPUB control information structure as the
-Web Reader without embedding the Web Reader: back, current chapter, and quick
-bookmark at the top; chapter navigation, progress slider, contents, notes,
-appearance, and settings at the bottom. Sheets, menus, sliders, switches, safe
-area handling, Dynamic Type, VoiceOver/TalkBack, and reduced motion remain
-platform-native.
+`packages/reader-contracts/reader-settings.json` is the only settings catalog.
+Its ordered sections, stable IDs, Chinese/English labels, options, numeric
+bounds and reading morphologies generate Web and KMP metadata. Native sheets
+remain SwiftUI/Compose. iOS obtains the same metadata through KMP and resolves
+generated native localization keys. Platform adapters may map editable field
+names and SDK capabilities, but must not maintain an independent setting list.
+`generate-reader-settings.py --check` detects metadata, localization and iOS
+field-binding drift; the Web pretest gate runs it.
 
-The device-level Reader preference contract is scoped by `serverIdentity +
-userId` and contains `appearance`, `display`, `interaction`,
-`epub.typography`, and `epub.optimization`. Defaults match the Web Reader:
-Warm/manual, 18 px, 1.9 line height, Source Han Sans fallback, weight 400,
-standard margins, single-page paginated flow, and the documented paragraph
-defaults. Legacy `paper`, `night`, and `system` inputs migrate to Warm, Night,
-and system mode. Preference-driven Readium reflow must suppress the resulting
-location observation from progress persistence.
+Preference storage is version **5**, independent of the unchanged Reader **v4**
+exact-progress protocol. Values stay local to the device, server and account.
+No preference API or cross-device synchronization is introduced. The Web storage
+adapter migrates old line-height-only publisher flags to a disabled/off master;
+KMP migrates native v3/v4 records while preserving the actual native master.
+iOS uses that same decoder and no longer writes a duplicate `iosDraft`. Invalid
+records are not overwritten on read. Legal custom values remain stored and are
+displayed even when they are not preset choices. Reset replaces every reading
+format's preferences in the current namespace, without touching progress,
+bookmarks, downloads or other accounts.
 
-The enabled theme set is Day `#F7F7F4/#1E293B`, Warm
-`#FDF6EA/#2B2118`, Green `#E8F0E3/#203126`, Night
-`#0F172A/#E2E8F0`, and Black `#000000/#F8FAFC`; system mode resolves to Day
-or Night. Readium public preferences own colors, size/weight ratios, line and
-paragraph layout, positive letter spacing, margins, scroll mode, and column
-count. Unsupported controls remain present but disabled. Font aliases and retained
-legacy negative spacing explicitly distinguish saved choices from effective rendering.
-Unsupported controls include annotations, gesture-animation and swipe toggles, phone page width,
-negative letter spacing, independent publisher-style parts, and smart/safe
-optimization. iOS volume-key turning is disabled; Android enables it.
+The sole publisher setting is `preservePublisherStyles`, displayed as
+“出版方样式” / “Publisher Styles” under Advanced Settings → Paragraph and Content
+Styles. Native engines receive their public `publisherStyles` preference.
+Publication-specific effectiveness comes from the SDK preference editor. The
+pinned Web engine has no public master switch: Web displays off/disabled with
+an explanation and keeps regular user fonts, theme and typography. It must not
+simulate that master using CSS, document rewriting or bundled partial toggles.
 
-`apps/web/public/fonts/reader` is the single licensed font asset source. Source
-Han Sans serves PingFang/Heiti/YaHei, Source Han Serif serves Songti, and LXGW
-WenKai serves Kaiti. The files add approximately 35 MB uncompressed. iOS
-Readium declares these bundled WOFF2 files through its public custom-font API.
-Readium Kotlin 3.3.0 also exposes `Configuration.addFontFamilyDeclaration()`;
-Android registers these same assets and serves only the `fonts/reader/` prefix.
-No toolkit upgrade, reflection or private script is required. Security
-adaptation may modify only the document head as defined above; body mutation or
-re-serialization is prohibited.
+The five themes and Web option values remain authoritative. Appearance contains
+text typography or comic/PDF page width and zoom; Settings contains interface,
+page turning, format layout, text optimization and the unified advanced groups.
+The native-only gesture-animation setting is removed. Unsupported controls keep
+their names and positions; saved values are not represented as effective values.
+The SDK's fixed-on swipe behavior is explained explicitly. Native command
+animation controls public navigation options, not the engine's swipe animation.
 
-### Shared native controls (2026-08-27)
+Android and iOS both use the existing preference writer and session:
+**edit → persist locally → submit necessary public SDK preferences**. Submission
+is not a pagination-completion signal. Preference changes must not poll for
+layout, capture/compare visible paragraphs, navigate to restore an anchor, roll
+back the renderer, recreate a Navigator, reopen/download a book, or introduce
+settings loading UI. Genuine save/SDK errors remain errors. Normal opening,
+TOC/bookmark jumps and exact progress restoration retain their own workflows.
+Preference reflow observations remain excluded from progress persistence.
 
-Each platform has one native toolbar and modal-container implementation for
-reflowable, comic and PDF sessions. Shared `ReaderPanel`, `ReaderControl` and
-`ReaderControlAvailability` contracts distinguish available, temporarily
-unavailable, not implemented and not applicable controls. Adapters ask the
-public Readium preferences editor about publication/layout/language-dependent
-effectiveness; format extensions are not capability checks.
+`apps/web/public/fonts/reader` remains the licensed font resource owner. Native
+PingFang/Heiti/YaHei map to Source Han Sans, Songti to Source Han Serif and Kaiti
+to LXGW WenKai, through the existing public font declarations. Identical labels
+do not promise identical glyph metrics across platforms. SDK sources remain
+unmodified and versions follow the approved baseline in section 10 (iOS 3.9.0);
+no private API or layout compensation is added.
 
-The publisher-style option maps to the native overall `publisherStyles` flag.
-Typography that the editor reports ineffective is disabled, retaining saved
-custom values. Continuous scrolling disables columns without discarding the
-pagination column preference. Command animation controls public navigation
-options for buttons, keys and tap zones; it does not control native swipe
-animation. Reset replaces shared settings and only the current morphology's
-settings. Comic/PDF options without engine implementations remain disabled.
+The pinned iOS PDF SDK exposes `fit`, but explicitly ignores width fit in its
+paginated mode. This path stays disabled instead of changing reading mode or
+claiming it works. Absolute zoom uses the existing public PDF/scroll view;
+comic command animation uses public Navigator go options. Other comic layout,
+negative spacing, smart optimization and fixed-layout capabilities without a
+usable public interface remain disabled.
 
-The pinned Swift SDK buffers decorated HTML across pagination reloads. The iOS
-Reader adapter applies native text preferences by creating a fresh public
-Navigator over the same Publication and exact Locator, then verifies restoration
-before persistence. Failure restores the prior navigator. This adapter owns the
-workaround; removal requires an authorized SDK update and passing physical render
-regressions (see the acceptance record). It never accesses the private cache or
-modifies publication content.
-
-Capability and runtime evidence is recorded in
-`docs/testing/mobile-reader-controls-2026-08-27.md`; compilation and mapping
-tests alone are not proof of rendering effectiveness.
+Current implementation and acceptance evidence, including device and SDK limits:
+`docs/testing/reader-settings-unification-2026-08-28.md`. Compilation is not proof
+of rendering effectiveness.
 
 Bookmarks use the existing Reader v4 collection wire schema. Local state is
 isolated by `serverIdentity + userId + resourceId + assetId + contentFingerprint`, retains
@@ -467,3 +475,35 @@ Chapter state is derived from exact href/fragment first, then the server's
 global chapter index and sort order. Duplicate titles are never navigation
 identities, and overall percentage is not used to guess a chapter; 100 percent
 is the sole exception and marks every chapter read.
+
+
+## 15. Parser authority and failure preservation (2026-08-28)
+
+The actual format parser/decoder decides whether bytes can be read. Application
+prechecks must not reject NUL, strip trailing NUL, sniff PDF/image signatures, or
+open an original with another parser merely to predict readability. A zero-byte
+original is not above the size limit; the actual parser reports its empty/invalid
+result. Storage owns containment, account isolation and atomic publication, not
+format parsing. SDK versions follow the approved baseline in section 10; SDK
+sources remain unmodified. Historical 3.8.0 acceptance records are not current pins.
+
+Original bytes, in-memory TXT/FB2/MOBI Publications, existing chapter boundaries,
+and native preference submission are preserved. No conversion artifact, implicit
+complete download, synthetic chapter or typography validation is permitted.
+Authentication, path safety, XXE/script/network isolation, transport/revision
+contracts and explicit budgets remain application responsibilities, with actual
+failure codes. The Reader error boundary retains stage, source and stable code;
+original causes stay internal and never enter user-visible diagnostics. A generic
+parser failure does not delete progress/downloads or select Download Center.
+
+The status/code contract is owned by
+`packages/reader-contracts/reader-http-error-statuses.json`, consumed by Web and
+generated into KMP. Older NUL errors are receive-only compatibility, not rules.
+
+This is a target policy, not a claim of complete migration. Original chapter
+security decorators still require initial XML/head/body checks until fixed SDK
+public interfaces can safely replace their isolation. Generated TXT/FB2 chapters
+reuse the CSP template without the extra whole-chapter XML pass. The fixed iOS
+comic decoder does not report UIImage decode failures, and remains unaccepted.
+The implementation/evidence matrix is authoritative for current coverage:
+`docs/testing/reader-parser-implementation-2026-08-28.md`.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import cast
 
 from fastapi import Request
@@ -9,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.contracts.http import ErrorEnvelope
+from app.contracts.http import ErrorEnvelope, MessageError
 from app.contracts.http_errors import HttpContractError
 from app.contracts.validation_errors import (
     RequestValidationErrorBody,
@@ -19,6 +20,8 @@ from app.contracts.validation_errors import (
 )
 from app.core.auth import delete_session_cookie
 from app.core.config import get_settings
+
+_STABLE_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 
 
 async def typed_http_error_handler(
@@ -34,6 +37,12 @@ async def typed_http_error_handler(
         status_code=error.status_code,
         content=envelope.model_dump(mode="json", by_alias=True),
     )
+    if (
+        isinstance(error.body, MessageError)
+        and error.body.code is not None
+        and _STABLE_ERROR_CODE.fullmatch(error.body.code)
+    ):
+        response.headers["X-Error-Code"] = error.body.code
     if error.clear_session_cookie:
         delete_session_cookie(response, get_settings())
     return response

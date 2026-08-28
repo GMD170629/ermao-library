@@ -21,7 +21,7 @@ enum ContentUITestFixture {
                 userDisplayName: "Reader",
                 userEmail: "reader@example.test",
                 userAvatarURL: nil,
-                userLocale: "en-US",
+                userLocale: Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "zh-CN" : "en-US",
                 authorization: RuntimeAuthorization(
                     isAdmin: false,
                     canManageSystem: true,
@@ -127,9 +127,13 @@ private struct FixtureContentClient: ContentClient {
     }
 
     func fetchBooks(context: ContentRequestContext, query: BooksQuery) async throws -> BookPage {
-        let filtered = query.query.isEmpty
-            ? books
-            : books.filter { $0.title.localizedCaseInsensitiveContains(query.query) }
+        let filtered = books.filter { book in
+            let libraryID = book.id == "pride-and-prejudice" ? "classics" : "science-fiction"
+            let readingStatus: LibraryReadingStatus = book.progress == nil ? .unread : .reading
+            return (query.query.isEmpty || book.title.localizedCaseInsensitiveContains(query.query))
+                && (query.libraryID == nil || query.libraryID == libraryID)
+                && (query.filters.readingStatus == nil || query.filters.readingStatus == readingStatus)
+        }
         return BookPage(
             books: filtered,
             page: query.page,
@@ -137,6 +141,13 @@ private struct FixtureContentClient: ContentClient {
             total: filtered.count,
             totalPages: filtered.isEmpty ? 0 : 1
         )
+    }
+
+    func fetchLibraryOptions(context: ContentRequestContext) async throws -> [LibrarySourceOption] {
+        [
+            LibrarySourceOption(id: "classics", name: "Classics"),
+            LibrarySourceOption(id: "science-fiction", name: "科幻 / Sci-Fi"),
+        ]
     }
 
     func fetchGroupings(context: ContentRequestContext, query: GroupingsQuery) async throws -> GroupingPage {

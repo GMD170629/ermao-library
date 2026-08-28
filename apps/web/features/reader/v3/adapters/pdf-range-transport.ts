@@ -7,7 +7,7 @@ import {
 } from '@shuku/reader-core';
 import type { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readBoundedResponse } from '../../../../shared/api/bounded-response';
-import { requestReaderResource } from '../../api/client';
+import { readerResourceFailure, requestReaderResource } from '../../api/client';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
@@ -82,8 +82,6 @@ export class PdfRangeByteSource {
   async prepare(signal: AbortSignal): Promise<Uint8Array> {
     await this.validateHead(signal);
     const bytes = await this.read(0, Math.min(PDF_RANGE_CHUNK_BYTES, this.access.length), signal);
-    const prefix = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.byteLength, 1024)));
-    if (!prefix.includes('%PDF-')) throw new PdfRangeError('PDF_INVALID', 'PDF 文件格式无效或已经损坏');
     return bytes;
   }
 
@@ -153,7 +151,7 @@ export class PdfRangeByteSource {
     } catch (cause) {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
     }
-    if (!response.ok) throw new PdfRangeError('NETWORK_UNAVAILABLE', `PDF 文件读取失败 (${response.status})`);
+    if (!response.ok) throw await readerResourceFailure(response, 'pdf');
     if (!response.headers.get('Accept-Ranges')?.toLowerCase().split(',').map((value) => value.trim()).includes('bytes')) {
       throw new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器不支持 PDF 字节 Range');
     }
@@ -225,7 +223,7 @@ export class PdfRangeByteSource {
     let rejection: PdfRangeError | null = null;
     if (response.status === 200) rejection = new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器未返回 PDF Range 响应');
     else if (response.status === 416) rejection = new PdfRangeError('PDF_RANGE_INVALID', '服务器拒绝了 PDF 字节区间');
-    else if (response.status !== 206) rejection = new PdfRangeError('NETWORK_UNAVAILABLE', `PDF Range 请求失败 (${response.status})`);
+    else if (response.status !== 206) throw await readerResourceFailure(response, 'pdf');
     else if (response.headers.get('Content-Range') !== `bytes ${begin}-${end - 1}/${this.access.length}`) {
       rejection = new PdfRangeError('PDF_RANGE_INVALID', 'PDF Content-Range 与请求不一致');
     }

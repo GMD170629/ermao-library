@@ -13,7 +13,7 @@ struct LibraryView: View {
     @Environment(\.managementRevision) private var managementRevision
     @Environment(\.appTheme) private var theme
     @State private var presentsFilter = false
-    @AccessibilityFocusState private var filterButtonFocused: Bool
+    @AccessibilityFocusState private var moreButtonFocused: Bool
 
     init(
         context: ContentRequestContext,
@@ -67,8 +67,8 @@ struct LibraryView: View {
             )
             .presentationDetents([.medium, .large])
         }
-        .onChange(of: presentsFilter) { isPresented in
-            if !isPresented { filterButtonFocused = true }
+        .onChange(of: presentsFilter) { _, isPresented in
+            if !isPresented { moreButtonFocused = true }
         }
         .appCanvas()
         .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.refreshAfterManagement() }
@@ -83,36 +83,18 @@ struct LibraryView: View {
     }
 
     private var scopePicker: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: .space1) {
-                librarySourceButton(
-                    id: nil,
-                    title: String(localized: "library.scope.works", locale: locale)
-                )
-                ForEach(store.libraryOptions) { option in
-                    librarySourceButton(id: option.id, title: option.name)
-                }
+        Picker("library.scope.accessibility", selection: Binding(
+            get: { store.selectedLibraryID },
+            set: { store.selectLibrary($0) }
+        )) {
+            Text("library.scope.works").tag(String?.none)
+            ForEach(store.libraryOptions) { option in
+                Text(option.name).tag(Optional(option.id))
             }
         }
-        .accessibilityLabel(Text("library.scope.accessibility"))
-    }
-
-    private func librarySourceButton(id: String?, title: String) -> some View {
-        let selected = store.selectedLibraryID == id
-        return Button {
-            store.selectLibrary(id)
-        } label: {
-            Text(title)
-                .appTextStyle(.label)
-                .lineLimit(1)
-                .foregroundStyle(selected ? theme.actionAccent : theme.textPrimary)
-                .padding(.horizontal, .space2)
-                .frame(minHeight: .iosMinimumTouchTarget)
-                .background(selected ? theme.accentSoft : theme.canvas)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .pickerStyle(.segmented)
+        .padding(.vertical, .space2)
+        .accessibilityIdentifier("library.sourcePicker")
     }
 
     @ViewBuilder
@@ -131,29 +113,6 @@ struct LibraryView: View {
                         .foregroundStyle(theme.textSecondary)
                 }
                 Spacer()
-                if store.selectedScope == .books {
-                    Button {
-                        presentsFilter = true
-                    } label: {
-                        Label(
-                            store.current.filters.isEmpty
-                                ? "library.filter.action"
-                                : "library.filter.active.action",
-                            systemImage: "line.3.horizontal.decrease"
-                        )
-                        .appTextStyle(.label)
-                        .foregroundStyle(
-                            store.current.filters.isEmpty
-                                ? theme.textSecondary
-                                : theme.actionAccent
-                        )
-                        .frame(minHeight: .iosMinimumTouchTarget)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityValue(Text("\(store.current.filters.count)"))
-                    .accessibilityFocused($filterButtonFocused)
-                }
             }
 
             if store.selectedScope == .books, !store.current.filters.isEmpty {
@@ -359,6 +318,12 @@ struct LibraryView: View {
         if store.selectedScope == .books {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button {
+                        presentsFilter = true
+                    } label: {
+                        Label("library.filter.reading.section", systemImage: "line.3.horizontal.decrease")
+                    }
+                    .accessibilityIdentifier("library.filter.action")
                     Section("library.sort.section") {
                         ForEach(
                             [LibrarySort.recentAdded, .recentRead, .title, .author],
@@ -391,6 +356,8 @@ struct LibraryView: View {
                     Image(systemName: "ellipsis")
                 }
                 .accessibilityLabel(Text("common.more"))
+                .accessibilityIdentifier("library.more")
+                .accessibilityFocused($moreButtonFocused)
             }
         }
     }

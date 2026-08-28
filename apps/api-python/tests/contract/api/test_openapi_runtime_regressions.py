@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pytest
+from fastapi import Request
+
+from app.api.error_handlers import typed_http_error_handler
 from app.bootstrap.system import record_system_event
+from app.contracts.http import HttpContractModel, MessageError
+from app.contracts.http_errors import BasicBadRequestError, HttpContractError
 from app.core.auth import hash_password
 from app.models import (
     LibraryBook,
@@ -25,6 +32,49 @@ if TYPE_CHECKING:
 
 ADMIN_EMAIL = "openapi-regression@example.com"
 ADMIN_PASSWORD = "OpenApiRegression123!"
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_header"),
+    [
+        ("PUBLICATION_TXT_NUL_CHARACTER", "PUBLICATION_TXT_NUL_CHARACTER"),
+        ("A", "A"),
+        ("A" * 64, "A" * 64),
+        ("A" * 65, None),
+        (None, None),
+        ("", None),
+        ("lower_case", None),
+        ("CODE\r\nX-Injected: value", None),
+        ("CODE\n", None),
+        ("CODE_中文", None),
+        ("/private/source.txt", None),
+    ],
+)
+def test_typed_error_response_headers_only_expose_bounded_stable_codes(
+    code: str | None, expected_header: str | None
+) -> None:
+    error = BasicBadRequestError(MessageError(message="Safe public message", code=code))
+    response = asyncio.run(typed_http_error_handler(Request({"type": "http"}), error))
+
+    assert response.status_code == 400
+    assert json.loads(response.body)["error"]["code"] == code
+    assert response.headers.get("X-Error-Code") == expected_header
+    assert "X-Injected" not in response.headers
+
+
+def test_typed_error_header_does_not_read_arbitrary_error_body_fields() -> None:
+    class StructuredErrorBody(HttpContractModel):
+        code: str
+
+    class StructuredError(HttpContractError[StructuredErrorBody]):
+        status_code = 400
+        body_model = StructuredErrorBody
+
+    error = StructuredError(StructuredErrorBody(code="STRUCTURED_ERROR"))
+    response = asyncio.run(typed_http_error_handler(Request({"type": "http"}), error))
+
+    assert json.loads(response.body)["error"]["code"] == "STRUCTURED_ERROR"
+    assert "X-Error-Code" not in response.headers
 
 
 def _path_key(relative_path: str) -> str:

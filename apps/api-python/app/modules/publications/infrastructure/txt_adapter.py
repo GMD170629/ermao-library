@@ -14,12 +14,15 @@ from app.modules.publications.application.ports import (
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
-    PublicationCorruptError,
     PublicationLink,
+    PublicationOnlineLimitError,
+    PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
     PublicationRevision,
     PublicationTocEntry,
+    PublicationTxtEmptyError,
+    PublicationTxtEncodingError,
     PublicationUnsupportedError,
 )
 from app.modules.publications.infrastructure.snapshot_cache import (
@@ -65,7 +68,7 @@ class _TxtSnapshot:
 
 def _decode_txt(content: bytes) -> str:
     if len(content) > MAX_TXT_SOURCE_BYTES:
-        raise PublicationCorruptError("TXT source exceeds the size limit")
+        raise PublicationOnlineLimitError("TXT source exceeds the size limit")
     candidates: tuple[tuple[str, bytes], ...]
     if content.startswith(b"\xef\xbb\xbf"):
         candidates = (("utf-8", content[3:]),)
@@ -75,22 +78,24 @@ def _decode_txt(content: bytes) -> str:
         candidates = (("utf-16-be", content[2:]),)
     else:
         candidates = (("utf-8", content), ("gb18030", content))
+    last_decode_error: UnicodeDecodeError | None = None
     for encoding, payload in candidates:
         try:
             decoded = payload.decode(encoding, errors="strict")
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as error:
+            last_decode_error = error
             continue
-        if "\x00" in decoded:
-            raise PublicationCorruptError("TXT source contains NUL characters")
         return decoded
-    raise PublicationCorruptError("TXT source encoding is unsupported")
+    raise PublicationTxtEncodingError(
+        "TXT source encoding is unsupported"
+    ) from last_decode_error
 
 
 def _normalized_lines(content: str) -> tuple[str, ...]:
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     normalized = normalized.replace("\u2028", "\n").replace("\u2029", "\n")
     if not normalized.strip():
-        raise PublicationCorruptError("TXT source is empty")
+        raise PublicationTxtEmptyError("TXT source is empty")
     return tuple(line.rstrip() for line in normalized.split("\n"))
 
 
@@ -201,7 +206,7 @@ def _snapshot(
     try:
         content = source_path.read_bytes()
     except OSError as error:
-        raise PublicationCorruptError("TXT source is unavailable") from error
+        raise PublicationReadError("TXT source is unavailable") from error
     chapters = _chapters(_normalized_lines(_decode_txt(content)), title)
     chapters_by_href: dict[str, _TxtChapter] = {}
     reading_order: list[PublicationLink] = []
@@ -283,7 +288,7 @@ class TxtPublicationAdapter(PublicationAdapter):
         )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
-            raise PublicationCorruptError("TXT source exceeds the size limit")
+            raise PublicationOnlineLimitError("TXT source exceeds the size limit")
         key = (
             str(source_path),
             stat_result.st_size,

@@ -48,6 +48,23 @@ test('aligns PDF byte requests to 256 KiB and caps requests at one MiB', () => {
   ]);
 });
 
+test('does not decide PDF validity from a file signature', async () => {
+  const bytes = fixtureBytes();
+  bytes.fill(0, 0, 1024);
+  const source = new PdfRangeByteSource(access(bytes), async (_input, init) => rangeResponse(bytes, init));
+  assert.deepEqual(await source.prepare(new AbortController().signal), bytes.slice(0, PDF_RANGE_CHUNK_BYTES));
+  source.abort();
+});
+
+test('HEAD denial retains its real HTTP reason without consuming a body', async () => {
+  let cancelled = false;
+  const source = new PdfRangeByteSource(access(fixtureBytes()), async () => new Response(
+    new ReadableStream({ cancel() { cancelled = true; } }), { status: 403 },
+  ));
+  await assert.rejects(source.prepare(new AbortController().signal), { code: 'FORBIDDEN', stage: 'pdf' });
+  assert.equal(cancelled, true);
+});
+
 test('uses only validated 206 responses and reuses cached chunks', async () => {
   const bytes = fixtureBytes();
   const requests: string[] = [];

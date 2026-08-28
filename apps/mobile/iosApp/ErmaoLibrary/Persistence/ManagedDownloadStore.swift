@@ -86,7 +86,8 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
         }
         let bytes = record.effectiveArtifactKind == .singleOriginalAsset
             ? fileSize(at: destination.partialFileURL) ?? 0 : 0
-        return ErmaoShared.DownloadStoredBytes(partialBytes: bytes < record.expectedBytes ? bytes : 0, completedReference: nil)
+        guard let expectedBytes = record.expectedBytes else { throw ManagedDownloadTransferError.invalidResponse }
+        return ErmaoShared.DownloadStoredBytes(partialBytes: bytes < expectedBytes ? bytes : 0, completedReference: nil)
     }
 
     /// Filesystem port: validate and atomically publish; task registration belongs to shared Downloads.
@@ -135,7 +136,8 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
             displayTitle: record.resourceTitle,
             bookID: record.bookID,
             resourceID: record.resourceID,
-            sourceFormat: record.format
+            sourceFormat: record.format,
+            byteCount: record.receivedBytes
         )
     }
 

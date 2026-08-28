@@ -91,7 +91,7 @@ sealed interface ReaderNavigationResult {
 sealed interface ReaderCommandResult {
     data object Completed : ReaderCommandResult
 
-    data class Rejected(val reasonCode: String) : ReaderCommandResult {
+    data class Rejected(val reasonCode: String, val cause: Throwable? = null) : ReaderCommandResult {
         init {
             require(reasonCode.isNotBlank()) { "Reader rejection reason is blank" }
         }

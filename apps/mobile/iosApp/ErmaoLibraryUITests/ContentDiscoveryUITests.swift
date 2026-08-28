@@ -6,6 +6,125 @@ final class ContentDiscoveryUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testLiveCoverManagementUsesChineseAccountLanguage() {
+        let app = XCUIApplication()
+        // The account's Chinese preference must win over an English system language.
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let library = app.tabBars.buttons["书库"]
+        XCTAssertTrue(library.waitForExistence(timeout: 15))
+        library.tap()
+        let book = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "work.")).firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout: 15))
+        book.press(forDuration: 1)
+        dismissNotificationBanner()
+        attachScreenshot(named: "live-cover-management-menu-zh", app: app)
+        let edit = app.buttons["编辑"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Edit"].exists)
+        XCTAssertTrue(app.buttons["识别"].exists)
+        XCTAssertTrue(app.buttons["重新扫描文件"].exists)
+        XCTAssertTrue(app.buttons["永久删除"].exists)
+        edit.tap()
+        XCTAssertTrue(app.textFields["标题"].waitForExistence(timeout: 15))
+        attachScreenshot(named: "live-cover-management-editor-zh", app: app)
+        XCTAssertTrue(app.buttons["保存"].exists)
+        XCTAssertTrue(app.staticTexts["保留当前封面"].exists)
+        app.buttons["移除独立封面"].tap()
+        XCTAssertTrue(app.staticTexts["保存时移除独立封面"].waitForExistence(timeout: 3))
+        app.buttons["撤销封面更改"].tap()
+        XCTAssertTrue(app.staticTexts["保留当前封面"].exists)
+        dismissNotificationBanner()
+        app.buttons["取消"].tap()
+        XCTAssertTrue(book.wait(for: \.isHittable, toEqual: true, timeout: 5))
+        book.press(forDuration: 1)
+        app.buttons["识别"].tap()
+        XCTAssertTrue(app.textFields["书名、系列名或关键词"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["尚无候选，请搜索或更换关键词"].exists)
+        attachScreenshot(named: "live-cover-management-recognition-zh", app: app)
+        dismissNotificationBanner()
+        app.buttons["取消"].tap()
+        XCTAssertTrue(book.wait(for: \.isHittable, toEqual: true, timeout: 5))
+        book.press(forDuration: 1)
+        app.buttons["永久删除"].tap()
+        XCTAssertTrue(app.staticTexts["将永久删除此图书及其源文件、资源和阅读记录。请输入图书名称确认。"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["永久删除"].isEnabled)
+        attachScreenshot(named: "live-cover-management-delete-warning-zh", app: app)
+        dismissNotificationBanner()
+        app.buttons["取消"].tap()
+    }
+
+    private func dismissNotificationBanner() {
+        // A real-device notification can cover the sheet's native Cancel button.
+        let banner = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            .descendants(matching: .any).matching(identifier: "NotificationShortLookView").firstMatch
+        if banner.exists {
+            banner.swipeUp()
+            XCTAssertTrue(banner.waitForNonExistence(timeout: 5))
+        }
+    }
+
+    func testLibraryNativeSearchSourcesAndOverflowFilterInEnglish() {
+        exerciseLibraryFilters(chinese: false)
+    }
+
+    func testLibraryNativeSearchSourcesAndOverflowFilterInChinese() {
+        exerciseLibraryFilters(chinese: true)
+    }
+
+    private func exerciseLibraryFilters(chinese: Bool) {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchArguments += ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)",
+                                "-AppleLocale", chinese ? "zh_CN" : "en_US"]
+        app.launch()
+        defer { app.terminate() }
+        let libraryTab = app.tabBars.buttons[chinese ? "书库" : "Library"]
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
+        libraryTab.tap()
+        let sources = app.segmentedControls["library.sourcePicker"]
+        XCTAssertTrue(sources.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.searchFields.firstMatch.exists)
+        XCTAssertFalse(app.buttons["library.filter.action"].exists)
+        sources.buttons["Classics"].tap()
+        let pride = app.buttons["work.pride-and-prejudice"]
+        XCTAssertTrue(pride.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["work.the-left-hand-of-darkness"].exists)
+        XCTAssertTrue(sources.buttons["Classics"].isSelected)
+        sources.buttons.element(boundBy: 0).tap()
+        let unreadBook = app.buttons["work.the-left-hand-of-darkness"]
+        XCTAssertTrue(unreadBook.waitForExistence(timeout: 5))
+        attachScreenshot(named: "library-native-root-\(chinese ? "zh" : "en")", app: app)
+
+        let more = app.buttons["library.more"]
+        more.tap()
+        let filter = app.buttons["library.filter.action"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 3))
+        attachScreenshot(named: "library-overflow-\(chinese ? "zh" : "en")", app: app)
+        filter.tap()
+        let unread = app.buttons[chinese ? "未开始" : "Not Started"]
+        XCTAssertTrue(unread.waitForExistence(timeout: 3))
+        unread.tap()
+        app.buttons[chinese ? "取消" : "Cancel"].tap()
+        XCTAssertTrue(pride.waitForExistence(timeout: 5))
+        more.tap(); filter.tap(); unread.tap()
+        app.buttons[chinese ? "应用" : "Apply"].tap()
+        XCTAssertTrue(unreadBook.waitForExistence(timeout: 5))
+        XCTAssertFalse(pride.exists)
+        more.tap(); filter.tap()
+        XCTAssertTrue(unread.waitForExistence(timeout: 3))
+        XCTAssertTrue(unread.isSelected)
+        app.buttons[chinese ? "清除全部" : "Clear All"].tap()
+        app.buttons[chinese ? "应用" : "Apply"].tap()
+        XCTAssertTrue(pride.waitForExistence(timeout: 5))
+
+        let search = app.searchFields.firstMatch
+        search.tap(); search.typeText("Pride")
+        XCTAssertTrue(pride.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: unreadBook)
+        waitForExpectations(timeout: 5)
+    }
+
     func testDirectoryResourcePushAndBackRestoresParentContext() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
@@ -321,7 +440,7 @@ final class ContentDiscoveryUITests: XCTestCase {
             return
         }
         if publication.expectsWebContent {
-            XCTAssertGreaterThan(app.webViews.count, 0, "\(publication.format) offline body")
+            XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: readerTimeout), "\(publication.format) offline body")
         }
         revealReaderControlsIfNeeded(app: app, readerScreen: readerScreen)
         XCTAssertFalse(app.staticTexts["Unable to Open Book"].exists)
@@ -383,7 +502,7 @@ final class ContentDiscoveryUITests: XCTestCase {
             return
         }
         if expectsWebContent {
-            XCTAssertGreaterThan(app.webViews.count, 0, "\(format) must render publication content")
+            XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 45), "\(format) must render publication content")
         }
         revealReaderControlsIfNeeded(app: app, readerScreen: readerScreen)
         let closeReader = app.buttons["reader.close"]
@@ -397,13 +516,25 @@ final class ContentDiscoveryUITests: XCTestCase {
         appearance.tap()
         let done = app.buttons["reader.panel.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 5), "\(format) shared sheet")
+        var savedFontSize: String?
         if expectsWebContent {
             let fontSize = app.sliders["reader.setting.fontSize"]
             XCTAssertTrue(fontSize.waitForExistence(timeout: 5), "\(format) native font control")
             XCTAssertTrue(fontSize.isEnabled)
-            fontSize.adjust(toNormalizedSliderPosition: 0.625)
-            XCTAssertTrue(app.progressIndicators["reader.preferences.applying"].waitForNonExistence(timeout: 10))
-            XCTAssertFalse(app.staticTexts["reader.preferences.failure"].exists, "Native preferences must apply and persist")
+            let fontControlFrame = fontSize.frame
+            // Exercise both directions so a preference left by a previous run cannot
+            // turn this regression into a no-op submission.
+            for position in [CGFloat(0.25), CGFloat(0.625)] {
+                fontSize.adjust(toNormalizedSliderPosition: position)
+                // The work detail behind the reader contains a determinate reading-progress
+                // bar. It is not a settings loading indicator; assert the visible surface.
+                XCTAssertFalse(app.progressIndicators.allElementsBoundByIndex.contains(where: \.isHittable), "Changing reading settings must not show a visible loading indicator")
+                XCTAssertFalse(app.progressIndicators["reader.opening"].exists, "Settings must not reopen the book")
+                XCTAssertEqual(fontSize.frame, fontControlFrame, "Changing the font size must not move the settings control")
+                XCTAssertFalse(app.staticTexts["reader.preferences.failure"].exists, "Native preferences must apply and persist")
+            }
+            savedFontSize = fontSize.value as? String
+            XCTAssertNotNil(savedFontSize)
         } else {
             XCTAssertFalse(app.sliders["reader.setting.fontSize"].exists, "Fixed layouts must not expose text typography")
         }
@@ -458,6 +589,16 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["无法打开图书"].exists)
         assertNoMarkupError(app: app)
         attachScreenshot(named: "live-reader-\(format.lowercased())-restored", app: app)
+        if let savedFontSize {
+            app.buttons["reader.appearance"].tap()
+            XCTAssertTrue(done.waitForExistence(timeout: 5))
+            let restoredFontSize = app.sliders["reader.setting.fontSize"]
+            XCTAssertTrue(restoredFontSize.waitForExistence(timeout: 5))
+            XCTAssertEqual(restoredFontSize.value as? String, savedFontSize, "The requested font size must survive closing and reopening Reader")
+            XCTAssertFalse(app.staticTexts["reader.preferences.failure"].exists)
+            done.tap()
+            XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        }
         dismissReaderNotificationBanner()
         app.buttons["reader.close"].tap()
         XCTAssertTrue(restoredScreen.waitForNonExistence(timeout: 15), "\(format) restored Reader must finish closing")

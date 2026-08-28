@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'docs/mobile-reader-architecture.md'
+      - 'AGENTS.md'
+      - '.cursor/rules/architecture.mdc'
       - 'apps/api-python/app/api/router.py'
       - 'apps/api-python/app/bootstrap/auth.py'
       - 'apps/api-python/app/contracts/http.py'
@@ -30,6 +33,9 @@ on:
       - prod
     paths:
       - 'apps/mobile/**'
+      - 'docs/mobile-reader-architecture.md'
+      - 'AGENTS.md'
+      - '.cursor/rules/architecture.mdc'
       - 'apps/api-python/app/api/router.py'
       - 'apps/api-python/app/bootstrap/auth.py'
       - 'apps/api-python/app/contracts/http.py'
@@ -129,6 +135,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Check approved iOS Readium baseline
+        run: |
+          python3 iosApp/verify_readium.py
+          python3 -m unittest discover -s iosApp -p 'test_verify_readium.py'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

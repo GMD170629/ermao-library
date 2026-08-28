@@ -21,6 +21,7 @@ from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationCorruptError,
     PublicationLink,
+    PublicationParserError,
     PublicationResource,
     PublicationResourceNotFoundError,
     PublicationResourceTooLargeError,
@@ -223,9 +224,19 @@ class _MobiCore:
         if status == _OK:
             return
         name = self._library.ermao_mobi_status_name(status).decode("ascii", "replace")
-        if name in {"unsupported", "drm_protected", "limit_exceeded"}:
-            raise PublicationUnsupportedError(name)
-        raise PublicationCorruptError(f"libmobi {operation} failed: {name}")
+        code = {
+            "unsupported": "PUBLICATION_UNSUPPORTED",
+            "drm_protected": "PUBLICATION_DRM_PROTECTED",
+            "limit_exceeded": "PUBLICATION_PARSER_LIMIT",
+            "out_of_memory": "PUBLICATION_PARSER_MEMORY",
+            "file_not_found": "PUBLICATION_NOT_FOUND",
+            "not_found": "PUBLICATION_RESOURCE_NOT_FOUND",
+            "io": "PUBLICATION_READ_FAILED",
+            "no_content": "PUBLICATION_STRUCTURE_INVALID",
+        }.get(name, "PUBLICATION_PARSE_FAILED")
+        raise PublicationParserError(
+            code=code, parser="libmobi", operation=operation, reason=name
+        )
 
     def book_info(self, book: ctypes.c_void_p) -> _BookInfo:
         result = _BookInfo(struct_size=ctypes.sizeof(_BookInfo))

@@ -38,9 +38,10 @@ class MobiReadiumPublicationFactory {
     fun open(
         file: File,
         transformContainer: (Container<Resource>) -> Container<Resource> = { it },
+        maximumFileBytes: Long = Long.MAX_VALUE,
     ): MobiReadiumPublication {
         val book = try {
-            MobiCoreBook.open(file)
+            MobiCoreBook.open(file, maximumFileBytes)
         } catch (error: Throwable) {
             throw error.toPublicationOpenException()
         }

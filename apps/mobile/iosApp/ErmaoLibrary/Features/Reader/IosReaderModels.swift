@@ -21,15 +21,31 @@ enum IosReaderFailureCode: String, Sendable {
     case corruptFile = "CORRUPT_FILE"
     case drmProtected = "DRM_PROTECTED"
     case parseFailed = "PARSE_FAILED"
+    case readFailed = "PUBLICATION_READ_FAILED"
+    case securityRejected = "PUBLICATION_SECURITY_REJECTED"
     case resourceMissing = "RESOURCE_MISSING"
+    case publicationUnavailable = "PUBLICATION_UNAVAILABLE"
+    case unauthorized = "UNAUTHORIZED"
+    case forbidden = "FORBIDDEN"
+    case invalidResponse = "PUBLICATION_RESPONSE_INVALID"
+    case serverUnavailable = "SERVER_UNAVAILABLE"
+    case requestTimeout = "REQUEST_TIMEOUT"
+    case tlsFailure = "TLS_FAILURE"
+    case rateLimited = "RATE_LIMITED"
+    case txtNulCharacter = "PUBLICATION_TXT_NUL_CHARACTER"
+    case txtEncodingUnsupported = "PUBLICATION_TXT_ENCODING_UNSUPPORTED"
+    case txtEmpty = "PUBLICATION_TXT_EMPTY"
     case publicationChanged = "PUBLICATION_CHANGED"
     case networkUnavailable = "NETWORK_UNAVAILABLE"
     case outOfMemoryRisk = "OUT_OF_MEMORY_RISK"
+    case publicationTooLarge = "READER_PUBLICATION_TOO_LARGE"
+    case onlineLimit = "PUBLICATION_ONLINE_LIMIT"
     case engineError = "READER_ENGINE_ERROR"
     case locationRestoreFailed = "LOCATION_RESTORE_FAILED"
     case persistenceFailed = "PERSISTENCE_FAILED"
     case pdfRangeUnsupported = "PDF_RANGE_UNSUPPORTED"
     case pdfRangeInvalid = "PDF_RANGE_INVALID"
+    case pdfEngineLimit = "PDF_ENGINE_PROGRESS_LIMIT"
     case pdfResourceChanged = "PDF_RESOURCE_CHANGED"
     case pdfCacheIO = "PDF_CACHE_IO"
     case pdfEncrypted = "PDF_ENCRYPTED"
@@ -48,43 +64,68 @@ enum IosReaderFailureCode: String, Sendable {
         self = Self(rawValue: sharedCode.wireValue) ?? .engineError
     }
 
+    var localizationKey: String {
+        self == .onlineLimit ? "reader.download.reason" : "reader.error.\(rawValue)"
+    }
+
     var localizedDescription: String {
-        switch self {
-        case .unsupportedFormat: String(localized: "reader.error.UNSUPPORTED_FORMAT")
-        case .corruptFile: String(localized: "reader.error.CORRUPT_FILE")
-        case .drmProtected: String(localized: "reader.error.DRM_PROTECTED")
-        case .parseFailed: String(localized: "reader.error.PARSE_FAILED")
-        case .resourceMissing: String(localized: "reader.error.RESOURCE_MISSING")
-        case .publicationChanged: String(localized: "reader.error.PUBLICATION_CHANGED")
-        case .networkUnavailable: String(localized: "reader.error.NETWORK_UNAVAILABLE")
-        case .outOfMemoryRisk: String(localized: "reader.error.OUT_OF_MEMORY_RISK")
-        case .engineError: String(localized: "reader.error.READER_ENGINE_ERROR")
-        case .locationRestoreFailed: String(localized: "reader.error.LOCATION_RESTORE_FAILED")
-        case .persistenceFailed: String(localized: "reader.error.PERSISTENCE_FAILED")
-        case .pdfRangeUnsupported: String(localized: "reader.error.PDF_RANGE_UNSUPPORTED")
-        case .pdfRangeInvalid: String(localized: "reader.error.PDF_RANGE_INVALID")
-        case .pdfResourceChanged: String(localized: "reader.error.PDF_RESOURCE_CHANGED")
-        case .pdfCacheIO: String(localized: "reader.error.PDF_CACHE_IO")
-        case .pdfEncrypted: String(localized: "reader.error.PDF_ENCRYPTED")
-        case .pdfInvalid: String(localized: "reader.error.PDF_INVALID")
-        case .pdfPageLoadFailed: String(localized: "reader.error.PDF_PAGE_LOAD_FAILED")
-        case .pdfRenderFailed: String(localized: "reader.error.PDF_RENDER_FAILED")
-        case .comicArchiveOpenFailed: String(localized: "reader.error.COMIC_ARCHIVE_OPEN_FAILED")
-        case .comicArchiveEncrypted: String(localized: "reader.error.COMIC_ARCHIVE_ENCRYPTED")
-        case .comicArchivePartMissing: String(localized: "reader.error.COMIC_ARCHIVE_PART_MISSING")
-        case .comicArchiveFormatUnsupported: String(localized: "reader.error.COMIC_ARCHIVE_FORMAT_UNSUPPORTED")
-        case .comicArchiveCorrupt: String(localized: "reader.error.COMIC_ARCHIVE_CORRUPT")
-        case .comicPageDecodeFailed: String(localized: "reader.error.COMIC_PAGE_DECODE_FAILED")
-        case .comicOutOfMemoryRisk: String(localized: "reader.error.COMIC_OUT_OF_MEMORY_RISK")
-        }
+        String(localized: String.LocalizationValue(localizationKey))
     }
 }
 
 struct IosReaderFailure: LocalizedError, Equatable, Sendable {
     let code: IosReaderFailureCode
+    let onlineContext: IosReaderOnlineFailureContext?
+    let underlyingError: NSError?
+
+    init(
+        code: IosReaderFailureCode,
+        onlineContext: IosReaderOnlineFailureContext? = nil,
+        underlyingError: NSError? = nil
+    ) {
+        self.code = code
+        self.onlineContext = onlineContext
+        self.underlyingError = underlyingError
+    }
+
+    static func fileRead(_ error: any Error) -> IosReaderFailure {
+        if let failure = error as? IosReaderFailure { return failure }
+        let underlying = error as NSError
+        let code: IosReaderFailureCode
+        switch (underlying.domain, underlying.code) {
+        case (NSCocoaErrorDomain, NSFileReadNoSuchFileError), (NSCocoaErrorDomain, NSFileNoSuchFileError):
+            code = .resourceMissing
+        case (NSCocoaErrorDomain, NSFileReadNoPermissionError): code = .forbidden
+        default: code = .readFailed
+        }
+        return IosReaderFailure(code: code, underlyingError: underlying)
+    }
 
     var errorDescription: String? {
-        code.localizedDescription
+        onlineContext?.localizedDescription(for: code) ?? code.localizedDescription
+    }
+}
+
+/// Native presentation metadata from the shared online failure contract.
+/// Raw server messages, URLs and exception descriptions never enter user copy.
+struct IosReaderOnlineFailureContext: Equatable, Sendable {
+    let sourceCode: String
+    let stage: String?
+
+    init(sourceCode: String, stage: ErmaoShared.OnlinePublicationStage?) {
+        self.sourceCode = sourceCode
+        self.stage = stage?.wireValue
+    }
+
+    func localizedDescription(for code: IosReaderFailureCode, bundle: Bundle = .main) -> String {
+        let reason = bundle.localizedString(forKey: code.localizationKey, value: nil, table: nil)
+        guard let stage else { return reason }
+        return String(
+            format: bundle.localizedString(forKey: "reader.online.failure.format", value: nil, table: nil),
+            bundle.localizedString(forKey: "reader.online.stage.\(stage)", value: nil, table: nil),
+            reason,
+            sourceCode
+        )
     }
 }
 

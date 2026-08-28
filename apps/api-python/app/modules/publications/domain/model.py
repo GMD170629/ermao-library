@@ -9,29 +9,84 @@ from hashlib import sha256
 class PublicationNotFoundError(Exception):
     """The actor cannot open the requested publication."""
 
+    code: str = "PUBLICATION_NOT_FOUND"
+
 
 class PublicationUnsupportedError(Exception):
     """The source format has no production publication adapter."""
+
+    code: str = "PUBLICATION_UNSUPPORTED"
 
 
 class PublicationCorruptError(Exception):
     """The source cannot safely produce a normalized publication."""
 
+    code: str = "PUBLICATION_CORRUPT"
+
+
+class PublicationTxtEncodingError(PublicationCorruptError):
+    """TXT cannot be decoded using the supported encoding policy."""
+
+    code: str = "PUBLICATION_TXT_ENCODING_UNSUPPORTED"
+
+
+class PublicationTxtEmptyError(PublicationCorruptError):
+    """Decoded TXT contains no non-whitespace text."""
+
+    code: str = "PUBLICATION_TXT_EMPTY"
+
 
 class PublicationSecurityError(PublicationCorruptError):
     """The source contains an active construct which must not be rendered."""
+
+    code = "PUBLICATION_SECURITY_REJECTED"
 
 
 class PublicationMarkupError(PublicationCorruptError):
     """One publication markup resource is malformed but may be recoverable."""
 
+    code = "PUBLICATION_MARKUP_INVALID"
+
 
 class PublicationStructureError(PublicationCorruptError):
     """The publication package cannot provide a usable reading order."""
 
+    code = "PUBLICATION_STRUCTURE_INVALID"
+
+
+class PublicationReadError(PublicationCorruptError):
+    """The filesystem or archive could not read the requested bytes."""
+
+    code: str = "PUBLICATION_READ_FAILED"
+
+
+class PublicationParserLimitError(PublicationCorruptError):
+    """An explicit parser resource budget was exceeded."""
+
+    code: str = "PUBLICATION_PARSER_LIMIT"
+
+
+class PublicationParserError(PublicationCorruptError):
+    """An actual native parser operation failed; no raw path enters the wire error."""
+
+    def __init__(self, *, code: str, parser: str, operation: str, reason: str) -> None:
+        super().__init__(f"{parser} {operation}: {reason}")
+        self.code = code
+        self.parser = parser
+        self.operation = operation
+        self.reason = reason
+
 
 class PublicationResourceTooLargeError(Exception):
     """One requested chapter exceeds the bounded online resource contract."""
+
+    code = "PUBLICATION_RESOURCE_TOO_LARGE"
+
+
+class PublicationOnlineLimitError(PublicationResourceTooLargeError):
+    """The server's online parser budget cannot admit this original."""
+
+    code = "PUBLICATION_ONLINE_LIMIT"
 
 
 class PublicationChangedError(Exception):
@@ -40,6 +95,8 @@ class PublicationChangedError(Exception):
 
 class PublicationResourceNotFoundError(Exception):
     """The requested resource is not in the validated publication index."""
+
+    code: str = "PUBLICATION_NOT_FOUND"
 
 
 @dataclass(frozen=True, slots=True)

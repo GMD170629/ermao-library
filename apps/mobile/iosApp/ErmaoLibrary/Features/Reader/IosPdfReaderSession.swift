@@ -1,6 +1,5 @@
 import Foundation
 @preconcurrency import ErmaoShared
-@preconcurrency import ReadiumAdapterGCDWebServer
 @preconcurrency import ReadiumNavigator
 @preconcurrency import ReadiumShared
 import UIKit
@@ -35,6 +34,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
     private let progressCoordination: IosReaderProgressSessionCoordination?
     private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
+    private(set) var pendingLaunchTargetPayload: String?
     private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
     private let namespaceKey: String
     private let bookID: String
@@ -43,7 +43,6 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private var managedPublication: IosManagedPublication?
     private var openedPublication: IosOpenedReadiumPublication?
     private var positions: [Locator] = []
-    private var httpServer: GCDHTTPServer?
     private var tapNavigation: IosPdfTapNavigation?
     private var pendingSave: Task<Void, Never>?
     private var expectedRestoredPage: Int?
@@ -85,6 +84,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         self.progressCoordination = progressCoordination
         self.remoteSnapshot = remoteSnapshot
         self.initialTarget = initialTarget
+        pendingLaunchTargetPayload = initialTarget.map { ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: $0) }
         self.namespaceKey = namespaceKey
         self.bookID = bookID
         self.publishProgressUpdate = publishProgressUpdate
@@ -144,22 +144,17 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 sourceFormat: managed.sourceFormat
             )
             let initialPage = try restorePage(local: local, remote: remoteSnapshot, source: openedSource)
-            let server = GCDHTTPServer(
-                assetRetriever: AssetRetriever(httpClient: DefaultHTTPClient(ephemeral: true))
-            )
             let navigator = try PDFNavigatorViewController(
                 publication: opened.publication,
                 initialLocation: initialPage.map { parsedPositions[$0] },
                 config: PDFNavigatorViewController.Configuration(
                     preferences: PDFPreferences(scroll: false, spread: .never)
-                ),
-                httpServer: server
+                )
             )
             navigator.delegate = self
             tapNavigation = IosPdfTapNavigation(navigator: navigator) { [weak self] point in
                 self?.handleTap(at: point)
             }
-            httpServer = server
             self.navigator = navigator
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 guard snapshot?.locator is ErmaoShared.PdfPublicationLocation else { return }
@@ -167,6 +162,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             }
             pageIndex = initialPage ?? 0
             phase = .reading
+            pendingLaunchTargetPayload = nil
             await progressCoordination?.checkForRemoteProgress()
         } catch let failure as IosReaderFailure {
             await releaseRuntime()
@@ -194,10 +190,13 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     private func executePageNavigation(_ index: Int) async -> Bool {
+        guard index >= 0, index < canonicalPageCount else { return false }
+        pendingLaunchTargetPayload = ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: ErmaoShared.ReaderNavigationTargetPdf(pageIndex: Int32(index)))
         if let pdfiumNavigator {
             if pageIndex == index { return true }
             guard pdfiumNavigator.goToPage(index) else { return false }
             await verifyCurrentPage(expected: index)
+            if pageIndex == index { pendingLaunchTargetPayload = nil }
             return pageIndex == index
         }
         guard positions.indices.contains(index), let navigator else { return false }
@@ -241,13 +240,25 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
 
     func applyPreferences(_ updated: IosReaderPreferences) async -> Bool {
         guard canApplyControlPreferences(updated) else { return false }
-        guard updated == preferences.reset(for: .pdf) || (updated.pdfZoom == preferences.pdfZoom && updated.pdfFit == preferences.pdfFit && updated.pdfRotation == preferences.pdfRotation && updated.pdfCropMargins == preferences.pdfCropMargins) else { return false }
         guard preferencesStore.save(updated) else { return false }
+        let zoomChanged = preferences.pdfZoom != updated.pdfZoom
         preferences = updated
+        if zoomChanged { applySavedZoom() }
         return true
     }
 
+    private func applySavedZoom() {
+        if let pdfiumNavigator { pdfiumNavigator.setZoom(preferences.pdfZoom); return }
+        guard let view = navigator?.pdfView else { return }
+        let fittedScale = view.scaleFactorForSizeToFit
+        guard fittedScale > 0 else { return }
+        view.minScaleFactor = min(view.minScaleFactor, fittedScale * 0.6)
+        view.maxScaleFactor = max(view.maxScaleFactor, fittedScale * 2.4)
+        view.scaleFactor = fittedScale * preferences.pdfZoom
+    }
+
     func verifyRestoredLocationAfterPresentation() async {
+        applySavedZoom()
         guard let expected = expectedRestoredPage else { return }
         expectedRestoredPage = nil
         try? await Task.sleep(for: .milliseconds(180))
@@ -455,7 +466,6 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         pdfiumNavigator = nil
         // Releasing the navigator removes its endpoint. Releasing this session-owned
         // GCD server then stops the loopback-only listener.
-        httpServer = nil
         await openedPublication?.close()
         openedPublication = nil
         managedPublication = nil
@@ -502,6 +512,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         expectedRestoredPage = initialPage
         pageIndex = initialPage
         phase = .reading
+        pendingLaunchTargetPayload = nil
         await progressCoordination?.checkForRemoteProgress()
     }
 
@@ -545,8 +556,16 @@ enum IosPdfPositionPolicy {
     }
 }
 
-extension IosPdfReaderSession: PDFNavigatorDelegate {
-    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) { locationChanged(locator) }
+// The pinned Readium delegate predates concurrency annotations; PDF view setup
+// is invoked from its UIKit main-thread view lifecycle.
+extension IosPdfReaderSession: @preconcurrency PDFNavigatorDelegate {
+    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        locationChanged(locator)
+        applySavedZoom()
+    }
+    func navigator(_ navigator: PDFNavigatorViewController, setupPDFView pdfView: PDFDocumentView) {
+        applySavedZoom()
+    }
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) { presentationError = .engineError }
     func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import CryptoKit
 import OSLog
+import Combine
 @preconcurrency import ErmaoShared
 
 struct IosReaderLaunchRequest: Identifiable, Equatable, Sendable {
@@ -132,13 +133,22 @@ final class IosReaderComposition: ObservableObject {
     private let deviceIdentity: IosReaderDeviceIdentity
     private let completedDownloads: any CompletedDownloadProviding
     private let navigationCache = IosReaderNavigationCache()
+    fileprivate let downloads: DownloadCenterStore?
+    fileprivate let contentClient: (any ContentClient)?
+    fileprivate let coverCache: AuthenticatedCoverCache?
 
     init(
         cookieStore: KeychainCookiePayloadStore,
-        completedDownloads: any CompletedDownloadProviding
+        completedDownloads: any CompletedDownloadProviding,
+        downloads: DownloadCenterStore? = nil,
+        contentClient: (any ContentClient)? = nil,
+        coverCache: AuthenticatedCoverCache? = nil
     ) throws {
         self.cookieStore = cookieStore
         self.completedDownloads = completedDownloads
+        self.downloads = downloads
+        self.contentClient = contentClient
+        self.coverCache = coverCache
         managedStore = try IosManagedPublicationStore()
         deviceIdentity = IosReaderDeviceIdentity()
     }
@@ -171,6 +181,9 @@ final class IosReaderComposition: ObservableObject {
                 namespace: request.context.namespaceKey
             ), artifact.resourceID == request.resourceID else {
                 throw IosReaderFailure(code: .resourceMissing)
+            }
+            if let failure = ReaderAdmission.shared.localFailure(format: artifact.sourceFormat, bytes: artifact.byteCount) {
+                throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: failure))
             }
             launchArtifact = artifact
             Self.logger.notice(
@@ -208,7 +221,7 @@ final class IosReaderComposition: ObservableObject {
                 }
             } catch {
                 result = nil
-                bootstrapFailure = IosReaderFailure(code: .networkUnavailable)
+                bootstrapFailure = IosReaderFailure(code: .engineError, underlyingError: error as NSError)
             }
         }
         let onlineBootstrap = (result as? ErmaoShared.ReaderBootstrapResultContent)?.value
@@ -228,7 +241,7 @@ final class IosReaderComposition: ObservableObject {
                 } catch let failure as IosReaderFailure {
                     launchArtifactFailure = failure
                 } catch {
-                    launchArtifactFailure = IosReaderFailure(code: .corruptFile)
+                    launchArtifactFailure = IosReaderFailure.fileRead(error)
                 }
             } else {
                 launchArtifactFailure = IosReaderFailure(code: .unsupportedFormat)
@@ -267,7 +280,7 @@ final class IosReaderComposition: ObservableObject {
             source = content.source
         } else {
             guard opensVerifiedLocalArtifact else {
-                throw bootstrapFailure ?? IosReaderFailure(code: .networkUnavailable)
+                throw bootstrapFailure ?? IosReaderFailure(code: .engineError)
             }
             let existing: IosManagedPublication
             do {
@@ -282,7 +295,7 @@ final class IosReaderComposition: ObservableObject {
                 if let launchArtifactFailure { throw launchArtifactFailure }
                 if let bootstrapFailure { throw bootstrapFailure }
                 if let readerFailure = error as? IosReaderFailure { throw readerFailure }
-                throw IosReaderFailure(code: .resourceMissing)
+                throw IosReaderFailure.fileRead(error)
             }
             Self.logger.notice(
                 "reader_start platform=ios format=\(existing.sourceFormat.wireValue, privacy: .public) entry=download_center stage=managed_resolve_completed code=READER_LOCAL_RESOLVE"
@@ -606,8 +619,10 @@ final class IosReaderComposition: ObservableObject {
             throw IosReaderFailure(code: .comicOutOfMemoryRisk)
         } catch IosCbzError.encrypted {
             throw IosReaderFailure(code: .comicArchiveEncrypted)
+        } catch let failure as IosReaderFailure {
+            throw failure
         } catch {
-            throw IosReaderFailure(code: .comicArchiveCorrupt)
+            throw IosReaderFailure(code: .comicArchiveOpenFailed, underlyingError: error as NSError)
         }
     }
 
@@ -640,59 +655,170 @@ final class IosReaderBootstrapHost: ObservableObject {
         self.composition = composition
     }
 
+    private var coordinator: ReaderLaunchCoordinator?
+    private var descriptor: DownloadDescriptor?
+    private var subscriptions: Set<AnyCancellable> = []
+    private var transitionTask: Task<Void, Never>?
+    private var ownsDownload = false
+    private var closed = false
+    private var localRequest: IosReaderLaunchRequest?
+    private var fallbackTargetPayload: String?
+    @Published private(set) var downloadDescriptor: DownloadDescriptor?
+    @Published private(set) var downloadRecord: ManagedDownloadRecord?
+    @Published private(set) var downloadFailed = false
+    @Published private(set) var downloadFailureCode: String?
+    @Published private(set) var preparingDownload = false
+    var coverClient: (any ContentClient)? { composition.contentClient }
+    var coverCache: AuthenticatedCoverCache? { composition.coverCache }
+    var contentContext: ContentRequestContext { request.context }
+
     func start() async {
-        guard !started else { return }
+        guard !started, !closed else { return }
         started = true
         do {
-            state = .ready(try await composition.bootstrap(request))
+            if request.managedDownloadRecordID == nil, let downloads = composition.downloads {
+                let coordinator = try await downloads.readerCoordinator(context: request.context)
+                self.coordinator = coordinator
+                let launch = try await coordinator.prepare(context: request.context.downloadRequestContext, resourceId: request.resourceID)
+                try Task.checkCancellation()
+                if let local = launch as? ReaderLaunchLocal {
+                    guard let record = try await downloads.completedReaderRecord(resourceID: local.artifact.identity.resourceId, context: request.context) else {
+                        throw IosReaderFailure(code: .resourceMissing)
+                    }
+                    localRequest = managedRequest(record)
+                } else if let online = launch as? ReaderLaunchOnline {
+                    descriptor = online.descriptor
+                } else if let unavailable = launch as? ReaderLaunchUnavailable {
+                    throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: unavailable.code))
+                }
+            }
+            try await open(localRequest ?? request)
+        } catch is CancellationError {
+            stop()
         } catch let failure as IosReaderFailure {
-            record(failure.code, stage: "bootstrap")
-            state = .failure(failure.code)
+            if !beginFallback(failure.code) { state = .failure(failure.code) }
         } catch {
-            record(.networkUnavailable, stage: "bootstrap")
-            state = .failure(.networkUnavailable)
+            state = .failure(.engineError)
         }
     }
 
-    var hasDownloadedArtifact: Bool { request.managedDownloadRecordID != nil }
+    private func open(_ request: IosReaderLaunchRequest) async throws {
+        let session = try await composition.bootstrap(request)
+        try Task.checkCancellation()
+        guard !closed, composition.downloads?.isCurrent(request.context) != false else { return }
+        if request.managedDownloadRecordID != nil {
+            let phase: IosReaderSessionPhase
+            switch session {
+            case .reflowable(let value): await value.open(); phase = value.phase
+            case .comic(let value): await value.open(); phase = value.phase
+            case .pdf(let value): await value.open(); phase = value.phase
+            }
+            try Task.checkCancellation()
+            guard !closed, composition.downloads?.isCurrent(request.context) != false else { return }
+            if case .failed(let code) = phase { throw IosReaderFailure(code: code) }
+        }
+        subscriptions.removeAll()
+        let phase: AnyPublisher<IosReaderSessionPhase, Never>
+        let errors: AnyPublisher<IosReaderFailureCode?, Never>
+        switch session {
+        case .reflowable(let value): phase = value.$phase.eraseToAnyPublisher(); errors = value.$presentationError.eraseToAnyPublisher()
+        case .comic(let value): phase = value.$phase.eraseToAnyPublisher(); errors = value.$presentationError.eraseToAnyPublisher()
+        case .pdf(let value): phase = value.$phase.eraseToAnyPublisher(); errors = value.$presentationError.eraseToAnyPublisher()
+        }
+        phase.sink { [weak self] phase in
+            if case .failed(let code) = phase { self?.beginFallback(code) }
+        }.store(in: &subscriptions)
+        errors.compactMap { $0 }.sink { [weak self] code in self?.beginFallback(code) }.store(in: &subscriptions)
+        state = .ready(session)
+    }
+
+    @discardableResult
+    private func beginFallback(_ code: IosReaderFailureCode) -> Bool {
+        guard !closed, localRequest == nil, downloadDescriptor == nil, let coordinator, let descriptor,
+              let downloads = composition.downloads else { return false }
+        let launch = coordinator.fallbackCode(descriptor: descriptor, failureCode: code.rawValue)
+        guard let decision = launch as? ReaderLaunchDownload else {
+            if let unavailable = launch as? ReaderLaunchUnavailable, unavailable.code.wireValue != code.rawValue {
+                state = .failure(IosReaderFailureCode(sharedCode: unavailable.code))
+                return true
+            }
+            return false
+        }
+        downloadDescriptor = decision.descriptor
+        subscriptions.removeAll()
+        let previousState = state
+        if case .ready(let session) = previousState {
+            switch session {
+            case .reflowable(let value): fallbackTargetPayload = value.pendingLaunchTargetPayload ?? (value.phase == .opening ? request.initialTargetPayload : nil)
+            case .pdf(let value): fallbackTargetPayload = value.pendingLaunchTargetPayload ?? (value.phase == .opening ? request.initialTargetPayload : nil)
+            case .comic: fallbackTargetPayload = nil
+            }
+        } else { fallbackTargetPayload = request.initialTargetPayload }
+        transitionTask = Task { [weak self] in
+            guard let self else { return }
+            if case .ready(let session) = previousState {
+                do {
+                    switch session {
+                    case .reflowable(let value): try await value.close()
+                    case .comic(let value): try await value.close()
+                    case .pdf(let value): try await value.close()
+                    }
+                } catch { record(.persistenceFailed, stage: "download_transition") }
+            }
+            guard !closed, downloads.isCurrent(request.context) else { return }
+            ownsDownload = downloads.beginReaderDownload(resourceID: request.resourceID, descriptor: descriptor)
+            for await (records, failures) in downloads.$records.combineLatest(downloads.$readerFailures).values {
+                guard !Task.isCancelled, !closed, downloads.isCurrent(request.context) else { return }
+                let record = records.first { $0.resourceID == request.resourceID }
+                downloadRecord = record
+                downloadFailureCode = failures[request.resourceID] ?? record?.stableErrorCode
+                downloadFailed = failures[request.resourceID] != nil || record?.state == .failedRetryable || record?.state == .failedTerminal
+                guard let record, record.isVerifiedOfflineCopy else { continue }
+                ownsDownload = false
+                preparingDownload = true
+                localRequest = managedRequest(record)
+                do {
+                    let completed = try await coordinator.complete(descriptor: descriptor)
+                    if let failure = completed as? ReaderLaunchUnavailable { throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: failure.code)) }
+                    try await open(localRequest ?? request)
+                }
+                catch is CancellationError { return }
+                catch let failure as IosReaderFailure { state = .failure(failure.code) }
+                catch { state = .failure(.engineError) }
+                downloadDescriptor = nil
+                preparingDownload = false
+                return
+            }
+        }
+        return true
+    }
+
+    private func managedRequest(_ record: ManagedDownloadRecord) -> IosReaderLaunchRequest {
+        IosReaderLaunchRequest(context: request.context, bookID: request.bookID, resourceID: request.resourceID,
+                              displayTitle: request.displayTitle, managedDownloadRecordID: record.id,
+                              initialTargetPayload: downloadDescriptor == nil ? request.initialTargetPayload : fallbackTargetPayload)
+    }
+
+    func retryDownload() {
+        guard !closed, let downloads = composition.downloads, let descriptor else { return }
+        ownsDownload = downloads.beginReaderDownload(resourceID: request.resourceID, descriptor: descriptor) || ownsDownload
+    }
+
+    func stop() {
+        closed = true
+        subscriptions.removeAll()
+        transitionTask?.cancel()
+        if ownsDownload { composition.downloads?.pauseReaderDownload(resourceID: request.resourceID) }
+        ownsDownload = false
+    }
 
     func retry() async {
-        started = false
+        guard !closed else { return }
         state = .loading
-        do {
-            state = .ready(try await composition.bootstrap(
-                request
-            ))
-            started = true
-        } catch let failure as IosReaderFailure {
-            record(failure.code, stage: "retry")
-            state = .failure(failure.code)
-        } catch {
-            record(.networkUnavailable, stage: "retry")
-            state = .failure(.networkUnavailable)
-        }
-    }
-
-    func readOnline() async {
-        guard request.managedDownloadRecordID != nil else { return }
-        started = false
-        state = .loading
-        do {
-            state = .ready(try await composition.bootstrap(IosReaderLaunchRequest(
-                context: request.context,
-                bookID: request.bookID,
-                resourceID: request.resourceID,
-                displayTitle: request.displayTitle,
-                initialTargetPayload: request.initialTargetPayload
-            )))
-            started = true
-        } catch let failure as IosReaderFailure {
-            record(failure.code, stage: "read_online")
-            state = .failure(failure.code)
-        } catch {
-            record(.networkUnavailable, stage: "read_online")
-            state = .failure(.networkUnavailable)
-        }
+        do { try await open(localRequest ?? request) }
+        catch is CancellationError { stop() }
+        catch let failure as IosReaderFailure { if !beginFallback(failure.code) { state = .failure(failure.code) } }
+        catch { state = .failure(.engineError) }
     }
 
     private func record(_ code: IosReaderFailureCode, stage: String) {
@@ -707,6 +833,7 @@ final class IosReaderBootstrapHost: ObservableObject {
 
 struct IosReaderBootstrapView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @StateObject private var host: IosReaderBootstrapHost
 
     init(request: IosReaderLaunchRequest, composition: IosReaderComposition) {
@@ -715,6 +842,34 @@ struct IosReaderBootstrapView: View {
 
     var body: some View {
         Group {
+            if let descriptor = host.downloadDescriptor {
+                VStack(spacing: 16) {
+                    if let client = host.coverClient, let cache = host.coverCache {
+                        BookCoverView(reference: descriptor.coverApiPath.map { CoverReference(path: $0) },
+                                      title: descriptor.bookTitle, context: host.contentContext, client: client, cache: cache)
+                            .frame(width: 120, height: 180)
+                    }
+                    Text(descriptor.bookTitle).font(.title2)
+                    Text("reader.download.reason")
+                    if host.preparingDownload {
+                        ProgressView("reader.download.preparing")
+                    } else {
+                        let received = host.downloadRecord?.receivedBytes ?? 0
+                        let total = host.downloadRecord?.expectedBytes ?? descriptor.totalBytes
+                        Text(LocalizedStringKey(host.downloadFailed ? "reader.download.failed" : host.downloadRecord?.state == .downloading ? "reader.download.transferring" : host.downloadRecord?.state == .paused ? "reader.download.paused" : "reader.download.queued"))
+                        if host.downloadFailed { Text(downloadFailureMessage(host.downloadFailureCode)) }
+                        if total > 0, received >= 0, received <= total {
+                            let progress = ReaderAdmission.shared.progress(received: received, total: total)
+                            ProgressView(value: progress)
+                            Text(verbatim: "\(received.formatted(.number.locale(locale))) / \(total.formatted(.number.locale(locale))) B · \(progress.formatted(.percent.locale(locale)))")
+                        }
+                        if host.downloadFailed || host.downloadRecord?.state == .paused {
+                            Button("common.retry") { host.retryDownload() }
+                        }
+                    }
+                    Button("reader.download.cancel") { host.stop(); dismiss() }
+                }.padding(24).accessibilityIdentifier("reader.download.transition")
+            } else {
             switch host.state {
             case .loading:
                 ProgressView("reader.loading.publication")
@@ -732,17 +887,16 @@ struct IosReaderBootstrapView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "exclamationmark.triangle").font(.largeTitle)
                     Text("reader.error.title").font(.headline)
-                    Text(code.localizedDescription).multilineTextAlignment(.center)
+                    Text(LocalizedStringKey(code.localizationKey)).multilineTextAlignment(.center)
                     Button("common.retry") { Task { await host.retry() } }
-                    if host.hasDownloadedArtifact {
-                        Button("reader.read.online") { Task { await host.readOnline() } }
-                    }
                     Button("common.close") { dismiss() }
                 }
                 .padding(24)
                 .accessibilityIdentifier("reader.bootstrap.failure.\(code.rawValue)")
             }
+            }
         }
         .task { await host.start() }
+        .onDisappear { host.stop() }
     }
 }

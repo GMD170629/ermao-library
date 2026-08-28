@@ -1,3 +1,5 @@
+export const READER_PREFERENCES_VERSION = 5 as const;
+
 export const READER_SCHEMA_VERSION = 4 as const;
 
 export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' | 'txt';
@@ -58,7 +60,7 @@ export type ReaderNavigationEntry = {
 };
 
 export type ReaderPreferences = {
-  schemaVersion: typeof READER_SCHEMA_VERSION;
+  schemaVersion: typeof READER_PREFERENCES_VERSION;
   appearance: {
     theme: ReaderTheme;
     themeMode: 'manual' | 'system';
@@ -80,7 +82,7 @@ export type ReaderPreferences = {
     pageWidth: number;
     fontFamily: ReaderFontFamily;
     fontWeight: 400 | 500 | 700;
-    letterSpacing: -0.02 | 0 | 0.04 | 0.08;
+    letterSpacing: number;
     pageMargin: 'narrow' | 'standard' | 'wide';
     spreadMode: 'auto' | 'single' | 'double';
     pageTurnAnimation: 'slide' | 'off';
@@ -90,8 +92,6 @@ export type ReaderPreferences = {
       paragraphSpacing: number;
       textAlign: 'publisher' | 'left' | 'justify';
       preservePublisherStyles: boolean;
-      allowPublisherColors: boolean;
-      allowPublisherFonts: boolean;
     };
     optimization: {
       enabled: boolean;
@@ -191,6 +191,9 @@ export type ReaderError = {
   code: string;
   message: string;
   recoverable: boolean;
+  safeContext?: Readonly<Record<string, string>>;
+  /** Internal diagnostic only; never serialize it or render it as user copy. */
+  cause?: unknown;
 };
 
 type ReaderAdapterEventBase = {

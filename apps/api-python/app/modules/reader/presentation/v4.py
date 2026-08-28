@@ -19,7 +19,8 @@ from app.bootstrap.publications import (
     publication_runtime,
 )
 from app.bootstrap.reader import reader_resource_service
-from app.contracts.http_errors import ErrorResponses
+from app.contracts.http import MessageError
+from app.contracts.http_errors import ErrorResponses, PayloadTooLargeError
 from app.core.auth import get_current_user
 from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
@@ -29,6 +30,7 @@ from app.modules.publications.public import (
     PublicationAccessScope,
     PublicationCorruptError,
     PublicationNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationUnsupportedError,
 )
 from app.modules.reader.application.dto import (
@@ -462,6 +464,7 @@ def reader_bootstrap_v4(
         ReaderUnauthorizedError,
         ReaderNotFoundError,
         ReaderValidationError,
+        PayloadTooLargeError,
     ),
 ]:
     user = _current_user(db, request, settings)
@@ -475,6 +478,12 @@ def reader_bootstrap_v4(
             _runtime_session_factory(request),
             publication_runtime(request),
         ).execute(resource_id=resource_id, access_scope=publication_scope)
+    except PublicationResourceTooLargeError as error:
+        raise PayloadTooLargeError(
+            MessageError(
+                message="Publication exceeds the online reading limit", code=error.code
+            )
+        ) from error
     except (
         OSError,
         PublicationCorruptError,

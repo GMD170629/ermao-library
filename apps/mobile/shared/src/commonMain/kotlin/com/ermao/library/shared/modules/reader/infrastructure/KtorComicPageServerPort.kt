@@ -27,13 +27,15 @@ class KtorComicPageServerPort internal constructor(
         val path = source.pageApiPathTemplate.replace("{pageIndex}", pageIndex.toString())
         when (val result = client.loadAuthenticatedBinary(
             "$path?imageVariant=${variant.wireValue}", MAXIMUM_PAGE_BYTES, IMAGE_TYPES,
+            errorCodeStatuses = ReaderHttpErrorStatuses.comic,
         )) {
             is ApiResult.Failure -> ComicPageReadResult.Failure(
-                if (result.error.kind == AppErrorKind.PayloadTooLarge) "COMIC_OUT_OF_MEMORY_RISK" else "COMIC_PAGE_LOAD_FAILED",
+                if (result.error.kind == AppErrorKind.PayloadTooLarge) "COMIC_OUT_OF_MEMORY_RISK" else result.error.code,
                 result.error.kind in setOf(AppErrorKind.NetworkUnavailable, AppErrorKind.Timeout, AppErrorKind.ServiceUnavailable),
+                cause = result.error.cause,
+                source = readerFailureSource(result.error.kind),
             )
             is ApiResult.Success -> {
-                if (result.value.bytes.isEmpty()) return@withClient ComicPageReadResult.Failure("COMIC_PAGE_DECODE_FAILED", false)
                 val actualVariant = if (result.metadata.firstHeader("X-Comic-Image-Variant") == ReaderComicImageVariant.DataSaver.wireValue) {
                     ReaderComicImageVariant.DataSaver
                 } else ReaderComicImageVariant.Original

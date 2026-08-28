@@ -28,6 +28,19 @@ final class ReaderProgressContractTests: XCTestCase {
         XCTAssertTrue(decoded.engineLocatorCanonicalJSON?.contains("\"cssSelector\":\"#paragraph-17\"") == true)
     }
 
+    func testReadium390RestoresAnExact380LocatorWithoutChangingItsAnchor() throws {
+        let progress = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
+        let location = try XCTUnwrap(progress.location as? ErmaoShared.ReflowReaderLocation)
+        let mapper = ReadiumSwiftLocatorMapper()
+        let restored = try XCTUnwrap(try mapper.exactLocator(from: location))
+        XCTAssertEqual(restored.href.string, "OPS/chapter-03.xhtml")
+        XCTAssertEqual(restored.locations["cssSelector"]?.string, "#paragraph-17")
+        let updated = try mapper.sharedLocation(from: restored)
+        XCTAssertEqual(updated.engineLocator?.version, "readium-swift:3.9.0")
+        let roundTripped = try XCTUnwrap(try mapper.exactLocator(from: updated))
+        XCTAssertEqual(roundTripped, restored, "Serialization key ordering may change; the complete locator must not")
+    }
+
     func testLegacyV1AndProgressionOnlyLocatorsAreRejected() {
         let codec = ErmaoShared.PublicKt.createReaderProgressJson()
         let legacy = exactProgressPayload().replacingOccurrences(of: #""version":7"#, with: #""version":1"#)
