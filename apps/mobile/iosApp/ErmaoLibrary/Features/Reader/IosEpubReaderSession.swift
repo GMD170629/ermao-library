@@ -585,37 +585,58 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     func goPrevious() async {
-        beginUserNavigation()
-        _ = await navigator?.goBackward(options: navigationOptions)
+        await turnPage(.previous)
     }
 
     func goNext() async {
-        beginUserNavigation()
-        _ = await navigator?.goForward(options: navigationOptions)
+        await turnPage(.next)
     }
 
     func goLeft() async {
-        beginUserNavigation()
-        _ = await navigator?.goLeft(options: navigationOptions)
+        await turnPage(navigator?.presentation.readingProgression == .rtl ? .next : .previous)
     }
 
     func goRight() async {
-        beginUserNavigation()
-        _ = await navigator?.goRight(options: navigationOptions)
+        await turnPage(navigator?.presentation.readingProgression == .rtl ? .previous : .next)
     }
 
-    func goToTOCEntry(_ entry: IosReaderTocEntry) async -> Bool {
-        await navigationQueue.enqueue { [weak self] in
-            guard let self else { return false }
-            return await self.executeTOCNavigation(entry)
+    private enum PageTurnDirection { case previous, next }
+
+    private func turnPage(_ direction: PageTurnDirection) async {
+        _ = await navigationQueue.enqueue { [weak self] in
+            guard let self, self.controlReady, let navigator = self.navigator else { return false }
+            if navigator.presentation.scroll {
+                let readingOrder = navigator.publication.readingOrder
+                guard let href = navigator.currentLocation?.href,
+                      let currentIndex = readingOrder.firstIndexWithHREF(href) else { return false }
+                let targetIndex = currentIndex + (direction == .previous ? -1 : 1)
+                guard readingOrder.indices.contains(targetIndex) else { return false }
+                let target = readingOrder[targetIndex]
+                // A resource link without a fragment asks Readium to locate its
+                // start. Do not go backward to the end and then scroll again.
+                return await self.executeLinkNavigation(Link(
+                    href: target.url().removingFragment().string, title: target.title
+                ))
+            }
+            self.beginUserNavigation()
+            switch direction {
+            case .previous: return await navigator.goBackward(options: self.navigationOptions)
+            case .next: return await navigator.goForward(options: self.navigationOptions)
+            }
         }
     }
 
-    private func executeTOCNavigation(_ entry: IosReaderTocEntry) async -> Bool {
-        guard let canonicalHref = entry.href,
-              RelativeURL(string: canonicalHref) != nil
-        else { return false }
-        let link = Link(href: canonicalHref, title: entry.title)
+    func goToTOCEntry(_ entry: IosReaderTocEntry) async -> Bool {
+        guard let href = entry.href else { return false }
+        return await navigationQueue.enqueue { [weak self] in
+            guard let self else { return false }
+            return await self.executeLinkNavigation(Link(href: href, title: entry.title))
+        }
+    }
+
+    private func executeLinkNavigation(_ link: Link) async -> Bool {
+        let canonicalHref = link.href
+        guard controlReady, RelativeURL(string: canonicalHref) != nil else { return false }
         if await navigationHrefMatches(canonicalHref) {
             return true
         }

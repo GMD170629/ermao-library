@@ -116,7 +116,7 @@ final class ReaderSecurityTests: XCTestCase {
                 try await Task.sleep(for: .milliseconds(100))
             }
             let navigator = try XCTUnwrap(session.navigator, "The real session must publish its navigator")
-            let diagnostic = await navigator.evaluateJavaScript("JSON.stringify({height:document.documentElement.scrollHeight,viewport:innerHeight,width:document.documentElement.scrollWidth,font:getComputedStyle(document.querySelector('p')).fontFamily,size:getComputedStyle(document.querySelector('p')).fontSize,line:getComputedStyle(document.querySelector('p')).lineHeight,color:getComputedStyle(document.querySelector('p')).color,rootColumn:getComputedStyle(document.documentElement).columnWidth,fonts:[...document.fonts].map(f=>({family:f.family,status:f.status}))})")
+            let diagnostic = await navigator.evaluateJavaScript("JSON.stringify({height:document.documentElement.scrollHeight,scrollY:window.scrollY,href:location.pathname,viewport:innerHeight,width:document.documentElement.scrollWidth,font:getComputedStyle(document.querySelector('p')).fontFamily,size:getComputedStyle(document.querySelector('p')).fontSize,line:getComputedStyle(document.querySelector('p')).lineHeight,color:getComputedStyle(document.querySelector('p')).color,rootColumn:getComputedStyle(document.documentElement).columnWidth,fonts:[...document.fonts].map(f=>({family:f.family,status:f.status}))})")
             XCTFail("\(message): \(diagnostic)")
         }
 
@@ -316,6 +316,70 @@ final class ReaderSecurityTests: XCTestCase {
                 try await expectRendered("document.body.textContent.includes('Paragraph 240.') && Math.abs(parseFloat(getComputedStyle(document.querySelector('p')).fontSize) - \(size)) < 0.7", "New and revisited chapters must retain full content and typography")
             }
         }
+        func expectChapterTop(_ index: Int) async throws {
+            // Input callbacks enqueue work asynchronously; wait for the public
+            // location notification as well as the document's visible content.
+            for _ in 0 ..< 100 where session.navigator?.currentLocation?.href.string != session.tableOfContents[index].href {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await expectRendered("document.body.textContent.includes('第\(index + 44)章') && Math.abs(window.scrollY) < 1", "Scroll navigation must enter chapter \(index + 44) at its top")
+            XCTAssertEqual(session.navigator?.currentLocation?.href.string, session.tableOfContents[index].href)
+            XCTAssertTrue(session.navigator === reopenedNavigator)
+        }
+        await session.goPrevious()
+        try await expectChapterTop(0)
+        await session.goPrevious()
+        try await expectChapterTop(0) // First chapter: no wrap and no jump to its end.
+        await session.goNext()
+        try await expectChapterTop(1)
+        await session.goNext()
+        try await expectChapterTop(2)
+        await session.goNext()
+        try await expectChapterTop(2) // Last chapter: no wrap.
+        let navigationSession = session
+        async let firstPrevious: Void = navigationSession.goPrevious()
+        async let secondPrevious: Void = navigationSession.goPrevious()
+        _ = await (firstPrevious, secondPrevious)
+        try await expectChapterTop(0)
+
+        for (key, index) in [(Key.pageDown, 1), (.pageUp, 0), (.arrowRight, 1), (.arrowLeft, 0), (.space, 1)] {
+            session.navigator(reopenedNavigator, didPressKey: KeyEvent(phase: .down, key: key))
+            try await expectChapterTop(index)
+        }
+        session.handleTap(at: CGPoint(x: 10, y: 100), width: 440)
+        try await expectChapterTop(0)
+        await session.goNext()
+        var reversedTaps = session.preferences
+        reversedTaps.tapZones = .reversed
+        let reversedApplied = await session.applyControlPreferences(reversedTaps)
+        XCTAssertTrue(reversedApplied)
+        // Respect the existing tap debounce when issuing another physical-style tap.
+        try await Task.sleep(for: .milliseconds(160))
+        session.handleTap(at: CGPoint(x: 430, y: 100), width: 440)
+        try await expectChapterTop(0)
+        await session.flushProgress()
+        let chapterStartProgress = try await progressStore.load(sourceId: "controls")
+        let chapterStart = try XCTUnwrap(chapterStartProgress?.location as? ErmaoShared.ReflowReaderLocation)
+        XCTAssertEqual(chapterStart.resourceKey, session.tableOfContents[0].href)
+        XCTAssertTrue(chapterStart.textQuote?.exact.contains("第44章") == true,
+                      "A chapter jump must persist the real visible start anchor")
+
+        var pagedPreferences = session.preferences
+        pagedPreferences.readingMode = .paged
+        let pagedApplied = await session.applyControlPreferences(pagedPreferences)
+        XCTAssertTrue(pagedApplied)
+        try await expectLoadedChapters(scrolled: false, size: 24)
+        let pagedHref = reopenedNavigator.currentLocation?.href.string
+        await session.goNext()
+        try await expectRendered("Math.abs(window.scrollX) > 0", "Paged Next must advance one viewport within the chapter")
+        XCTAssertEqual(reopenedNavigator.currentLocation?.href.string, pagedHref)
+        let offsetValue = try await reopenedNavigator.evaluateJavaScript("Math.abs(window.scrollX)").get()
+        let offset = try XCTUnwrap(offsetValue as? Double)
+        XCTAssertGreaterThan(offset, 0)
+        await session.goPrevious()
+        try await expectRendered("Math.abs(window.scrollX) < \(offset)", "Paged Previous must still move back one viewport")
+        XCTAssertEqual(reopenedNavigator.currentLocation?.href.string, pagedHref)
+        XCTAssertTrue(session.navigator === reopenedNavigator)
         try await session.close()
         XCTAssertEqual(try Data(contentsOf: file), original)
         XCTAssertEqual(try Data(contentsOf: managed.fileURL), original)

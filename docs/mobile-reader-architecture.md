@@ -415,6 +415,17 @@ settings loading UI. Genuine save/SDK errors remain errors. Normal opening,
 TOC/bookmark jumps and exact progress restoration retain their own workflows.
 Preference reflow observations remain excluded from progress persistence.
 
+For iOS reflowable reading, app-owned Previous/Next commands in scrolling mode
+navigate to the start of the adjacent original reading-order resource, including
+when Previous is invoked halfway through the current chapter. They must not first
+navigate to the previous resource's end and then issue another scroll. Toolbar,
+tap-zone and keyboard commands share the existing session navigation queue and
+link-navigation owner; left/right preserve the SDK's LTR/RTL mapping. The first
+and last resources do not wrap. Paginated commands retain the SDK's ordinary
+page-turn behavior, and normal chapter jumps persist actual visible anchors.
+No SDK modification, custom scrolling JavaScript, new preference or navigator
+recreation is involved. This rule does not alter SDK-owned VoiceOver scrolling.
+
 `apps/web/public/fonts/reader` remains the licensed font resource owner. Native
 PingFang/Heiti/YaHei map to Source Han Sans, Songti to Source Han Serif and Kaiti
 to LXGW WenKai, through the existing public font declarations. Identical labels
