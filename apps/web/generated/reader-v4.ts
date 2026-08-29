@@ -254,7 +254,7 @@ export type ReaderProgressStateResponse = {
 };
 
 export type ReaderPublicationAccess = {
-  kind: "reflowable" | "comic";
+  kind: "comic";
   manifestUrl: string;
   positionsUrl?: string | null;
   pageUrlTemplate?: string | null;

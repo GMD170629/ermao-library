@@ -8,6 +8,7 @@ import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderComicSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderPdfFit
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
 import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import java.util.UUID
@@ -18,6 +19,14 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ReaderPreferencesInstrumentedTest {
+    @Test
+    fun readerExposesExactlyThreeFontChoices() {
+        assertEquals(
+            listOf("pingfang", "songti", "kaiti"),
+            ReaderSettingsCatalog.settings.first { it.id == "fontFamily" }.options.map { it.value },
+        )
+    }
+
     @Test
     fun continuousScrollKeepsReadiumTouchPageTurnsEnabled() {
         assertFalse(readerNavigatorConfiguration().disablePageTurnsWhileScrolling)
@@ -38,7 +47,6 @@ class ReaderPreferencesInstrumentedTest {
             pdf = ReaderPreferences().pdf.copy(fit = ReaderPdfFit.Width),
         )
         val supported = stored.copy(
-            epub = stored.epub.copy(spreadMode = ReaderSpreadMode.Single),
             comic = stored.comic.copy(spreadMode = ReaderComicSpreadMode.Single),
         )
 

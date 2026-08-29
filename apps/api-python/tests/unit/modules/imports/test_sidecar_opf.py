@@ -99,6 +99,7 @@ def test_directory_sidecar_does_not_inherit_parent_metadata(tmp_path: Path) -> N
         b"<package><metadata>",
         b"x" * (2 * 1024 * 1024 + 1),
     ),
+    ids=("entity", "invalid-xml", "oversized"),
 )
 def test_parser_rejects_entities_invalid_xml_and_oversized_input(
     payload: bytes,

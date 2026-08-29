@@ -6,7 +6,6 @@ from sqlalchemy import false, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.contracts.media_capabilities import exact_source_format
 from app.contracts.publication_sources import PublicationAccessScope, PublicationSource
 from app.models.library import Library
 from app.modules.library.infrastructure.readable_resource_schema import (
@@ -102,10 +101,7 @@ class SqlAlchemyPublicationSourceRepository:
         return PublicationSource(
             resource_id=resource.id,
             asset_id=asset.id,
-            source_format=exact_source_format(
-                resource_format=resource.format,
-                filename=source_node.name,
-            ).lower(),
+            source_format=resource.format.strip().lower(),
             path=source_node.relative_path,
             size_bytes=source_node.observed_size_bytes or 0,
             mtime_ms=source_node.observed_mtime_ns // 1_000_000,

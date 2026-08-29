@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -134,5 +135,6 @@ class SqlAlchemyResourceMetadata:
             if field in metadata_fields:
                 setattr(metadata, field, value)
         metadata.updated_at = now
+
 
 __all__ = ["SqlAlchemyResourceMetadata"]

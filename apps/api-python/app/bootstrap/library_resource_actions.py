@@ -44,9 +44,7 @@ def regenerate_resource_cover(db: Session) -> RegenerateResourceCover:
     )
 
 
-def upload_resource_cover(
-    db: Session, settings: Settings
-) -> UploadResourceCover:
+def upload_resource_cover(db: Session, settings: Settings) -> UploadResourceCover:
     return UploadResourceCover(
         SqlAlchemyResourceMetadata(db),
         SqlAlchemyResourceCover(db),

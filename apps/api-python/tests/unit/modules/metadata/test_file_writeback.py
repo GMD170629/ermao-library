@@ -93,7 +93,8 @@ def test_sidecar_preserves_extensions_and_clears_removed_managed_fields(
         """<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata>
         <dc:title>旧标题</dc:title><dc:description>保留简介</dc:description>
         <meta name="vendor:custom" content="keep-me"/>
-        </metadata><manifest/><spine/></package>"""
+        </metadata><manifest/><spine/></package>""",
+        encoding="utf-8",
     )
 
     prepared = prepare_writeback(str(source), _payload(source), tmp_path)

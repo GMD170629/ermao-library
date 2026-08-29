@@ -51,7 +51,6 @@ internal fun ReaderDownloadTransition(
             Modifier.size(120.dp, 168.dp), managementEnabled = false,
         )
         Text(descriptor.bookTitle, style = MaterialTheme.typography.titleLarge)
-        Text(stringResource(R.string.reader_download_reason))
         if (hasFailure) Text(com.ermao.library.features.downloads.downloadFailureMessage(failureCode ?: record?.errorCode))
         Text(stringResource(when {
             preparing -> R.string.reader_download_preparing

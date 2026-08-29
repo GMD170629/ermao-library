@@ -1,6 +1,6 @@
 # ADR 0012: Publication owns reflowable navigation
 
-- Status: Accepted
+- Status: Accepted for import/Library projections; Reader delivery amended by ADR 0025
 - Date: 2026-08-14
 
 ## Context
@@ -27,11 +27,15 @@ original file hash, parser identifier and normalization identifier. A separate
 cache-state row records successful empty TOCs. A changed source or generator
 identity invalidates the projection.
 
-The Work Detail navigation surface, the volume reading-units endpoint, Reader v4
-bootstrap and the Publication manifest may each populate a missing projection.
-Parsing happens outside the write transaction. Publication identity is rechecked
-before an atomic chapter-row replacement so an obsolete parse cannot overwrite a
-newer file.
+The Work Detail navigation surface and the volume reading-units endpoint may each
+populate a missing server-side projection. Parsing happens outside the write
+transaction. Publication identity is rechecked before an atomic chapter-row
+replacement so an obsolete parse cannot overwrite a newer file.
+
+ADR 0025 removes this projection from the Reader delivery path. Reflowable Reader
+v4 bootstrap no longer populates or returns server navigation, and there is no
+reflowable Publication manifest/positions/chapter HTTP surface. Each client derives
+its Reader TOC, reading order and positions from the fully validated local original.
 
 The flat compatibility projection uses deterministic pre-order traversal and keeps
 the TOC path and depth in metadata. Public reading-unit routes and response fields
@@ -47,8 +51,8 @@ projections and remain eager format-specific indexes.
 - `LibraryVolume.chapterCount` is `null` until a successful projection and is `0`
   for a successfully parsed Publication with no TOC entries.
 - A detail projection remains available when parsing fails, returns no chapters,
-  records a structured failure and retries on a later access. Publication endpoints
-  keep their explicit unavailable/corrupt failure contract.
+  records a structured failure and retries on a later Library access. It does not
+  affect Reader startup or local parsing failures.
 - EPUB Publication parsing must support both EPUB 3 Navigation Documents and EPUB 2
   NCX. FB2 receives a direct original-file Publication adapter; this decision does
   not add FB2 navigator support to Web, Android or iOS clients.

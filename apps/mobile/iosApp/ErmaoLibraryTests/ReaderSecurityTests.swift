@@ -432,87 +432,6 @@ final class ReaderSecurityTests: XCTestCase {
     }
 
     @MainActor
-    func testOnlineFailurePreservesItsReasonAndStageWithoutReadingAnOriginalFile() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("reader-online-errors-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: root) }
-        let store = try IosManagedPublicationStore(root: root)
-        let manifestPath = "/api/reader/v4/resources/online-errors/publication/manifest.json"
-        let positionsPath = manifestPath.replacingOccurrences(of: "manifest.json", with: "positions.json")
-        let source = ErmaoShared.RemoteReflowableReaderSource(
-            resourceId: "online-errors", displayTitle: "Online error fixture",
-            bookId: "book", assetId: "original", sourceFormat: .txt,
-            namespace: ErmaoShared.PublicKt.createReaderSyncNamespace(
-                serverIdentity: "server", userId: "user", authorizationVersion: 1
-            ),
-            manifestApiPath: manifestPath,
-            positionsApiPath: positionsPath
-        )
-        func makeSession(port: StubOnlinePublicationPort) -> IosReflowableReaderSession {
-            IosReflowableReaderSession(
-                resourceID: source.resourceId, displayTitle: source.displayTitle, sourceFormat: .txt,
-                onlineSource: source,
-                onlinePublication: ErmaoShared.OnlinePublicationSession(source: source, port: port),
-                managedStore: store, progressStore: IosNonBlockingReaderProgressStore()
-            )
-        }
-        let failures: [(String, IosReaderFailureCode)] = [
-            ("PUBLICATION_TXT_NUL_CHARACTER", .txtNulCharacter),
-            ("PUBLICATION_TXT_ENCODING_UNSUPPORTED", .txtEncodingUnsupported),
-            ("PUBLICATION_TXT_EMPTY", .txtEmpty),
-            ("PUBLICATION_NOT_FOUND", .publicationUnavailable),
-            ("UNAUTHORIZED", .unauthorized),
-            ("FORBIDDEN", .forbidden),
-            ("BINARY_CONTENT_TYPE_MISSING", .invalidResponse),
-            ("SERVER_FAILURE", .serverUnavailable),
-            ("REQUEST_TIMEOUT", .requestTimeout),
-            ("TLS_FAILURE", .tlsFailure),
-            ("RATE_LIMITED", .rateLimited),
-            ("TRANSPORT_FAILURE", .engineError),
-        ]
-        for (sourceCode, expected) in failures {
-            let port = StubOnlinePublicationPort(code: sourceCode)
-            let session = makeSession(port: port)
-            await session.open()
-            XCTAssertEqual(session.phase, .failed(expected), sourceCode)
-            let failure = try XCTUnwrap(session.onlineFailure, sourceCode)
-            XCTAssertEqual(failure.onlineContext?.sourceCode, sourceCode)
-            XCTAssertEqual(failure.onlineContext?.stage, "manifest")
-            XCTAssertNotNil(failure.underlyingError)
-            XCTAssertNil(session.navigator)
-            XCTAssertEqual(port.requestedPaths, [manifestPath])
-            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
-            XCTAssertFalse(session.failureDescription(for: expected).contains("已下载"))
-            try await session.close()
-        }
-        let nativeParserFailures = [
-            (
-                manifest: #"{"readingOrder":[{"href":"chapter.xhtml","type":"application/xhtml+xml"}]}"#,
-                positions: #"{"positions":[{"href":"chapter.xhtml","type":"application/xhtml+xml"}]}"#,
-                stage: "manifest", code: "PUBLICATION_MANIFEST_INVALID"
-            ),
-            (
-                manifest: #"{"metadata":{"title":"Fixture"},"readingOrder":[{"href":"chapter.xhtml","type":"not a media type"}]}"#,
-                positions: #"{"positions":[{"href":"chapter.xhtml","type":"not a media type"}]}"#,
-                stage: "positions", code: "PUBLICATION_POSITIONS_INVALID"
-            ),
-        ]
-        for example in nativeParserFailures {
-            let port = StubOnlinePublicationPort(contents: [manifestPath: example.manifest, positionsPath: example.positions])
-            let session = makeSession(port: port)
-            await session.open()
-            XCTAssertEqual(session.phase, .failed(.invalidResponse), example.code)
-            let failure = try XCTUnwrap(session.onlineFailure, example.code)
-            XCTAssertEqual(failure.onlineContext?.sourceCode, example.code)
-            XCTAssertEqual(failure.onlineContext?.stage, example.stage)
-            XCTAssertNotNil(failure.underlyingError)
-            XCTAssertNil(session.navigator)
-            XCTAssertEqual(port.requestedPaths, [manifestPath, positionsPath])
-            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), [])
-            try await session.close()
-        }
-    }
-
-    @MainActor
     func testBlankTxtPreservesTheParserFailureAcrossTheKotlinBoundary() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -751,49 +670,6 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertGreaterThan(profile.lowerBound, comment.lowerBound)
         XCTAssertLessThan(profile.lowerBound, title.lowerBound)
         XCTAssertTrue(decorated.contains(#"<![CDATA["<head>fake</head>"]]>"#))
-    }
-}
-
-private final class StubOnlinePublicationPort: ErmaoShared.PublicationResourcePort, @unchecked Sendable {
-    private let code: String
-    private let contents: [String: String]
-    private let lock = NSLock()
-    private var paths: [String] = []
-
-    init(code: String) {
-        self.code = code
-        contents = [:]
-    }
-
-    init(contents: [String: String]) {
-        code = "UNEXPECTED_TEST_REQUEST"
-        self.contents = contents
-    }
-
-    var requestedPaths: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return paths
-    }
-
-    func read(apiPath: String, maximumBytes: Int32, mediaTypes: Set<String>) async throws -> any ErmaoShared.OnlinePublicationReadResult {
-        recordPath(apiPath)
-        if let text = contents[apiPath] {
-            let bytes = KotlinByteArray(size: Int32(text.utf8.count))
-            for (index, byte) in text.utf8.enumerated() {
-                bytes.set(index: Int32(index), value: Int8(bitPattern: byte))
-            }
-            return ErmaoShared.OnlinePublicationReadResultContent(bytes: bytes)
-        }
-        return ErmaoShared.OnlinePublicationReadResultFailure(code: code, stage: nil, cause: nil, source: "server")
-    }
-
-    func close() {}
-
-    private func recordPath(_ path: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        paths.append(path)
     }
 }
 

@@ -16,8 +16,6 @@ type FontProfile = {
 
 const profiles: Record<ReaderFontFamily, FontProfile> = {
   pingfang: { systemFamilies: ['PingFang SC', 'Hiragino Sans GB'], generic: 'sans-serif', embeddedFamily: 'Shuku Reader Sans', embeddedUrl: withBasePath('/fonts/reader/sans.woff2') },
-  heiti: { systemFamilies: ['Heiti SC', 'STHeiti'], generic: 'sans-serif', embeddedFamily: 'Shuku Reader Sans', embeddedUrl: withBasePath('/fonts/reader/sans.woff2') },
-  yahei: { systemFamilies: ['Microsoft YaHei', 'PingFang SC'], generic: 'sans-serif', embeddedFamily: 'Shuku Reader Sans', embeddedUrl: withBasePath('/fonts/reader/sans.woff2') },
   songti: { systemFamilies: ['Songti SC', 'STSong', 'SimSun'], generic: 'serif', embeddedFamily: 'Shuku Reader Songti', embeddedUrl: withBasePath('/fonts/reader/songti.woff2') },
   kaiti: { systemFamilies: ['Kaiti SC', 'STKaiti', 'KaiTi'], generic: 'serif', embeddedFamily: 'Shuku Reader Kaiti', embeddedUrl: withBasePath('/fonts/reader/kaiti.woff2') }
 };

@@ -36,10 +36,11 @@ struct ErmaoLibraryApp: App {
             ? ContentUITestFixture.makeContentClient()
             : ContentCompositionRoot.makeClient(cookieStore: cookieStore)
         contentClient = readerContentClient
-        readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
+        let readerComposition = usesContentFixture ? nil : try? IosReaderComposition(
             cookieStore: cookieStore, completedDownloads: managedDownloads, downloads: downloadCenter,
             contentClient: readerContentClient, coverCache: coverCache
         )
+        self.readerComposition = readerComposition
         shelfClient = usesContentFixture
             ? ContentUITestFixture.makeShelfClient()
             : ShelfCompositionRoot.makeClient(cookieStore: cookieStore)
@@ -66,7 +67,11 @@ struct ErmaoLibraryApp: App {
                     coverCache: coverCache,
                     downloads: managedDownloads,
                     reader: usesContentFixture ? nil : readerPrivateContentCache
-                )
+                ),
+                preparePrivateNamespaceTransition: {
+                    await readerComposition?.closeActiveReader()
+                    await downloadCenter.cancelAllTransfers()
+                }
             )
         )
     }

@@ -5,7 +5,7 @@ export const READER_SCHEMA_VERSION = 4 as const;
 export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' | 'txt';
 export type ReaderKind = 'reflowable' | 'comic' | 'pdf';
 export type ReaderTheme = 'day' | 'warm' | 'green' | 'night' | 'black';
-export type ReaderFontFamily = 'pingfang' | 'heiti' | 'songti' | 'yahei' | 'kaiti';
+export type ReaderFontFamily = 'pingfang' | 'songti' | 'kaiti';
 export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
 export type ReaderOperationKind = 'bootstrap' | 'navigation' | 'render' | 'preferences' | 'pagination';
 
@@ -127,12 +127,24 @@ type ReaderSourceBase = {
   totalPages?: number | null;
 };
 
+export type ReaderOriginalResource = Readonly<{
+  resourceId: string;
+  assetId: string;
+  /** Exact immutable asset identity used by every local-original store. */
+  assetVersion: `${number}:${number}`;
+  sourceFormat: ReflowableFormat;
+  mimeType: string;
+  sizeBytes: number;
+  mtimeMs: number;
+  downloadUrl: string;
+}>;
+
 export type ReaderSource = ReaderSourceBase & (
   | {
     kind: 'reflowable';
     sourceFormat: ReflowableFormat;
-    /** Absolute RWPM manifest URL consumed directly by the Readium Web adapter. */
-    publicationManifestUrl: string;
+    /** The original, unconverted publication downloaded before local parsing. */
+    originalResource: ReaderOriginalResource;
     navigation: ReaderNavigationEntry[];
     navigationFingerprint?: string;
   }
@@ -164,6 +176,8 @@ export type ReaderCapabilities = {
   supportsPagination: boolean;
   supportsScrolling: boolean;
   supportsSpreads: boolean;
+  /** Setting controls truthfully consumed by the active local adapter. Omitted by Reader v4 server payloads. */
+  supportedControls?: readonly string[];
 };
 
 export type ReaderCommand =

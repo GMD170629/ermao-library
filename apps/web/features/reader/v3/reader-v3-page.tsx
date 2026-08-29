@@ -38,6 +38,7 @@ import { ReaderEngineRuntime } from './reader-engine-runtime';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
 import { I18nText, type I18nContextValue } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
+import type { OriginalDownloadProgress } from './original-publication/browser-publication-store';
 
 const openingStorageKey = 'shuku:reader:opening';
 
@@ -114,15 +115,16 @@ function remoteProgressLabel(
   return chapter?.title ?? `${formatNumber(notice.displayPercent, { maximumFractionDigits: 1 })}%`;
 }
 
-function OpeningCover({ context, ready, background, color, indexProgress, onCancel }: {
+function OpeningCover({ context, ready, background, color, indexProgress, originalProgress, onCancel }: {
   context: OpeningContext | null;
   ready: boolean;
   background: string;
   color: string;
   indexProgress: { completed: number; total: number; percent: number } | null;
+  originalProgress: OriginalDownloadProgress | null;
   onCancel: () => void;
 }) {
-  const { t: i18nAttribute } = useAttributeI18n();
+  const { t: i18nAttribute, formatNumber } = useAttributeI18n();
   const [visible, setVisible] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -176,7 +178,29 @@ function OpeningCover({ context, ready, background, color, indexProgress, onCanc
       <div className="absolute inset-x-6 bottom-[calc(4rem+var(--shuku-safe-area-bottom))] text-center">
         <div className="line-clamp-2 text-lg font-semibold">{context?.title ?? i18nAttribute("正在打开阅读器")}</div>
         {context?.author ? <div className="mt-1 text-sm opacity-65">{context.author}</div> : null}
-        {indexProgress ? (
+        {originalProgress ? (
+          <div className="mx-auto mt-5 w-full max-w-sm">
+            <div className="text-sm font-medium"><I18nText>正在加载阅读内容</I18nText></div>
+            <div
+              className="mt-3 h-2 overflow-hidden rounded-full bg-current/15"
+              role="progressbar"
+              aria-label={i18nAttribute("阅读内容加载进度")}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(originalProgress.percent)}
+            >
+              <div className="h-full rounded-full bg-current transition-[width] duration-150" style={{ width: `${originalProgress.percent}%` }} />
+            </div>
+            <div className="mt-2 text-xs tabular-nums opacity-65">
+              {i18nAttribute("已加载 {value0} / {value1} · {value2}%", {
+                value0: formatNumber(originalProgress.loadedBytes),
+                value1: formatNumber(originalProgress.totalBytes),
+                value2: formatNumber(Math.round(originalProgress.percent))
+              })}
+            </div>
+            <button type="button" onClick={onCancel} className="mt-4 min-h-11 rounded-xl bg-current/10 px-4 text-sm transition hover:bg-current/15"><I18nText>取消并返回书库</I18nText></button>
+          </div>
+        ) : indexProgress ? (
           <div className="mx-auto mt-5 w-full max-w-sm">
             <div className="text-sm font-medium"><I18nText>正在建立全书位置索引</I18nText></div>
             <div
@@ -199,7 +223,12 @@ function OpeningCover({ context, ready, background, color, indexProgress, onCanc
             </div>
             <div className="mt-1 text-xs opacity-55"><I18nText>首次打开需要完成一次，之后将直接进入阅读。</I18nText></div>
           </div>
-        ) : null}
+        ) : (
+          <div className="mx-auto mt-5 w-full max-w-sm">
+            <div className="text-sm font-medium"><I18nText>正在加载阅读内容</I18nText></div>
+            <button type="button" onClick={onCancel} className="mt-4 min-h-11 rounded-xl bg-current/10 px-4 text-sm transition hover:bg-current/15"><I18nText>取消并返回书库</I18nText></button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -215,6 +244,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const [retry, setRetry] = useState(0);
   const [readerReady, setReaderReady] = useState(false);
   const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number; percent: number } | null>(null);
+  const [originalProgress, setOriginalProgress] = useState<OriginalDownloadProgress | null>(null);
   const [storageError, setStorageError] = useState('');
   const [remoteNotice, setRemoteNotice] = useState<RemoteProgressNotice | null>(null);
   const [externalNavigation, setExternalNavigation] = useState<{ id: number; location: ReaderLocation } | null>(null);
@@ -417,6 +447,8 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         ? ({
             RESOURCE_FORMAT_UNSUPPORTED: '当前文件格式尚未开放阅读支持',
             READER_FORMAT_MORPHOLOGY_MISMATCH: '文件格式与阅读器类型不匹配',
+            ORIGINAL_DESCRIPTOR_INVALID: '原文件下载信息无效。',
+            ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH: '原文件格式与媒体类型不匹配。',
             PUBLICATION_PROCESSING: '内容仍在准备中，请稍后重试',
             PUBLICATION_CORRUPT: '文件已损坏，无法打开',
             PUBLICATION_DRM: '受 DRM 保护的文件无法打开',
@@ -652,6 +684,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
           onRetry={() => setRetry((value) => value + 1)}
           onSelectResource={(nextResourceId, pageIndex) => router.push(readerHref(nextResourceId, pageIndex))}
           onIndexProgress={setIndexProgress}
+          onOriginalProgress={setOriginalProgress}
           onReady={() => setReaderReady(true)}
           onStorageWarning={setStorageError}
           externalNavigation={externalNavigation}
@@ -692,6 +725,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         background={activeSurface.background}
         color={activeSurface.color}
         indexProgress={indexProgress}
+        originalProgress={originalProgress}
         onCancel={() => router.push('/library')}
       />
     </>

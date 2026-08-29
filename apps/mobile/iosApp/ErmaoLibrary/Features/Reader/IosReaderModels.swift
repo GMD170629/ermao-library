@@ -39,7 +39,6 @@ enum IosReaderFailureCode: String, Sendable {
     case networkUnavailable = "NETWORK_UNAVAILABLE"
     case outOfMemoryRisk = "OUT_OF_MEMORY_RISK"
     case publicationTooLarge = "READER_PUBLICATION_TOO_LARGE"
-    case onlineLimit = "PUBLICATION_ONLINE_LIMIT"
     case engineError = "READER_ENGINE_ERROR"
     case locationRestoreFailed = "LOCATION_RESTORE_FAILED"
     case persistenceFailed = "PERSISTENCE_FAILED"
@@ -65,7 +64,7 @@ enum IosReaderFailureCode: String, Sendable {
     }
 
     var localizationKey: String {
-        self == .onlineLimit ? "reader.download.reason" : "reader.error.\(rawValue)"
+        "reader.error.\(rawValue)"
     }
 
     var localizedDescription: String {
@@ -75,16 +74,13 @@ enum IosReaderFailureCode: String, Sendable {
 
 struct IosReaderFailure: LocalizedError, Equatable, Sendable {
     let code: IosReaderFailureCode
-    let onlineContext: IosReaderOnlineFailureContext?
     let underlyingError: NSError?
 
     init(
         code: IosReaderFailureCode,
-        onlineContext: IosReaderOnlineFailureContext? = nil,
         underlyingError: NSError? = nil
     ) {
         self.code = code
-        self.onlineContext = onlineContext
         self.underlyingError = underlyingError
     }
 
@@ -102,30 +98,7 @@ struct IosReaderFailure: LocalizedError, Equatable, Sendable {
     }
 
     var errorDescription: String? {
-        onlineContext?.localizedDescription(for: code) ?? code.localizedDescription
-    }
-}
-
-/// Native presentation metadata from the shared online failure contract.
-/// Raw server messages, URLs and exception descriptions never enter user copy.
-struct IosReaderOnlineFailureContext: Equatable, Sendable {
-    let sourceCode: String
-    let stage: String?
-
-    init(sourceCode: String, stage: ErmaoShared.OnlinePublicationStage?) {
-        self.sourceCode = sourceCode
-        self.stage = stage?.wireValue
-    }
-
-    func localizedDescription(for code: IosReaderFailureCode, bundle: Bundle = .main) -> String {
-        let reason = bundle.localizedString(forKey: code.localizationKey, value: nil, table: nil)
-        guard let stage else { return reason }
-        return String(
-            format: bundle.localizedString(forKey: "reader.online.failure.format", value: nil, table: nil),
-            bundle.localizedString(forKey: "reader.online.stage.\(stage)", value: nil, table: nil),
-            reason,
-            sourceCode
-        )
+        code.localizedDescription
     }
 }
 

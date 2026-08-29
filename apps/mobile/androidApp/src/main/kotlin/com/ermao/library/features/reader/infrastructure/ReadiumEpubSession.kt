@@ -16,7 +16,6 @@ import com.ermao.library.shared.modules.reader.createReaderProgressPresentationU
 import com.ermao.library.shared.modules.reader.domain.mergeReaderBookmarks
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
-import com.ermao.library.shared.modules.reader.ReaderNavigationUnit
 import com.ermao.library.shared.modules.reader.ReaderNavigationTarget
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable
@@ -121,9 +120,7 @@ private fun ReaderBookmark.record(): AndroidReaderBookmarkRecord = AndroidReader
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumEpubSession(
-    private val source: com.ermao.library.shared.modules.reader.ReaderSource,
-    private val onlinePublication: com.ermao.library.shared.modules.reader.OnlinePublicationSession? = null,
-    private val canonicalUnits: List<ReaderNavigationUnit> = emptyList(),
+    private val source: LocalReaderSource,
     private val publicationStore: AndroidReaderPublicationStore,
     private val progressStore: ReaderProgressStore,
     private val deviceIdentity: AndroidReaderDeviceIdentity,
@@ -150,7 +147,7 @@ internal class ReadiumEpubSession(
     override val capabilities: ReaderCapabilities = ReaderCapabilities.epub(
         supportsVolumeKeys = true,
         supportsCustomFonts = true,
-    ).copy(supportsSpreadMode = false)
+    ).copy(supportsPageWidth = true)
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
 
@@ -203,7 +200,7 @@ internal class ReadiumEpubSession(
 
     private suspend fun openLocalPublication(): Publication {
         val file = try {
-            publicationStore.resolve(requireNotNull(source as? LocalReaderSource))
+            publicationStore.resolve(source)
         } catch (error: IllegalArgumentException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         } catch (error: FileNotFoundException) {
@@ -260,11 +257,7 @@ internal class ReadiumEpubSession(
     override suspend fun prepare(classLoader: ClassLoader): EpubNavigatorFragment {
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
-        val openedPublication = if (onlinePublication != null) {
-            RemoteReflowableReadiumPublicationFactory(onlinePublication) { _contentError.value = it }.open()
-        } else {
-            openLocalPublication()
-        }
+        val openedPublication = openLocalPublication()
         if (openedPublication.isRestricted) {
             openedPublication.close()
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.DrmProtected))
@@ -691,7 +684,6 @@ internal class ReadiumEpubSession(
     }
 
     override fun release() {
-        onlinePublication?.close()
         locationJob?.cancel()
         locationJob = null
         bookmarkScope = null
@@ -836,37 +828,19 @@ internal class ReadiumEpubSession(
     }
 
     private fun buildTableOfContents(openedPublication: Publication): List<ReaderTocEntry> {
-        val canonicalToc = canonicalUnits.mapNotNull { unit ->
-            val canonicalLocator = unit.href
-                ?.let { href -> Url(href) }
-                ?.let { href -> openedPublication.locatorFromLink(Link(href = href, title = unit.title)) }
-                ?: return@mapNotNull null
-            ReaderTocEntry(
-                title = unit.title,
-                location = locatorMapper.toDomain(canonicalLocator.withPublicationTotalProgression()),
-                id = unit.id,
-                index = unit.index,
-                target = ReaderNavigationTargetReflowable(checkNotNull(unit.href)),
-            )
-        }
-        val canonicalHrefs = canonicalToc.mapNotNull { (it.location as? ReflowReaderLocation)?.resourceKey }
-            .map { it.substringBefore('#') }
-            .toSet()
-        val publicationToc = openedPublication.tableOfContents
+        return openedPublication.tableOfContents
             .ifEmpty { openedPublication.readingOrder }
             .mapIndexedNotNull { index, link ->
                 val locator = openedPublication.locatorFromLink(link) ?: return@mapIndexedNotNull null
                 val href = locator.href.toString()
-                if (href.substringBefore('#') in canonicalHrefs) return@mapIndexedNotNull null
                 ReaderTocEntry(
                     title = link.title?.takeIf(String::isNotBlank) ?: (index + 1).toString(),
                     location = locatorMapper.toDomain(locator.withPublicationTotalProgression()),
                     id = href,
-                    index = canonicalToc.size + index,
+                    index = index,
                     target = ReaderNavigationTargetReflowable(href),
                 )
             }
-        return canonicalToc + publicationToc
     }
 
     private fun publishPresentationUpdate(progress: ReaderProgress) {
@@ -874,7 +848,10 @@ internal class ReadiumEpubSession(
         val namespaceKey = presentationNamespaceKey ?: return
         val bookId = source.bookId ?: return
         val href = reflow.resourceKey ?: return
-        val percent = ((reflow.totalProgression ?: reflow.progression ?: 0.0) * 100).coerceIn(0.0, 100.0)
+        val percent = reflow.totalProgression?.times(100)
+            ?: progress.percent
+            ?: remoteSnapshot?.displayPercent
+            ?: return
         val chapterTitle = tableOfContents.firstOrNull {
             (it.location as? ReflowReaderLocation)?.resourceKey == href
         }?.title

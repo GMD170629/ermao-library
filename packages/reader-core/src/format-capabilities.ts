@@ -1,27 +1,29 @@
 import type { ReaderKind, ReflowableFormat } from './types';
 
 export type SupportedReaderSourceFormat = ReflowableFormat | 'cbz' | 'zip' | 'cbr' | 'rar' | 'image_dir' | 'pdf';
+export type ReaderDeliveryMode = 'DOWNLOAD_ORIGINAL' | 'STREAM' | 'UNSUPPORTED';
 
 export type ReaderFormatCapability = Readonly<{
   sourceFormat: SupportedReaderSourceFormat;
   extension: `.${string}`;
   readerKind: ReaderKind;
+  deliveryMode: ReaderDeliveryMode;
 }>;
 
 export const READER_FORMAT_CAPABILITIES: readonly ReaderFormatCapability[] = [
-  { sourceFormat: 'epub', extension: '.epub', readerKind: 'reflowable' },
-  { sourceFormat: 'mobi', extension: '.mobi', readerKind: 'reflowable' },
-  { sourceFormat: 'azw', extension: '.azw', readerKind: 'reflowable' },
-  { sourceFormat: 'azw3', extension: '.azw3', readerKind: 'reflowable' },
-  { sourceFormat: 'prc', extension: '.prc', readerKind: 'reflowable' },
-  { sourceFormat: 'txt', extension: '.txt', readerKind: 'reflowable' },
-  { sourceFormat: 'fb2', extension: '.fb2', readerKind: 'reflowable' },
-  { sourceFormat: 'cbz', extension: '.cbz', readerKind: 'comic' },
-  { sourceFormat: 'zip', extension: '.zip', readerKind: 'comic' },
-  { sourceFormat: 'cbr', extension: '.cbr', readerKind: 'comic' },
-  { sourceFormat: 'rar', extension: '.rar', readerKind: 'comic' },
-  { sourceFormat: 'image_dir', extension: '.image-dir', readerKind: 'comic' },
-  { sourceFormat: 'pdf', extension: '.pdf', readerKind: 'pdf' }
+  { sourceFormat: 'epub', extension: '.epub', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'mobi', extension: '.mobi', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'azw', extension: '.azw', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'azw3', extension: '.azw3', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'prc', extension: '.prc', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'txt', extension: '.txt', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'fb2', extension: '.fb2', readerKind: 'reflowable', deliveryMode: 'DOWNLOAD_ORIGINAL' },
+  { sourceFormat: 'cbz', extension: '.cbz', readerKind: 'comic', deliveryMode: 'STREAM' },
+  { sourceFormat: 'zip', extension: '.zip', readerKind: 'comic', deliveryMode: 'STREAM' },
+  { sourceFormat: 'cbr', extension: '.cbr', readerKind: 'comic', deliveryMode: 'STREAM' },
+  { sourceFormat: 'rar', extension: '.rar', readerKind: 'comic', deliveryMode: 'STREAM' },
+  { sourceFormat: 'image_dir', extension: '.image-dir', readerKind: 'comic', deliveryMode: 'STREAM' },
+  { sourceFormat: 'pdf', extension: '.pdf', readerKind: 'pdf', deliveryMode: 'STREAM' }
 ] as const;
 
 const capabilityBySourceFormat = new Map(

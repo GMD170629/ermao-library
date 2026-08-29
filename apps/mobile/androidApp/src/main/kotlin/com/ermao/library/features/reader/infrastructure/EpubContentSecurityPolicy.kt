@@ -27,7 +27,7 @@ internal object EpubContentSecurityPolicy {
             "https://*/readium/scripts/readium-fixed.js; script-src-attr 'none'; " +
             "style-src 'self' https://*/readium/readium-css/ blob: 'unsafe-inline'; " +
             "img-src 'self' blob: data:; " +
-            "font-src 'self' https://*/readium/readium-css/fonts/ https://*/readium/fonts/ https://readium_assets/fonts/reader/ blob: data:; " +
+            "font-src 'self' https://*/readium/readium-css/fonts/ https://*/readium/fonts/ https://*/fonts/reader/ blob: data:; " +
             "media-src 'self' blob: data:"
     private const val DEVICE_VIEWPORT =
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>"

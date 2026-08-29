@@ -82,22 +82,22 @@ class AndroidDownloadCatalogTest {
     }
 
     @Test
-    fun legacyUserDownloadIsPreservedWithoutGuessingSourceFormat() = runTest {
-        val root = Files.createTempDirectory("download-catalog-kindle-cleanup-test").toFile()
+    fun exactAzw3UserDownloadRoundTripsWithoutFormatRewriting() = runTest {
+        val root = Files.createTempDirectory("download-catalog-azw3-test").toFile()
         val namespace = AndroidDownloadNamespace("server", "user", 3)
         try {
             val namespaceKey = sha256("server|user|3")
-            val localReference = "$namespaceKey/artifacts/legacy.kindle"
+            val localReference = "$namespaceKey/artifacts/book.azw3"
             val artifact = root.resolve(localReference).apply {
                 parentFile?.mkdirs()
                 writeBytes(byteArrayOf(1, 2, 3, 4))
             }
             val catalog = AndroidDownloadCatalog(root)
-            catalog.upsert(record("legacy-kindle", localReference, 2, format = "KINDLE"))
+            catalog.upsert(record("azw3", localReference, 2, format = "AZW3"))
 
-            assertEquals("KINDLE", AndroidDownloadCatalog(root).records(namespace).single().format)
+            assertEquals("AZW3", AndroidDownloadCatalog(root).records(namespace).single().format)
             assertTrue(artifact.exists())
-            assertTrue(root.resolve(namespaceKey).resolve("catalog.json").readText().contains("KINDLE"))
+            assertTrue(root.resolve(namespaceKey).resolve("catalog.json").readText().contains("AZW3"))
         } finally {
             root.deleteRecursively()
         }

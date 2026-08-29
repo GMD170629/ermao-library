@@ -15,6 +15,7 @@ import {
   resolveApplicationOnline
 } from '../../lib/pwa/network-availability';
 import { prepareForPwaUpdate } from '../../lib/pwa/update-coordination';
+import { privateCacheNamespace } from '../../lib/pwa/private-cache-namespace';
 import { activateReaderUser, clearPrivateReaderData, deactivateReaderUser, getReaderRuntime, startReaderRuntime, stopReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
 import { PRODUCT_NAME } from '../../lib/brand';
@@ -148,8 +149,7 @@ export function PwaClient() {
     setCurrentUserNamespace(userId, authzVersion);
     navigator.serviceWorker?.controller?.postMessage({
       type: 'SET_PRIVATE_CACHE_NAMESPACE',
-      userId,
-      authzVersion
+      namespace: privateCacheNamespace(userId, authzVersion)
     });
   }, [session?.authorization?.authzVersion, session?.user?.id]);
 

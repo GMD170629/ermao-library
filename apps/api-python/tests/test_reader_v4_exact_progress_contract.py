@@ -204,7 +204,7 @@ def test_shared_progression_only_fixture_has_stable_exactness_error(
     assert db_session.query(ReaderResourceProgress).count() == 0
 
 
-def test_exact_locator_resource_must_belong_to_the_normalized_publication(
+def test_exact_reflowable_locator_is_saved_without_reopening_the_publication(
     client: TestClient, db_session: Session
 ) -> None:
     resource = _login_and_resource(client, db_session)
@@ -218,9 +218,12 @@ def test_exact_locator_resource_must_belong_to_the_normalized_publication(
         f"/api/reader/v4/resources/{resource.id}/progress", json=payload
     )
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "READER_LOCATOR_RESOURCE_INVALID"
-    assert db_session.query(ReaderResourceProgress).count() == 0
+    assert response.status_code == 200, response.json()
+    assert (
+        response.json()["data"]["locator"]["engineLocator"]["payload"]["href"]
+        == "not-in-reading-order.xhtml"
+    )
+    assert db_session.query(ReaderResourceProgress).count() == 1
 
 
 def test_stale_revision_returns_current_exact_snapshot_without_overwrite(

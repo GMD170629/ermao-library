@@ -1,6 +1,7 @@
 package com.ermao.library.features.downloads.model
 
 import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
 
 enum class DownloadReaderEntryAction {
     OpenLocalArtifact,
@@ -15,7 +16,7 @@ fun downloadReaderEntryAction(
     localArtifactIsValid: (AndroidDownloadRecord) -> Boolean,
 ): DownloadReaderEntryAction {
     if (!ReaderFormatSupport.canReadOriginal(readerType, format)) {
-        return if (ReaderFormatSupport.canOpenOnline(readerType, format)) {
+        return if (ReaderFormatSupport.deliveryMode(readerType, format) == ReaderDeliveryMode.Stream) {
             DownloadReaderEntryAction.OpenServerReader
         } else {
             DownloadReaderEntryAction.ValidateUnsupportedAccess

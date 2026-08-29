@@ -48,6 +48,7 @@ class DownloadActionsViewModel(
     private val mutableFailureByResource = MutableStateFlow<Map<String, String>>(emptyMap())
     val failureByResource: StateFlow<Map<String, String>> = mutableFailureByResource.asStateFlow()
     private val activeTransfers = mutableMapOf<String, Job>()
+    private val readerOwnedTransfers = mutableSetOf<String>()
 
     fun readerLaunchCoordinator() = com.ermao.library.shared.modules.reader.ReaderLaunchCoordinator(sharedCatalog, gateway)
     val requestContext: DownloadRequestContext get() = context
@@ -64,21 +65,44 @@ class DownloadActionsViewModel(
         viewModelScope.launch { containTaskFailure("recovery") { runtime.recoverInterrupted(context.namespace) } }
     }
 
-    fun requestDownload(resourceId: String) = requestDownload(resourceId, null)
+    fun requestDownload(resourceId: String) {
+        enqueueDownload(resourceId, null, readerOwned = false)
+    }
 
     fun requestDownload(resourceId: String, expectedDescriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor?) {
-        if (resourceId.isBlank() || activeTransfers[resourceId]?.isActive == true) return
+        enqueueDownload(resourceId, expectedDescriptor, readerOwned = false)
+    }
+
+    /** Starts or rejoins a Reader-owned transfer across Activity recreation. */
+    fun requestReaderDownload(
+        resourceId: String,
+        expectedDescriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor,
+    ): Boolean = enqueueDownload(resourceId, expectedDescriptor, readerOwned = true)
+
+    private fun enqueueDownload(
+        resourceId: String,
+        expectedDescriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor?,
+        readerOwned: Boolean,
+    ): Boolean {
+        if (resourceId.isBlank()) return false
+        if (activeTransfers[resourceId]?.isActive == true) return resourceId in readerOwnedTransfers
+        if (readerOwned) readerOwnedTransfers += resourceId
         mutableFailureByResource.value -= resourceId
         val job = viewModelScope.launch {
             containTaskFailure(resourceId) {
-                when (val result = runtime.download(context, resourceId, UUID.randomUUID().toString(), sink, expectedDescriptor = expectedDescriptor)) {
+                when (val result = runtime.ensure(context, resourceId, UUID.randomUUID().toString(), sink,
+                    expectedDescriptor = expectedDescriptor)) {
                     is DownloadResourceFailure -> saveBootstrapFailure(resourceId, result.error.code)
                     else -> Unit
                 }
             }
         }
         activeTransfers[resourceId] = job
-        job.invokeOnCompletion { activeTransfers.remove(resourceId, job) }
+        job.invokeOnCompletion {
+            activeTransfers.remove(resourceId, job)
+            readerOwnedTransfers.remove(resourceId)
+        }
+        return readerOwned
     }
 
     fun performBatch(resourceIds: Set<String>, onComplete: (DownloadBatchResult) -> Unit) {
@@ -98,7 +122,12 @@ class DownloadActionsViewModel(
 
     fun cancelDownload(resourceId: String) { activeTransfers[resourceId]?.cancel() }
 
+    fun cancelReaderDownload(resourceId: String) {
+        if (readerOwnedTransfers.remove(resourceId)) activeTransfers[resourceId]?.cancel()
+    }
+
     fun cancelAll() {
+        readerOwnedTransfers.clear()
         activeTransfers.values.forEach(Job::cancel)
     }
 

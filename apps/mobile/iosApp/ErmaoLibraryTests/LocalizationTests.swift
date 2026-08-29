@@ -4,24 +4,6 @@ import ErmaoShared
 @testable import ErmaoLibrary
 
 final class LocalizationTests: XCTestCase {
-    func testOnlineFailureNamesTheStageAndActualTxtReasonInBothLanguages() throws {
-        for (locale, stage, reason) in [
-            ("en", "book information", "embedded NUL characters"),
-            ("zh-Hans", "书籍信息", "拒绝了正文中的 NUL 空字符"),
-        ] {
-            let path = try XCTUnwrap(Bundle.main.path(forResource: locale, ofType: "lproj"))
-            let bundle = try XCTUnwrap(Bundle(path: path))
-            let context = IosReaderOnlineFailureContext(sourceCode: "PUBLICATION_TXT_NUL_CHARACTER", stage: .manifest)
-            let description = context.localizedDescription(for: .txtNulCharacter, bundle: bundle)
-            XCTAssertTrue(description.contains(stage), description)
-            XCTAssertTrue(description.contains(reason), description)
-            XCTAssertTrue(description.contains("PUBLICATION_TXT_NUL_CHARACTER"), description)
-            XCTAssertFalse(description.contains("downloaded"), description)
-            XCTAssertFalse(description.contains("已下载"), description)
-            XCTAssertFalse(description.contains("%@"), description)
-        }
-    }
-
     func testCompatibilityCopyReflectsTheActualFailure() {
         XCTAssertEqual(
             ServerCompatibilityCopy.resolve(reasonCode: "CLIENT_UPDATE_REQUIRED"),
@@ -59,12 +41,6 @@ final class LocalizationTests: XCTestCase {
             "reader.error.PUBLICATION_TXT_NUL_CHARACTER",
             "reader.error.PUBLICATION_TXT_ENCODING_UNSUPPORTED",
             "reader.error.PUBLICATION_TXT_EMPTY",
-            "reader.online.failure.format",
-            "reader.online.stage.manifest",
-            "reader.online.stage.positions",
-            "reader.online.stage.chapter",
-            "reader.online.stage.resource",
-            "reader.download.reason",
             "reader.download.preparing",
             "reader.download.failed",
             "reader.download.transferring",

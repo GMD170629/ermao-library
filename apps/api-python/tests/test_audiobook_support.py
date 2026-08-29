@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -221,6 +222,31 @@ def test_audio_format_catalog_admits_every_declared_extension() -> None:
     assert audio_mime_type("book.ape") == "audio/x-ape"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows pipe regression")
+def test_ffprobe_output_reader_supports_windows_anonymous_pipes() -> None:
+    returncode, stdout, stderr = audio_metadata_module._run_process_with_output_limit(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'probe-ok')"],
+        timeout_seconds=2,
+        max_stdout_bytes=64,
+        max_stderr_bytes=64,
+    )
+
+    assert returncode == 0
+    assert stdout == b"probe-ok"
+    assert stderr == b""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows pipe regression")
+def test_ffprobe_output_reader_enforces_windows_stdout_limit() -> None:
+    with pytest.raises(ValueError, match="输出超过安全上限"):
+        audio_metadata_module._run_process_with_output_limit(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1024)"],
+            timeout_seconds=2,
+            max_stdout_bytes=64,
+            max_stderr_bytes=64,
+        )
+
+
 def test_new_audio_format_requires_ffprobe_confirmation(tmp_path, monkeypatch) -> None:
     source = tmp_path / "chapter.flac"
     source.write_bytes(b"audio")
@@ -234,6 +260,73 @@ def test_new_audio_format_requires_ffprobe_confirmation(tmp_path, monkeypatch) -
     with pytest.raises(audio_metadata_module.AudioInspectionError) as captured:
         parse_audio_metadata(source)
     assert captured.value.code == "AUDIO_PROBE_REQUIRED"
+
+
+def test_raw_aptx_duration_is_recovered_from_fixed_bitrate(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "chapter.aptx"
+    source.write_bytes(b"x" * 384_000)
+    payload = {
+        "streams": [
+            {
+                "codec_type": "audio",
+                "codec_name": "aptx",
+                "sample_rate": "48000",
+                "channels": 2,
+            }
+        ],
+        "format": {"size": str(source.stat().st_size)},
+    }
+    monkeypatch.setattr(audio_metadata_module.shutil, "which", lambda _name: "/ffprobe")
+    monkeypatch.setattr(
+        audio_metadata_module,
+        "_run_process_with_output_limit",
+        lambda *_args, **_kwargs: (0, json.dumps(payload).encode(), b""),
+    )
+
+    parsed = audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)
+
+    assert parsed["codec"] == "aptx"
+    assert parsed["duration_ms"] == 8_000
+
+
+def test_g726_probe_supplies_required_raw_demuxer_options(
+    tmp_path, monkeypatch
+) -> None:
+    source = tmp_path / "chapter.g726"
+    source.write_bytes(b"audio")
+    payload = {
+        "streams": [
+            {
+                "codec_type": "audio",
+                "codec_name": "adpcm_g726",
+                "duration": "1.5",
+            }
+        ],
+        "format": {},
+    }
+    observed: list[str] = []
+    monkeypatch.setattr(audio_metadata_module.shutil, "which", lambda _name: "/ffprobe")
+
+    def run(command, **_kwargs):
+        observed.extend(command)
+        return 0, json.dumps(payload).encode(), b""
+
+    monkeypatch.setattr(audio_metadata_module, "_run_process_with_output_limit", run)
+
+    parsed = audio_metadata_module._read_with_ffprobe(source, timeout_seconds=1)
+
+    assert parsed["duration_ms"] == 1_500
+    assert observed[-7:] == [
+        "-f",
+        "g726",
+        "-code_size",
+        "4",
+        "-ar",
+        "8000",
+        str(source),
+    ]
 
 
 @pytest.mark.parametrize("attached_picture", [False, True])

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.library.public import AssetRole
 
 
@@ -12,7 +13,7 @@ class ResourceAdapterId(str, Enum):
     EPUB = "epub"
     PDF = "pdf"
     TXT = "txt"
-    KINDLE = "kindle"
+    MOBI_FAMILY = "mobi-family"
     COMIC_ARCHIVE = "comic-archive"
     AUDIO_FILE = "audio-file"
     AUDIOBOOK_DIRECTORY = "audiobook-directory"
@@ -67,13 +68,19 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
         ),
     ),
     ResourceAdapterSpec(
-        adapter_id=ResourceAdapterId.KINDLE,
-        adapter_version="1",
-        format_label="KINDLE",
+        adapter_id=ResourceAdapterId.MOBI_FAMILY,
+        adapter_version="2",
+        format_label="MOBI",
         file_extensions=frozenset({".mobi", ".azw", ".azw3", ".prc"}),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
+        format_by_extension=(
+            (".mobi", "MOBI"),
+            (".azw", "AZW"),
+            (".azw3", "AZW3"),
+            (".prc", "PRC"),
+        ),
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.COMIC_ARCHIVE,
@@ -94,19 +101,7 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
         adapter_id=ResourceAdapterId.AUDIO_FILE,
         adapter_version="1",
         format_label="AUDIO",
-        file_extensions=frozenset(
-            {
-                ".aac",
-                ".flac",
-                ".m4a",
-                ".m4b",
-                ".mp3",
-                ".ogg",
-                ".opus",
-                ".wav",
-                ".wma",
-            }
-        ),
+        file_extensions=SUPPORTED_AUDIO_EXTS,
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
@@ -115,19 +110,7 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
         adapter_id=ResourceAdapterId.AUDIOBOOK_DIRECTORY,
         adapter_version="1",
         format_label="AUDIOBOOK_DIR",
-        file_extensions=frozenset(
-            {
-                ".aac",
-                ".flac",
-                ".m4a",
-                ".m4b",
-                ".mp3",
-                ".ogg",
-                ".opus",
-                ".wav",
-                ".wma",
-            }
-        ),
+        file_extensions=SUPPORTED_AUDIO_EXTS,
         is_directory_adapter=True,
         asset_role=AssetRole.TRACK,
         minimum_ready_assets=1,

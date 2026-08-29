@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "emscriptenVersion": "3.1.74",
+  "abiVersion": 1,
+  "moduleSha256": "3edb97889238c2d92518120ec6f30391b21ba406c6b5fbc699cf36f06e0019f7",
+  "wasmSha256": "48940214c74fcc9be2a18784e61dd2ceae39f068ee483cf7cd2c6a1bb311befc",
+  "sourceSha256": "dc3c64b0c857c1a7f8fd38d859e965adf2a05301a8d58cc858f5d0f1c0ca400c",
+  "webGlueSha256": "36a52c12ad334f03c884609dc8cc17291791c16a4839b8d55b5cd067a5bdce42"
+}

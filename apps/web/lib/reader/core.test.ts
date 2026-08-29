@@ -105,6 +105,11 @@ test('preserves an explicitly saved PDF width fit preference', () => {
   assert.equal(preferences.pdf.fit, 'width');
 });
 
+test('migrates retired sans font aliases to the single visible sans choice', () => {
+  assert.equal(normalizeReaderPreferences({ epub: { fontFamily: 'heiti' } }).epub.fontFamily, 'pingfang');
+  assert.equal(normalizeReaderPreferences({ epub: { fontFamily: 'yahei' } }).epub.fontFamily, 'pingfang');
+});
+
 test('rejects preference snapshots from retired schema versions', () => {
   assert.throws(() => normalizeReaderPreferences({ schemaVersion: 2 }), /schema version 5/);
   assert.throws(() => normalizeReaderPreferences({ schemaVersion: 3 }), /schema version 5/);

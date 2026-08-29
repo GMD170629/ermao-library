@@ -9,14 +9,13 @@ import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrap
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
-import com.ermao.library.shared.modules.reader.application.ReaderPublicationAccess
 import com.ermao.library.shared.modules.reader.application.ReaderPdfAccess
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResult
 import com.ermao.library.shared.modules.reader.application.ReaderComicAccess
 import com.ermao.library.shared.modules.reader.application.ReaderComicPage
 import com.ermao.library.shared.modules.reader.application.ReaderNavigationUnit
 import com.ermao.library.shared.modules.reader.application.ReaderPdfPage
-import com.ermao.library.shared.modules.reader.application.ReaderRemotePublicationAccess
+import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResource
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
@@ -53,12 +52,23 @@ class KtorReaderBootstrapGateway internal constructor(
                 )
                 is ApiResult.Success -> try {
                     val bootstrap = json.decodeFromJsonElement(ReaderBootstrapWire.serializer(), result.value)
-                    when (val manifest = loadComicManifest(client, bootstrap)) {
-                        is ComicManifestLoad.Failure -> ReaderBootstrapResult.Failure(
-                            manifest.code,
-                            manifest.recoverable,
-                        )
-                        is ComicManifestLoad.Content -> bootstrap.toDomain(request, manifest.value)
+                    when (val preflight = bootstrap.validateBeforeSecondaryRequest(request)) {
+                        is ReaderBootstrapPreflight.Failure -> preflight.value
+                        is ReaderBootstrapPreflight.Content -> when (val manifest = loadComicManifest(
+                            client,
+                            preflight.comicAccess,
+                        )) {
+                            is ComicManifestLoad.Failure -> ReaderBootstrapResult.Failure(
+                                manifest.code,
+                                manifest.recoverable,
+                            )
+                            is ComicManifestLoad.Content -> bootstrap.toDomain(
+                                request,
+                                preflight.sourceFormat,
+                                preflight.comicAccess,
+                                manifest.value,
+                            )
+                        }
                     }
                 } catch (_: IllegalArgumentException) {
                     ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
@@ -71,17 +81,11 @@ class KtorReaderBootstrapGateway internal constructor(
 
     private suspend fun loadComicManifest(
         client: ApiClient,
-        bootstrap: ReaderBootstrapWire,
+        access: ReaderPublicationAccessWire?,
     ): ComicManifestLoad {
-        if (bootstrap.readerType != "comic") return ComicManifestLoad.Content(null)
-        val access = bootstrap.publication
-            ?: return ComicManifestLoad.Failure("READER_COMIC_MANIFEST_INVALID", false)
-        val expectedPath = "/api/reader/v4/resources/${encodePathSegment(bootstrap.resource.id)}/comic/manifest"
-        if (access.kind != "comic" || access.manifestUrl != expectedPath) {
-            return ComicManifestLoad.Failure("READER_COMIC_MANIFEST_INVALID", false)
-        }
+        if (access == null) return ComicManifestLoad.Content(null)
         return when (val result = client.execute(
-            ApiRequest(ApiMethod.Get, access.manifestUrl, JsonObject.serializer()),
+            ApiRequest(ApiMethod.Get, requireNotNull(access.manifestUrl), JsonObject.serializer()),
         )) {
             is ApiResult.Failure -> ComicManifestLoad.Failure(
                 result.error.code,
@@ -97,33 +101,74 @@ class KtorReaderBootstrapGateway internal constructor(
         }
     }
 
-    private fun ReaderBootstrapWire.toDomain(
+    private fun ReaderBootstrapWire.validateBeforeSecondaryRequest(
         request: ReaderBootstrapRequest,
-        comicManifest: ReaderComicManifestWire?,
-    ): ReaderBootstrapResult {
-        val exactSourceFormat = ReaderSourceFormat.fromWireValue(sourceFormat)
+    ): ReaderBootstrapPreflight {
+        val exactSourceFormat = ReaderSourceFormat.entries.firstOrNull { it.wireValue == sourceFormat }
         if (schemaVersion != READER_SERVER_SCHEMA_VERSION || exactSourceFormat == null ||
-            readerType != exactSourceFormat.readerFormat.wireReaderType
+            readerType != exactSourceFormat.readerTypeWire()
         ) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_UNSUPPORTED", recoverable = false)
+            return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_BOOTSTRAP_UNSUPPORTED", recoverable = false),
+            )
         }
         if (userId != request.namespace.userId) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_USER_MISMATCH", recoverable = false)
+            return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_BOOTSTRAP_USER_MISMATCH", recoverable = false),
+            )
         }
-        if (resource.id != request.resourceId || resource.bookId != book.id) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
-        }
-        if (!resource.format.equals(exactSourceFormat.wireValue, ignoreCase = true) ||
-            !resource.readerType.equals(readerType, ignoreCase = true)
+        val expectedResourcePath = "/api/resources/${encodePathSegment(request.resourceId)}"
+        if (book.id.isBlank() || resource.id != request.resourceId || resource.bookId != book.id ||
+            resource.sourceNodeId.isBlank() || resourceUrl != expectedResourcePath ||
+            availableResources.any { it.id.isBlank() || it.bookId != book.id || it.sourceNodeId.isBlank() } ||
+            availableResources.map(ReaderBootstrapResourceWire::id).distinct().size != availableResources.size ||
+            assets.any { it.id.isBlank() || it.resourceId != resource.id || it.sourceNodeId.isBlank() } ||
+            assets.map(ReaderBootstrapAssetWire::id).distinct().size != assets.size ||
+            units.any { unit -> unit.assetId != null && assets.none { asset -> asset.id == unit.assetId } }
         ) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", recoverable = false)
+            return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false),
+            )
         }
-        if (availableResources.any { it.bookId != book.id } ||
-            assets.any { it.resourceId != resource.id } ||
-            units.any { it.assetId != null && assets.none { asset -> asset.id == it.assetId } }
+        if (resource.format != exactSourceFormat.fileKind || resource.readerType != readerType ||
+            availableResources.any { !it.hasExactFormatAndMorphology() }
         ) {
-            return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_IDENTITY_MISMATCH", recoverable = false)
+            return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", recoverable = false),
+            )
         }
+        if (!exactSourceFormat.isComic) {
+            return if (publication == null) {
+                ReaderBootstrapPreflight.Content(exactSourceFormat, comicAccess = null)
+            } else {
+                ReaderBootstrapPreflight.Failure(
+                    ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", recoverable = false),
+                )
+            }
+        }
+        val access = publication
+            ?: return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", recoverable = false),
+            )
+        val readerPath = "/api/reader/v4/resources/${encodePathSegment(request.resourceId)}/comic"
+        if (access.kind != "comic" || access.positionsUrl != null ||
+            access.manifestUrl != "$readerPath/manifest" ||
+            access.pageUrlTemplate != "$readerPath/pages/{pageIndex}" ||
+            access.imageVariants != listOf("original", "data-saver")
+        ) {
+            return ReaderBootstrapPreflight.Failure(
+                ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", recoverable = false),
+            )
+        }
+        return ReaderBootstrapPreflight.Content(exactSourceFormat, access)
+    }
+
+    private fun ReaderBootstrapWire.toDomain(
+        request: ReaderBootstrapRequest,
+        exactSourceFormat: ReaderSourceFormat,
+        validatedComicAccess: ReaderPublicationAccessWire?,
+        comicManifest: ReaderComicManifestWire?,
+    ): ReaderBootstrapResult {
         val orderedAssets = assets.sortedWith(compareBy<ReaderBootstrapAssetWire>({ it.sortOrder }, { it.id }))
         val primaryAsset = orderedAssets.firstOrNull { it.role.equals("PRIMARY", ignoreCase = true) }
             ?: orderedAssets.firstOrNull()
@@ -147,22 +192,13 @@ class KtorReaderBootstrapGateway internal constructor(
         } catch (_: IllegalArgumentException) {
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
         }
-        val comicAccess = publication?.takeIf { exactSourceFormat.isComic }?.let { access ->
-            if (access.kind != "comic" || access.positionsUrl != null ||
-                access.manifestUrl != "/api/reader/v4/resources/${resource.id}/comic/manifest" ||
-                access.pageUrlTemplate != "/api/reader/v4/resources/${resource.id}/comic/pages/{pageIndex}" ||
-                access.imageVariants != listOf("original", "data-saver")
-            ) {
-                return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
-            }
+        val comicAccess = validatedComicAccess?.let { access ->
             ReaderComicAccess(
-                manifestApiPath = access.manifestUrl,
-                pageApiPathTemplate = access.pageUrlTemplate,
+                manifestApiPath = requireNotNull(access.manifestUrl),
+                pageApiPathTemplate = requireNotNull(access.pageUrlTemplate),
                 imageVariants = access.imageVariants.toSet(),
             )
-        } ?: if (exactSourceFormat.isComic) {
-            return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
-        } else null
+        }
         val comicPages = if (exactSourceFormat.isComic) {
             val manifest = comicManifest
                 ?: return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
@@ -208,29 +244,19 @@ class KtorReaderBootstrapGateway internal constructor(
             return ReaderBootstrapResult.Failure("READER_PUBLICATION_ASSET_INVALID", false)
         }
         val displayTitle = resource.title.ifBlank { book.title }
-        val reflowable = exactSourceFormat.readerFormat in setOf(ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text)
-        val publicationAccess = if (reflowable) {
-            val path = "/api/reader/v4/resources/${encodePathSegment(resource.id)}/publication/"
-            if (publication?.kind != "reflowable" || publication.manifestUrl != path + "manifest.json" ||
-                publication.positionsUrl != path + "positions.json") {
-                return ReaderBootstrapResult.Failure("READER_PUBLICATION_MANIFEST_INVALID", false)
-            }
-            ReaderPublicationAccess(path + "manifest.json", path + "positions.json")
-        } else null
         val pdfAccess = if (exactSourceFormat == ReaderSourceFormat.Pdf) {
             ReaderPdfAccess(primaryAsset.url, primaryAsset.sizeBytes)
         } else null
         return ReaderBootstrapResult.Content(
             ReaderBootstrap(
                 target = target,
-                remoteAccess = ReaderRemotePublicationAccess(
+                resource = ReaderBootstrapResource(
                     resourceId = resource.id,
                     displayTitle = displayTitle,
                     bookId = book.id,
                     sourceFormat = exactSourceFormat,
                     assetId = primaryAsset.id.takeUnless { exactSourceFormat == ReaderSourceFormat.ImageDir },
                 ),
-                publicationAccess = publicationAccess,
                 pdfAccess = pdfAccess,
                 remoteSnapshot = remoteSnapshot,
                 units = orderedUnits.map { unit ->
@@ -293,6 +319,11 @@ private fun String.isSafeReaderMediaApiPath(): Boolean =
             matches(Regex("^/api/resources/[^/?#]+/asset$")))
 
 private fun ReaderSourceFormat.readerTypeWire(): String = readerFormat.wireReaderType
+
+private fun ReaderBootstrapResourceWire.hasExactFormatAndMorphology(): Boolean =
+    ReaderSourceFormat.entries.any { sourceFormat ->
+        format == sourceFormat.fileKind && readerType == sourceFormat.readerTypeWire()
+    }
 
 @Serializable
 private data class ReaderBootstrapWire(
@@ -407,6 +438,15 @@ private data class ReaderComicManifestPageWire(
 private sealed interface ComicManifestLoad {
     data class Content(val value: ReaderComicManifestWire?) : ComicManifestLoad
     data class Failure(val code: String, val recoverable: Boolean) : ComicManifestLoad
+}
+
+private sealed interface ReaderBootstrapPreflight {
+    data class Content(
+        val sourceFormat: ReaderSourceFormat,
+        val comicAccess: ReaderPublicationAccessWire?,
+    ) : ReaderBootstrapPreflight
+
+    data class Failure(val value: ReaderBootstrapResult.Failure) : ReaderBootstrapPreflight
 }
 
 @Serializable

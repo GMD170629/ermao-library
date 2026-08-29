@@ -181,7 +181,7 @@ class DownloadResourceRuntimeTest {
     }
 
     @Test
-    fun titleChangesReuseCompletedTaskButSourceVersionChangesCreateDistinctTask() = runBlocking {
+    fun titleChangesReuseCompletedTaskButSourceVersionReplacesStaleTask() = runBlocking {
         val catalog = InMemoryDownloadCatalogRepository()
         val original = descriptor.copy(source = descriptor.source.copy(sourceModifiedAtMillis = 100))
         val first = SuccessfulGateway(original)
@@ -192,7 +192,35 @@ class DownloadResourceRuntimeTest {
         val revised = SuccessfulGateway(original.copy(source = original.source.copy(sourceModifiedAtMillis = 101)))
         DownloadResourceRuntime(catalog, revised, { 42 }).download(context, "resource", "revised", NoopSink)
         assertEquals(1, revised.requests.size)
-        assertEquals(2, catalog.listTasks(namespace).size)
+        assertEquals(1, catalog.listTasks(namespace).size)
+        assertEquals(101, catalog.listTasks(namespace).single().descriptor.source.sourceModifiedAtMillis)
+    }
+
+    @Test
+    fun terminalOrMissingFileRecordIsDiscardedAndRebuilt() = runBlocking {
+        val catalog = InMemoryDownloadCatalogRepository()
+        catalog.saveTask(com.ermao.library.shared.modules.downloads.domain.DownloadTask(
+            id = "broken",
+            descriptor = descriptor,
+            status = DownloadTaskStatus.FailedTerminal,
+            failureCode = "DOWNLOAD_LOCAL_FILE_INVALID",
+        ))
+        val discarded = mutableListOf<String>()
+        val sink = object : DownloadByteSink {
+            override suspend fun discard(request: DownloadSinkRequest) {
+                discarded += request.taskId
+            }
+            override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession = error("Unused")
+        }
+        val gateway = SuccessfulGateway(descriptor)
+
+        assertIs<DownloadResourceResult.Completed>(
+            DownloadResourceRuntime(catalog, gateway, { 42 }).ensure(context, "resource", "rebuilt", sink),
+        )
+
+        assertEquals(listOf("broken"), discarded)
+        assertEquals("rebuilt", catalog.listTasks(namespace).single().id)
+        assertEquals(1, gateway.requests.size)
     }
 
     private class SuccessfulGateway(

@@ -55,9 +55,7 @@ class PublishedResourceCover:
 
 
 class ResourceCoverPublicationPort(Protocol):
-    def prepare(
-        self, *, resource_id: str, content: bytes
-    ) -> PreparedResourceCover: ...
+    def prepare(self, *, resource_id: str, content: bytes) -> PreparedResourceCover: ...
 
     def publish(
         self,
@@ -180,9 +178,7 @@ class UploadResourceCover:
         if context is None:
             raise ResourceNotFoundError
 
-        previous_cover_path = self._covers.current_cover_path(
-            resource_id=context.id
-        )
+        previous_cover_path = self._covers.current_cover_path(resource_id=context.id)
         prepared = self._publication.prepare(
             resource_id=context.id,
             content=command.content,

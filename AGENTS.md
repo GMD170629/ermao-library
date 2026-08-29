@@ -459,20 +459,20 @@ TXT support must use their parser-backed in-memory Publication directly. The
 existing dormant import conversion subsystem is not a Reader fallback and must
 not be connected to Reader bootstrap, delivery, download, cache, or progress.
 
-### Online Reading and Offline Download Separation
+### Reflowable Download-Then-Read and Streamed Fixed Layout
 
-Online reading and Downloads have separate ownership. Native App reading is online-first, with a visible download transition when online capabilities are insufficient. Web retains the stricter online-only strategy.
+Every first-party Reader opens reflowable publications from a verified complete original. `EPUB`, `FB2`, `TXT`, `MOBI`, `AZW`, `AZW3`, and `PRC` therefore use download-then-read on Web, Android, and iOS. PDF and comics retain their bounded online delivery, and audio retains its dedicated player flow.
 
-- Normal online Reader startup fetches only required original chapters/resources, comic pages or bounded PDF ranges. It must display readable content without downloading the whole publication. No automatic cache warmup or background completion of the original is allowed.
-- Native Android/iOS use the shared Reader launch coordinator and a 2 GiB inclusive admission limit. Admission does not promise successful parsing, rendering, memory safety under all device conditions, or smooth reading. Preserve full chapters; do not add synthetic chapters, conversion artifacts, indexing infrastructure or incremental parsers to bypass engine limits.
-- Explicit online parser/size limits and unsupported PDF Range may select a visible Download Center transition after checking local capability. Authentication, corruption, revision changes and ordinary network errors must not select download. A known local allocation/engine limitation fails before a pointless download. A failed local parse never redownloads or loops back online.
-- Downloads owns the only full-file transport, task, resume and publication implementation. Native account lifecycle owns that runtime. Reader observes/reuses its tasks through the public application boundary, preserving resource identity and navigation/progress. Verified local files open without awaiting network; completed files remain in Downloads.
-- Closing/cancelling removes the auto-open intention. Pause a transfer started by that launch while retaining resumable bytes; observing an existing independent transfer does not take cancellation ownership. Account changes and late completions must not open a reader.
-- Shared online adapters retain bounded application buffers (currently 64 MiB body cache, 8 MiB chapter response, 1 MiB PDF request), validate headers and reject oversize/invalid responses. Native SDK ordinary caches are allowed; do not patch SDK internals to enforce an exact aggregate cache budget. Release owned sessions on close/account change. No online original-file body store or background completion.
-- Web keeps its existing request/cache limits, dependency patches, no full-download fallback and no persistent online body store. Native concessions do not change Web.
-- All sizes, offsets, totals and admission comparisons are 64-bit. Check directory resources by total original member bytes. Keep independent image, XML, expanded-archive and allocation safety limits. Pass the shared admission policy explicitly across native language boundaries.
-- Server parser budgets remain bounded, with explicit lifecycle, revision invalidation and concurrent-request coalescing. Metadata/HEAD must not read chapter bodies. Online size/budget errors are typed separately from corrupt publications.
-- Verify cold online opening without original-file requests/tasks, visible transition and real progress, task reuse, cancellation, account changes, retry, exact navigation and offline reopening. Report admission tests separately from real large-file opening and device evidence.
+- Reader entry does not expose a separate product mode or change its button/detail copy. A missing reflowable original enters the Reader loading surface, reports real bytes and percentage, and opens only after the complete original is validated. There is no online-readability or experience heuristic and no hidden chapter/RWPM fallback.
+- Downloads owns the only native full-file transport, task, resume, rebuild and completion implementation. Reader creates or observes that public task, keyed by namespace, `resourceId`, `assetId`, and the `size:mtime` asset version. Missing or stale files are invalidated and rebuilt through Downloads; local parser failures do not redownload.
+- Web uses the same authorized original-asset contract through a Reader-owned, account/version-scoped browser Cache Storage adapter. It has no download list, pause/resume or persistent task state: cancellation deletes the incomplete entry and a later attempt starts from zero. A fresh authorized bootstrap is still required for a cold open.
+- The downloaded original is the actual parser input. Reader never persists a converted EPUB, ZIP, unpacked directory, generated chapter set, or other derived publication. Browser/native parsers expose virtual resources and positions in memory only.
+- Local content ownership is independent from Reader progress and bookmark ownership. Authenticated sessions continue the established non-blocking synchronization even though publication bytes are local; completed native files can open without waiting for network.
+- Closing/cancelling removes the auto-open intention. Native launches pause only transfers they own while keeping resumable task state; observing an independent Download does not take cancellation ownership. Configuration recreation, account changes and late completion must not open the wrong Reader.
+- PDF and comic failures never select an implicit complete download. Preserve their current Range/page budgets and explicit Download Center behavior. Audio is outside this transition.
+- The shared 2 GiB inclusive admission limit and independent image, XML, expanded-archive, DRM, allocation and parser limits remain hard safety boundaries. All sizes, offsets and totals are 64-bit. Admission still does not promise that every device can render every admitted file.
+- Server Reader bootstrap for reflowable resources is metadata/progress only. It must not parse navigation or publish manifest, positions or chapter-resource URLs. Server parser infrastructure may remain for import and exact locator validation, but not as a first-party body-delivery fallback.
+- Verification must prove the first transfer completes before opening, progress advances while the response is still open, cache/task reuse avoids a second body transfer, missing files rebuild, cancellation cannot publish a partial, and reflowable sessions issue no manifest/positions/chapter requests. Physical-device evidence remains required for native acceptance.
 
 ### Mobile Work Detail single source of truth
 
@@ -486,9 +486,9 @@ Content, cover, sort and permission contracts continue to follow the Web impleme
 `apps/web/features/books/book-detail-page.tsx`,
 `apps/web/features/books/ui/book-content-browser.tsx`, and
 `apps/web/features/books/ui/resource-detail-view.tsx`. Directories retain breadcrumbs,
-folders, pagination, view modes and the six Web sort orders. Reading is online-first;
-offline download is a separate optional action. Audio playback remains explicitly
-unavailable in this navigation-only iteration.
+folders, pagination, view modes and the six Web sort orders. Reflowable reading implicitly
+uses the verified original-download transition; explicit Download Center actions remain
+available. Audio playback remains explicitly unavailable in this navigation-only iteration.
 
 ### Android Physical-Device-Default Development
 

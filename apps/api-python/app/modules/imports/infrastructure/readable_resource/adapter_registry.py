@@ -283,7 +283,10 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
     ) -> LocalMetadataCandidate | None:
         if adapter.adapter_id is ResourceAdapterId.EPUB:
             return self._inspect_epub(path)
-        if adapter.adapter_id in {ResourceAdapterId.TXT, ResourceAdapterId.KINDLE}:
+        if adapter.adapter_id in {
+            ResourceAdapterId.TXT,
+            ResourceAdapterId.MOBI_FAMILY,
+        }:
             return self._inspect_reflowable(path, adapter.format_label)
         return None
 

@@ -14,16 +14,20 @@ struct IosReflowableReaderView: View {
     var onRetry: () -> Void = {}
 
     var body: some View {
-        ZStack {
-            palette.background.ignoresSafeArea()
-            content
-            if session.phase == .reading || session.phase == .background {
-                IosReaderControls(session: session, onClose: close)
-            }
-            if session.resumePrompt != nil || session.restoreWarning != nil {
-                resumeNotice
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .zIndex(2)
+        GeometryReader { geometry in
+            ZStack {
+                palette.background.ignoresSafeArea()
+                content
+                    .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pageWidth))
+                    .frame(maxHeight: .infinity)
+                if session.phase == .reading || session.phase == .background {
+                    IosReaderControls(session: session, onClose: close)
+                }
+                if session.resumePrompt != nil || session.restoreWarning != nil {
+                    resumeNotice
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .zIndex(2)
+                }
             }
         }
         .animation(.easeInOut(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18), value: session.controlsVisible)
@@ -165,6 +169,11 @@ struct IosReflowableReaderView: View {
             dismiss()
         }
     }
+}
+
+func readerContentWidth(available: CGFloat, preferred: Int) -> CGFloat {
+    guard available > 640 else { return available }
+    return min(available, CGFloat(preferred))
 }
 
 struct ReaderPalette {

@@ -49,6 +49,11 @@ function privateCacheName(kind) {
   return privateCacheNamespace ? `${PRIVATE_CACHE_PREFIX}${privateCacheNamespace}-${kind}` : '';
 }
 
+function obsoletePrivateCacheNames(cacheNames, nextNamespace) {
+  const currentPrefix = `${PRIVATE_CACHE_PREFIX}${nextNamespace}-`;
+  return cacheNames.filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX) && !cacheName.startsWith(currentPrefix));
+}
+
 function debugLog(level, message, details) {
   self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
     .then((clients) => {
@@ -308,16 +313,13 @@ self.addEventListener('message', (event) => {
     event.waitUntil(clearPrivateCaches().then(() => debugLog('info', 'private caches cleared')));
   }
   if (event.data?.type === 'SET_PRIVATE_CACHE_NAMESPACE') {
-    const userId = safeCacheNamespacePart(event.data.userId);
-    const authzVersion = safeCacheNamespacePart(event.data.authzVersion);
-    const nextNamespace = userId && authzVersion ? `${userId}-${authzVersion}` : '';
+    const nextNamespace = safeCacheNamespacePart(event.data.namespace);
     if (nextNamespace && nextNamespace !== privateCacheNamespace) {
       privateCacheNamespace = nextNamespace;
       event.waitUntil(
         caches.keys()
           .then((keys) => Promise.all(
-            keys
-              .filter((cacheName) => cacheName.startsWith(PRIVATE_CACHE_PREFIX) && !cacheName.startsWith(`${PRIVATE_CACHE_PREFIX}${nextNamespace}-`))
+            obsoletePrivateCacheNames(keys, nextNamespace)
               .map((cacheName) => caches.delete(cacheName))
           ))
           .then(() => debugLog('info', 'private cache namespace updated', nextNamespace))

@@ -1,6 +1,6 @@
 # ADR 0016: Source-preserving Reader Publications
 
-- Status: Accepted
+- Status: Accepted for source preservation; delivery model superseded by ADR 0025
 - Date: 2026-08-16
 - Supersedes: ADR 0013
 
@@ -13,17 +13,17 @@ persisted representation without being required by Readium or its Locator model.
 
 ## Decision
 
-Online Reader consumes only bounded resources from the original publication.
-Explicit Downloads and local imports preserve the original file. Reader must not
+Every reflowable Reader consumes the verified complete original publication through
+its platform-local parser. Native Downloads, Web Reader storage and local imports
+preserve the original file. Reader must not
 create, cache, advertise or download a
 derived EPUB, ZIP or unpacked publication directory.
 
 MOBI, AZW, AZW3 and PRC use the pinned libmobi C ABI to expose a bounded virtual
 Publication. TXT uses the deterministic TXT parser to expose the equivalent
 virtual Publication. These in-memory resources are parsing results, not converted
-files. Android, iOS and Web obtain the same logical Publication through the
-authenticated manifest, positions and resource routes and pass it directly to
-native Readium or Readium TS.
+files. Android, iOS and Web construct the same logical Publication locally from the
+downloaded original and pass it directly to native Readium or Readium TS.
 
 Publication resource bytes come from the format adapter. Delivery code may set
 HTTP security headers and native containers may apply the documented head-only
@@ -42,10 +42,11 @@ progress restoration or any Reader fallback without a new explicit decision.
 
 ## Consequences
 
-- Explicit Downloads preserves the original source; Reader never starts a download.
-- Web resource requests parse and stream virtual Publication resources on demand.
-- Native online readers use shared authenticated chapter access; local imports and
-  explicit completed downloads retain their existing original-format parsers.
+- Native Reader starts or observes the authoritative Downloads task when the original
+  is missing; Web stores the original through its Reader-owned browser adapter.
+- Web and native parsers expose virtual Publication resources locally on demand.
+- Every completed original retains its original-format parser and no server chapter
+  delivery fallback.
 - Parser failures are visible instead of being hidden by a derived EPUB repair.
 - Reader v4 removes the former render-artifact field and endpoint as a coordinated
   breaking change.

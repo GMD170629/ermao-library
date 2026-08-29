@@ -4,7 +4,7 @@ import pytest
 
 from app.contracts.media_capabilities import (
     canonical_publication_mime_type,
-    exact_source_format,
+    capability_for_format,
     resolve_asset_mime_type,
 )
 
@@ -38,50 +38,33 @@ def test_image_directory_has_no_synthetic_publication_mime_type() -> None:
 
 
 @pytest.mark.parametrize(
-    ("filename", "expected"),
+    ("source_format", "filename", "expected"),
     [
-        ("book.mobi", "MOBI"),
-        ("book.azw", "AZW"),
-        ("book.AZW3", "AZW3"),
-        ("book.prc", "PRC"),
+        ("AZW", "book.azw", "application/vnd.amazon.ebook"),
+        ("AZW3", "book.azw3", "application/vnd.amazon.ebook"),
+        ("MOBI", "book.mobi", "application/x-mobipocket-ebook"),
+        ("PRC", "book.prc", "application/x-mobipocket-ebook"),
     ],
 )
-def test_kindle_catalog_family_recovers_exact_original_format(
-    filename: str,
-    expected: str,
-) -> None:
-    assert exact_source_format(resource_format="KINDLE", filename=filename) == expected
-
-
-def test_exact_source_format_preserves_non_kindle_resource_format() -> None:
-    assert (
-        exact_source_format(resource_format="IMAGE_DIR", filename="001.png")
-        == "IMAGE_DIR"
-    )
-
-
-@pytest.mark.parametrize(
-    ("filename", "expected"),
-    [
-        ("book.azw", "application/vnd.amazon.ebook"),
-        ("book.azw3", "application/vnd.amazon.ebook"),
-        ("book.mobi", "application/x-mobipocket-ebook"),
-        ("book.prc", "application/x-mobipocket-ebook"),
-    ],
-)
-def test_kindle_catalog_family_uses_exact_original_mime(
+def test_mobi_family_actual_format_uses_canonical_mime(
+    source_format: str,
     filename: str,
     expected: str,
 ) -> None:
     assert (
         resolve_asset_mime_type(
-            resource_format="KINDLE",
+            resource_format=source_format,
             asset_role="PRIMARY",
             filename=filename,
             stored_mime_type="application/octet-stream",
         )
         == expected
     )
+
+
+def test_generic_kindle_format_is_unsupported() -> None:
+    assert capability_for_format("KINDLE") is None
+    assert canonical_publication_mime_type("KINDLE") is None
 
 
 @pytest.mark.parametrize("stored", [None, "", "application/octet-stream"])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.application.readable_resource.ports import adapter_identity
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
@@ -19,8 +20,8 @@ from app.modules.imports.domain.resource_adapters import (
         ("scan.PDF", ResourceAdapterId.PDF),
         ("notes.txt", ResourceAdapterId.TXT),
         ("legacy.fb2", ResourceAdapterId.TXT),
-        ("book.mobi", ResourceAdapterId.KINDLE),
-        ("book.azw3", ResourceAdapterId.KINDLE),
+        ("book.mobi", ResourceAdapterId.MOBI_FAMILY),
+        ("book.azw3", ResourceAdapterId.MOBI_FAMILY),
         ("issue.cbz", ResourceAdapterId.COMIC_ARCHIVE),
         ("pack.zip", ResourceAdapterId.COMIC_ARCHIVE),
         ("chapter.mp3", ResourceAdapterId.AUDIO_FILE),
@@ -56,6 +57,21 @@ def test_directory_adapter_match(
     assert adapter is not None
     assert adapter.adapter_id is adapter_id
     assert adapter.is_directory_adapter is True
+
+
+@pytest.mark.parametrize("extension", sorted(SUPPORTED_AUDIO_EXTS))
+def test_every_declared_audio_extension_has_file_and_directory_adapters(
+    extension: str,
+) -> None:
+    file_adapter = unique_adapter_or_none(match_file_adapters(f"chapter{extension}"))
+    directory_adapter = unique_adapter_or_none(
+        match_directory_adapters_for_samples((f"01{extension}",))
+    )
+
+    assert file_adapter is not None
+    assert file_adapter.adapter_id is ResourceAdapterId.AUDIO_FILE
+    assert directory_adapter is not None
+    assert directory_adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
 
 
 def test_file_adapter_does_not_match_directory_only_extensions_as_directory() -> None:
@@ -105,6 +121,27 @@ def test_text_adapter_preserves_the_concrete_source_format(
     assert adapter is not None
     assert adapter.adapter_id is ResourceAdapterId.TXT
     assert source_format_for_filename(adapter, filename) == expected_format
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format"),
+    (
+        ("book.mobi", "MOBI"),
+        ("book.azw", "AZW"),
+        ("book.azw3", "AZW3"),
+        ("book.prc", "PRC"),
+    ),
+)
+def test_mobi_family_adapter_persists_the_concrete_source_format(
+    filename: str,
+    expected_format: str,
+) -> None:
+    adapter = unique_adapter_or_none(match_file_adapters(filename))
+    assert adapter is not None
+    identity = adapter_identity(adapter, source_name=filename)
+    assert identity.adapter_id == ResourceAdapterId.MOBI_FAMILY.value
+    assert identity.adapter_version == "2"
+    assert identity.format_label == expected_format
 
 
 @pytest.mark.parametrize(

@@ -203,9 +203,7 @@ def test_resource_cover_upload_publishes_validated_resource_cover(
 
     assert response.status_code == 200, response.text
     db_session.expire_all()
-    metadata = db_session.get(
-        LibraryReadableResourceMetadata, "upload-cover-resource"
-    )
+    metadata = db_session.get(LibraryReadableResourceMetadata, "upload-cover-resource")
     assert metadata is not None
     assert metadata.cover_path == "covers/resources/upload-cover-resource.png"
     assert metadata.cover_status == "READY"
@@ -220,9 +218,7 @@ def test_resource_cover_upload_rejects_invalid_content_without_changing_cover(
 ) -> None:
     _login(client, db_session)
     _add_graph(db_session, "invalid-cover-book", "invalid-cover-resource")
-    metadata = db_session.get(
-        LibraryReadableResourceMetadata, "invalid-cover-resource"
-    )
+    metadata = db_session.get(LibraryReadableResourceMetadata, "invalid-cover-resource")
     assert metadata is not None
     metadata.cover_path = "covers/resources/existing.png"
     metadata.cover_status = "READY"
@@ -239,9 +235,7 @@ def test_resource_cover_upload_rejects_invalid_content_without_changing_cover(
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == "INVALID_RESOURCE_COVER"
     db_session.expire_all()
-    metadata = db_session.get(
-        LibraryReadableResourceMetadata, "invalid-cover-resource"
-    )
+    metadata = db_session.get(LibraryReadableResourceMetadata, "invalid-cover-resource")
     assert metadata is not None
     assert (metadata.cover_path, metadata.cover_status) == (
         "covers/resources/existing.png",

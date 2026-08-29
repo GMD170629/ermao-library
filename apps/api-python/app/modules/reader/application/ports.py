@@ -109,7 +109,7 @@ class ReaderClock(Protocol):
     def now(self) -> datetime: ...
 
 
-class ReaderPublicationLocatorIndex(Protocol):
+class ReaderLocatorIndex(Protocol):
     def validate(
         self,
         *,

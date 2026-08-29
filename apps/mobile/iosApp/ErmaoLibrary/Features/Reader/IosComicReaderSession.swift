@@ -151,7 +151,11 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             }
             pageIndex = initialPage?.pageIndex ?? 0
             phase = .reading
-            await progressCoordination?.checkForRemoteProgress()
+            if remoteSource == nil {
+                progressCoordination?.beginDeferredSynchronization()
+            } else {
+                await progressCoordination?.checkForRemoteProgress()
+            }
         } catch let failure as IosReaderFailure {
             await openedPublication?.close()
             openedPublication = nil
@@ -241,9 +245,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         guard phase != .closed else { return }
         phase = .closing
         pendingSave?.cancel()
-        try? await persistCurrentPage()
-        try? await progressStore.retryPendingUpload()
-        try? await progressStore.awaitPendingUpload()
+        try? await persistCurrentPage(waitForSynchronization: false)
+        progressCoordination?.close()
         navigator?.delegate = nil
         navigator = nil
         httpServer = nil
@@ -351,7 +354,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         }
     }
 
-    private func persistCurrentPage() async throws {
+    private func persistCurrentPage(waitForSynchronization: Bool = true) async throws {
         guard hasReadingActivity,
               phase == .reading || phase == .background || phase == .closing,
               let locator = navigator?.currentLocation,
@@ -360,7 +363,9 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         guard let progress = makeProgress(page: page) else { return }
         let percent = progress.percent?.doubleValue ?? 0
         try await progressStore.save(progress: progress)
-        await progressCoordination?.refreshAfterSave()
+        if waitForSynchronization {
+            await progressCoordination?.refreshAfterSave()
+        }
         remoteProgressSnapshot = progressCoordination?.remoteSnapshot
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.modules.library.application.resource_details import (
     ListResourceDetails,
@@ -36,9 +36,6 @@ class FakeQueries:
     def list_assets(self, **_kwargs: object) -> tuple[ResourceAssetDetail, ...]:
         return self.assets
 
-    def has_navigation_units(self, **_kwargs: object) -> bool:
-        return bool(self.units)
-
     def resolve_pdf_page_count(self, **_kwargs: object) -> int | None:
         return self.resolved_page_count
 
@@ -46,14 +43,6 @@ class FakeQueries:
         self, **_kwargs: object
     ) -> ResourceCurrentChapter | None:
         return None
-
-
-@dataclass
-class FakeNavigation:
-    prepared: list[str] = field(default_factory=list)
-
-    def prepare(self, *, resource_id: str, **_kwargs: object) -> None:
-        self.prepared.append(resource_id)
 
 
 def resource(
@@ -103,9 +92,7 @@ def test_reflowable_details_keep_toc_level_and_apply_pagination() -> None:
         )
         for index in range(55)
     )
-    query = ListResourceDetails(
-        FakeQueries(resource("EPUB"), units=units), FakeNavigation()
-    )
+    query = ListResourceDetails(FakeQueries(resource("EPUB"), units=units))
 
     result = query.execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=2, page_size=50
@@ -118,23 +105,17 @@ def test_reflowable_details_keep_toc_level_and_apply_pagination() -> None:
     assert all(unit.level == 2 for unit in result.units)
 
 
-def test_reflowable_details_prepare_missing_navigation_then_return_empty_state() -> (
-    None
-):
-    navigation = FakeNavigation()
-    result = ListResourceDetails(FakeQueries(resource("MOBI")), navigation).execute(
+def test_reflowable_details_do_not_prepare_missing_server_navigation() -> None:
+    result = ListResourceDetails(FakeQueries(resource("MOBI"))).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
     )
 
-    assert navigation.prepared == ["resource-1"]
     assert result.units == ()
     assert result.total == 0
 
 
 def test_pdf_details_are_synthesized_without_page_rows() -> None:
-    result = ListResourceDetails(
-        FakeQueries(resource("PDF", page_count=26)), FakeNavigation()
-    ).execute(
+    result = ListResourceDetails(FakeQueries(resource("PDF", page_count=26))).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=2, page_size=24
     )
 
@@ -145,7 +126,7 @@ def test_pdf_details_are_synthesized_without_page_rows() -> None:
 
 def test_pdf_details_resolve_page_count_when_legacy_metadata_is_missing() -> None:
     result = ListResourceDetails(
-        FakeQueries(resource("PDF"), resolved_page_count=3), FakeNavigation()
+        FakeQueries(resource("PDF"), resolved_page_count=3)
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=24
     )
@@ -161,7 +142,7 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
         asset("page-1", "page1.jpg", role="PAGE"),
     )
     image_result = ListResourceDetails(
-        FakeQueries(resource("IMAGE_DIR"), assets=image_assets), FakeNavigation()
+        FakeQueries(resource("IMAGE_DIR"), assets=image_assets)
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=24
     )
@@ -177,7 +158,7 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
         asset("track-2", "Track 2.mp3", role="TRACK", track=99),
     )
     audio_result = ListResourceDetails(
-        FakeQueries(resource("AUDIOBOOK_DIR"), assets=audio_assets), FakeNavigation()
+        FakeQueries(resource("AUDIOBOOK_DIR"), assets=audio_assets)
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
     )

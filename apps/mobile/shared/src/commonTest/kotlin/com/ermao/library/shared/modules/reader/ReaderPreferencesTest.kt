@@ -34,9 +34,16 @@ class ReaderPreferencesTest {
         val publisher = preferences.copy(epub = preferences.epub.copy(
             typography = preferences.epub.typography.copy(preservePublisherStyles = true),
         ))
-        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.LineHeight, publisher))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.LineHeight, publisher))
         assertEquals(ReaderControlAvailability.Available, state(ReaderControl.PublisherStyles, publisher))
         assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontSize, publisher))
+        val optimizationOff = preferences.copy(epub = preferences.epub.copy(
+            optimization = preferences.epub.optimization.copy(enabled = false),
+        ))
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
+            ReaderControl.DeduplicateIndent, ReaderMorphology.Reflowable,
+            reflow.copy(supportsSmartOptimization = true), optimizationOff, true,
+        ))
         assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
             ReaderControl.ParagraphIndent, ReaderMorphology.Reflowable, reflow, preferences, true,
             setOf(ReaderControl.ParagraphIndent),
@@ -77,6 +84,20 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun retiredSansAliasesMigrateToTheSingleVisibleSansChoice() {
+        val codec = ReaderPreferencesJson()
+        val heiti = codec.decode("""{"schemaVersion":5,"epub":{"fontFamily":"heiti"}}""")
+        val yahei = codec.decode("""{"schemaVersion":5,"epub":{"fontFamily":"yahei"}}""")
+
+        assertEquals(ReaderFontFamily.Pingfang, heiti.epub.fontFamily)
+        assertEquals(ReaderFontFamily.Pingfang, yahei.epub.fontFamily)
+        assertEquals(
+            listOf("pingfang", "songti", "kaiti"),
+            ReaderSettingsCatalog.settings.first { it.id == "fontFamily" }.options.map { it.value },
+        )
+    }
+
+    @Test
     fun legacyPaperNightAndSystemValuesMigrate() {
         val codec = ReaderPreferencesJson()
 
@@ -114,7 +135,7 @@ class ReaderPreferencesTest {
         assertEquals("1.85", line.value(preferences))
         assertEquals(listOf("1.6", "1.9", "2.2"), line.options.map { it.value })
         assertEquals(0.03, line.change(preferences, "2.2").epub.letterSpacing)
-        assertEquals(listOf("single", "double"), ReaderSettingsCatalog.settings.first { it.id == "textSpread" }.options.map { it.value })
+        assertEquals(listOf("auto", "single", "double"), ReaderSettingsCatalog.settings.first { it.id == "textSpread" }.options.map { it.value })
         ReaderMorphology.entries.forEach { format ->
             assertTrue(ReaderSettingsCatalog.settings.any { format in it.formats && it.section.endsWith("Appearance") })
         }

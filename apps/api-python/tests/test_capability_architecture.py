@@ -813,11 +813,6 @@ def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
         / "infrastructure"
         / "readable_resource"
         / "adapter_registry.py": "app.modules.metadata.public",
-        APP_ROOT
-        / "modules"
-        / "reader"
-        / "presentation"
-        / "v4.py": "app.modules.publications.public",
     }
     for path, token in public_imports.items():
         assert token in path.read_text(encoding="utf-8"), (

@@ -1,4 +1,4 @@
-export { mapBookView } from './api/client';
+export { fetchLibraryResource, mapBookView, mapReadableResourceView } from './api/client';
 export {
   BookActionController,
   type BookActionMenuRequest,

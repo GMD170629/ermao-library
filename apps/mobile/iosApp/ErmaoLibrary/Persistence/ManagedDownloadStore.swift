@@ -90,6 +90,20 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
         return ErmaoShared.DownloadStoredBytes(partialBytes: bytes < expectedBytes ? bytes : 0, completedReference: nil)
     }
 
+    func discardStoredBytes(for record: ManagedDownloadRecord) throws {
+        let destination = try destination(for: record)
+        for candidate in [destination.partialFileURL, destination.finalFileURL]
+            where FileManager.default.fileExists(atPath: candidate.path) {
+            try FileManager.default.removeItem(at: candidate)
+        }
+        if let relativePath = record.localRelativePath,
+           let published = resolvedContentURL(relativePath, namespace: record.namespace),
+           published != destination.finalFileURL,
+           FileManager.default.fileExists(atPath: published.path) {
+            try FileManager.default.removeItem(at: published)
+        }
+    }
+
     /// Filesystem port: validate and atomically publish; task registration belongs to shared Downloads.
     func publishFile(record: ManagedDownloadRecord, destination: ManagedDownloadDestination, verifiedBytes: Int64) throws -> String {
         guard verifiedBytes > 0,
@@ -128,6 +142,7 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
         let manifest = try loadManifest(namespace: namespace)
         guard let record = manifest.records.first(where: { $0.id == recordID }),
               record.namespace == namespace,
+              record.verifiedSharedArtifact != nil,
               ReaderFormatSupport.shared.canReadOriginal(readerType: record.readerType.rawValue, format: record.format),
               let fileURL = fileURL(for: record) else { return nil }
         return CompletedDownloadFile(

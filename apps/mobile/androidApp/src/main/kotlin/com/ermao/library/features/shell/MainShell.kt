@@ -1,6 +1,7 @@
 package com.ermao.library.features.shell
 
 import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
@@ -718,7 +719,7 @@ private fun openResource(
     unit: com.ermao.library.shared.modules.library.domain.ReadingUnit? = null,
     onUnavailable: (ReaderUnavailableRoute) -> Unit,
 ) {
-    if (ReaderFormatSupport.canOpenOnline(resource.readerType, resource.format)) {
+    if (ReaderFormatSupport.deliveryMode(resource.readerType, resource.format) != ReaderDeliveryMode.Unsupported) {
         context.startActivity(ReaderActivity.createServerIntent(context, profileId, resource.id,
             unit?.let { com.ermao.library.shared.modules.reader.readingUnitLaunchTarget(resource.readerType, it.href, it.metadata.pageNumber) }))
     } else {

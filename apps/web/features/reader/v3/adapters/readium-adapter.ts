@@ -52,9 +52,18 @@ import {
 import { resolveEpubFont, type EpubFontResolution } from './epub-font';
 
 const READIUM_VERSION = 'readium-ts:2.8.2';
+const READIUM_SUPPORTED_CONTROLS = [
+  'Theme', 'SystemTheme', 'FontSize', 'FontFamily', 'FontWeight', 'LineHeight',
+  'LetterSpacing', 'NegativeLetterSpacing', 'PageMargins', 'PageWidth', 'ReadingMode',
+  'Spread', 'ParagraphIndent', 'ParagraphSpacing', 'TextAlignment', 'PublisherStyles',
+  'SmartOptimization', 'DeduplicateIndent', 'IndentUnindented', 'ProgressStyle', 'Clock',
+  'KeepAwake', 'TapZones', 'Keyboard'
+] as const;
 
 export type ReadiumAdapterOptions = {
   container: HTMLElement;
+  publicationBlob: Blob;
+  publicationTitle: string;
   initialHref?: string | null;
   onInputIntent?: ReaderAdapterInputHandler;
   onEndOfResource?: () => boolean | Promise<boolean>;
@@ -65,7 +74,7 @@ function callbackNavigation(run: (callback: (ok: boolean) => void) => void) {
 }
 
 function capabilities(navigator: EpubNavigator): ReaderCapabilities {
-  return { readingDirection: navigator.readingProgression === 'rtl' ? 'rtl' : 'ltr', canGoNext: navigator.canGoForward, canGoPrevious: navigator.canGoBackward, canJumpToProgress: true, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: false, supportsSpreads: true };
+  return { readingDirection: navigator.readingProgression === 'rtl' ? 'rtl' : 'ltr', canGoNext: navigator.canGoForward, canGoPrevious: navigator.canGoBackward, canJumpToProgress: true, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true, supportedControls: READIUM_SUPPORTED_CONTROLS };
 }
 
 const DEFAULT_CAPABILITIES: ReaderCapabilities = {
@@ -78,8 +87,9 @@ const DEFAULT_CAPABILITIES: ReaderCapabilities = {
   canZoom: false,
   canSelectText: true,
   supportsPagination: true,
-  supportsScrolling: false,
-  supportsSpreads: true
+  supportsScrolling: true,
+  supportsSpreads: true,
+  supportedControls: READIUM_SUPPORTED_CONTROLS
 };
 
 function commandForInput(intent: ReturnType<typeof readerKeyIntent> | ReturnType<typeof readerPointerIntent>) {
@@ -150,6 +160,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   private viewportSignature = '';
   private resizeSequence = 0;
   private resizePresentationInFlight = false;
+  private closePublication: (() => void) | null = null;
   private readonly keyboardNavigation = new ReaderKeyboardNavigationController();
   private readonly frameControllers = new Set<AbortController>();
   private readonly bridgedDocuments = new WeakMap<Document, AbortController>();
@@ -161,12 +172,18 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     const generation = this.beginSession(context.sessionId, context.operation);
     this.locationOperation = context.operation;
     if (context.source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
-    if (!context.source.publicationManifestUrl) throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
     this.preferences = context.preferences; this.format = context.source.sourceFormat;
     this.emit({ type: 'phase-changed', phase: 'loading-font' }, context.operation);
     await this.resolveFont(context.preferences, context.signal);
     this.emit({ type: 'phase-changed', phase: 'loading-content' }, context.operation);
-    const opened = await openReadiumPublication(context.source.publicationManifestUrl, context.signal); this.assertActive(generation, context.signal);
+    const opened = await openReadiumPublication(
+      this.options.publicationBlob,
+      context.source.sourceFormat,
+      this.options.publicationTitle,
+      context.signal
+    );
+    this.closePublication = opened.close;
+    this.assertActive(generation, context.signal);
     this.positions = opened.positions;
     const handlePointer: EpubNavigatorListeners['tap'] = (event) => this.onPointer(event);
     const listeners: EpubNavigatorListeners = {
@@ -600,7 +617,6 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     const navigator = this.navigator;
     if (!navigator) return this.failOperation(context, 'READIUM_NOT_READY');
     this.presentationOperation = context.operation;
-    const anchor = this.latestExact;
     try {
       await this.resolveFont(preferences, context.signal);
       if (context.signal.aborted) throw new DOMException('The operation was aborted', 'AbortError');
@@ -610,24 +626,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       ));
       if (context.signal.aborted) throw new DOMException('The operation was aborted', 'AbortError');
       this.applyPresentationToLoadedFrames();
-      if (anchor) {
-        const locator = Locator.deserialize(anchor.payload);
-        if (locator) {
-          const accepted = await this.navigateToExact(navigator, anchor, locator);
-          if (!accepted) {
-            if (this.presentationOperation === context.operation) {
-              this.presentationOperation = null;
-            }
-            this.scheduleFrameCapture(
-              this.options.container.ownerDocument.defaultView ?? window,
-              true
-            );
-            return this.ack(context.operation, true);
-          }
-        }
-      }
       this.scheduleFrameCapture(this.options.container.ownerDocument.defaultView ?? window, true);
-      return this.ack(context.operation, true, anchor ? { location: location(anchor, this.format, this.navigator) } : {});
+      return this.ack(context.operation, true);
     } catch (reason) {
       if (this.presentationOperation === context.operation) {
         this.presentationOperation = null;
@@ -701,15 +701,12 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       if (signature === this.viewportSignature) return;
       this.viewportSignature = signature;
       const sequence = ++this.resizeSequence;
-      const anchor = this.latestExact;
       this.resizePresentationInFlight = true;
       void navigator.submitPreferences(new EpubPreferences(
         createReadiumEpubPreferences(preferences, width, this.resolvedFont ?? undefined)
       )).then(async () => {
         if (sequence !== this.resizeSequence || navigator !== this.navigator) return;
         this.applyPresentationToLoadedFrames();
-        const locator = anchor ? Locator.deserialize(anchor.payload) : null;
-        if (locator) await callbackNavigation((callback) => navigator.go(locator, false, callback));
       }).catch(() => undefined).finally(() => {
         if (sequence === this.resizeSequence) this.resizePresentationInFlight = false;
       });
@@ -735,6 +732,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.resolvedFont = null;
     this.resolvedFontFamily = null;
     this.keyboardNavigation.reset();
+    this.closePublication?.();
+    this.closePublication = null;
     this.positions = [];
     this.startLocator = null;
     this.locationOperation = null;

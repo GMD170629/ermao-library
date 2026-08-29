@@ -14,13 +14,16 @@ export type ResourceImportSummary = Readonly<{
 
 export type ResourceAssetView = Readonly<{
   id: string;
+  title: string;
   resourceId: string;
   sourceNodeId: string;
   role: string;
   mimeType: string;
+  sourceFormat: ResourceFormat | null;
   sortOrder: number;
   sizeBytes: number;
   size: string;
+  mtimeMs: number;
   durationMs?: number | null;
   codec?: string | null;
   bitrate?: number | null;

@@ -93,10 +93,39 @@ final class DownloadCenterStore: ObservableObject {
         return owned
     }
 
-    func completedReaderRecord(resourceID: String, context: ContentRequestContext) async throws -> ManagedDownloadRecord? {
-        try await repository.records(namespace: context.namespaceKey).first { $0.resourceID == resourceID && $0.isVerifiedOfflineCopy }
+    func readerRecord(
+        descriptor: DownloadDescriptor,
+        records candidates: [ManagedDownloadRecord]? = nil
+    ) -> ManagedDownloadRecord? {
+        (candidates ?? records).first { record in
+            guard record.resourceID == descriptor.identity.resourceId,
+                  record.assetID == descriptor.identity.assetId,
+                  let encoded = record.sharedTaskJSON,
+                  let task = try? DownloadCatalogCodec.shared.decode(serialized: encoded)
+            else { return false }
+            return task.matchesDescriptor(candidate: descriptor)
+        }
+    }
+
+    func completedReaderRecord(
+        descriptor: DownloadDescriptor,
+        context: ContentRequestContext
+    ) async throws -> ManagedDownloadRecord? {
+        let candidates = try await repository.records(namespace: context.namespaceKey)
+        return readerRecord(descriptor: descriptor, records: candidates).flatMap { record in
+            record.isVerifiedOfflineCopy ? record : nil
+        }
     }
     func pauseReaderDownload(resourceID: String) { runningTasks[resourceID]?.cancel() }
+
+    func rebuildReaderDownload(resourceID: String, descriptor: DownloadDescriptor) async -> Bool {
+        if let active = runningTasks[resourceID] {
+            active.cancel()
+            await active.value
+        }
+        guard runningTasks[resourceID] == nil else { return false }
+        return beginReaderDownload(resourceID: resourceID, descriptor: descriptor)
+    }
 
     func performBatch(book: BookCard, resources: [BookResource],
                       completion: @escaping @MainActor (ManagedDownloadBatchResult) -> Void) {

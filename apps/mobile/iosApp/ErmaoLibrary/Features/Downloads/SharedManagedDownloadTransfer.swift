@@ -43,7 +43,7 @@ final class SharedManagedDownloadTransfer: ManagedDownloadTransferring {
         guard let runtime, let catalog else { throw ManagedDownloadTransferError.invalidResponse }
         let cancellation = DownloadCancellation()
         try await withTaskCancellationHandler {
-            let result = try await runtime.download(
+            let result = try await runtime.ensure(
                 context: context.downloadRequestContext, resourceId: resourceID, taskId: UUID().uuidString,
                 sink: IosDownloadFileSink(catalog: catalog, repository: repository), observer: nil,
                 cancellation: cancellation, expectedDescriptor: expectedDescriptor
@@ -110,25 +110,11 @@ private final class IosDownloadCatalog: NSObject, DownloadCatalogRepository, @un
         try requireNamespace(descriptor.identity.namespace_)
         let candidates = try await repository.records(namespace: context.namespaceKey)
         for record in candidates where record.resourceID == descriptor.identity.resourceId && record.assetID == descriptor.identity.assetId {
-            if let encoded = record.sharedTaskJSON {
-                let task = try DownloadCatalogCodec.shared.decode(serialized: encoded)
-                if task.matchesDescriptor(candidate: descriptor) { return Self.validated(task: task, record: record) }
-                continue
+            guard let encoded = record.sharedTaskJSON else { continue }
+            let task = try DownloadCatalogCodec.shared.decode(serialized: encoded)
+            if task.matchesDescriptor(candidate: descriptor) {
+                return Self.validated(task: task, record: record)
             }
-            // Migrate an existing user download in place; no file deletion or replacement.
-            guard record.bookID == descriptor.identity.bookId, record.expectedBytes == descriptor.totalBytes,
-                  record.format.caseInsensitiveCompare(descriptor.format) == .orderedSame,
-                  record.mimeType == descriptor.source.mimeType else { continue }
-            let artifact = record.isVerifiedOfflineCopy ? CompletedDownloadArtifact(
-                descriptor: descriptor, localReference: record.localRelativePath ?? "",
-                verifiedBytes: record.receivedBytes,
-                completedAtEpochMillis: Int64((record.completedAt ?? record.updatedAt).timeIntervalSince1970 * 1000),
-                lastOpenedAtEpochMillis: record.lastOpenedAt.map { KotlinLong(value: Int64($0.timeIntervalSince1970 * 1000)) }
-            ) : nil
-            let task = DownloadTask(id: record.id, descriptor: descriptor, status: record.state.sharedStatus,
-                                    transferredBytes: record.receivedBytes, failureCode: record.stableErrorCode, artifact: artifact)
-            try await saveTask(task: task)
-            return task
         }
         return nil
     }
@@ -210,6 +196,15 @@ private final class IosDownloadFileSink: NSObject, DownloadByteSink, DownloadBun
         guard record.resourceID == request.resourceId, record.assetID == request.assetId,
               record.expectedBytes == request.expectedTotalBytes else { throw ManagedDownloadTransferError.invalidResponse }
         return try await repository.storedBytes(for: record)
+    }
+    func discard(request: DownloadSinkRequest) async throws {
+        let record = try await catalog.record(taskID: request.taskId)
+        guard record.resourceID == request.resourceId,
+              record.assetID == request.assetId,
+              record.expectedBytes == request.expectedTotalBytes else {
+            throw ManagedDownloadTransferError.invalidResponse
+        }
+        try await repository.discardStoredBytes(for: record)
     }
     func begin(request: DownloadSinkRequest) async throws -> DownloadByteSinkSession {
         let record = try await catalog.record(taskID: request.taskId)

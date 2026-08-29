@@ -22,7 +22,6 @@ from app.bootstrap.media import (
     media_resource_query,
     media_streaming,
 )
-from app.bootstrap.publications import build_publication_runtime
 from app.bootstrap.reader import reader_resource_service
 from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 from app.core.authorization import (
@@ -662,13 +661,12 @@ class ReaderOpdsProgression:
     def get_progression(
         self, actor_id: str, resource_id: str
     ) -> OpdsProgressionDocumentDto | None:
-        runtime = build_publication_runtime(self._settings)
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
             context = authorization_context(db, user)
             progress = reader_resource_service(
-                db, self._settings, runtime
+                db, self._settings
             ).get_external_progress(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -679,7 +677,6 @@ class ReaderOpdsProgression:
             raise OpdsPublicationNotFound from error
         finally:
             db.close()
-            runtime.close()
 
     def update_progression(
         self,
@@ -687,12 +684,11 @@ class ReaderOpdsProgression:
         resource_id: str,
         document: OpdsProgressionDocumentDto,
     ) -> OpdsProgressionUpdateResultDto:
-        runtime = build_publication_runtime(self._settings)
         db = self._session_factory()
         try:
             user = _active_user(db, actor_id)
             context = authorization_context(db, user)
-            service = reader_resource_service(db, self._settings, runtime)
+            service = reader_resource_service(db, self._settings)
             existing = service.get_external_progress(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -722,7 +718,6 @@ class ReaderOpdsProgression:
             raise OpdsProgressionInvalidPayload from error
         finally:
             db.close()
-            runtime.close()
 
 
 class OpdsMediaResources:

@@ -21,11 +21,11 @@ from app.modules.publications.domain.model import (
     PublicationCorruptError,
     PublicationLink,
     PublicationMarkupError,
-    PublicationOnlineLimitError,
     PublicationParserLimitError,
     PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationRevision,
     PublicationSecurityError,
     PublicationStructureError,
@@ -130,7 +130,7 @@ def _normalized_text(element: ElementTree.Element | None) -> str:
 
 def _xml_root(content: bytes) -> ElementTree.Element:
     if len(content) > MAX_FB2_SOURCE_BYTES:
-        raise PublicationOnlineLimitError("FB2 source exceeds the size limit")
+        raise PublicationResourceTooLargeError("FB2 source exceeds the size limit")
     if _UNSAFE_XML_DECLARATION.search(content):
         raise PublicationSecurityError("active XML declarations are not allowed")
     content = _normalize_legacy_link_prefix(content)
@@ -585,7 +585,7 @@ class Fb2PublicationAdapter(PublicationAdapter):
         )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_FB2_SOURCE_BYTES:
-            raise PublicationOnlineLimitError("FB2 source exceeds the size limit")
+            raise PublicationResourceTooLargeError("FB2 source exceeds the size limit")
         key = (
             str(source_path),
             stat_result.st_size,

@@ -8,7 +8,7 @@ import org.junit.Test
 
 class AndroidReaderPreferencePolicyTest {
     @Test
-    fun androidAlwaysProjectsReflowableAndComicPreferencesToSinglePage() {
+    fun androidPreservesReflowableSpreadAndLimitsOnlyComicToSinglePage() {
         val requested = ReaderPreferences(
             epub = ReaderPreferences().epub.copy(spreadMode = ReaderSpreadMode.Double),
             comic = ReaderPreferences().comic.copy(spreadMode = ReaderComicSpreadMode.Double),
@@ -16,7 +16,7 @@ class AndroidReaderPreferencePolicyTest {
 
         val supported = enforceAndroidSinglePagePreferences(requested)
 
-        assertEquals(ReaderSpreadMode.Single, supported.epub.spreadMode)
+        assertEquals(ReaderSpreadMode.Double, supported.epub.spreadMode)
         assertEquals(ReaderComicSpreadMode.Single, supported.comic.spreadMode)
     }
 }

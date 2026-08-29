@@ -58,7 +58,8 @@ extension IosReaderControlSession {
     func zoomControl(_ direction: Int) {}
 
     func platformControlEnabled(_ control: ErmaoShared.ReaderControl, unavailable: Set<ErmaoShared.ReaderControl> = []) -> Bool {
-        ErmaoShared.PublicKt.resolveReaderControlContext(
+        if control == .pagewidth && UIScreen.main.bounds.width <= 640 { return false }
+        return ErmaoShared.PublicKt.resolveReaderControlContext(
             control: control, morphology: controlMorphology,
             capabilities: ErmaoShared.PublicKt.readerPlatformCapabilities(morphology: controlMorphology, volumeKeys: false, pdfFit: false),
             ready: controlReady, scrolling: preferences.readingMode == .continuousScroll,

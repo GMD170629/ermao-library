@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -432,6 +433,188 @@ def test_scan_requeues_existing_fb2_when_text_adapter_contract_upgrades(
             assert _drain(pipeline) == ["ok"]
             db.expire_all()
             assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_format"),
+    (
+        ("book.mobi", "MOBI"),
+        ("book.azw", "AZW"),
+        ("book.azw3", "AZW3"),
+        ("book.prc", "PRC"),
+    ),
+)
+def test_mobi_family_import_persists_exact_source_format(
+    tmp_path: Path,
+    filename: str,
+    expected_format: str,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db)
+            (root / filename).write_bytes(b"mobi-family")
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert _drain(pipeline) == ["scan", "ok"]
+
+            resource = db.scalar(select(LibraryReadableResource))
+            assert resource is not None
+            assert resource.adapter_id == "mobi-family"
+            assert resource.adapter_version == "2"
+            assert resource.format == expected_format
+            assert resource.import_state == "READY"
+    finally:
+        engine.dispose()
+
+
+def test_changed_file_observation_invalidates_and_requeues_only_once(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            pipeline, _ = _pipeline(db)
+            source = root / "one.epub"
+            source.write_bytes(b"v1")
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            node = db.scalar(select(LibrarySourceNode))
+            resource = db.scalar(select(LibraryReadableResource))
+            asset = db.scalar(select(LibraryResourceAsset))
+            task = db.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
+                )
+            )
+            assert node is not None
+            assert resource is not None
+            assert asset is not None
+            assert task is not None
+            db.add(
+                ReadableResourceNavigationUnit(
+                    id="stale-chapter",
+                    resource_id=resource.id,
+                    asset_id=asset.id,
+                    unit_type="chapter",
+                    title="Stale chapter",
+                    href="stale.xhtml",
+                    media_type="application/xhtml+xml",
+                    sort_order=0,
+                    metadata_json="{}",
+                )
+            )
+            db.commit()
+            original_task_id = task.id
+            replacement_mtime_ns = source.stat().st_mtime_ns + 1_000_000_000
+            source.write_bytes(b"replacement-content")
+            os.utime(source, ns=(replacement_mtime_ns, replacement_mtime_ns))
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
+            db.expire_all()
+
+            refreshed_node = db.get(LibrarySourceNode, node.id)
+            refreshed_resource = db.get(LibraryReadableResource, resource.id)
+            refreshed_asset = db.get(LibraryResourceAsset, asset.id)
+            requeued = db.get(LibraryImportTask, original_task_id)
+            assert refreshed_node is not None
+            assert refreshed_node.observed_size_bytes == len(b"replacement-content")
+            assert refreshed_node.observed_mtime_ns == replacement_mtime_ns
+            assert refreshed_resource is not None
+            assert refreshed_resource.import_state == "PENDING"
+            assert refreshed_asset is not None
+            assert refreshed_asset.import_state == "PENDING"
+            assert (
+                db.scalar(
+                    select(func.count(ReadableResourceNavigationUnit.id)).where(
+                        ReadableResourceNavigationUnit.asset_id == asset.id
+                    )
+                )
+                == 0
+            )
+            assert requeued is not None
+            assert requeued.state == "QUEUED"
+
+            assert _drain(pipeline) == ["ok"]
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert _drain(pipeline) == ["scan"]
+            db.expire_all()
+            assert db.get(LibraryImportTask, original_task_id).state == "SUCCEEDED"
+    finally:
+        engine.dispose()
+
+
+def test_changed_directory_member_preserves_other_ready_assets(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            album = root / "album"
+            album.mkdir()
+            changed_source = album / "01.mp3"
+            changed_source.write_bytes(b"one")
+            (album / "02.mp3").write_bytes(b"two")
+            pipeline, _ = _pipeline(db)
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            _drain(pipeline)
+
+            resource = db.scalar(select(LibraryReadableResource))
+            assert resource is not None
+            changed_node = db.scalar(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.relative_path == "album/01.mp3"
+                )
+            )
+            assert changed_node is not None
+            replacement_mtime_ns = changed_source.stat().st_mtime_ns + 1_000_000_000
+            changed_source.write_bytes(b"one-replaced")
+            os.utime(
+                changed_source,
+                ns=(replacement_mtime_ns, replacement_mtime_ns),
+            )
+
+            pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
+            db.expire_all()
+
+            assets = db.execute(
+                select(LibraryResourceAsset, LibrarySourceNode)
+                .join(
+                    LibrarySourceNode,
+                    LibrarySourceNode.id == LibraryResourceAsset.source_node_id,
+                )
+                .where(LibraryResourceAsset.resource_id == resource.id)
+            ).all()
+            states = {node.name: asset.import_state for asset, node in assets}
+            assert states == {"01.mp3": "PENDING", "02.mp3": "READY"}
+            assert db.get(LibraryReadableResource, resource.id).import_state == "READY"
+
+            assert _drain(pipeline) == ["ok"]
+            db.expire_all()
+            assert db.get(LibraryReadableResource, resource.id).import_state == "READY"
+            assert (
+                db.scalar(
+                    select(func.count(LibraryResourceAsset.id)).where(
+                        LibraryResourceAsset.resource_id == resource.id,
+                        LibraryResourceAsset.import_state == "READY",
+                    )
+                )
+                == 2
+            )
     finally:
         engine.dispose()
 

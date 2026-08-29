@@ -35,6 +35,7 @@ import {
 } from '../../lib/auth-session';
 import { withBasePath } from '../../lib/base-path';
 import { DEFAULT_ACCOUNT_AVATAR_PATH, PRODUCT_NAME } from '../../lib/brand';
+import { privateCacheNamespace } from '../../lib/pwa/private-cache-namespace';
 import { clearCurrentUserNamespace, setCurrentUserNamespace, userDevicePreferenceKey } from '../../lib/user-preferences';
 import { Cover } from '../book/cover';
 import { clearPrivatePwaStorage, PwaClient } from '../system/pwa-client';
@@ -328,8 +329,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             }
             navigator.serviceWorker?.controller?.postMessage({
               type: 'SET_PRIVATE_CACHE_NAMESPACE',
-              userId: nextUser.id,
-              authzVersion: nextVersion
+              namespace: privateCacheNamespace(nextUser.id, nextVersion)
             });
           }
           setSessionStatus('authenticated');

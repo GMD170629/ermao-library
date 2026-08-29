@@ -156,6 +156,14 @@ class SourceNodeRepositoryPort(Protocol):
         entry: ObservedSourceEntry,
     ) -> tuple[SourceNodeRecord, bool]: ...
 
+    def refresh_observation(
+        self,
+        *,
+        source_node_id: str,
+        entry: ObservedSourceEntry,
+    ) -> tuple[SourceNodeRecord, bool]:
+        """Refresh observed facts and report a size/mtime version change."""
+
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]: ...
 
     def delete_subtree(self, source_node_id: str) -> None: ...
@@ -215,6 +223,14 @@ class BookResourceRepositoryPort(Protocol):
         resource_id: str,
         adapter: AdapterIdentity,
     ) -> ReadableResourceRecord: ...
+
+    def invalidate_asset_for_reimport(
+        self,
+        *,
+        resource_id: str,
+        source_node_id: str,
+    ) -> bool:
+        """Invalidate one existing asset and remove its stale navigation units."""
 
     def set_enablement(
         self,

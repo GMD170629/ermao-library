@@ -36,9 +36,7 @@ class SqlAlchemyLibraryWriteStore:
 
     def cancel_import_tasks(self, library_id: str) -> int:
         result = self._db.execute(
-            delete(LibraryImportTask).where(
-                LibraryImportTask.library_id == library_id
-            )
+            delete(LibraryImportTask).where(LibraryImportTask.library_id == library_id)
         )
         self._db.flush()
         return int(getattr(result, "rowcount", 0) or 0)

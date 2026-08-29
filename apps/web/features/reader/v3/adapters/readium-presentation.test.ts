@@ -57,7 +57,7 @@ test('Readium maps all five reader themes to native colors', () => {
   }
 });
 
-test('Readium maps every native typography preference and always paginates', () => {
+test('Readium maps every native typography preference and submits scrolling', () => {
   const input = preferencesWith({
     fontSize: 27,
     lineHeight: 2.2,
@@ -86,18 +86,23 @@ test('Readium maps every native typography preference and always paginates', () 
   assert.equal(mapped.paragraphIndent, 3);
   assert.equal(mapped.paragraphSpacing, 0.75);
   assert.equal(mapped.textAlign, 'justify');
-  assert.equal(mapped.columnCount, 2);
+  assert.equal(mapped.columnCount, 1);
   assert.equal(mapped.constraint, 300);
   assert.equal(mapped.maximalLineLength, null);
   assert.equal(mapped.minimalLineLength, null);
-  assert.equal(mapped.scroll, false);
+  assert.equal(mapped.scroll, true);
 });
 
-test('unsupported publisher master never changes Web font, color or line-height mapping', () => {
+test('publisher styles release publisher-owned typography but keep reader colors and font size', () => {
   const regular = createReadiumEpubPreferences(preferencesWith({}, { textAlign: 'publisher' }), 900);
   const requested = createReadiumEpubPreferences(preferencesWith({}, { preservePublisherStyles: true, textAlign: 'publisher' }), 900);
-  assert.deepEqual(requested, regular);
-  assert.equal(projectReadiumEffectivePreferences(preferencesWith({}, { preservePublisherStyles: true })).epub.typography.preservePublisherStyles, false);
+  assert.equal(requested.backgroundColor, regular.backgroundColor);
+  assert.equal(requested.fontSize, regular.fontSize);
+  assert.equal(requested.fontFamily, null);
+  assert.equal(requested.fontWeight, null);
+  assert.equal(requested.lineHeight, null);
+  assert.equal(requested.paragraphIndent, null);
+  assert.equal(projectReadiumEffectivePreferences(preferencesWith({}, { preservePublisherStyles: true })).epub.typography.preservePublisherStyles, true);
 });
 
 test('negative letter spacing clears the native value and uses residual CSS', () => {
@@ -109,7 +114,7 @@ test('negative letter spacing clears the native value and uses residual CSS', ()
   assert.match(residual, /letter-spacing: -0\.02em !important/);
 });
 
-test('page width constrains the navigator and legacy auto spread stays single', () => {
+test('page width constrains the navigator and auto spread is delegated to Readium', () => {
   const narrowMeasure = preferencesWith({ pageWidth: 600, spreadMode: 'auto' });
   const wideMeasure = preferencesWith({ pageWidth: 1350, spreadMode: 'auto' });
 
@@ -126,17 +131,17 @@ test('page width constrains the navigator and legacy auto spread stays single', 
     pageGutter: 24
   });
   assert.equal(resolveReadiumViewportPresentation(wideMeasure, 390).columnCount, 1);
-  assert.equal(createReadiumEpubPreferences(narrowMeasure, 1200).columnCount, 1);
-  assert.equal(createReadiumEpubPreferences(wideMeasure, 1200).columnCount, 1);
+  assert.equal(createReadiumEpubPreferences(narrowMeasure, 1200).columnCount, null);
+  assert.equal(createReadiumEpubPreferences(wideMeasure, 1200).columnCount, null);
 });
 
-test('effective projection is immutable and pins unsupported Readium settings', () => {
+test('effective projection is immutable and preserves the supported scrolling setting', () => {
   const input = preferencesWith({ flow: 'scrolled', spreadMode: 'auto' });
   input.interaction.swipePageTurn = false;
   const projected = projectReadiumEffectivePreferences(input);
 
-  assert.equal(projected.epub.flow, 'paginated');
-  assert.equal(projected.epub.spreadMode, 'single');
+  assert.equal(projected.epub.flow, 'scrolled');
+  assert.equal(projected.epub.spreadMode, 'auto');
   assert.equal(projected.interaction.swipePageTurn, true);
   assert.equal(input.epub.flow, 'scrolled');
   assert.equal(input.epub.spreadMode, 'auto');
@@ -169,6 +174,7 @@ test('residual style stays small and only overrides publisher-owned surfaces whe
   assert.doesNotMatch(strict, /padding-block/);
   assert.doesNotMatch(strict, /data-shuku-readium-media-only/);
   assert.match(publisher, /background: #FDF6EA !important/);
-  assert.match(publisher, /font-family: .* !important/);
-  assert.match(publisher, /line-height: .* !important/);
+  assert.doesNotMatch(publisher, /font-family: .* !important/);
+  assert.doesNotMatch(publisher, /line-height: .* !important/);
+  assert.doesNotMatch(publisher, /data-shuku-smart-paragraph/);
 });

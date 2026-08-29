@@ -35,7 +35,7 @@ internal class ReadiumPublicationPositionIndex private constructor(
         val Empty = ReadiumPublicationPositionIndex(emptyList())
 
         fun from(positions: List<Locator>): ReadiumPublicationPositionIndex = ReadiumPublicationPositionIndex(
-            positions.mapNotNull { locator ->
+            entries = positions.mapNotNull { locator ->
                 val total = locator.locations.totalProgression ?: return@mapNotNull null
                 Entry(
                     locator = locator,

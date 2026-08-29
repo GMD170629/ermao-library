@@ -24,7 +24,7 @@ from app.modules.imports.infrastructure.text_encoding import (
     detect_txt_encoding,
 )
 
-_KINDLE_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
+_MOBI_FAMILY_FORMATS = {"MOBI", "AZW", "AZW3", "PRC"}
 _MAX_COVER_BYTES = 20 * 1024 * 1024
 
 
@@ -38,8 +38,8 @@ def inspect_reflowable_book(path: Path, source_format: str) -> ReflowableBookMet
         metadata = _inspect_txt(path)
     elif normalized_format == "FB2":
         metadata = _inspect_fb2(path)
-    elif normalized_format in _KINDLE_FORMATS:
-        metadata = _inspect_kindle(path, normalized_format)
+    elif normalized_format in _MOBI_FAMILY_FORMATS:
+        metadata = _inspect_mobi_family(path, normalized_format)
     else:
         raise ReflowableMetadataError(f"Unsupported reflowable format: {source_format}")
     if metadata.cover is not None:
@@ -150,14 +150,14 @@ def _inspect_fb2(path: Path) -> ReflowableBookMetadata:
     )
 
 
-def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
+def _inspect_mobi_family(path: Path, source_format: str) -> ReflowableBookMetadata:
     try:
         content = path.read_bytes()
     except OSError as exc:
-        raise ReflowableMetadataError("Unable to read Kindle book") from exc
+        raise ReflowableMetadataError("Unable to read MOBI-family publication") from exc
     records = _pdb_records(content)
     if not records:
-        raise ReflowableMetadataError("Kindle book has no records")
+        raise ReflowableMetadataError("MOBI-family publication has no records")
     header = records[0]
     if len(header) < 132 or header[16:20] != b"MOBI":
         raise ReflowableMetadataError("Missing MOBI header")
@@ -199,7 +199,7 @@ def _inspect_kindle(path: Path, source_format: str) -> ReflowableBookMetadata:
     subjects = tuple(
         cleaned for value in exth.get(105, ()) if (cleaned := _clean(value)) is not None
     )
-    cover = _kindle_cover(records, resource_start, exth)
+    cover = _mobi_family_cover(records, resource_start, exth)
     compression = struct.unpack_from(">H", header, 0)[0]
     return ReflowableBookMetadata(
         title=_clean(html.unescape(title or path.stem)),
@@ -269,7 +269,7 @@ def _parse_exth(
     return {key: tuple(values) for key, values in result.items()}
 
 
-def _kindle_cover(
+def _mobi_family_cover(
     records: tuple[bytes, ...], resource_start: int, exth: dict[int, tuple[str, ...]]
 ) -> EmbeddedBookCover | None:
     raw_offset = _first(exth, 201) or _first(exth, 202)

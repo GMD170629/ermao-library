@@ -363,6 +363,12 @@ def _number(value: float | None) -> float | None:
     return float(value)
 
 
+def _required_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidRecognizedMetadataError("metadata number is unavailable")
+    return float(value)
+
+
 def _same(left: object, right: object) -> bool:
     if isinstance(left, str) or isinstance(right, str):
         return _text(str(left) if left is not None else None) == _text(
@@ -471,7 +477,7 @@ class ApplyRecognizedMetadata:
         else:
             self._unit_of_work.rollback()
 
-        cover_status = "notSelected"
+        cover_status: Literal["notSelected", "applied", "failed"] = "notSelected"
         if cover_field is not None:
             try:
                 self._covers.apply(
@@ -596,7 +602,7 @@ class ApplyRecognizedMetadata:
         elif field is RecognizedMetadataField.BOOK_SERIES_NAME:
             book_changes["series_name"] = str(value)
         elif field is RecognizedMetadataField.BOOK_SERIES_INDEX:
-            book_changes["series_index"] = float(value)
+            book_changes["series_index"] = _required_number(value)
         elif field is RecognizedMetadataField.RESOURCE_TITLE:
             resource_changes["title"] = str(value)
         elif field is RecognizedMetadataField.RESOURCE_DESCRIPTION:
@@ -620,7 +626,7 @@ class ApplyRecognizedMetadata:
         ):
             resource_changes["abridged"] = value
         elif field is RecognizedMetadataField.RESOURCE_INDEX:
-            resource_changes["resource_index"] = float(value)
+            resource_changes["resource_index"] = _required_number(value)
 
 
 __all__ = [

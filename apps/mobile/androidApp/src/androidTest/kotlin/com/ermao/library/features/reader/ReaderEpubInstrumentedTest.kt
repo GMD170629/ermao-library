@@ -16,6 +16,7 @@ import com.ermao.library.shared.modules.reader.EngineLocatorPayload
 import com.ermao.library.shared.modules.reader.ReaderEngine
 import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
+import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
@@ -72,6 +73,44 @@ class ReaderEpubInstrumentedTest {
     fun removeReaderArtifacts() = runBlocking {
         progressStore.delete(sourceId)
         publicationStore.delete(sourceId)
+    }
+
+    @Test
+    fun allThreeBundledFontChoicesLoadInTheAndroidWebView() {
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
+            waitForReader(scenario)
+
+            listOf(
+                ReaderFontFamily.Pingfang to "Shuku Sans",
+                ReaderFontFamily.Songti to "Shuku Songti",
+                ReaderFontFamily.Kaiti to "Shuku Kaiti",
+            ).forEach { (family, nativeFamily) ->
+                scenario.onActivity { activity ->
+                    val controller = checkNotNull(activity.controllerForTesting)
+                    controller.updatePreferences(
+                        controller.preferences.value.copy(
+                            epub = controller.preferences.value.epub.copy(fontFamily = family),
+                        ),
+                    )
+                }
+                waitUntilValue("bundled font $nativeFamily") {
+                    evaluateJavascript(
+                        scenario,
+                        """
+                            (() => {
+                              const paragraph = document.querySelector('p');
+                              return paragraph &&
+                                getComputedStyle(paragraph).fontFamily.includes('$nativeFamily') &&
+                                [...document.fonts].some(font =>
+                                  font.family.includes('$nativeFamily') && font.status === 'loaded'
+                                );
+                            })()
+                        """.trimIndent(),
+                    ) == "true"
+                }
+            }
+        }
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.ermao.library.shared.modules.reader.application
 
+import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.downloads.CompletedDownloadArtifact
 import com.ermao.library.shared.modules.downloads.DownloadBootstrapGateway
 import com.ermao.library.shared.modules.downloads.DownloadBootstrapFailure
@@ -9,8 +10,8 @@ import com.ermao.library.shared.modules.downloads.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.DownloadRequestContext
 import com.ermao.library.shared.modules.downloads.DownloadTask
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
+import com.ermao.library.shared.modules.reader.domain.ReaderDeliveryMode
 import com.ermao.library.shared.modules.reader.domain.ReaderFormatSupport
-import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
 
 /** Admission is not an engine allocation or successful-opening guarantee. */
@@ -28,9 +29,6 @@ object ReaderAdmission {
         else -> null
     }
 
-    fun permitsDownload(failure: ReaderErrorCode): Boolean =
-        failure == ReaderErrorCode.OnlineLimit || failure == ReaderErrorCode.RangeUnsupported
-
     fun progress(received: Long, total: Long): Double {
         require(total > 0 && received in 0..total)
         return received.toDouble() / total.toDouble()
@@ -38,65 +36,71 @@ object ReaderAdmission {
 }
 
 sealed interface ReaderLaunch {
-    data class Online(val descriptor: DownloadDescriptor) : ReaderLaunch
+    data class Stream(val descriptor: DownloadDescriptor) : ReaderLaunch {
+        init {
+            require(
+                ReaderFormatSupport.deliveryMode(
+                    descriptor.readerType.name,
+                    descriptor.format,
+                ) == ReaderDeliveryMode.Stream,
+            ) { "Reader streaming is reserved for PDF and comic resources" }
+        }
+    }
     data class Local(val artifact: CompletedDownloadArtifact) : ReaderLaunch
-    data class Download(val descriptor: DownloadDescriptor, val reason: ReaderErrorCode) : ReaderLaunch
+    data class Download(val descriptor: DownloadDescriptor) : ReaderLaunch
     data class Unavailable(val code: ReaderErrorCode) : ReaderLaunch
 }
 
-/** One launch owns one fallback decision. Transfer ownership remains in Downloads. */
+/** Resolves fresh authorization and exact asset identity when reachable.
+ * Only non-authoritative connectivity failures may reuse a verified artifact from the active namespace.
+ */
 class ReaderLaunchCoordinator(
     private val catalog: DownloadCatalogRepository,
     private val gateway: DownloadBootstrapGateway,
 ) {
-    private var fallbackSelected = false
-
     @Throws(Exception::class)
     suspend fun prepare(context: DownloadRequestContext, resourceId: String): ReaderLaunch {
-        val local = catalog.listArtifacts(context.namespace)
+        val localArtifacts = catalog.listArtifacts(context.namespace)
             .filter { it.identity.resourceId == resourceId }
-            .maxByOrNull { it.completedAtEpochMillis }
-        if (local != null) return local(local)
         return when (val result = gateway.load(context, resourceId)) {
-            is DownloadBootstrapFailure -> ReaderLaunch.Unavailable(
-                readerErrorCodeForFailure(result.error.code, false),
-            )
+            is DownloadBootstrapFailure -> {
+                val local = localArtifacts
+                    .filter { it.descriptor.deliveryMode() == ReaderDeliveryMode.DownloadOriginal }
+                    .maxByOrNull { it.completedAtEpochMillis }
+                if (result.error.kind.allowsVerifiedOfflineReaderFallback() && local != null) {
+                    local(local)
+                } else {
+                    ReaderLaunch.Unavailable(
+                        readerErrorCodeForFailure(result.error.code, false),
+                    )
+                }
+            }
             is DownloadBootstrapSuccess -> {
                 val descriptor = result.bootstrap.descriptor
+                val localFailure = ReaderAdmission.localFailure(descriptor.format, descriptor.totalBytes)
+                val local = localArtifacts
+                    .filter { descriptor.matches(it.descriptor) }
+                    .maxByOrNull { it.completedAtEpochMillis }
                 when {
-                    !ReaderAdmission.accepts(descriptor.totalBytes) ->
-                        ReaderLaunch.Unavailable(ReaderErrorCode.PublicationTooLarge)
-                    !ReaderFormatSupport.canOpenOnline(descriptor.readerType.name.lowercase(), descriptor.format) ->
-                        ReaderLaunch.Unavailable(ReaderErrorCode.UnsupportedFormat)
-                    else -> ReaderLaunch.Online(descriptor)
+                    localFailure != null -> ReaderLaunch.Unavailable(localFailure)
+                    local != null -> local(local)
+                    descriptor.deliveryMode() == ReaderDeliveryMode.DownloadOriginal -> ReaderLaunch.Download(descriptor)
+                    descriptor.deliveryMode() == ReaderDeliveryMode.Stream -> ReaderLaunch.Stream(descriptor)
+                    else -> ReaderLaunch.Unavailable(ReaderErrorCode.UnsupportedFormat)
                 }
             }
         }
     }
 
-    fun fallback(descriptor: DownloadDescriptor, failure: ReaderErrorCode): ReaderLaunch {
-        if (fallbackSelected || !ReaderAdmission.permitsDownload(failure)) return ReaderLaunch.Unavailable(failure)
-        val localFailure = ReaderAdmission.localFailure(descriptor.format, descriptor.totalBytes)
-        if (localFailure != null) return ReaderLaunch.Unavailable(localFailure)
-        if (ReaderSourceFormat.fromWireValue(descriptor.format) == null ||
-            !ReaderFormatSupport.canReadOriginal(descriptor.readerType.name.lowercase(), descriptor.format)) {
-            return ReaderLaunch.Unavailable(ReaderErrorCode.UnsupportedFormat)
-        }
-        fallbackSelected = true
-        return ReaderLaunch.Download(descriptor, failure)
-    }
-
-    fun fallbackCode(descriptor: DownloadDescriptor, failureCode: String): ReaderLaunch =
-        fallback(descriptor, readerErrorCodeForFailure(failureCode, false))
-
     @Throws(Exception::class)
     suspend fun complete(descriptor: DownloadDescriptor): ReaderLaunch {
-        val artifact = catalog.listArtifacts(descriptor.identity.namespace)
-            .firstOrNull { it.identity.resourceId == descriptor.identity.resourceId }
-            ?: return ReaderLaunch.Unavailable(ReaderErrorCode.ResourceMissing)
-        if (!DownloadTask("reader-validation", descriptor).matchesDescriptor(artifact.descriptor)) {
-            return ReaderLaunch.Unavailable(ReaderErrorCode.PublicationChanged)
-        }
+        val candidates = catalog.listArtifacts(descriptor.identity.namespace)
+            .filter { it.identity.resourceId == descriptor.identity.resourceId }
+        val artifact = candidates.filter { descriptor.matches(it.descriptor) }
+            .maxByOrNull { it.completedAtEpochMillis }
+            ?: return ReaderLaunch.Unavailable(
+                if (candidates.isEmpty()) ReaderErrorCode.ResourceMissing else ReaderErrorCode.PublicationChanged,
+            )
         return local(artifact)
     }
 
@@ -110,4 +114,18 @@ class ReaderLaunchCoordinator(
             else -> ReaderLaunch.Local(artifact)
         }
     }
+
+    private fun DownloadDescriptor.matches(candidate: DownloadDescriptor): Boolean =
+        DownloadTask("reader-validation", this).matchesDescriptor(candidate)
+
+    private fun DownloadDescriptor.deliveryMode(): ReaderDeliveryMode =
+        ReaderFormatSupport.deliveryMode(readerType.name, format)
 }
+
+private fun AppErrorKind.allowsVerifiedOfflineReaderFallback(): Boolean = this in setOf(
+    AppErrorKind.NetworkUnavailable,
+    AppErrorKind.Timeout,
+    AppErrorKind.TlsFailure,
+    AppErrorKind.ServiceUnavailable,
+    AppErrorKind.ServerFailure,
+)

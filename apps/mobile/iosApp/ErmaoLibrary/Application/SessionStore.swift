@@ -23,21 +23,25 @@ final class SessionStore: ObservableObject {
     private let runtime: MobileRuntimeClient
     private let credentialStore: ServerCredentialStore
     private let privateContentCache: any PrivateContentCacheClearing
+    private let preparePrivateNamespaceTransition: @MainActor @Sendable () async -> Void
     private var observation: RuntimeObservationToken?
     private var operation: Task<Void, Never>?
     private var activeOperationID: UUID?
     private var hasStarted = false
     private var isConnectingServer = false
     private var credentialStorageCause: Error?
+    private var preparedTransitionNamespace: String?
 
     init(
         runtime: MobileRuntimeClient,
         credentialStore: ServerCredentialStore = KeychainServerCredentialStore(),
-        privateContentCache: any PrivateContentCacheClearing = AuthenticatedCoverCache()
+        privateContentCache: any PrivateContentCacheClearing = AuthenticatedCoverCache(),
+        preparePrivateNamespaceTransition: @escaping @MainActor @Sendable () async -> Void = {}
     ) {
         self.runtime = runtime
         self.credentialStore = credentialStore
         self.privateContentCache = privateContentCache
+        self.preparePrivateNamespaceTransition = preparePrivateNamespaceTransition
         snapshot = runtime.currentSnapshot
         serverProfiles = runtime.serverProfiles
         observation = runtime.observe { [weak self] snapshot in
@@ -123,7 +127,9 @@ final class SessionStore: ObservableObject {
 
     func switchServer(profileID: String) {
         password = ""
-        perform { [runtime] in try await runtime.switchServer(profileID: profileID) }
+        performPrivateNamespaceTransition {
+            try await self.runtime.switchServer(profileID: profileID)
+        }
     }
 
     func selectServerForLogin(_ profile: RuntimeServerProfile) {
@@ -275,6 +281,11 @@ final class SessionStore: ObservableObject {
 
     func purgeCurrentNamespace() async throws {
         guard let namespace = currentPrivateNamespace else { return }
+        await preparePrivateNamespaceTransition()
+        try await removePrivateNamespace(namespace)
+    }
+
+    private func removePrivateNamespace(_ namespace: String) async throws {
         do {
             try await privateContentCache.removeNamespace(namespace)
         } catch {
@@ -289,12 +300,22 @@ final class SessionStore: ObservableObject {
 
     func logoutAwaitingCompletion(purgeNamespace: Bool = true) async throws {
         password = ""
-        if purgeNamespace {
-            try await purgeCurrentNamespace()
+        let previousNamespace = currentPrivateNamespace
+        await preparePrivateNamespaceTransition()
+        if purgeNamespace, let previousNamespace {
+            try await removePrivateNamespace(previousNamespace)
         }
-        let outcome = try await runtime.logout()
-        refreshProfiles()
-        apply(outcome.navigationDirective)
+        preparedTransitionNamespace = previousNamespace
+        do {
+            let outcome = try await runtime.logout()
+            refreshProfiles()
+            apply(outcome.navigationDirective)
+        } catch {
+            if preparedTransitionNamespace == previousNamespace {
+                preparedTransitionNamespace = nil
+            }
+            throw error
+        }
     }
 
     func chooseAnotherServer() {
@@ -358,18 +379,18 @@ final class SessionStore: ObservableObject {
         let previousNamespace = privateNamespace(for: snapshot)
         let nextNamespace = privateNamespace(for: newSnapshot)
         if let previousNamespace, previousNamespace != nextNamespace {
-            // Logout, server switch, and account replacement all cross a
-            // private boundary. Cleanup is scoped and idempotent.
-            Task { @MainActor [weak self] in
-                do {
-                    try await self?.privateContentCache.removeNamespace(previousNamespace)
-                } catch {
-                    self?.operationFailure = RuntimeOperationFailure(
-                        errorKind: "StorageFailure",
-                        errorCode: "CACHE_PURGE_FAILED",
-                        fieldViolations: [],
-                        parameters: [:]
-                    )
+            if preparedTransitionNamespace == previousNamespace {
+                preparedTransitionNamespace = nil
+            } else {
+                // Runtime-driven expiry is the only unprepared transition. User-
+                // initiated account/server changes purge before activating the next namespace.
+                Task { @MainActor [weak self] in
+                    do {
+                        await self?.preparePrivateNamespaceTransition()
+                        try await self?.removePrivateNamespace(previousNamespace)
+                    } catch {
+                        self?.recordPrivateNamespaceRemovalFailure()
+                    }
                 }
             }
         }
@@ -413,6 +434,37 @@ final class SessionStore: ObservableObject {
     private func refreshProfiles() {
         serverProfiles = runtime.serverProfiles
         refreshLoginSummaries()
+    }
+
+    private func performPrivateNamespaceTransition(
+        _ work: @escaping @MainActor () async throws -> RuntimeOperationOutcome
+    ) {
+        let previousNamespace = currentPrivateNamespace
+        perform { [weak self] in
+            guard let self else { throw CancellationError() }
+            await self.preparePrivateNamespaceTransition()
+            if let previousNamespace {
+                try await self.removePrivateNamespace(previousNamespace)
+            }
+            self.preparedTransitionNamespace = previousNamespace
+            do {
+                return try await work()
+            } catch {
+                if self.preparedTransitionNamespace == previousNamespace {
+                    self.preparedTransitionNamespace = nil
+                }
+                throw error
+            }
+        }
+    }
+
+    private func recordPrivateNamespaceRemovalFailure() {
+        operationFailure = RuntimeOperationFailure(
+            errorKind: "StorageFailure",
+            errorCode: "CACHE_PURGE_FAILED",
+            fieldViolations: [],
+            parameters: [:]
+        )
     }
 
     private func perform(

@@ -138,7 +138,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             self._session.flush()
         return self._to_record(row)
 
-    def requeue_asset_for_adapter_upgrade(
+    def requeue_import_asset_task(
         self,
         *,
         library_id: str,

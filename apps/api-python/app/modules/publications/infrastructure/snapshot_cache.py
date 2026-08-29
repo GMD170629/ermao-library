@@ -7,7 +7,7 @@ from threading import RLock
 from time import monotonic
 from typing import Generic, TypeVar
 
-from app.modules.publications.domain.model import PublicationOnlineLimitError
+from app.modules.publications.domain.model import PublicationResourceTooLargeError
 
 SnapshotKey = tuple[str, int, int] | tuple[str, int, int, str, str | None]
 V = TypeVar("V")
@@ -40,7 +40,7 @@ class PublicationSnapshotCache(Generic[V]):
         if weight < 1:
             raise ValueError("Publication snapshot weight must be positive")
         if weight > self._maximum_weight:
-            raise PublicationOnlineLimitError(
+            raise PublicationResourceTooLargeError(
                 "Publication parser memory limit exceeded"
             )
         with self._lock:

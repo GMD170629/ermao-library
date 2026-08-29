@@ -58,3 +58,10 @@ class KtorComicPageServerPort internal constructor(
         val IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }
 }
+
+private fun readerFailureSource(kind: AppErrorKind): String = when (kind) {
+    AppErrorKind.NetworkUnavailable, AppErrorKind.Timeout, AppErrorKind.TlsFailure,
+    AppErrorKind.Cancelled, AppErrorKind.ProtocolViolation -> "transport"
+    AppErrorKind.StorageFailure -> "storage"
+    else -> "server"
+}

@@ -12,7 +12,7 @@
 
 > v1.0.0 会话与内容回退修订（2026-08-15）：以 [`ADR 0015`](adr/0015-mobile-v1-verified-session-without-offline-mode.md) 为准。首发不提供独立离线模式、30 天授权宽限或服务器 GET 页面持久缓存回退。匹配的已验证会话可先恢复正常 App Shell，再后台验证；暂时网络失败保留 Shell，明确 401、账户停用或服务器身份变化才结束会话。完成下载、Reader、本地进度、书签和偏好继续保留，但不构成单独的离线产品模式。
 
-> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。页面按绑定节点类型展示，详见上述导航修订。阅读与收听均在线优先，不要求先下载；离线下载是独立的可选动作。
+> ADR 0020 身份与 Book Detail 统一修订（2026-08-26）：[`ADR 0020`](adr/0020-mobile-book-resource-asset-cutover.md) 取代本文全部 `Work / Version / Volume / File` 身份和兼容假设。Mobile 只使用 `Book(bookId) → ReadableResource(resourceId) → ResourceAsset(assetId)`。详情显示、目录/资源动作和管理入口以当前 Web 的 `book-detail-page.tsx`、`book-content-browser.tsx`、`resource-detail-view.tsx` 及其权限过滤为唯一产品事实；`bookDetailManagement` 不作为全局开关。页面按绑定节点类型展示，详见上述导航修订。依据 [`ADR 0025`](adr/0025-reflowable-original-download-before-reading.md)，可重排阅读入口隐式创建／观察原文件下载任务并在完整校验后打开；PDF／漫画保持在线，有声书保持既有能力。
 
 ## 1. 基线目的
 
@@ -114,15 +114,15 @@ P0 必须形成以下连续闭环：
 
 | 能力 | Web 入口 / 真实 API | 数据与权限状态 | 决策 | App 原生形态与硬约束 |
 |---|---|---|---|---|
-| Reader bootstrap | `/reader/[resourceId]`；`GET /api/reader/v4/resources/{resourceId}/bootstrap` | `bootstrapping / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot、Book、Resource、Assets 与 publication | P0 | 只使用 `resourceId` 与 Reader v4；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
-| 可重排电子书 | Reader v4 + Publication manifest/positions/resources | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；按需原章节、精确定位、响应限额和内容版本变化 | P0 | 在线入口始终请求 Bootstrap；已有本地完整工件时由原生解析器决定能否打开，fingerprint、版本和声明长度差异仅作诊断。在线按需获取完整原章节，离线仅使用 Downloads 已完成文件并由书内 TOC 补充。Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet；Web DOM/Foliate renderer 不能直接当原生实现 |
+| Reader bootstrap | `/reader/[resourceId]`；`GET /api/reader/v4/resources/{resourceId}/bootstrap` | `bootstrapping / downloading / loading / ready / error / disposed`；含 reader type、fingerprint、progress snapshot、Book、Resource 与 Assets；漫画可含页流交付信息 | P0 | 只使用 `resourceId` 与 Reader v4；可重排 bootstrap 是轻量授权、描述符与同步契约，不返回 manifest、positions 或章节 URL；相对媒体 URL 必须基于已配置服务器 base URL 解析 |
+| 可重排电子书 | Reader v4 bootstrap + Library 原文件描述符/媒体端点 | EPUB/MOBI/AZW/AZW3/PRC/FB2/TXT；精确资产版本、真实长度/MIME/格式、下载进度、解析安全限制与内容版本变化 | P0 | 点击阅读后隐式创建或复用该卷册的原文件下载；完整校验成功后才由本地解析器打开，目录、reading order、positions 和精确跳转均来自本地原文件。原生任务复用 Download Center；Web 使用按授权 namespace 隔离的 Cache Storage。禁止在线章节回退、派生 EPUB/ZIP 或持久化解包目录；Reader 仍提供点按区、滑页/滚动、目录、书签、进度与外观 Sheet |
 | 漫画 | Reader v4 + pages list/page API | LTR/RTL、页列表、图片加载失败、内存与预取窗口 | P0 | 在线默认按页流式阅读，原生图片管线只做有限预取，禁止一次加载全部页；有完整本地工件时可离线打开，不要求在线阅读前下载整包 |
 | PDF | Reader v4 + 支持 Range 的媒体端点 | Range、ETag、页码与密码/加载错误；当前 Web 实际以分页为主 | P0，首发只承诺分页 | 在线使用系统/原生 PDF renderer 通过 Range 流式读取，不要求先下载整份；完整本地工件可离线打开；捏合缩放、页码 scrubber，连续模式不在未验证前承诺 |
 | 书签 | Reader v4 bookmarks GET/PUT | 本地优先；服务端为整组替换、无 revision，多设备存在最后写覆盖风险 | P0 | 书签列表、增删、跳转；必须标注当前同步弱一致性，禁止宣称无冲突多端合并 |
 | 批注 / 笔记 | Web Reader 面板占位 | 无完整数据层和跨端同步契约 | 排除 | P0 设计稿不得出现可用的“笔记/批注”承诺 |
 | 阅读进度同步 | Reader v4 progress PUT；客户端本地精确位置 | 进度以 `bookId + resourceId` 归属；`clientId / revision / location` 描述同步状态，Publication fingerprint 仅作诊断 | P0 | 本地事务先保存，再同步；Asset 或解析器指纹变化不得创建新进度槽、丢弃位置或阻止恢复；进度模块异常不得阻止内容打开或退出 |
 | 音频书 | `/listen/[resourceId]` 仅为瞬时深链；bootstrap + Asset API | pending/loading/playing/paused/error；track/chapter/resume；Range 媒体 | P0 | 全局 mini player + Now Playing；系统音频会话、后台播放、锁屏/耳机/Bluetooth、跳转、倍速、章节、睡眠定时；`/listen` 不建成底部页面 |
-| 本地下载内容 | App 私有下载目录 + Library Resource/Asset 描述 + 原文件媒体 API；Web SW 仅为参考 | 服务端没有设备下载 manifest；App 目录按 `serverIdentity + userId + authzVersion` 隔离，以 completed、Book/Resource/Asset 身份和本地文件存在为事实来源；fingerprint 仅作诊断 | P0 受限范围 | Download Center 按图书聚合任务与完整工件，并直接搜索本地已下载书名、作者和资源名；只承诺显式完成的 Resource，不把普通缓存或服务器任务冒充下载事实；不得宣称全量本地书库 |
+| 本地下载内容 | App 私有下载目录 + Library Resource/Asset 描述 + 原文件媒体 API；Web 可重排 Reader 专用 Cache Storage | 服务端没有设备下载 manifest；身份固定为授权 namespace、Resource、Asset 与 `size:mtimeMs` 版本，并校验真实格式、MIME 与长度 | P0 受限范围 | Download Center 按图书聚合原生任务与完整工件；Reader 与 Download Center 调用同一确保/重建用例。Web Reader 缓存不展示为下载列表，不支持暂停/续传，取消或校验失败删除未完成项并从零重下；不得把普通缓存或单卷完成冒充整书已下载 |
 | 原文件导出 | Web 下载；媒体 GET/HEAD | 与 App 私有下载工件是两种意图 | P1 | “导出原文件”单独走系统 Share Sheet；不能把一个下载按钮同时表示本地副本和文件导出 |
 
 ### 4.4 导入、发送与系统管理

@@ -30,9 +30,26 @@ fun resolveReaderControl(
     nativeUnavailable: Set<ReaderControl> = emptySet(),
 ): ReaderControlAvailability = resolveReaderControlContext(
     control, morphology, capabilities, ready,
-    preferences.epub.flow == ReaderReadingMode.ContinuousScroll,
+    when (morphology) {
+        ReaderMorphology.Reflowable -> preferences.epub.flow == ReaderReadingMode.ContinuousScroll
+        ReaderMorphology.Comic -> preferences.comic.flow == ReaderReadingMode.ContinuousScroll
+        ReaderMorphology.Pdf -> false
+    },
     nativeUnavailable,
-)
+).let { availability ->
+    if (availability != ReaderControlAvailability.Available) return@let availability
+    when {
+        morphology == ReaderMorphology.Reflowable && preferences.epub.typography.preservePublisherStyles &&
+            control in PUBLISHER_OWNED_CONTROLS -> ReaderControlAvailability.TemporarilyUnavailable
+        morphology == ReaderMorphology.Reflowable && !preferences.epub.optimization.enabled &&
+            control in SMART_OPTIMIZATION_CHILD_CONTROLS -> ReaderControlAvailability.TemporarilyUnavailable
+        morphology == ReaderMorphology.Comic && preferences.comic.flow == ReaderReadingMode.ContinuousScroll &&
+            control in COMIC_PAGINATED_CONTROLS -> ReaderControlAvailability.TemporarilyUnavailable
+        morphology == ReaderMorphology.Comic && control == ReaderControl.ComicCoverSingle &&
+            preferences.comic.spreadMode != ReaderComicSpreadMode.Double -> ReaderControlAvailability.TemporarilyUnavailable
+        else -> availability
+    }
+}
 
 fun resolveReaderControlContext(
     control: ReaderControl,
@@ -46,7 +63,7 @@ fun resolveReaderControlContext(
         control in COMIC_CONTROLS && morphology != ReaderMorphology.Comic ||
         control in PDF_CONTROLS && morphology != ReaderMorphology.Pdf
     ) return ReaderControlAvailability.NotApplicable
-    if (!capabilities.supports(control)) return ReaderControlAvailability.NotImplemented
+    if (control !in capabilities.supportedControls) return ReaderControlAvailability.NotImplemented
     if (!ready || control in nativeUnavailable) return ReaderControlAvailability.TemporarilyUnavailable
     if (morphology == ReaderMorphology.Reflowable) {
         if (control == ReaderControl.Spread && scrolling) {
@@ -59,7 +76,11 @@ fun resolveReaderControlContext(
 /** Reset all reading formats in the current local account namespace. */
 fun resetReaderPreferences(): ReaderPreferences = ReaderPreferences()
 
-private fun ReaderCapabilities.supports(control: ReaderControl): Boolean = when (control) {
+/** Stable control-set contract consumed by native presentation adapters. */
+val ReaderCapabilities.supportedControls: Set<ReaderControl>
+    get() = ReaderControl.entries.filterTo(linkedSetOf()) { supportsDeclaredControl(it) }
+
+private fun ReaderCapabilities.supportsDeclaredControl(control: ReaderControl): Boolean = when (control) {
     ReaderControl.Previous -> canGoPrevious
     ReaderControl.Next -> canGoNext
     ReaderControl.Progress -> canGoPrevious || canGoNext
@@ -109,3 +130,12 @@ private val REFLOW_CONTROLS = setOf(
 )
 private val COMIC_CONTROLS = setOf(ReaderControl.ComicDirection, ReaderControl.ComicCoverSingle, ReaderControl.ComicPageGap)
 private val PDF_CONTROLS = setOf(ReaderControl.PdfZoom, ReaderControl.PdfFit, ReaderControl.PdfRotation, ReaderControl.PdfCrop)
+private val PUBLISHER_OWNED_CONTROLS = setOf(
+    ReaderControl.FontFamily, ReaderControl.FontWeight, ReaderControl.LetterSpacing,
+    ReaderControl.LineHeight, ReaderControl.ParagraphIndent, ReaderControl.ParagraphSpacing,
+    ReaderControl.TextAlignment,
+)
+private val SMART_OPTIMIZATION_CHILD_CONTROLS = setOf(ReaderControl.DeduplicateIndent, ReaderControl.IndentUnindented)
+private val COMIC_PAGINATED_CONTROLS = setOf(
+    ReaderControl.Spread, ReaderControl.ComicDirection, ReaderControl.ComicCoverSingle, ReaderControl.ComicPageGap,
+)

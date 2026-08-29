@@ -84,7 +84,6 @@
 		B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07900000000000000000079 /* IosEpubReaderSession.swift */; };
 		B08000000000000000000080 /* IosEpubReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08000000000000000000080 /* IosEpubReaderView.swift */; };
 		B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08400000000000000000084 /* IosReaderLocalDatabase.swift */; };
-		B08500000000000000000085 /* IosOnlinePublication.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08500000000000000000085 /* IosOnlinePublication.swift */; };
 		B08600000000000000000086 /* IosReaderComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08600000000000000000086 /* IosReaderComposition.swift */; };
 		B08800000000000000000088 /* IosMobiCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08800000000000000000088 /* IosMobiCore.swift */; };
 		B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15700000000000000000157 /* IosMobiContentSanitizer.swift */; };
@@ -265,7 +264,6 @@
 		F07900000000000000000079 /* IosEpubReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderSession.swift; sourceTree = "<group>"; };
 		F08000000000000000000080 /* IosEpubReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderView.swift; sourceTree = "<group>"; };
 		F08400000000000000000084 /* IosReaderLocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderLocalDatabase.swift; sourceTree = "<group>"; };
-		F08500000000000000000085 /* IosOnlinePublication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosOnlinePublication.swift; sourceTree = "<group>"; };
 		F08600000000000000000086 /* IosReaderComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderComposition.swift; sourceTree = "<group>"; };
 		F08800000000000000000088 /* IosMobiCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiCore.swift; sourceTree = "<group>"; };
 		F15700000000000000000157 /* IosMobiContentSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosMobiContentSanitizer.swift; sourceTree = "<group>"; };
@@ -670,7 +668,6 @@
 				C01200000000000000000002 /* IosReaderControls.swift */,
 				C01200000000000000000001 /* IosReaderControlSession.swift */,
 				F08400000000000000000084 /* IosReaderLocalDatabase.swift */,
-				F08500000000000000000085 /* IosOnlinePublication.swift */,
 				F08600000000000000000086 /* IosReaderComposition.swift */,
 				F08800000000000000000088 /* IosMobiCore.swift */,
 				F15700000000000000000157 /* IosMobiContentSanitizer.swift */,
@@ -1001,7 +998,6 @@
 				C01100000000000000000002 /* IosReaderControls.swift in Sources */,
 				C01100000000000000000001 /* IosReaderControlSession.swift in Sources */,
 				B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */,
-				B08500000000000000000085 /* IosOnlinePublication.swift in Sources */,
 				B08600000000000000000086 /* IosReaderComposition.swift in Sources */,
 				B08800000000000000000088 /* IosMobiCore.swift in Sources */,
 				B15700000000000000000157 /* IosMobiContentSanitizer.swift in Sources */,

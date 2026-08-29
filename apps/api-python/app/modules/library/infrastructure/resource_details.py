@@ -217,18 +217,6 @@ class SqlAlchemyResourceDetailQueries:
             total,
         )
 
-    def has_navigation_units(self, *, resource_id: str, unit_type: str) -> bool:
-        return (
-            self._db.scalar(
-                select(ReadableResourceNavigationUnit.id).where(
-                    ReadableResourceNavigationUnit.resource_id == resource_id,
-                    func.lower(ReadableResourceNavigationUnit.unit_type)
-                    == unit_type.casefold(),
-                )
-            )
-            is not None
-        )
-
     def list_assets(self, *, resource_id: str) -> tuple[ResourceAssetDetail, ...]:
         rows = self._db.execute(
             select(

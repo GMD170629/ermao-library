@@ -435,7 +435,7 @@ class ReaderCapabilities(ReaderWireModel):
 
 
 class ReaderPublicationAccess(ReaderWireModel):
-    kind: Literal["reflowable", "comic"]
+    kind: Literal["comic"]
     manifest_url: str = Field(alias="manifestUrl")
     positions_url: str | None = Field(default=None, alias="positionsUrl")
     page_url_template: str | None = Field(default=None, alias="pageUrlTemplate")
@@ -446,12 +446,7 @@ class ReaderPublicationAccess(ReaderWireModel):
 
     @model_validator(mode="after")
     def validate_kind(self) -> ReaderPublicationAccess:
-        if self.kind == "reflowable":
-            if self.positions_url is None or self.page_url_template is not None:
-                raise ValueError("Invalid reflowable publication access")
-            if self.image_variants:
-                raise ValueError("Invalid reflowable publication access")
-        elif (
+        if (
             self.positions_url is not None
             or self.page_url_template is None
             or self.image_variants != ["original", "data-saver"]
@@ -531,7 +526,10 @@ class ReaderBootstrapData(ReaderWireModel):
     units: list[ReaderNavigationUnitSummary]
     resource_url: str = Field(alias="resourceUrl")
     capabilities: ReaderCapabilities
-    publication: ReaderPublicationAccess | None = None
+    publication: ReaderPublicationAccess | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     progress_snapshot: ReaderProgressSnapshot | None = Field(
         default=None, alias="progressSnapshot"
     )

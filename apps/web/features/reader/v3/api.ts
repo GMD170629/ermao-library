@@ -3,12 +3,13 @@ import {
   parseSupportedReaderSourceFormat,
   readerFormatCapability,
   type ReaderLocation,
-  type ReaderNavigationEntry,
+  type ReaderOriginalResource,
   type ReaderSource,
   type ReflowableFormat,
   type SupportedReaderSourceFormat
 } from '@shuku/reader-core';
 import { withBasePath } from '../../../lib/base-path';
+import { fetchLibraryResource } from '../../books/public';
 import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
 
@@ -146,8 +147,38 @@ function mapUnits(value: unknown): ReaderUnit[] {
   return units;
 }
 
-function serverNavigation(units: ReaderUnit[]): ReaderNavigationEntry[] {
-  return units.filter((unit) => unit.href).map((unit) => ({ id: unit.id, navigationKey: unit.id, label: unit.title, href: unit.href ?? undefined, index: unit.index }));
+function assetVersion(sizeBytes: number, mtimeMs: number): ReaderOriginalResource['assetVersion'] {
+  return `${sizeBytes}:${mtimeMs}`;
+}
+
+async function originalResourceDescriptor(
+  resourceId: string,
+  format: ReflowableFormat,
+  signal: AbortSignal
+): Promise<ReaderOriginalResource> {
+  const descriptor = await fetchLibraryResource(resourceId, signal);
+  if (descriptor.readerType !== 'reflowable' || descriptor.format.toLowerCase() !== format) {
+    throw new ReaderBootstrapError('ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH', 'ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH');
+  }
+  const exactFormat = format.toUpperCase();
+  const asset = descriptor.assets.find((candidate) => (
+    candidate.role === 'PRIMARY'
+    && candidate.resourceId === resourceId
+    && candidate.sourceFormat === exactFormat
+  ));
+  if (!asset || asset.sizeBytes <= 0 || asset.mtimeMs < 0 || !asset.mimeType || !asset.downloadUrl) {
+    throw new ReaderBootstrapError('ORIGINAL_DESCRIPTOR_INVALID', 'ORIGINAL_DESCRIPTOR_INVALID');
+  }
+  return {
+    resourceId,
+    assetId: asset.id,
+    assetVersion: assetVersion(asset.sizeBytes, asset.mtimeMs),
+    sourceFormat: format,
+    mimeType: asset.mimeType,
+    sizeBytes: asset.sizeBytes,
+    mtimeMs: asset.mtimeMs,
+    downloadUrl: asset.downloadUrl
+  };
 }
 
 async function fetchComicManifest(
@@ -263,19 +294,16 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
   if (data.progressSnapshot !== null && data.progressSnapshot !== undefined && !serverProgressSnapshot) {
     throw new Error('阅读器启动信息包含无效的 Reader v4 进度快照');
   }
-  const publicationManifestUrl = readerType === 'reflowable'
-    ? nullableString(publicationAccess.manifestUrl)
-    : null;
   let source: ReaderSource;
   if (readerType === 'reflowable') {
-    if (!publicationManifestUrl) throw new Error('READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE');
+    const originalResource = await originalResourceDescriptor(resource.id, format as ReflowableFormat, signal);
     source = {
       bookId,
       resourceId: resource.id,
       kind: 'reflowable',
       sourceFormat: format as ReflowableFormat,
-      publicationManifestUrl: withBasePath(publicationManifestUrl),
-      navigation: serverNavigation(units),
+      originalResource,
+      navigation: [],
       totalPages: resource.pageCount
     };
   } else if (readerType === 'comic') {

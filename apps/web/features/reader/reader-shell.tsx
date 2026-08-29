@@ -1,6 +1,6 @@
 'use client';
 
-import { READER_SETTINGS_CATALOG, readerSettingValue, changeReaderSetting, type ReaderSettingId } from '@shuku/reader-core';
+import { READER_SETTINGS_CATALOG, readerSettingAvailability, readerSettingValue, changeReaderSetting, type ReaderSettingId } from '@shuku/reader-core';
 import { preferencesToReaderSettings, readerSettingsToPreferences } from './v3/presentation';
 
 import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
@@ -1054,7 +1054,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 <ReaderPreferencesPanel panel={panel} settings={settings} readerType={readerType} dark={dark}
                   updateSettings={updateSettings} onResetSettings={onResetSettings} keepControlsOpen={keepControlsOpen}
                   pageWidthMaximum={pageWidthMaximum} mobilePageWidth={mobilePageWidth} wakeLockSupported={wakeLockSupported}
-                  canZoom={capabilities?.canZoom !== false} />
+                  canZoom={capabilities?.canZoom !== false} supportedControls={capabilities?.supportedControls} />
               ) : null}
 
             </div>
@@ -1432,11 +1432,11 @@ function comicNavButtonClass(selected: boolean, dark: boolean) {
   );
 }
 
-function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSettings, onResetSettings, keepControlsOpen, pageWidthMaximum, mobilePageWidth, wakeLockSupported, canZoom }: {
+function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSettings, onResetSettings, keepControlsOpen, pageWidthMaximum, mobilePageWidth, wakeLockSupported, canZoom, supportedControls: adapterSupportedControls }: {
   panel: 'appearance' | 'settings'; settings: ReaderSettings; readerType: ReaderKind; dark: boolean;
   updateSettings: (value: Partial<ReaderSettings>) => void;
   onResetSettings?: () => void | Promise<void>; keepControlsOpen: () => void;
-  pageWidthMaximum: number; mobilePageWidth: boolean; wakeLockSupported: boolean; canZoom: boolean;
+  pageWidthMaximum: number; mobilePageWidth: boolean; wakeLockSupported: boolean; canZoom: boolean; supportedControls?: readonly string[];
 }) {
   const { t } = useAttributeI18n();
   const [advanced, setAdvanced] = useState(false);
@@ -1458,24 +1458,23 @@ function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSetti
     const saved = readerSettingValue(preferences, id);
     const pageWidth = id === 'textPageWidth' || id === 'comicPageWidth' || id === 'pdfPageWidth';
     const zoom = id === 'comicZoom' || id === 'pdfZoom';
-    const disabled = id === 'preservePublisherStyles' || id === 'epubAnimation' ||
-      (id === 'swipePageTurn' && readerType === 'reflowable') ||
-      (id === 'keepScreenAwake' && !wakeLockSupported) || (pageWidth && mobilePageWidth) || (zoom && !canZoom) ||
-      (['comicSpread', 'comicDirection', 'comicPageGap', 'comicCoverSingle'].includes(id) && settings.comicFlow === 'scrolled') ||
-      (id === 'comicCoverSingle' && settings.comicMode !== 'double') ||
-      (['deduplicateIndent', 'indentUnindented'].includes(id) && !settings.smartOptimization);
-    const description = id === 'preservePublisherStyles' ? t('当前 Web 引擎未提供出版方样式总开关接口，此设置不可用。')
-      : id === 'epubAnimation' ? t('Readium 暂不支持可配置翻页动画，此设置当前不生效。')
-      : id === 'textFlow' ? t('滚动模式暂未适配，当前使用分页阅读。')
-      : id === 'swipePageTurn' && readerType === 'reflowable' ? t('Readium 使用原生触摸滑动，当前无法关闭。')
-      : id === 'keepScreenAwake' && !wakeLockSupported ? t('当前浏览器不支持保持屏幕唤醒')
-      : pageWidth && mobilePageWidth ? t('手机模式下自动使用可视区域宽度')
-      : id === 'volumeKeyPageTurn' ? t('默认关闭，部分浏览器可能不会转发音量键事件')
-      : undefined;
+    const supportedControls = new Set<string>(adapterSupportedControls ?? READER_SETTINGS_CATALOG.settings.flatMap((candidate) => candidate.control ? [candidate.control] : []));
+    supportedControls.delete('VolumeKeys');
+    const state = readerSettingAvailability(id, {
+      morphology: readerType,
+      ready: true,
+      supportedControls,
+      wideViewport: !mobilePageWidth,
+      wakeLockSupported,
+      canZoom,
+      preferences
+    });
+    const disabled = state.availability !== 'available';
+    const description = state.reason ? availabilityDescription(state.reason) : undefined;
     if (id === 'theme') return <ThemeSwatches key={id} value={settings.theme} onChange={(value) => update(id, value)} dark={dark} />;
     if (setting.kind === 'action') return onResetSettings ? <button key={id} type="button" onClick={() => { void onResetSettings(); keepControlsOpen(); }} className="min-h-11 w-full" aria-label={label}>{label}</button> : null;
     if (setting.kind === 'toggle') {
-      const checked = id === 'preservePublisherStyles' ? false : id === 'swipePageTurn' && readerType === 'reflowable' ? true : saved === 'true' || saved === 'system';
+      const checked = id === 'swipePageTurn' && readerType === 'reflowable' ? true : saved === 'true' || saved === 'system';
       return <ReaderToggleRow key={id} label={label} description={description} checked={checked} disabled={disabled} onChange={(value) => update(id, id === 'themeMode' ? value ? 'system' : 'manual' : String(value))} dark={dark} />;
     }
     if (setting.kind === 'number' && setting.limits) {
@@ -1484,8 +1483,22 @@ function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSetti
       return <CompactStepper key={id} label={label} value={zoom ? `${Math.round(Number(saved) * 100)}%` : `${saved}px`} disabled={disabled} onMinus={() => update(id, String(Math.max(minimum, Number((Number(saved) - step).toFixed(2)))))} onPlus={() => update(id, String(Math.min(maximum, Number((Number(saved) + step).toFixed(2)))))} dark={dark} />;
     }
     if (!setting.options) return null;
-    const options = READER_SETTINGS_CATALOG.optionGroups[setting.options].map((option) => ({ value: option.value, label: option.label['zh-CN'], disabled: id === 'textFlow' && option.value === 'scrolled' }));
-    return <CompactSettingOptions key={id} label={label} value={id === 'textFlow' ? 'paginated' : saved} options={options} disabled={disabled} description={description} disambiguateLabels={id === 'quickFontSize' || id === 'lineHeight'} onChange={(value) => update(id, value)} dark={dark} />;
+    const options = READER_SETTINGS_CATALOG.optionGroups[setting.options].map((option) => ({ value: option.value, label: option.label['zh-CN'] }));
+    return <CompactSettingOptions key={id} label={label} value={saved} options={options} disabled={disabled} description={description} disambiguateLabels={id === 'quickFontSize' || id === 'lineHeight'} onChange={(value) => update(id, value)} dark={dark} />;
+  }
+  function availabilityDescription(reason: keyof typeof READER_SETTINGS_CATALOG.availabilityReasons) {
+    switch (reason) {
+      case 'engineNotReady': return t('阅读引擎尚未就绪');
+      case 'notImplemented': return t('当前平台尚未实现');
+      case 'publicationConstraint': return t('当前出版物不支持此设置');
+      case 'narrowViewport': return t('可用宽度不大于 640 时自动使用全宽');
+      case 'scrollingMode': return t('滚动模式下暂不可用');
+      case 'requiresDoubleSpread': return t('仅在双页模式下可用');
+      case 'optimizationDisabled': return t('请先开启智能优化');
+      case 'publisherStylesActive': return t('出版方样式开启时由出版物控制');
+      case 'wakeLockUnavailable': return t('当前环境不支持保持屏幕唤醒');
+      case 'zoomUnavailable': return t('当前阅读器不支持可配置缩放');
+    }
   }
   function sectionView(section: typeof sections[number]) {
     const entries = READER_SETTINGS_CATALOG.settings.filter((setting) => setting.section === section.id && setting.formats.some((format) => format === readerType));

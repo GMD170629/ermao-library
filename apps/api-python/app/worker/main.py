@@ -7,6 +7,7 @@ import os
 import signal
 import threading
 from pathlib import Path
+from tempfile import gettempdir
 
 from app.bootstrap.library_scan_runtime import (
     LibraryScanCoordinator,
@@ -26,9 +27,15 @@ from app.db.session import (
 )
 
 logger = logging.getLogger("ermao.import_worker")
-READY_FILE = Path(
-    os.environ.get("IMPORT_WORKER_READY_FILE") or "/tmp/import-worker-ready"
-)
+
+
+def worker_ready_file() -> Path:
+    """Return the configured probe path or a platform-native temporary path."""
+
+    configured = os.environ.get("IMPORT_WORKER_READY_FILE")
+    if configured:
+        return Path(configured)
+    return Path(gettempdir()) / "import-worker-ready"
 
 
 def main() -> None:
@@ -36,6 +43,7 @@ def main() -> None:
     from app.services.organize_scheduler import OrganizerScheduler
 
     settings = get_settings()
+    ready_file = worker_ready_file()
     verify_current_schema(engine)
 
     import_session = BackgroundSessionLocal()
@@ -67,7 +75,7 @@ def main() -> None:
             return
         stopping = True
         logger.info("readable_resource.worker.stopping", extra={"signal": signum})
-        READY_FILE.unlink(missing_ok=True)
+        ready_file.unlink(missing_ok=True)
         stop_event.set()
 
     signal.signal(signal.SIGINT, shutdown)
@@ -75,7 +83,7 @@ def main() -> None:
 
     metadata_worker.start()
     organizer_scheduler.start()
-    READY_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    ready_file.write_text(str(os.getpid()), encoding="utf-8")
     logger.info("readable_resource.worker.ready")
 
     try:
@@ -92,7 +100,7 @@ def main() -> None:
             if outcome == "idle":
                 stop_event.wait(settings.import_queue_interval_seconds)
     finally:
-        READY_FILE.unlink(missing_ok=True)
+        ready_file.unlink(missing_ok=True)
         metadata_worker.shutdown()
         organizer_scheduler.shutdown()
         scan_coordinator.shutdown()

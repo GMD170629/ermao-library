@@ -394,6 +394,52 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.snapshot.phase, .signedOut)
     }
 
+    func testServerSwitchClosesReadersAndTransfersBeforeRemovingOldNamespace() async throws {
+        let first = makeProfile(id: "first", baseURL: "https://first.example.com", active: true)
+        let second = makeProfile(id: "second", baseURL: "https://second.example.com", active: false)
+        let events = PrivateTransitionEvents()
+        let cache = OrderedPrivateContentCache(events: events)
+        let runtime = PreviewMobileRuntime(
+            snapshot: RuntimeSessionSnapshot(
+                phase: .authenticated,
+                profile: first,
+                userID: "reader-1",
+                userDisplayName: "Reader",
+                userEmail: "reader@example.com",
+                authorization: RuntimeAuthorization(
+                    isAdmin: false,
+                    canManageSystem: false,
+                    allLibraryScopes: true,
+                    libraryIDs: [],
+                    canViewManualImports: false,
+                    authorizationVersion: 7
+                ),
+                reasonCode: nil
+            ),
+            serverProfiles: [first, second]
+        )
+        let store = SessionStore(
+            runtime: runtime,
+            privateContentCache: cache,
+            preparePrivateNamespaceTransition: {
+                await events.append("reader-and-downloads-closed")
+            }
+        )
+
+        store.switchServer(profileID: second.id)
+        await waitUntilIdle(store)
+
+        let recordedEvents = await events.values()
+        XCTAssertEqual(
+            recordedEvents,
+            [
+                "reader-and-downloads-closed",
+                "removed:identity-first|reader-1|7",
+            ]
+        )
+        XCTAssertEqual(store.snapshot.profile?.id, second.id)
+    }
+
     private func waitUntilIdle(_ store: SessionStore) async {
         for _ in 0..<100 where store.isPerformingOperation {
             await Task.yield()
@@ -468,5 +514,20 @@ private actor RecordingPrivateContentCache: PrivateContentCacheClearing {
 
     func removedNamespaces() -> [String] {
         namespaces
+    }
+}
+
+private actor PrivateTransitionEvents {
+    private var events: [String] = []
+
+    func append(_ event: String) { events.append(event) }
+    func values() -> [String] { events }
+}
+
+private struct OrderedPrivateContentCache: PrivateContentCacheClearing {
+    let events: PrivateTransitionEvents
+
+    func removeNamespace(_ namespace: String) async throws {
+        await events.append("removed:\(namespace)")
     }
 }

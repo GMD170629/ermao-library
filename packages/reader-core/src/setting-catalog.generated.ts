@@ -55,16 +55,8 @@ export const READER_FONT_FAMILY_OPTIONS = [
     "label": "苹方"
   },
   {
-    "value": "heiti",
-    "label": "黑体"
-  },
-  {
     "value": "songti",
     "label": "宋体"
-  },
-  {
-    "value": "yahei",
-    "label": "微软雅黑"
   },
   {
     "value": "kaiti",
@@ -82,6 +74,20 @@ export const READER_FLOW_OPTIONS = [
   }
 ] as const;
 export const READER_SPREAD_MODE_OPTIONS = [
+  {
+    "value": "single",
+    "label": "单页"
+  },
+  {
+    "value": "double",
+    "label": "双页"
+  }
+] as const;
+export const READER_TEXT_SPREAD_MODE_OPTIONS = [
+  {
+    "value": "auto",
+    "label": "自动"
+  },
   {
     "value": "single",
     "label": "单页"
@@ -340,6 +346,87 @@ export const READER_PDF_CROP_OPTIONS = [
 export const READER_SETTINGS_CATALOG = {
   "version": 1,
   "preferenceVersion": 5,
+  "availabilityReasons": {
+    "engineNotReady": {
+      "zh-CN": "阅读引擎尚未就绪",
+      "en-US": "The reader engine is not ready yet"
+    },
+    "notImplemented": {
+      "zh-CN": "当前平台尚未实现",
+      "en-US": "Not implemented on this platform"
+    },
+    "publicationConstraint": {
+      "zh-CN": "当前出版物不支持此设置",
+      "en-US": "This publication does not support the setting"
+    },
+    "narrowViewport": {
+      "zh-CN": "可用宽度不大于 640 时自动使用全宽",
+      "en-US": "Full width is used when the available width is 640 or less"
+    },
+    "scrollingMode": {
+      "zh-CN": "滚动模式下暂不可用",
+      "en-US": "Temporarily unavailable while scrolling"
+    },
+    "requiresDoubleSpread": {
+      "zh-CN": "仅在双页模式下可用",
+      "en-US": "Available only in two-page mode"
+    },
+    "optimizationDisabled": {
+      "zh-CN": "请先开启智能优化",
+      "en-US": "Turn on Smart Optimization first"
+    },
+    "publisherStylesActive": {
+      "zh-CN": "出版方样式开启时由出版物控制",
+      "en-US": "Controlled by the publication while Publisher Styles is on"
+    },
+    "wakeLockUnavailable": {
+      "zh-CN": "当前环境不支持保持屏幕唤醒",
+      "en-US": "The current environment does not support keeping the screen awake"
+    },
+    "zoomUnavailable": {
+      "zh-CN": "当前阅读器不支持可配置缩放",
+      "en-US": "The current reader does not support configurable zoom"
+    }
+  },
+  "availabilityRules": {
+    "wideViewport": [
+      "textPageWidth",
+      "comicPageWidth",
+      "pdfPageWidth"
+    ],
+    "paginatedReflowable": [
+      "textSpread"
+    ],
+    "paginatedComic": [
+      "comicSpread",
+      "comicDirection",
+      "comicCoverSingle",
+      "comicPageGap"
+    ],
+    "doubleComicSpread": [
+      "comicCoverSingle"
+    ],
+    "optimizationEnabled": [
+      "deduplicateIndent",
+      "indentUnindented"
+    ],
+    "publisherStylesOff": [
+      "fontFamily",
+      "fontWeight",
+      "letterSpacing",
+      "lineHeight",
+      "paragraphIndent",
+      "paragraphSpacing",
+      "textAlign"
+    ],
+    "wakeLock": [
+      "keepScreenAwake"
+    ],
+    "zoom": [
+      "comicZoom",
+      "pdfZoom"
+    ]
+  },
   "sections": [
     {
       "id": "top",
@@ -543,24 +630,10 @@ export const READER_SETTINGS_CATALOG = {
         }
       },
       {
-        "value": "heiti",
-        "label": {
-          "zh-CN": "黑体",
-          "en-US": "Heiti"
-        }
-      },
-      {
         "value": "songti",
         "label": {
           "zh-CN": "宋体",
           "en-US": "Songti"
-        }
-      },
-      {
-        "value": "yahei",
-        "label": {
-          "zh-CN": "微软雅黑",
-          "en-US": "Microsoft YaHei"
         }
       },
       {
@@ -588,6 +661,29 @@ export const READER_SETTINGS_CATALOG = {
       }
     ],
     "READER_SPREAD_MODE_OPTIONS": [
+      {
+        "value": "single",
+        "label": {
+          "zh-CN": "单页",
+          "en-US": "Single Page"
+        }
+      },
+      {
+        "value": "double",
+        "label": {
+          "zh-CN": "双页",
+          "en-US": "Double"
+        }
+      }
+    ],
+    "READER_TEXT_SPREAD_MODE_OPTIONS": [
+      {
+        "value": "auto",
+        "label": {
+          "zh-CN": "自动",
+          "en-US": "Auto"
+        }
+      },
       {
         "value": "single",
         "label": {
@@ -1418,7 +1514,7 @@ export const READER_SETTINGS_CATALOG = {
       "path": "epub.spreadMode",
       "control": "Spread",
       "kind": "choice",
-      "options": "READER_SPREAD_MODE_OPTIONS",
+      "options": "READER_TEXT_SPREAD_MODE_OPTIONS",
       "formats": [
         "reflowable"
       ],
@@ -1762,6 +1858,10 @@ export const READER_SETTINGS_CATALOG = {
 } as const;
 
 export type ReaderSettingId = typeof READER_SETTINGS_CATALOG.settings[number]['id'];
+export type ReaderControlId = NonNullable<typeof READER_SETTINGS_CATALOG.settings[number]['control']>;
+export type ReaderControlAvailability = 'available' | 'temporarilyUnavailable' | 'notImplemented' | 'notApplicable';
+export type ReaderAvailabilityReason = keyof typeof READER_SETTINGS_CATALOG.availabilityReasons;
+export type ReaderSettingAvailabilityContext = Readonly<{ morphology: 'reflowable' | 'comic' | 'pdf'; ready: boolean; supportedControls: ReadonlySet<string>; nativeUnavailable?: ReadonlySet<string>; wideViewport: boolean; wakeLockSupported: boolean; canZoom: boolean; preferences: ReaderPreferences }>;
 import { normalizeReaderPreferences } from './preferences';
 import type { ReaderPreferences } from './types';
 export function readerSettingValue(preferences: ReaderPreferences, id: ReaderSettingId): string {
@@ -1857,4 +1957,22 @@ export function changeReaderSetting(preferences: ReaderPreferences, id: ReaderSe
     case "volumeKeyPageTurn": return normalizeReaderPreferences({ ...preferences, interaction: { ...preferences.interaction, volumeKeyPageTurn: value === 'true' } });
     case 'reset': return normalizeReaderPreferences({});
   }
+}
+export function readerSettingAvailability(id: ReaderSettingId, context: ReaderSettingAvailabilityContext): Readonly<{ availability: ReaderControlAvailability; reason?: ReaderAvailabilityReason }> {
+  const setting = READER_SETTINGS_CATALOG.settings.find((candidate) => candidate.id === id);
+  if (!setting || !(setting.formats as readonly string[]).includes(context.morphology)) return { availability: 'notApplicable' };
+  if (setting.control === null) return { availability: 'available' };
+  if (!context.supportedControls.has(setting.control)) return { availability: 'notImplemented', reason: 'notImplemented' };
+  if (!context.ready) return { availability: 'temporarilyUnavailable', reason: 'engineNotReady' };
+  if (context.nativeUnavailable?.has(setting.control)) return { availability: 'temporarilyUnavailable', reason: 'publicationConstraint' };
+  const rules = READER_SETTINGS_CATALOG.availabilityRules;
+  if (rules.wideViewport.includes(id as never) && !context.wideViewport) return { availability: 'temporarilyUnavailable', reason: 'narrowViewport' };
+  if (rules.wakeLock.includes(id as never) && !context.wakeLockSupported) return { availability: 'notImplemented', reason: 'wakeLockUnavailable' };
+  if (rules.zoom.includes(id as never) && !context.canZoom) return { availability: 'notImplemented', reason: 'zoomUnavailable' };
+  if (rules.paginatedReflowable.includes(id as never) && context.preferences.epub.flow === 'scrolled') return { availability: 'temporarilyUnavailable', reason: 'scrollingMode' };
+  if (rules.paginatedComic.includes(id as never) && context.preferences.comic.flow === 'scrolled') return { availability: 'temporarilyUnavailable', reason: 'scrollingMode' };
+  if (rules.doubleComicSpread.includes(id as never) && context.preferences.comic.spreadMode !== 'double') return { availability: 'temporarilyUnavailable', reason: 'requiresDoubleSpread' };
+  if (rules.optimizationEnabled.includes(id as never) && !context.preferences.epub.optimization.enabled) return { availability: 'temporarilyUnavailable', reason: 'optimizationDisabled' };
+  if (rules.publisherStylesOff.includes(id as never) && context.preferences.epub.typography.preservePublisherStyles) return { availability: 'temporarilyUnavailable', reason: 'publisherStylesActive' };
+  return { availability: 'available' };
 }

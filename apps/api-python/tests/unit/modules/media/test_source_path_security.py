@@ -118,4 +118,4 @@ def test_version_precondition_rejects_stale_resume_before_streaming(
     rejected = send_file(source, request, "user-1", asset_id="asset-1")
     assert rejected.status_code == 412
     assert b"ASSET_VERSION_CHANGED" in rejected.body
-    assert version == f"10:{int(source.stat().st_mtime * 1000)}"
+    assert version == f"10:{source.stat().st_mtime_ns // 1_000_000}"

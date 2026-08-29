@@ -6,6 +6,7 @@ import re
 import selectors
 import shutil
 import subprocess
+import threading
 import time
 import unicodedata
 from pathlib import Path
@@ -32,6 +33,9 @@ AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
 MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
 MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
+_FFPROBE_RAW_INPUT_OPTIONS: dict[str, tuple[str, ...]] = {
+    ".g726": ("-f", "g726", "-code_size", "4", "-ar", "8000"),
+}
 MISDECLARED_TEXT_ENCODING_CANDIDATES = (
     "utf-8",
     "gb18030",
@@ -282,6 +286,7 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         "-show_format",
         "-show_streams",
         "-show_chapters",
+        *_FFPROBE_RAW_INPUT_OPTIONS.get(path.suffix.lower(), ()),
         str(path),
     ]
     returncode, stdout, stderr = _run_process_with_output_limit(
@@ -346,12 +351,20 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
                     "end_ms": end_ms,
                 }
             )
+    duration_ms = _seconds_to_ms(duration)
+    if duration_ms <= 0:
+        duration_ms = _raw_audio_duration_ms(
+            path,
+            audio_stream=audio_stream,
+            ffprobe_executable=executable,
+            timeout_seconds=timeout_seconds,
+        )
     result = {
         "title": _first_tag(tags, "title"),
         "album": _first_tag(tags, "album"),
         "author": _first_tag(tags, "album_artist", "albumartist", "artist", "author"),
         "narrator": _first_tag(tags, "narrator", "readby", "reader", "composer"),
-        "duration_ms": _seconds_to_ms(duration),
+        "duration_ms": duration_ms,
         "codec": audio_stream.get("codec_name"),
         "bitrate": audio_stream.get("bit_rate") or format_data.get("bit_rate"),
         "sample_rate": audio_stream.get("sample_rate"),
@@ -376,6 +389,59 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
     return result
 
 
+def _raw_audio_duration_ms(
+    path: Path,
+    *,
+    audio_stream: dict[str, Any],
+    ffprobe_executable: str,
+    timeout_seconds: int,
+) -> int:
+    """Recover duration for raw codecs whose demuxers omit container duration."""
+
+    codec = str(audio_stream.get("codec_name") or "").strip().lower()
+    sample_rate = _positive_int(audio_stream.get("sample_rate"))
+    channels = _positive_int(audio_stream.get("channels"))
+    bits_per_sample_per_channel = {"aptx": 4, "aptx_hd": 6}.get(codec)
+    if bits_per_sample_per_channel and sample_rate and channels:
+        bit_rate = sample_rate * channels * bits_per_sample_per_channel
+        return max(0, round(path.stat().st_size * 8 * 1000 / bit_rate))
+    if codec not in {"mlp", "truehd"} or sample_rate is None:
+        return 0
+    command = [
+        ffprobe_executable,
+        "-v",
+        "error",
+        "-count_packets",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=nb_read_packets",
+        "-print_format",
+        "json",
+        str(path),
+    ]
+    returncode, stdout, _stderr = _run_process_with_output_limit(
+        command,
+        timeout_seconds=max(1, timeout_seconds),
+        max_stdout_bytes=64 * 1024,
+        max_stderr_bytes=MAX_FFPROBE_STDERR_BYTES,
+    )
+    if returncode != 0:
+        return 0
+    try:
+        payload = json.loads(stdout.decode("utf-8", errors="strict") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return 0
+    streams = payload.get("streams") if isinstance(payload.get("streams"), list) else []
+    packet_count = (
+        _positive_int(streams[0].get("nb_read_packets"))
+        if streams and isinstance(streams[0], dict)
+        else None
+    )
+    # MLP and TrueHD audio access units carry 40 PCM samples.
+    return max(0, round(packet_count * 40 * 1000 / sample_rate)) if packet_count else 0
+
+
 def _run_process_with_output_limit(
     command: list[str],
     *,
@@ -391,18 +457,24 @@ def _run_process_with_output_limit(
         )
     except OSError as exc:
         raise ValueError(f"ffprobe 读取音频失败：{exc}") from exc
-    if process.stdout is None or process.stderr is None:
+    stdout_pipe = process.stdout
+    stderr_pipe = process.stderr
+    if stdout_pipe is None or stderr_pipe is None:
         process.kill()
         process.wait()
         raise ValueError("ffprobe 读取音频失败：无法捕获子进程输出")
 
+    if os.name == "nt":
+        return _communicate_with_output_limit_on_windows(
+            process,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+        )
+
     selector = selectors.DefaultSelector()
-    selector.register(
-        process.stdout, selectors.EVENT_READ, ("stdout", max_stdout_bytes)
-    )
-    selector.register(
-        process.stderr, selectors.EVENT_READ, ("stderr", max_stderr_bytes)
-    )
+    selector.register(stdout_pipe, selectors.EVENT_READ, ("stdout", max_stdout_bytes))
+    selector.register(stderr_pipe, selectors.EVENT_READ, ("stderr", max_stderr_bytes))
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     deadline = time.monotonic() + max(1, timeout_seconds)
     try:
@@ -442,11 +514,82 @@ def _run_process_with_output_limit(
         return returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"])
     finally:
         selector.close()
-        process.stdout.close()
-        process.stderr.close()
+        stdout_pipe.close()
+        stderr_pipe.close()
+
+
+def _communicate_with_output_limit_on_windows(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: int,
+    max_stdout_bytes: int,
+    max_stderr_bytes: int,
+) -> tuple[int, bytes, bytes]:
+    """Drain Windows anonymous pipes concurrently with explicit byte limits."""
+
+    stdout_pipe = process.stdout
+    stderr_pipe = process.stderr
+    if stdout_pipe is None or stderr_pipe is None:
+        process.kill()
+        process.wait()
+        raise ValueError("ffprobe 读取音频失败：无法捕获子进程输出")
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    overflow = threading.Event()
+
+    def drain(name: str, limit: int) -> None:
+        stream = stdout_pipe if name == "stdout" else stderr_pipe
+        while not overflow.is_set():
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                return
+            if len(buffers[name]) + len(chunk) > limit:
+                overflow.set()
+                return
+            buffers[name].extend(chunk)
+
+    threads = (
+        threading.Thread(
+            target=drain,
+            args=("stdout", max_stdout_bytes),
+            name="ffprobe-stdout",
+            daemon=True,
+        ),
+        threading.Thread(
+            target=drain,
+            args=("stderr", max_stderr_bytes),
+            name="ffprobe-stderr",
+            daemon=True,
+        ),
+    )
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    try:
+        while process.poll() is None:
+            if overflow.is_set():
+                process.kill()
+                process.wait()
+                raise ValueError("ffprobe 输出超过安全上限")
+            if time.monotonic() >= deadline:
+                process.kill()
+                process.wait()
+                raise ValueError(f"ffprobe 读取音频超时（{timeout_seconds} 秒）")
+            time.sleep(0.01)
+        for thread in threads:
+            thread.join(timeout=1)
+        if overflow.is_set():
+            raise ValueError("ffprobe 输出超过安全上限")
+        if any(thread.is_alive() for thread in threads):
+            process.kill()
+            process.wait()
+            raise ValueError("ffprobe 读取音频失败：子进程输出未正常结束")
+        return process.returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"])
+    finally:
         if process.poll() is None:
             process.kill()
             process.wait()
+        stdout_pipe.close()
+        stderr_pipe.close()
 
 
 def _read_with_mutagen(path: Path) -> dict[str, Any]:

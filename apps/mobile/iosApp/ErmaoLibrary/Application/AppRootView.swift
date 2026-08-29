@@ -234,11 +234,9 @@ private struct AuthenticatedShellHost: View {
                     refreshSession: { await store.refreshCurrentSession() },
                     showReauthentication: { store.requireReauthentication() },
                     purgeCurrentNamespace: {
-                        await downloads.cancelAllTransfers()
                         try await store.purgeCurrentNamespace()
                     },
                     logout: {
-                        await downloads.cancelAllTransfers()
                         try await store.logoutAwaitingCompletion(purgeNamespace: true)
                     }
                 )

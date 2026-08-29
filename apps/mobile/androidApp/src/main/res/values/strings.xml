@@ -390,7 +390,7 @@
     <string name="reader_comic_page">Page %1$d</string>
     <string name="reader_pdf_page">Page %1$d</string>
     <string name="reader_progress_remaining_percent">%1$d%% remaining</string>
-    <string name="reader_font_mapping">PingFang, Heiti and YaHei use Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai.</string>
+    <string name="reader_font_mapping">PingFang uses Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai.</string>
     <string name="reader_negative_spacing_retained">Saved negative spacing is retained but unsupported. Effective spacing is 0.</string>
     <string name="reader_advanced_settings">Advanced settings</string>
     <string name="reader_done">Done</string>
@@ -609,7 +609,6 @@
     <string name="management_result_cover_not_selected">Cover was not selected</string>
     <string name="management_reading_status">Reading status</string>
     <string name="reader_error_publication_changed">The publication has changed. Please reopen it.</string>
-    <string name="reader_download_reason">Online reading is unavailable for this resource. Downloading the original before opening.</string>
     <string name="reader_download_preparing">Preparing the downloaded book…</string>
     <string name="reader_download_failed">Download failed. You can retry.</string>
     <string name="reader_download_transferring">Downloading</string>

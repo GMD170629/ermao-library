@@ -12,8 +12,13 @@ test('reader format registry is the single supported visual format matrix', () =
     ['epub', 'mobi', 'azw', 'azw3', 'prc', 'txt', 'fb2', 'cbz', 'zip', 'cbr', 'rar', 'image_dir', 'pdf']
   );
   assert.equal(readerFormatCapability('txt').readerKind, 'reflowable');
+  for (const format of ['epub', 'mobi', 'azw', 'azw3', 'prc', 'txt', 'fb2'] as const) {
+    assert.equal(readerFormatCapability(format).deliveryMode, 'DOWNLOAD_ORIGINAL');
+  }
   assert.equal(readerFormatCapability('cbz').readerKind, 'comic');
+  assert.equal(readerFormatCapability('cbz').deliveryMode, 'STREAM');
   assert.equal(readerFormatCapability('pdf').readerKind, 'pdf');
+  assert.equal(readerFormatCapability('pdf').deliveryMode, 'STREAM');
 });
 
 test('format parsing is case insensitive and includes comic archive aliases', () => {

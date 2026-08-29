@@ -62,13 +62,14 @@ function readerType(value: unknown, format: ResourceFormat): ReaderType {
   return 'reflowable';
 }
 
-function mapResource(value: unknown): ReadableResourceView | null {
+export function mapReadableResourceView(value: unknown): ReadableResourceView | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
   const bookId = stringValue(item.bookId).trim();
   const sourceNodeId = stringValue(item.sourceNodeId).trim();
+  if (!id || !bookId || !sourceNodeId) return null;
   const format = resourceFormat(item.format);
-  if (!id || !bookId || !sourceNodeId || !format) return null;
+  if (!format) throw new Error(`Unsupported resource format: ${stringValue(item.format)}`);
   const assets = (Array.isArray(item.assets) ? item.assets : []).flatMap((rawAsset) => {
     const asset = record(rawAsset);
     const assetId = stringValue(asset.id).trim();
@@ -80,13 +81,16 @@ function mapResource(value: unknown): ReadableResourceView | null {
     if (!assetId || assetResourceId !== id || !assetSourceNodeId || !role || !url || !downloadUrl) return [];
     return [{
       id: assetId,
+      title: stringValue(asset.title, assetId),
       resourceId: assetResourceId,
       sourceNodeId: assetSourceNodeId,
       role,
       mimeType: stringValue(asset.mimeType),
+      sourceFormat: resourceFormat(asset.sourceFormat),
       sortOrder: finiteNumber(asset.sortOrder),
       sizeBytes: finiteNumber(asset.sizeBytes),
       size: stringValue(asset.size),
+      mtimeMs: finiteNumber(asset.mtimeMs),
       durationMs: nullableNumber(asset.durationMs),
       codec: nullableString(asset.codec),
       bitrate: nullableNumber(asset.bitrate),
@@ -94,8 +98,8 @@ function mapResource(value: unknown): ReadableResourceView | null {
       channels: nullableNumber(asset.channels),
       discNumber: nullableNumber(asset.discNumber),
       trackNumber: nullableNumber(asset.trackNumber),
-      url,
-      downloadUrl
+      url: withBasePath(url),
+      downloadUrl: withBasePath(downloadUrl)
     }];
   });
   return {
@@ -146,7 +150,7 @@ export function mapBookView(value: unknown): BookView {
   const id = stringValue(root.id).trim();
   const sourceNodeId = stringValue(root.sourceNodeId).trim();
   if (!id || !sourceNodeId || !Array.isArray(root.resources)) throw new Error('图书响应缺少资源结构或来源节点身份');
-  const resources = root.resources.map(mapResource).filter((item): item is ReadableResourceView => item !== null);
+  const resources = root.resources.map(mapReadableResourceView).filter((item): item is ReadableResourceView => item !== null);
   const publicationStatus = root.publicationStatus === 'ONGOING' || root.publicationStatus === 'COMPLETED' || root.publicationStatus === 'HIATUS' || root.publicationStatus === 'CANCELLED' ? root.publicationStatus : 'UNKNOWN';
   const trackingStatus = root.trackingStatus === 'TRACKING' || root.trackingStatus === 'PAUSED' || root.trackingStatus === 'IGNORED' ? root.trackingStatus : 'NOT_TRACKING';
   return {
@@ -202,6 +206,17 @@ export async function fetchBook(
   return mapBookView(data.book ?? data);
 }
 
+/** Authoritative Library descriptor used by both details and local-original Reader delivery. */
+export async function fetchLibraryResource(
+  resourceId: string,
+  signal?: AbortSignal
+): Promise<ReadableResourceView> {
+  const data = record(await apiJson(`/api/resources/${encodeURIComponent(resourceId)}`, { signal }));
+  const resource = mapReadableResourceView(data.resource ?? data);
+  if (!resource || resource.id !== resourceId) throw new Error('LIBRARY_RESOURCE_DESCRIPTOR_MISMATCH');
+  return resource;
+}
+
 export async function fetchBookResources(
   bookId: string,
   page: number,
@@ -215,7 +230,7 @@ export async function fetchBookResources(
   const total = Math.max(0, finiteNumber(data.total));
   return {
     bookId,
-    resources: (Array.isArray(data.resources) ? data.resources : []).map(mapResource).filter((resource): resource is ReadableResourceView => resource !== null),
+    resources: (Array.isArray(data.resources) ? data.resources : []).map(mapReadableResourceView).filter((resource): resource is ReadableResourceView => resource !== null),
     page: positiveInteger(data.page, page),
     pageSize: resolvedPageSize,
     total,

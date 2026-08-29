@@ -225,8 +225,7 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
             if setting.id == "pdfFit" { Text("reader.pdf.fit.unavailable").font(.caption).foregroundStyle(.secondary) }
             if fixedSwipe { Text("reader.settings.swipeFixed").font(.caption).foregroundStyle(.secondary) }
             if !available && !fixedSwipe {
-                let contextual = setting.control.map { session.platformControlEnabled($0) } ?? false
-                Text(String(format: String(localized: contextual ? "reader.settings.contextUnavailable" : "reader.catalog.unavailable"), localizedReaderOption(setting.key), displayedValue))
+                Text(LocalizedStringKey("reader.catalog.reason.\(unavailabilityReason(for: setting))"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             if setting.id == "letterSpacing" && !session.isEnabled(.negativeletterspacing) {
@@ -235,6 +234,22 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
             if setting.id == "fontFamily" { Text("reader.settings.fontMapping").font(.caption).foregroundStyle(.secondary) }
         }
         .accessibilityIdentifier(setting.id == "preservePublisherStyles" ? "reader.setting.publisherStyles" : "reader.setting.\(setting.id)")
+    }
+
+    private func unavailabilityReason(for setting: ReaderSettingDefinition) -> String {
+        let rules = Set(setting.availabilityRules)
+        if !session.controlReady { return "engineNotReady" }
+        if rules.contains("wideViewport") && UIScreen.main.bounds.width <= 640 { return "narrowViewport" }
+        if rules.contains("paginatedReflowable") && editor.draft.readingMode == .continuousScroll { return "scrollingMode" }
+        if rules.contains("paginatedComic") && editor.draft.comicFlow == .scrolled { return "scrollingMode" }
+        if rules.contains("doubleComicSpread") && editor.draft.comicSpread != .double { return "requiresDoubleSpread" }
+        if rules.contains("optimizationEnabled") && !editor.draft.smartOptimization { return "optimizationDisabled" }
+        if rules.contains("publisherStylesOff") && editor.draft.preservePublisherStyles { return "publisherStylesActive" }
+        if rules.contains("wakeLock") { return "wakeLockUnavailable" }
+        if rules.contains("zoom") { return "zoomUnavailable" }
+        return setting.control.map { session.platformControlEnabled($0) } == true
+            ? "publicationConstraint"
+            : "notImplemented"
     }
 }
 

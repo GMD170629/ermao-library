@@ -82,6 +82,38 @@ struct ManagedDownloadRecord: Identifiable, Codable, Equatable, Sendable {
     }
 
     var effectiveArtifactKind: ManagedDownloadArtifactKind { artifactKind ?? .singleOriginalAsset }
+
+    /// Reader admission requires the shared task descriptor because it carries
+    /// the exact asset version (size + mtime) that the native manifest alone lacks.
+    var verifiedSharedArtifact: CompletedDownloadArtifact? {
+        let expectedArtifactKind: DownloadArtifactKind = effectiveArtifactKind == .originalPageSet
+            ? .originalpageset
+            : .singleoriginalasset
+        guard isVerifiedOfflineCopy,
+              let expectedBytes,
+              let mimeType,
+              let localRelativePath,
+              let sharedTaskJSON,
+              let task = try? DownloadCatalogCodec.shared.decode(serialized: sharedTaskJSON),
+              task.id == id,
+              task.status == .completed,
+              task.descriptor.identity.bookId == bookID,
+              task.descriptor.identity.resourceId == resourceID,
+              task.descriptor.identity.assetId == assetID,
+              task.descriptor.totalBytes == expectedBytes,
+              task.descriptor.format.caseInsensitiveCompare(format) == .orderedSame,
+              task.descriptor.source.mimeType == mimeType,
+              task.descriptor.readerType.name.lowercased() == readerType.rawValue,
+              task.descriptor.artifactKind == expectedArtifactKind,
+              let artifact = task.artifact,
+              artifact.localReference == localRelativePath,
+              artifact.verifiedBytes == receivedBytes
+        else { return nil }
+        let taskNamespace = task.descriptor.identity.namespace_
+        guard "\(taskNamespace.serverIdentity)|\(taskNamespace.userId)|\(taskNamespace.authorizationVersion)" == namespace
+        else { return nil }
+        return artifact
+    }
 }
 
 struct ManagedDownloadResourceGroup: Identifiable, Equatable, Sendable {
@@ -169,19 +201,25 @@ struct ReaderHandoff: Hashable, Sendable {
 }
 
 enum ManagedReaderAccessPolicy {
-    /// Library resources expose KINDLE as a family; Reader bootstrap resolves the exact original.
-    /// Verified offline artifacts must still have an exact format.
+    /// A remote handoff starts the launch coordinator; reflowable formats may
+    /// therefore enter a managed download before the native reader opens.
     static func supportsNativeHandoff(_ handoff: ReaderHandoff) -> Bool {
         switch handoff.source {
         case .remoteStream:
-            ReaderFormatSupport.shared.canOpenOnline(readerType: handoff.readerType.rawValue, format: handoff.format)
+            ReaderFormatSupport.shared.deliveryMode(
+                readerType: handoff.readerType.rawValue,
+                format: handoff.format
+            ) != .unsupported
         case .verifiedLocal:
             ReaderFormatSupport.shared.canReadOriginal(readerType: handoff.readerType.rawValue, format: handoff.format)
         }
     }
 
     static func verifiedLocalHandoff(record: ManagedDownloadRecord?, resourceID: String) -> ReaderHandoff? {
-        guard let record, record.resourceID == resourceID, record.isVerifiedOfflineCopy else { return nil }
+        guard let record,
+              record.resourceID == resourceID,
+              record.verifiedSharedArtifact != nil
+        else { return nil }
         return ReaderHandoff(
             bookID: record.bookID, resourceID: record.resourceID, assetID: record.assetID,
             title: record.bookTitle, resourceTitle: record.resourceTitle, format: record.format,
@@ -190,7 +228,7 @@ enum ManagedReaderAccessPolicy {
     }
 
     static func completedRecord(records: [ManagedDownloadRecord], recordID: String) -> ManagedDownloadRecord? {
-        records.first { $0.id == recordID && $0.isVerifiedOfflineCopy }
+        records.first { $0.id == recordID && $0.verifiedSharedArtifact != nil }
     }
 }
 

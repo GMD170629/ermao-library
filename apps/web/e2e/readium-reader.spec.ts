@@ -1,22 +1,34 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
 });
 
-const publicationCsp = "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; script-src blob:; style-src 'self' blob: 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: data:; media-src 'self' blob: data:";
-const publicationHeaders = { 'content-security-policy': publicationCsp, 'x-content-type-options': 'nosniff' };
-function secureXhtml(markup: string) {
-  return markup.replace(/<head>/i, `<head><meta http-equiv="Content-Security-Policy" content="${publicationCsp}" data-shuku-security-profile="web-v2"/><style data-shuku-security-profile="web-v2">iframe,frame,object,embed,applet{display:none!important}</style>`);
-}
-
-const chapterOne = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
+const chapterOne = `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body>
   <h1 id="chapter-title">第一章 Readium 验收</h1>
   <p id="opening">天地玄黄，宇宙洪荒。</p>
   ${Array.from({ length: 24 }, (_, index) => `<p id="filler-${index}">定位夹具正文 ${index + 1}：用于确保恢复目标不在首屏。</p>`).join('')}
   <p id="target">跨端恢复目标正文。</p>
-</body></html>`);
-const chapterTwo = secureXhtml(`<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1 id="chapter-two">第二章</h1><p id="second-opening">第二章正文。</p></body></html>`);
+</body></html>`;
+const chapterTwo = `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1 id="chapter-two">第二章</h1><p id="second-opening">第二章正文。</p></body></html>`;
+
+type EpubFixtureItem = Readonly<{ href: string; title: string; body: string }>;
+
+async function createEpub(items: readonly EpubFixtureItem[] = [
+  { href: 'chapter1.xhtml', title: '第一章', body: chapterOne },
+  { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
+]): Promise<Uint8Array> {
+  const writer = new ZipWriter(new Uint8ArrayWriter());
+  await writer.add('mimetype', new TextReader('application/epub+zip'), { level: 0 });
+  await writer.add('META-INF/container.xml', new TextReader('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'));
+  const manifest = items.map((item, index) => `<item id="item-${index}" href="${item.href}" media-type="application/xhtml+xml"/>`).join('');
+  const spine = items.map((_item, index) => `<itemref idref="item-${index}"/>`).join('');
+  await writer.add('content.opf', new TextReader(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Readium E2E</dc:title><dc:language>zh-CN</dc:language></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`));
+  await writer.add('nav.xhtml', new TextReader(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>${items.map((item) => `<li><a href="${item.href}">${item.title}</a></li>`).join('')}</ol></nav></body></html>`));
+  for (const item of items) await writer.add(item.href, new TextReader(item.body));
+  return writer.close();
+}
 
 function exactLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
   return {
@@ -32,40 +44,25 @@ function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legac
   const resource = { id: 'epub-resource', bookId: 'book-epub', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
   return { ok: true, data: {
     schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
-    publication: { manifestUrl: '/api/reader/v4/resources/epub-resource/publication/manifest.json', positionsUrl: '/api/reader/v4/resources/epub-resource/publication/positions.json' },
     book: { id: 'book-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
     resourceCompleted: false,
     resource, availableResources: [resource],
     assets: [{ id: 'epub-asset', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/assets/epub-asset' }],
-    units: [
-      { id: 'unit-1', index: 0, title: '第一章', href: 'chapter1.xhtml', assetId: 'epub-asset', startMs: null, endMs: null, durationMs: null, metadata: {} },
-      { id: 'unit-2', index: 1, title: '第二章', href: 'chapter2.xhtml', assetId: 'epub-asset', startMs: null, endMs: null, durationMs: null, metadata: {} }
-    ],
+    units: [],
     capabilities: { canGoNext: true, canGoPrevious: false, canJumpToProgress: false, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true },
     progressSnapshot, progressPercent: legacyPercent
   } };
 }
 
-function rwpmManifest() {
-  return {
-    '@context': 'https://readium.org/webpub-manifest/context.jsonld',
-    metadata: { '@type': 'http://schema.org/Book', identifier: 'urn:shuku:e2e', title: 'Readium E2E', conformsTo: ['https://readium.org/webpub-manifest/profiles/epub'], layout: 'reflowable', readingProgression: 'ltr' },
-    links: [{ rel: ['self'], href: 'manifest.json', type: 'application/webpub+json' }, { rel: ['positions'], href: 'positions.json', type: 'application/vnd.readium.position-list+json' }],
-    readingOrder: [{ href: 'chapter1.xhtml', type: 'application/xhtml+xml', title: '第一章' }, { href: 'chapter2.xhtml', type: 'application/xhtml+xml', title: '第二章' }],
-    toc: [{ href: 'chapter1.xhtml#chapter-title', title: '第一章' }, { href: 'chapter2.xhtml#chapter-two', title: '第二章' }]
-  };
-}
-
-async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null, legacyPercent: number, writes: unknown[]) {
+async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null, legacyPercent: number, writes: unknown[], epub: Uint8Array) {
   const request = route.request(); const pathname = new URL(request.url()).pathname;
   if (pathname.endsWith('/bootstrap')) return route.fulfill({ json: readerBootstrap(snapshot, legacyPercent) });
-  if (pathname.endsWith('/publication/manifest.json')) return route.fulfill({ contentType: 'application/webpub+json', json: rwpmManifest() });
-  if (pathname.endsWith('/publication/positions.json')) return route.fulfill({ contentType: 'application/vnd.readium.position-list+json', json: { total: 2, positions: [
-    { href: 'chapter1.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0, position: 1 } },
-    { href: 'chapter2.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 1, position: 2 } }
-  ] } });
-  if (pathname.endsWith('/publication/chapter1.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', headers: publicationHeaders, body: chapterOne });
-  if (pathname.endsWith('/publication/chapter2.xhtml')) return route.fulfill({ contentType: 'application/xhtml+xml', headers: publicationHeaders, body: chapterTwo });
+  if (pathname === '/api/resources/epub-resource') return route.fulfill({ json: { ok: true, data: { resource: {
+    id: 'epub-resource', bookId: 'book-epub', sourceNodeId: 'source-epub', title: '全本', format: 'EPUB', readerType: 'reflowable',
+    sortOrder: 0, importStatus: 'READY', coverUrl: '', sizeBytes: epub.byteLength, readable: true, kindleSendAvailable: false,
+    assets: [{ id: 'epub-asset', title: 'Original', resourceId: 'epub-resource', sourceNodeId: 'source-asset', role: 'PRIMARY', mimeType: 'application/epub+zip', sourceFormat: 'EPUB', sizeBytes: epub.byteLength, size: `${epub.byteLength} B`, mtimeMs: 1234, sortOrder: 0, url: '/api/assets/epub-asset', downloadUrl: '/api/assets/epub-asset?download=true' }]
+  } } } });
+  if (pathname === '/api/assets/epub-asset') return route.fulfill({ status: 200, contentType: 'application/epub+zip', headers: { 'Content-Length': String(epub.byteLength), 'X-Asset-Version': `${epub.byteLength}:1234` }, body: Buffer.from(epub) });
   if (pathname.endsWith('/progress')) {
     if (request.method() === 'GET') {
       const revision = typeof snapshot?.revision === 'number' ? snapshot.revision : 0;
@@ -83,9 +80,10 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
   return route.fulfill({ json: { ok: true, data: {} } });
 }
 
-async function installReaderRoutes(page: Page, snapshot: Record<string, unknown> | null = null, legacyPercent = 0) {
+async function installReaderRoutes(page: Page, snapshot: Record<string, unknown> | null = null, legacyPercent = 0, items?: readonly EpubFixtureItem[]) {
   const writes: unknown[] = [];
-  await page.route('**/api/**', (route) => fulfillApi(route, snapshot, legacyPercent, writes));
+  const epub = await createEpub(items);
+  await page.route('**/api/**', (route) => fulfillApi(route, snapshot, legacyPercent, writes, epub));
   return writes;
 }
 
@@ -94,7 +92,9 @@ async function visibleReadiumFrame(page: Page) {
   const frame = shell.locator('iframe:visible').first(); await expect(frame).toBeVisible(); return frame;
 }
 
-test('Readium opens EPUB through RWPM and uploads an exact first-visible locator', async ({ page }) => {
+test('Readium opens a cached original EPUB without manifest, positions or chapter requests', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(new URL(request.url()).pathname));
   const writes = await installReaderRoutes(page); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
@@ -103,6 +103,27 @@ test('Readium opens EPUB through RWPM and uploads an exact first-visible locator
   expect(write.locator.kind).toBe('reflowable');
   expect(write.locator.engineLocator.payload.href).toBe('chapter1.xhtml');
   expect(write.locator.engineLocator.payload.locations.cssSelector || write.locator.engineLocator.payload.locations.fragments?.length || write.locator.engineLocator.payload.text?.highlight).toBeTruthy();
+  expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
+  expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
+});
+
+test('Readium rejects a malicious local EPUB without a remote publication fallback', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+  await installReaderRoutes(page, null, 0, [{
+    href: 'chapter1.xhtml',
+    title: 'Unsafe',
+    body: '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Unsafe</title></head><body><a href="javascript:alert(1)">unsafe</a></body></html>'
+  }]);
+
+  await page.goto('/reader/epub-resource');
+  const shell = page.locator('[data-reader-shell="v3"]');
+  const error = shell.locator('[data-reader-error-code]');
+  await expect(error).toBeVisible();
+  await expect(error).toHaveAttribute('data-reader-error-code', 'PUBLICATION_SECURITY_REJECTED');
+  await expect(shell.locator('iframe')).toHaveCount(0);
+  expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
+  expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
 });
 
 test('Readium progress advances while paging inside the same chapter', async ({ page }) => {
@@ -146,99 +167,37 @@ test('Readium highlights the current chapter and enables adjacent chapter naviga
   await expect(firstChapter).toHaveAttribute('aria-current', 'location');
 });
 
-test('Readium starts at the first reader navigation unit instead of blank front matter', async ({ page }) => {
-  await installReaderRoutes(page);
-  await page.route('**/publication/manifest.json', (route) => route.fulfill({
-    contentType: 'application/webpub+json',
-    json: {
-      ...rwpmManifest(),
-      readingOrder: [
-        { href: 'cover.xhtml', type: 'application/xhtml+xml', title: '封面' },
-        { href: 'contents.xhtml', type: 'application/xhtml+xml', title: '目录' },
-        ...rwpmManifest().readingOrder
-      ]
-    }
-  }));
-  await page.route('**/publication/positions.json', (route) => route.fulfill({
-    contentType: 'application/vnd.readium.position-list+json',
-    json: { total: 4, positions: [
-      { href: 'cover.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0, position: 1 } },
-      { href: 'contents.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0.2, position: 2 } },
-      { href: 'chapter1.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0.4, position: 3 } },
-      { href: 'chapter2.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 1, position: 4 } }
-    ] }
-  }));
-  await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head><body><p id="front-cover">封面前置页</p></body></html>')
-  }));
-  await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
-  }));
+test('Readium treats local EPUB reading order as the only正文 source', async ({ page }) => {
+  await installReaderRoutes(page, null, 0, [
+    { href: 'cover.xhtml', title: '封面', body: '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>封面</title></head><body><p id="front-cover">封面前置页</p></body></html>' },
+    { href: 'contents.xhtml', title: '目录', body: '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>' },
+    { href: 'chapter1.xhtml', title: '第一章', body: chapterOne },
+    { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
+  ]);
 
   await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
-  await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
-  await expect(frame.contentFrame().locator('#front-cover')).toHaveCount(0);
+  await expect(frame.contentFrame().locator('#front-cover')).toBeVisible();
 
   await frame.contentFrame().locator('body').press('End');
   const finalFrame = await visibleReadiumFrame(page);
   await expect(finalFrame.contentFrame().locator('#chapter-two')).toBeVisible();
   await finalFrame.contentFrame().locator('body').press('Home');
   const startFrame = await visibleReadiumFrame(page);
-  await expect(startFrame.contentFrame().locator('#chapter-title')).toBeVisible();
+  await expect(startFrame.contentFrame().locator('#front-cover')).toBeVisible();
 });
 
 test('Readium applies block margins to every page viewport without special-casing covers', async ({ page }) => {
-  await installReaderRoutes(page);
-  await page.route('**/publication/manifest.json', (route) => route.fulfill({
-    contentType: 'application/webpub+json',
-    json: {
-      ...rwpmManifest(),
-      readingOrder: [
-        { href: 'cover.xhtml', type: 'application/xhtml+xml', title: '封面' },
-        { href: 'contents.xhtml', type: 'application/xhtml+xml', title: '目录' },
-        ...rwpmManifest().readingOrder
-      ]
-    }
-  }));
-  await page.route('**/publication/positions.json', (route) => route.fulfill({
-    contentType: 'application/vnd.readium.position-list+json',
-    json: { total: 4, positions: [
-      { href: 'cover.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0, position: 1 } },
-      { href: 'contents.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0.2, position: 2 } },
-      { href: 'chapter1.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 0.4, position: 3 } },
-      { href: 'chapter2.xhtml', type: 'application/xhtml+xml', locations: { progression: 0, totalProgression: 1, position: 4 } }
-    ] }
-  }));
-  await page.route('**/publication/cover.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title><style>body{text-align:center;padding:0;margin:0}</style></head><body><div><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 521 751" preserveAspectRatio="none"><rect id="cover-art" width="521" height="751" fill="#315b48"/></svg></div></body></html>')
-  }));
-  await page.route('**/publication/contents.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>')
-  }));
-  await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>')
-  }));
+  await installReaderRoutes(page, null, 0, [
+    { href: 'cover.xhtml', title: '封面', body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Cover</title><style>body{text-align:center;padding:0;margin:0}</style></head><body><div><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 521 751" preserveAspectRatio="none"><rect id="cover-art" width="521" height="751" fill="#315b48"/></svg></div></body></html>' },
+    { href: 'contents.xhtml', title: '目录', body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>目录</title></head><body><p id="front-contents">目录前置页</p></body></html>' },
+    { href: 'chapter1.xhtml', title: '第一章', body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1 id="chapter-title">第一章 Readium 验收</h1><p>短章正文。</p></body></html>' },
+    { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
+  ]);
 
   await page.goto('/reader/epub-resource');
   let frame = await visibleReadiumFrame(page);
-  await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
-  let bounds = await frame.boundingBox();
-  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
-  await page.mouse.click(bounds.x + 20, bounds.y + bounds.height / 2);
-
-  frame = await visibleReadiumFrame(page);
-  await expect(frame.contentFrame().locator('#front-contents')).toBeVisible();
-  bounds = await frame.boundingBox();
-  if (!bounds) throw new Error('READIUM_FRAME_BOUNDS_MISSING');
-  await page.mouse.click(bounds.x + 20, bounds.y + bounds.height / 2);
-
-  frame = await visibleReadiumFrame(page);
+  let bounds: Awaited<ReturnType<typeof frame.boundingBox>>;
   await expect(frame.contentFrame().locator('#cover-art')).toHaveCount(1);
   const coverLayout = await frame.contentFrame().locator('body').evaluate((body) => {
     const documentElement = body.ownerDocument.documentElement;
@@ -279,11 +238,10 @@ test('Readium applies block margins to every page viewport without special-casin
 });
 
 test('Readium iframe routes center and jittered edge mouse taps without leaving a blue selection', async ({ page }) => {
-  await installReaderRoutes(page);
-  await page.route('**/publication/chapter1.xhtml', (route) => route.fulfill({
-    contentType: 'application/xhtml+xml', headers: publicationHeaders,
-    body: secureXhtml('<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>')
-  }));
+  await installReaderRoutes(page, null, 0, [
+    { href: 'chapter1.xhtml', title: '短章', body: '<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>短章</title></head><body><h1 id="short-title">短章</h1><p id="short-opening">用于点击翻页与选择保护，拖动选择这段正文时不能翻页。</p><a id="inside-link" href="#short-title">内部链接</a></body></html>' },
+    { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
+  ]);
   await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page);
   const bounds = await frame.boundingBox();
@@ -437,7 +395,8 @@ test('Readium restore is accepted only after re-capturing the same exact DOM blo
 test('an in-session remote update stays non-modal and jumps only after exact verification', async ({ page }) => {
   const writes: unknown[] = [];
   let currentSnapshot: Record<string, unknown> | null = null;
-  await page.route('**/api/**', (route) => fulfillApi(route, currentSnapshot, 0, writes));
+  const epub = await createEpub();
+  await page.route('**/api/**', (route) => fulfillApi(route, currentSnapshot, 0, writes, epub));
   await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
@@ -470,7 +429,7 @@ test('whole-publication percentage is display-only and never an automatic restor
   expect(write.locator.engineLocator.payload.locations.progression).not.toBe(0.88);
 });
 
-test('Readium settings expose unsupported pagination controls without accepting ineffective choices', async ({ page }) => {
+test('Readium settings expose scrolling, auto spread and publisher styles with truthful context states', async ({ page }) => {
   await installReaderRoutes(page);
   await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
@@ -483,30 +442,32 @@ test('Readium settings expose unsupported pagination controls without accepting 
 
   const flow = page.getByRole('group', { name: '阅读方式' });
   await expect(flow.getByRole('button', { name: '分页' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(flow.getByRole('button', { name: '滚动' })).toBeDisabled();
-  await expect(page.getByText('滚动模式暂未适配，当前使用分页阅读。')).toBeVisible();
+  await flow.getByRole('button', { name: '滚动' }).click();
+  await expect(flow.getByRole('button', { name: '滚动' })).toHaveAttribute('aria-pressed', 'true');
 
   const spread = page.getByRole('group', { name: '页面' });
-  await expect(spread.getByRole('button', { name: '自动' })).toHaveCount(0);
+  await expect(spread.getByRole('button', { name: '自动' })).toBeDisabled();
   await expect(spread.getByRole('button', { name: '单页' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('滚动模式下暂不可用')).toBeVisible();
+  await flow.getByRole('button', { name: '分页' }).click();
+  await expect(spread.getByRole('button', { name: '自动' })).toBeEnabled();
   await spread.getByRole('button', { name: '双页' }).click();
   await expect(spread.getByRole('button', { name: '双页' })).toHaveAttribute('aria-pressed', 'true');
 
   const animation = page.getByRole('group', { name: '动画' });
   await expect(animation.getByRole('button', { name: '平移' })).toBeDisabled();
   await expect(animation.getByRole('button', { name: '关闭' })).toBeDisabled();
-  await expect(page.getByText('Readium 暂不支持可配置翻页动画，此设置当前不生效。')).toBeVisible();
 
   const swipe = page.getByRole('checkbox', { name: /滑动翻页/ });
   await expect(swipe).toBeChecked();
   await expect(swipe).toBeDisabled();
-  await expect(page.getByText('Readium 使用原生触摸滑动，当前无法关闭。')).toBeVisible();
 
   await page.getByRole('button', { name: '高级设置', exact: true }).click();
   const publisher = page.getByRole('checkbox', { name: /出版方样式/ });
-  await expect(publisher).toBeDisabled();
+  await expect(publisher).toBeEnabled();
   await expect(publisher).not.toBeChecked();
-  await expect(page.getByText('当前 Web 引擎未提供出版方样式总开关接口，此设置不可用。')).toBeVisible();
+  await page.getByText('出版方样式', { exact: true }).click();
+  await expect(publisher).toBeChecked();
   await expect(page.getByText('保留出版方行高', { exact: true })).toHaveCount(0);
   await expect(page.getByText('允许出版方颜色', { exact: true })).toHaveCount(0);
   await expect(page.getByText('允许出版方字体', { exact: true })).toHaveCount(0);
@@ -561,23 +522,21 @@ test('Readium iframe keyboard input reaches first and last publication positions
   await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
 });
 
-test('Reader preserves an HTTP parser-stage failure and reopens without requesting the original', async ({ page }) => {
+test('Reader deletes a failed original transfer and retries it from zero', async ({ page }) => {
   const originalRequests: string[] = [];
-  let manifests = 0;
+  const epub = await createEpub();
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path.startsWith('/api/assets/')) originalRequests.push(path);
-    if (path.endsWith('/publication/manifest.json')) {
-      manifests += 1;
-      return route.fulfill({ status: 403, headers: { 'X-Error-Code': 'FORBIDDEN' }, body: 'private-response-body' });
+    if (path === '/api/assets/epub-asset') {
+      originalRequests.push(path);
+      return route.fulfill({ status: 403, contentType: 'text/plain', body: 'private-response-body' });
     }
-    return fulfillApi(route, null, 0, []);
+    return fulfillApi(route, null, 0, [], epub);
   });
   await page.goto('/reader/epub-resource');
-  await expect(page.getByText('在线阅读失败：服务器拒绝访问。')).toBeVisible();
+  await expect(page.getByText('原文件下载响应无效')).toBeVisible();
   await expect(page.getByText('private-response-body')).toHaveCount(0);
   await page.reload();
-  await expect(page.getByText('在线阅读失败：服务器拒绝访问。')).toBeVisible();
-  expect(manifests).toBeGreaterThanOrEqual(2);
-  expect(originalRequests).toEqual([]);
+  await expect(page.getByText('原文件下载响应无效')).toBeVisible();
+  expect(originalRequests).toHaveLength(2);
 });

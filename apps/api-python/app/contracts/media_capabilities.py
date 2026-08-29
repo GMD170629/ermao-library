@@ -36,7 +36,6 @@ _FORMAT_CAPABILITIES = {
         MediaFormatCapability("PRC", ReaderType.REFLOWABLE),
         MediaFormatCapability("TXT", ReaderType.REFLOWABLE),
         MediaFormatCapability("FB2", ReaderType.REFLOWABLE),
-        MediaFormatCapability("KINDLE", ReaderType.REFLOWABLE),
         MediaFormatCapability("CBZ", ReaderType.COMIC),
         MediaFormatCapability("ZIP", ReaderType.COMIC),
         MediaFormatCapability("CBR", ReaderType.COMIC),
@@ -59,7 +58,6 @@ _CANONICAL_PUBLICATION_MIME_TYPES: dict[str, str] = {
     "AZW": "application/vnd.amazon.ebook",
     "AZW3": "application/vnd.amazon.ebook",
     "PRC": "application/x-mobipocket-ebook",
-    "KINDLE": "application/x-mobipocket-ebook",
     "TXT": "text/plain",
     "FB2": "application/x-fictionbook+xml",
     "CBZ": "application/vnd.comicbook+zip",
@@ -78,12 +76,6 @@ _IMAGE_MIME_TYPES_BY_SUFFIX: dict[str, str] = {
     ".jpg": "image/jpeg",
     ".png": "image/png",
     ".webp": "image/webp",
-}
-_KINDLE_SOURCE_FORMATS_BY_SUFFIX: dict[str, str] = {
-    ".azw": "AZW",
-    ".azw3": "AZW3",
-    ".mobi": "MOBI",
-    ".prc": "PRC",
 }
 
 
@@ -119,21 +111,6 @@ def canonical_publication_mime_type(resource_format: str) -> str | None:
     return _CANONICAL_PUBLICATION_MIME_TYPES.get(resource_format.strip().upper())
 
 
-def exact_source_format(*, resource_format: str, filename: str) -> str:
-    """Map a stored resource family back to its original publication format.
-
-    The catalog intentionally groups MOBI-family resources as ``KINDLE``. Reader
-    and media delivery still need the exact original format, which is stable in
-    the source-node filename and does not require rewriting existing rows.
-    """
-
-    normalized_format = resource_format.strip().upper()
-    if normalized_format != "KINDLE":
-        return normalized_format
-    suffix = PurePosixPath(filename).suffix.lower()
-    return _KINDLE_SOURCE_FORMATS_BY_SUFFIX.get(suffix, normalized_format)
-
-
 def resolve_asset_mime_type(
     *,
     resource_format: str,
@@ -150,10 +127,7 @@ def resolve_asset_mime_type(
     """
 
     normalized_role = asset_role.strip().upper()
-    normalized_format = exact_source_format(
-        resource_format=resource_format,
-        filename=filename,
-    )
+    normalized_format = resource_format.strip().upper()
     if normalized_role == "PAGE" or normalized_format == "IMAGE_DIR":
         suffix = PurePosixPath(filename).suffix.lower()
         image_mime_type = _IMAGE_MIME_TYPES_BY_SUFFIX.get(suffix)

@@ -59,6 +59,7 @@ class _Opener:
         ("text/html", _image_bytes()),
         ("image/png", b"x" * (10 * 1024 * 1024 + 1)),
     ],
+    ids=("wrong-mime", "oversized"),
 )
 def test_remote_cover_rejects_wrong_mime_and_oversized_responses(
     monkeypatch,

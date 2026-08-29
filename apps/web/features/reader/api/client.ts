@@ -1,7 +1,7 @@
 import readerHttpErrorStatuses from '../../../../../packages/reader-contracts/reader-http-error-statuses.json';
 import { withBasePath } from '../../../lib/base-path';
 
-export type ReaderResourceStage = 'manifest' | 'positions' | 'chapter' | 'resource' | 'pdf' | 'comic';
+export type ReaderResourceStage = 'resource' | 'pdf' | 'comic';
 
 export class ReaderResourceError extends Error {
   readonly source = 'server';

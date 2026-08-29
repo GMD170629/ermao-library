@@ -179,9 +179,7 @@ def test_mobile_library_routes_emit_current_wire_shapes(
         "failed": 0,
     }
 
-    recent_reading = client.get(
-        "/api/dashboard/recent-reading", params={"limit": 10}
-    )
+    recent_reading = client.get("/api/dashboard/recent-reading", params={"limit": 10})
     assert recent_reading.status_code == 200, recent_reading.text
     assert set(recent_reading.json()["data"]["books"][0]) == set(recent_book)
 

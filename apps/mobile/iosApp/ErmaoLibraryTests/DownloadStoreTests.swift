@@ -345,6 +345,27 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(loaded.single?.stableErrorCode, "DOWNLOAD_LOCAL_FILE_INVALID")
     }
 
+    func testDiscardRemovesPublishedAndPartialBytesBeforeTaskRebuild() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ManagedDownloadStore(rootDirectory: root)
+        let record = try await makeRecord(store: store)
+        let destination = try await store.destination(for: record)
+        try Data([1, 2, 3, 4]).write(to: destination.partialFileURL)
+        let completed = try await store.seedCompleted(
+            record: record,
+            destination: destination,
+            receipt: CompletedFixtureBytes(receivedBytes: 4, expectedBytes: 4)
+        )
+
+        try await store.discardStoredBytes(for: completed)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.partialFileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.finalFileURL.path))
+        let discardedFile = await store.fileURL(for: completed)
+        XCTAssertNil(discardedFile)
+    }
+
     func testNamespacesRemainIsolatedAndCanBePurgedIndependently() async throws {
         let store = ManagedDownloadStore(rootDirectory: temporaryDirectory())
         _ = try await makeRecord(store: store, namespace: "server|one|1", resourceID: "one")
@@ -371,12 +392,12 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(records.single?.state, .paused)
     }
 
-    func testExactKindleFamilySourceFormatPreservesExtensionAndMime() async throws {
+    func testExactMobiFamilySourceFormatPreservesExtensionAndMime() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = ManagedDownloadStore(rootDirectory: root)
         let resource = BookResource(
-            id: "resource", bookID: "book", sourceNodeID: "source-node-kindle",
+            id: "resource", bookID: "book", sourceNodeID: "source-node-azw3",
             title: "Resource", format: "AZW3", sizeLabel: "4 bytes",
             progress: nil, isReadable: true, isSelected: true
         )
@@ -398,63 +419,6 @@ final class DownloadStoreTests: XCTestCase {
         XCTAssertEqual(destination.finalFileURL.lastPathComponent, "asset.azw3")
         let persisted = try await store.records(namespace: namespace)
         XCTAssertEqual(persisted.map(\.id), [exact.id])
-    }
-
-    func testLegacyUserDownloadIsPreservedWithoutGuessingItsFormat() async throws {
-        let root = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let encodedNamespace = Data(namespace.utf8).base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "+", with: "-")
-        let namespaceDirectory = root.appendingPathComponent(encodedNamespace, isDirectory: true)
-        let contentDirectory = namespaceDirectory.appendingPathComponent("content/legacy", isDirectory: true)
-        try FileManager.default.createDirectory(at: contentDirectory, withIntermediateDirectories: true)
-        let legacyURL = contentDirectory.appendingPathComponent("asset.kindle")
-        try Data([1, 2, 3, 4]).write(to: legacyURL)
-        let now = Date()
-        let legacy = ManagedDownloadRecord(
-            id: "legacy-record",
-            namespace: namespace,
-            bookID: "book",
-            bookTitle: "Book",
-            bookAuthor: nil,
-            resourceID: "resource",
-            resourceTitle: "Resource",
-            assetID: "asset",
-            format: "KINDLE",
-            mimeType: nil,
-            readerType: .reflowable,
-            state: .completed,
-            verification: .verified,
-            expectedBytes: 4,
-            artifactKind: .singleOriginalAsset,
-            receivedBytes: 4,
-            localRelativePath: "content/legacy/asset.kindle",
-            stableErrorCode: nil,
-            createdAt: now,
-            updatedAt: now,
-            completedAt: now,
-            lastOpenedAt: nil
-        )
-        struct LegacyManifest: Encodable {
-            let contractVersion: Int
-            let records: [ManagedDownloadRecord]
-        }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(LegacyManifest(contractVersion: 4, records: [legacy])).write(
-            to: namespaceDirectory.appendingPathComponent("manifest.json"),
-            options: .atomic
-        )
-        let store = ManagedDownloadStore(rootDirectory: root)
-
-        let records = try await store.records(namespace: namespace)
-        XCTAssertEqual(records.map(\.id), [legacy.id])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
-        let persisted = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: namespaceDirectory.appendingPathComponent("manifest.json"))
-        ) as? [String: Any]
-        XCTAssertEqual((persisted?["records"] as? [Any])?.count, 1)
     }
 
     func testChangedAssetIdentityPreservesPreviousTask() async throws {
@@ -489,6 +453,40 @@ final class DownloadStoreTests: XCTestCase {
 
         XCTAssertNotEqual(replacement.id, original.id)
         XCTAssertEqual(replacement.assetID, "asset-new")
+    }
+
+    func testReaderRecordSelectsOnlyTheExactAssetVersion() async throws {
+        let repository = ManagedDownloadStore(rootDirectory: temporaryDirectory())
+        var stale = try await makeRecord(store: repository)
+        var current = try await makeRecord(store: repository)
+        let staleDescriptor = try exactDescriptor(for: stale, totalBytes: 3)
+        let currentDescriptor = try exactDescriptor(for: current, totalBytes: 4)
+        stale.sharedTaskJSON = DownloadCatalogCodec.shared.encode(task: DownloadTask(
+            id: stale.id,
+            descriptor: staleDescriptor,
+            status: .queued,
+            transferredBytes: 0,
+            failureCode: nil,
+            artifact: nil
+        ))
+        current.sharedTaskJSON = DownloadCatalogCodec.shared.encode(task: DownloadTask(
+            id: current.id,
+            descriptor: currentDescriptor,
+            status: .queued,
+            transferredBytes: 0,
+            failureCode: nil,
+            artifact: nil
+        ))
+        let center = DownloadCenterStore(repository: repository)
+
+        XCTAssertEqual(
+            center.readerRecord(descriptor: currentDescriptor, records: [stale, current])?.id,
+            current.id
+        )
+        XCTAssertNil(center.readerRecord(
+            descriptor: try exactDescriptor(for: current, totalBytes: 5),
+            records: [stale, current]
+        ))
     }
 
     func testAssetIdentityPersistsAndGroupsResourcesBelowBook() async throws {
@@ -545,7 +543,29 @@ final class DownloadStoreTests: XCTestCase {
             resourceID: queued.resourceID
         ))
 
-        let completed = try await complete(queued, in: store)
+        let completedWithoutDescriptor = try await complete(queued, in: store)
+        XCTAssertNil(ManagedReaderAccessPolicy.verifiedLocalHandoff(
+            record: completedWithoutDescriptor,
+            resourceID: completedWithoutDescriptor.resourceID
+        ))
+        var completed = completedWithoutDescriptor
+        completed.mimeType = "application/epub+zip"
+        let descriptor = try exactDescriptor(for: completed)
+        let artifact = CompletedDownloadArtifact(
+            descriptor: descriptor,
+            localReference: try XCTUnwrap(completed.localRelativePath),
+            verifiedBytes: completed.receivedBytes,
+            completedAtEpochMillis: Int64((completed.completedAt ?? completed.updatedAt).timeIntervalSince1970 * 1_000),
+            lastOpenedAtEpochMillis: nil
+        )
+        completed.sharedTaskJSON = DownloadCatalogCodec.shared.encode(task: DownloadTask(
+            id: completed.id,
+            descriptor: descriptor,
+            status: .completed,
+            transferredBytes: completed.receivedBytes,
+            failureCode: nil,
+            artifact: artifact
+        ))
         let handoff = ManagedReaderAccessPolicy.verifiedLocalHandoff(
             record: completed,
             resourceID: completed.resourceID
@@ -569,26 +589,53 @@ final class DownloadStoreTests: XCTestCase {
                 "Expected exact native reflowable support for \(format)"
             )
         }
+        for format in ["EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"] {
+            XCTAssertEqual(
+                ReaderFormatSupport.shared.deliveryMode(readerType: "reflowable", format: format),
+                .downloadoriginal
+            )
+        }
+        XCTAssertEqual(ReaderFormatSupport.shared.deliveryMode(readerType: "pdf", format: "PDF"), .stream)
         for format in ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"] {
             XCTAssertTrue(
                 ReaderFormatSupport.shared.canReadOriginal(readerType: "comic", format: format),
                 "Expected native comic support for \(format)"
             )
+            XCTAssertEqual(ReaderFormatSupport.shared.deliveryMode(readerType: "comic", format: format), .stream)
         }
+        XCTAssertEqual(ReaderFormatSupport.shared.deliveryMode(readerType: "audio", format: "MP3"), .unsupported)
     }
 
-    func testKindleLibraryFamilyEntersBootstrapButNeverIdentifiesAnOfflineArtifact() {
-        func handoff(_ source: ReaderHandoffSource, readerType: ManagedDownloadReaderType = .reflowable) -> ReaderHandoff {
+    func testReaderHandoffUsesDeliveryModeAndRejectsGenericKindle() {
+        func handoff(
+            _ source: ReaderHandoffSource,
+            format: String,
+            readerType: ManagedDownloadReaderType
+        ) -> ReaderHandoff {
             ReaderHandoff(
                 bookID: "book", resourceID: "resource", assetID: nil,
-                title: "Book", resourceTitle: "Resource", format: " kindle ",
+                title: "Book", resourceTitle: "Resource", format: format,
                 readerType: readerType, source: source
             )
         }
-        XCTAssertTrue(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream)))
-        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.verifiedLocal(recordID: "record"))))
-        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream, readerType: .audio)))
-        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(handoff(.remoteStream, readerType: .comic)))
+        XCTAssertTrue(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.remoteStream, format: "EPUB", readerType: .reflowable)
+        ))
+        XCTAssertTrue(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.remoteStream, format: "PDF", readerType: .pdf)
+        ))
+        XCTAssertTrue(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.remoteStream, format: "CBZ", readerType: .comic)
+        ))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.remoteStream, format: "MP3", readerType: .audio)
+        ))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.remoteStream, format: "KINDLE", readerType: .reflowable)
+        ))
+        XCTAssertFalse(ManagedReaderAccessPolicy.supportsNativeHandoff(
+            handoff(.verifiedLocal(recordID: "record"), format: "KINDLE", readerType: .reflowable)
+        ))
     }
 
     private func waitUntil(
@@ -604,6 +651,61 @@ final class DownloadStoreTests: XCTestCase {
     }
 
     private var namespace: String { "server|user|1" }
+
+    private func exactDescriptor(
+        for record: ManagedDownloadRecord,
+        totalBytes: Int64? = nil
+    ) throws -> DownloadDescriptor {
+        let namespaceParts = record.namespace.split(separator: "|", omittingEmptySubsequences: false)
+        XCTAssertEqual(namespaceParts.count, 3)
+        let serverIdentity = try XCTUnwrap(namespaceParts.first.map(String.init))
+        let userID = try XCTUnwrap(namespaceParts.dropFirst().first.map(String.init))
+        let authorizationVersion = try XCTUnwrap(namespaceParts.last.flatMap { Int64($0) })
+        let expectedTotalBytes: Int64
+        if let totalBytes {
+            expectedTotalBytes = totalBytes
+        } else {
+            expectedTotalBytes = try XCTUnwrap(record.expectedBytes)
+        }
+        let readerType: ErmaoShared.DownloadReaderType = switch record.readerType {
+        case .reflowable: .reflowable
+        case .comic: .comic
+        case .pdf: .pdf
+        case .audio: .audio
+        }
+        let artifactKind: ErmaoShared.DownloadArtifactKind = record.effectiveArtifactKind == .originalPageSet
+            ? .originalpageset
+            : .singleoriginalasset
+        return DownloadDescriptor(
+            identity: DownloadIdentity(
+                namespace: PublicKt.createDownloadNamespace(
+                    serverIdentity: serverIdentity,
+                    userId: userID,
+                    authorizationVersion: authorizationVersion
+                ),
+                bookId: record.bookID,
+                resourceId: record.resourceID,
+                assetId: record.assetID
+            ),
+            bookTitle: record.bookTitle,
+            bookAuthor: record.bookAuthor,
+            coverApiPath: nil,
+            resourceTitle: record.resourceTitle,
+            format: record.format,
+            readerType: readerType,
+            source: DownloadSource(
+                apiPath: "/api/assets/\(record.assetID)",
+                mimeType: record.mimeType ?? "application/epub+zip",
+                totalBytes: expectedTotalBytes,
+                sourceModifiedAtMillis: nil
+            ),
+            resourceIndex: nil,
+            resourceSortOrder: nil,
+            isDownloadable: true,
+            artifactKind: artifactKind,
+            members: []
+        )
+    }
 
     private func makeRecord(
         store: ManagedDownloadStore,

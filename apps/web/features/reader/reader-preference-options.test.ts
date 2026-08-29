@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { READER_SETTINGS_CATALOG, normalizeReaderPreferences, readerSettingValue, changeReaderSetting, DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
+import { READER_SETTINGS_CATALOG, normalizeReaderPreferences, readerSettingAvailability, readerSettingValue, changeReaderSetting, DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -44,4 +44,26 @@ test('catalog and generated clients have one ordered bilingual settings contract
     assert.ok(setting.label['en-US']);
     assert.doesNotMatch(setting.label['en-US'], /[\u3400-\u9fff]/);
   }
+});
+
+test('catalog availability rules produce stable four-state contextual results', () => {
+  const supportedControls = new Set(READER_SETTINGS_CATALOG.settings.flatMap((setting) => setting.control ? [setting.control] : []));
+  const context = {
+    morphology: 'reflowable' as const,
+    ready: true,
+    supportedControls,
+    wideViewport: true,
+    wakeLockSupported: true,
+    canZoom: true,
+    preferences: DEFAULT_READER_PREFERENCES
+  };
+  assert.equal(readerSettingAvailability('textSpread', context).availability, 'available');
+  assert.deepEqual(readerSettingAvailability('textPageWidth', { ...context, wideViewport: false }), {
+    availability: 'temporarilyUnavailable', reason: 'narrowViewport'
+  });
+  assert.equal(readerSettingAvailability('comicSpread', context).availability, 'notApplicable');
+  supportedControls.delete('VolumeKeys');
+  assert.deepEqual(readerSettingAvailability('volumeKeyPageTurn', context), {
+    availability: 'notImplemented', reason: 'notImplemented'
+  });
 });

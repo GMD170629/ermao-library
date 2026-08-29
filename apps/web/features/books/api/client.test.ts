@@ -61,13 +61,16 @@ test('maps a direct book resource collection with physical identities', () => {
     ...resource('resource-1'),
     assets: [{
       id: 'asset-1',
+      title: 'Archive',
       resourceId: 'resource-1',
       sourceNodeId: 'asset-source-node',
       role: 'PRIMARY',
       mimeType: 'application/zip',
+      sourceFormat: 'ZIP',
       sortOrder: 0,
       sizeBytes: 1024,
       size: '1 KB',
+      mtimeMs: 1234,
       url: '/api/assets/asset-1',
       downloadUrl: '/api/assets/asset-1?download=true'
     }]
@@ -78,7 +81,37 @@ test('maps a direct book resource collection with physical identities', () => {
   assert.equal(book.resources[0]?.readable, true);
   assert.equal(book.resources[0]?.bookId, 'book-1');
   assert.equal(book.resources[0]?.assets[0]?.downloadUrl, '/api/assets/asset-1?download=true');
+  assert.equal(book.resources[0]?.assets[0]?.sourceFormat, 'ZIP');
+  assert.equal(book.resources[0]?.assets[0]?.mtimeMs, 1234);
   assert.equal('path' in (book.resources[0]?.assets[0] ?? {}), false);
+});
+
+test('retains every exact MOBI-family resource format', () => {
+  const formats = ['MOBI', 'AZW', 'AZW3', 'PRC'] as const;
+  const book = mapBookView({
+    id: 'book-1',
+    sourceNodeId: 'book-source-node',
+    title: 'Book',
+    resources: formats.map((format) => ({
+      ...resource(`resource-${format.toLowerCase()}`),
+      format,
+      readerType: 'reflowable'
+    }))
+  });
+
+  assert.deepEqual(book.resources.map((item) => item.format), formats);
+});
+
+test('rejects the removed generic KINDLE resource format', () => {
+  assert.throws(
+    () => mapBookView({
+      id: 'book-1',
+      sourceNodeId: 'book-source-node',
+      title: 'Book',
+      resources: [{ ...resource('resource-kindle'), format: 'KINDLE' }]
+    }),
+    /Unsupported resource format: KINDLE/
+  );
 });
 
 test('requests book detail with an optional resource selector', async () => {

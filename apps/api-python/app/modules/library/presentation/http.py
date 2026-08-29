@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
@@ -46,7 +46,6 @@ from app.bootstrap.library_resource_actions import (
     regenerate_resource_cover,
     upload_resource_cover,
 )
-from app.bootstrap.publications import publication_runtime
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
 from app.core.authorization import (
     authorization_context,
@@ -1805,16 +1804,10 @@ def list_library_reading_units(
         can_view_manual_imports=authorization.can_view_manual_imports,
         library_ids=authorization.library_ids,
     )
-    factory: object = request.app.state.session_factory
-    if not isinstance(factory, sessionmaker):
-        raise TypeError("application session factory is unavailable")
     try:
         result = resource_details(
             db,
             user_id=user.id,
-            session_factory=factory,
-            settings=settings,
-            runtime=publication_runtime(request),
         ).execute(
             context=context,
             book_id=book_id,

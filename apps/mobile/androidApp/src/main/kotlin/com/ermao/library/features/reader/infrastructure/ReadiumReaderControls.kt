@@ -22,8 +22,7 @@ internal fun readerNavigatorConfiguration(): EpubNavigatorFragment.Configuration
                 addFontFamilyDeclaration(FontFamily(family)) {
                     addFontFace {
                         addSource("fonts/reader/$asset.woff2")
-                        if (asset == "kaiti") setFontWeight(FontWeight.NORMAL)
-                        else setFontWeight(400..700)
+                        setFontWeight(FontWeight.NORMAL)
                     }
                 }
             }

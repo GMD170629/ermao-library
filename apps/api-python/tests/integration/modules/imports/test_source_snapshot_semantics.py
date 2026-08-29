@@ -157,7 +157,7 @@ def _continue_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
     return _drain(pipeline)
 
 
-def test_observed_snapshot_is_immutable_on_content_change(tmp_path: Path) -> None:
+def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -178,15 +178,13 @@ def test_observed_snapshot_is_immutable_on_content_change(tmp_path: Path) -> Non
                 )
             )
             assert node is not None
-            snap = (
+            identity = (
                 node.id,
-                node.observed_size_bytes,
-                node.observed_mtime_ns,
-                node.observed_at,
                 node.physical_kind,
                 node.path_key,
                 node.name,
             )
+            first_observed_at = node.observed_at
             resource = db.scalar(select(LibraryReadableResource))
             asset = db.scalar(select(LibraryResourceAsset))
             task = db.scalar(
@@ -208,13 +206,13 @@ def test_observed_snapshot_is_immutable_on_content_change(tmp_path: Path) -> Non
             db.refresh(node)
             assert (
                 node.id,
-                node.observed_size_bytes,
-                node.observed_mtime_ns,
-                node.observed_at,
                 node.physical_kind,
                 node.path_key,
                 node.name,
-            ) == snap
+            ) == identity
+            assert node.observed_size_bytes == len(b"v2-longer-content")
+            assert node.observed_mtime_ns == later
+            assert node.observed_at > first_observed_at
             assert db.scalar(select(func.count()).select_from(LibraryBook)) == 1
             assert (
                 db.scalar(select(func.count()).select_from(LibraryReadableResource))

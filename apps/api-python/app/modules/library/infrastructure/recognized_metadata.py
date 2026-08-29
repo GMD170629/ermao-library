@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
+from http.client import HTTPMessage
 from pathlib import Path
+from typing import IO
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, build_opener
 from urllib.request import Request as UrlRequest
@@ -287,6 +289,7 @@ class SqlAlchemyRecognizedMetadata(RecognizedMetadataPort, RecognizedCoverMetada
         cover_path: str,
         now: datetime,
     ) -> None:
+        metadata: LibraryBookMetadata | LibraryReadableResourceMetadata | None
         if scope is MetadataTargetScope.BOOK:
             metadata = self._db.get(LibraryBookMetadata, state.target_id)
             if metadata is None:
@@ -304,10 +307,10 @@ class _SafeCoverRedirectHandler(HTTPRedirectHandler):
     def redirect_request(
         self,
         req: UrlRequest,
-        fp: object,
+        fp: IO[bytes],
         code: int,
         msg: str,
-        headers: object,
+        headers: HTTPMessage,
         newurl: str,
     ) -> UrlRequest | None:
         validate_cover_url(newurl)
@@ -389,7 +392,7 @@ class FilesystemRecognizedCoverPublication(RecognizedCoverPublicationPort):
             raise
         return PublishedRecognizedCover(
             target_id=target_id,
-            stored_path=str(final_path.relative_to(self._storage_root)),
+            stored_path=final_path.relative_to(self._storage_root).as_posix(),
             final_path=final_path,
             backup_path=backup_path,
         )

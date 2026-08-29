@@ -89,7 +89,7 @@ val syncBrandAsset by tasks.registering(Sync::class) {
 }
 
 val syncReaderAssets by tasks.registering(Sync::class) {
-    from(rootProject.layout.projectDirectory.dir("../web/public/fonts/reader"))
+    from(rootProject.layout.projectDirectory.dir("../web/public/fonts/reader/android-legacy"))
     into(layout.buildDirectory.dir("generated/reader-assets/fonts/reader"))
 }
 

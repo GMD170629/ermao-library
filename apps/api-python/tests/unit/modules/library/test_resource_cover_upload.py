@@ -64,9 +64,7 @@ class FakeCoverState:
         assert resource_id == "resource-1"
         return "covers/resources/old.png"
 
-    def mark_ready(
-        self, *, resource_id: str, cover_path: str, now: datetime
-    ) -> None:
+    def mark_ready(self, *, resource_id: str, cover_path: str, now: datetime) -> None:
         del now
         assert resource_id == "resource-1"
         self.ready_path = cover_path

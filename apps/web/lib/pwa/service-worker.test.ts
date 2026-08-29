@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { privateCacheName, privateCacheNamespace } from './private-cache-namespace';
 
 const source = readFileSync(new URL('../../public/sw.js', import.meta.url), 'utf8');
 const packageSource = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
@@ -52,10 +53,23 @@ test('localized web manifest is never pinned in a service-worker cache', () => {
 test('private API and cover caches are partitioned by user and authorization version', () => {
   assert.match(source, /const PRIVATE_CACHE_PREFIX = 'shuku-pwa-private-v1-'/);
   assert.match(source, /event\.data\?\.type === 'SET_PRIVATE_CACHE_NAMESPACE'/);
-  assert.match(source, /const nextNamespace = userId && authzVersion \? `\$\{userId\}-\$\{authzVersion\}` : ''/);
+  assert.match(source, /const nextNamespace = safeCacheNamespacePart\(event\.data\.namespace\)/);
   assert.match(source, /privateCacheName\('api'\)/);
   assert.match(source, /privateCacheName\('cover'\)/);
   assert.match(source, /event\.data\?\.type === 'CLEAR_PRIVATE_CACHES'/);
+});
+
+test('reader originals share the service-worker namespace and only obsolete accounts are deleted', () => {
+  const namespace = privateCacheNamespace('user.1', 7);
+  const currentReader = privateCacheName(namespace, 'reader-original-v1');
+  const currentApi = privateCacheName(namespace, 'api');
+  const oldReader = privateCacheName(privateCacheNamespace('user.1', 6), 'reader-original-v1');
+  const otherUser = privateCacheName(privateCacheNamespace('user.2', 7), 'cover');
+  const currentPrefix = `shuku-pwa-private-v1-${namespace}-`;
+  const obsolete = [currentReader, currentApi, oldReader, otherUser]
+    .filter((cacheName) => cacheName.startsWith('shuku-pwa-private-v1-') && !cacheName.startsWith(currentPrefix));
+  assert.deepEqual(obsolete, [oldReader, otherUser]);
+  assert.match(source, /obsoletePrivateCacheNames\(keys, nextNamespace\)/);
 });
 
 test('forced updates only purge versioned frontend resources and preserve reader storage', () => {

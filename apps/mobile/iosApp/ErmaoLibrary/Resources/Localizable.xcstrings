@@ -806,13 +806,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "PingFang, Heiti and YaHei use Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai."
+            "value": "PingFang uses Source Han Sans; Songti uses Source Han Serif; Kaiti uses LXGW WenKai."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "苹方、黑体和微软雅黑使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。"
+            "value": "苹方使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。"
           }
         }
       }
@@ -13324,23 +13324,6 @@
         }
       }
     },
-    "reader.catalog.option.READER_FONT_FAMILY_OPTIONS.heiti": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Heiti"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "黑体"
-          }
-        }
-      }
-    },
     "reader.catalog.option.READER_FONT_FAMILY_OPTIONS.songti": {
       "extractionState": "manual",
       "localizations": {
@@ -13354,23 +13337,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "宋体"
-          }
-        }
-      }
-    },
-    "reader.catalog.option.READER_FONT_FAMILY_OPTIONS.yahei": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Microsoft YaHei"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "微软雅黑"
           }
         }
       }
@@ -13444,6 +13410,57 @@
       }
     },
     "reader.catalog.option.READER_SPREAD_MODE_OPTIONS.double": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "双页"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.auto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.single": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Single Page"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "单页"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.double": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -14357,6 +14374,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "自动"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.engineNotReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The reader engine is not ready yet"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读引擎尚未就绪"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.notImplemented": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not implemented on this platform"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前平台尚未实现"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.publicationConstraint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This publication does not support the setting"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前出版物不支持此设置"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.narrowViewport": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full width is used when the available width is 640 or less"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可用宽度不大于 640 时自动使用全宽"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.scrollingMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Temporarily unavailable while scrolling"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动模式下暂不可用"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.requiresDoubleSpread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Available only in two-page mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅在双页模式下可用"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.optimizationDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on Smart Optimization first"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先开启智能优化"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.publisherStylesActive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Controlled by the publication while Publisher Styles is on"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出版方样式开启时由出版物控制"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.wakeLockUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current environment does not support keeping the screen awake"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前环境不支持保持屏幕唤醒"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.zoomUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current reader does not support configurable zoom"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前阅读器不支持可配置缩放"
           }
         }
       }

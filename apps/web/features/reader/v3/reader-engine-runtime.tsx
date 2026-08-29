@@ -13,6 +13,14 @@ import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './ada
 import { I18nText } from '@/i18n/provider';
 import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import { projectReadiumEffectivePreferences } from './adapters/readium-presentation';
+import { currentAuthorizationVersion } from '../../../lib/user-preferences';
+import {
+  BrowserPublicationStore,
+  OriginalPublicationStoreError,
+  browserPublicationNamespace,
+  type OriginalDownloadProgress
+} from './original-publication/browser-publication-store';
+import { requestOriginalDownload } from './original-publication/api/client';
 
 type ReaderEngineRuntimeProps = {
   bootstrap: ReaderBootstrap;
@@ -25,6 +33,7 @@ type ReaderEngineRuntimeProps = {
   onRetry: () => void;
   onSelectResource: (resourceId: string, pageIndex?: number) => void;
   onIndexProgress: (progress: { completed: number; total: number; percent: number } | null) => void;
+  onOriginalProgress: (progress: OriginalDownloadProgress | null) => void;
   onReady: () => void;
   onStorageWarning: (message: string) => void;
   externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
@@ -66,7 +75,6 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'PUBLICATION_UNSUPPORTED') return translate('格式解析器不支持此出版物。');
   if (code === 'REQUEST_TIMEOUT') return translate('读取阅读资源超时。');
   if (code === 'TLS_FAILURE') return translate('阅读连接的 TLS 验证失败。');
-  if (code === 'PUBLICATION_ONLINE_LIMIT') return translate('原文件超过当前在线解析的资源限额。');
   if (code === 'PUBLICATION_TXT_NUL_CHARACTER') return translate('服务器的 TXT 解析实现拒绝了 NUL 字符。');
   if (code === 'PUBLICATION_TXT_ENCODING_UNSUPPORTED') return translate('TXT 解码器无法解码此文件。');
   if (code === 'PUBLICATION_TXT_EMPTY') return translate('TXT 解析器未找到可读文本。');
@@ -76,14 +84,19 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'PUBLICATION_DRM_PROTECTED') return translate('解析器报告此出版物受 DRM 保护。');
   if (code === 'PUBLICATION_PARSER_LIMIT' || code === 'PUBLICATION_PARSER_MEMORY') return translate('解析器达到资源限制，无法继续读取。');
   if (code === 'PUBLICATION_READ_FAILED') return translate('解析器读取原文件失败。');
+  if (code === 'ORIGINAL_DESCRIPTOR_INVALID') return translate('原文件下载信息无效。');
+  if (code === 'ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH') return translate('原文件格式与媒体类型不匹配。');
+  if (code === 'ORIGINAL_VERSION_INVALID' || code === 'ORIGINAL_VERSION_CHANGED') return translate('原文件已更新，请重新打开。');
+  if (code === 'ORIGINAL_SIZE_LIMIT') return translate('原文件超过阅读器的安全大小限制。');
+  if (code === 'ORIGINAL_MIME_INVALID') return translate('原文件格式与媒体类型不匹配。');
+  if (code === 'ORIGINAL_DOWNLOAD_URL_INVALID') return translate('原文件下载地址未通过安全校验。');
+  if (code === 'ORIGINAL_RESPONSE_INVALID') return translate('原文件下载响应无效。');
+  if (code === 'ORIGINAL_LENGTH_INVALID') return translate('原文件下载不完整，请重试。');
+  if (code === 'ORIGINAL_CACHE_IO') return translate('浏览器无法保存原文件，请检查存储空间后重试。');
+  if (code === 'ORIGINAL_NAMESPACE_INVALID') return translate('阅读缓存的账号信息无效。');
   if (code === 'READER_ENGINE_ERROR') return translate('阅读引擎失败，未提供详细原因。');
   if (code === 'PUBLICATION_CHANGED' || code === 'PUBLICATION_RESOURCE_CHANGED') return translate('出版物已更新，请重新打开。');
-  if (code === 'PUBLICATION_RESOURCE_TOO_LARGE' || code === 'RESPONSE_TOO_LARGE') return translate('当前章节超过在线阅读的安全上限，无法打开。');
-  if (code === 'RESPONSE_LENGTH_INVALID' || code === 'RESPONSE_STREAM_MISSING') return translate('章节响应无效，请重试。');
-  if (code === 'PUBLICATION_RESOURCE_UNAVAILABLE') return translate('章节资源无法读取，请检查网络后重试。');
-  if (code === 'READIUM_PUBLICATION_SECURITY_PROFILE_MISSING') return translate('阅读响应缺少必需的安全策略，已停止打开。');
   if (code === 'READER_EXACT_RESTORE_UNVERIFIED') return translate('无法精确恢复到另一设备的位置');
-  if (code === 'READIUM_PUBLICATION_ENDPOINT_UNAVAILABLE') return translate('服务器尚未提供 Readium Publication，无法打开此书。');
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
   if (code === 'NOVEL_DRM_PROTECTED') return translate('文件可能受 DRM 保护，无法打开。');
   if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，请检查文件完整性和格式。');
@@ -106,6 +119,12 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   return null;
 }
 
+function adapterErrorCode(reason: unknown): string {
+  if (reason instanceof OriginalPublicationStoreError) return reason.code;
+  if (reason instanceof Error && /^[A-Z][A-Z0-9_]+$/.test(reason.message)) return reason.message;
+  return 'READER_ENGINE_ERROR';
+}
+
 function phaseLabel(phase: string | null, kind: ReaderBootstrap['readerType']) {
   if (phase === 'generating-pagination') return '正在建立全书位置索引';
   if (phase === 'loading-font') return '正在准备阅读字体';
@@ -124,6 +143,7 @@ export function ReaderEngineRuntime({
   onRetry,
   onSelectResource,
   onIndexProgress,
+  onOriginalProgress,
   onReady,
   onStorageWarning,
   externalNavigation = null,
@@ -132,7 +152,7 @@ export function ReaderEngineRuntime({
   const { t: i18nAttribute } = useAttributeI18n();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   const [adapter, setAdapter] = useState<ReaderAdapter | null>(null);
-  const [adapterLoadError, setAdapterLoadError] = useState('');
+  const [adapterLoadErrorCode, setAdapterLoadErrorCode] = useState('');
   const [passwordReason, setPasswordReason] = useState<'need-password' | 'incorrect-password' | null>(null);
   const [password, setPassword] = useState('');
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
@@ -153,8 +173,9 @@ export function ReaderEngineRuntime({
     if (!container) return undefined;
     let active = true;
     let created: ReaderAdapter | null = null;
+    const controller = new AbortController();
     setAdapter(null);
-    setAdapterLoadError('');
+    setAdapterLoadErrorCode('');
     container.replaceChildren();
 
     void (async () => {
@@ -179,10 +200,26 @@ export function ReaderEngineRuntime({
         return executeRef.current(intent.command);
       };
       if (bootstrap.readerType === 'reflowable') {
+        const source = bootstrap.source;
+        if (source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
+        const store = new BrowserPublicationStore(window.caches, requestOriginalDownload);
+        const original = await store.ensure({
+          ...source.originalResource,
+          namespace: browserPublicationNamespace(
+            bootstrap.userId,
+            currentAuthorizationVersion(bootstrap.userId)
+          )
+        }, {
+          signal: controller.signal,
+          onProgress: (progress) => { if (active) onOriginalProgress(progress); }
+        });
+        if (!active) return;
         const adapterModule = await import('./adapters/readium-adapter');
         created = adapterModule.createReadiumWebReaderAdapter({
           container,
-          initialHref: bootstrap.units[0]?.href ?? null,
+          publicationBlob: original.blob,
+          publicationTitle: bootstrap.book.title,
+          initialHref: null,
           onInputIntent: handleAdapterInputIntent,
           onEndOfResource: openNextResource
         });
@@ -223,16 +260,17 @@ export function ReaderEngineRuntime({
     })().catch((reason) => {
       if (active) {
         setAdapter(null);
-        setAdapterLoadError(reason instanceof Error ? reason.message : '阅读引擎加载失败，请检查网络后重试。');
+        setAdapterLoadErrorCode(adapterErrorCode(reason));
       }
     });
 
     return () => {
       active = false;
+      controller.abort();
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onStorageWarning]);
+  }, [bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.source, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onOriginalProgress, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,
@@ -266,9 +304,9 @@ export function ReaderEngineRuntime({
     if (
       session.state.lifecycle === 'ready'
       || session.state.lifecycle === 'error'
-      || adapterLoadError
+      || adapterLoadErrorCode
     ) onReady();
-  }, [adapterLoadError, onReady, session.state.lifecycle]);
+  }, [adapterLoadErrorCode, onReady, session.state.lifecycle]);
 
   useEffect(() => {
     if (!externalNavigation || session.state.lifecycle !== 'ready') return;
@@ -304,7 +342,17 @@ export function ReaderEngineRuntime({
     ...preferencesToReaderSettings(runtimePreferences),
     manualTheme: preferences.appearance.theme
   };
-  const items = useMemo(() => bootstrapNavigationItems(bootstrap), [bootstrap]);
+  const items = useMemo(() => {
+    if (bootstrap.readerType === 'reflowable' && session.state.navigationItems.length > 0) {
+      return session.state.navigationItems.map((item, index) => ({
+        index: item.index ?? index,
+        title: item.label,
+        href: item.href,
+        navigationKey: item.navigationKey ?? item.id
+      }));
+    }
+    return bootstrapNavigationItems(bootstrap);
+  }, [bootstrap, session.state.navigationItems]);
   const bookmarkStorageKey = useMemo(() => readerBookmarkStorageKey(
     bootstrap.userId,
     bootstrap.resource.id
@@ -477,10 +525,10 @@ export function ReaderEngineRuntime({
             {(!adapter
               || session.state.lifecycle === 'bootstrapping'
               || session.state.lifecycle === 'loading'
-              || session.state.phase === 'loading-font') && !adapterLoadError ? (
+              || session.state.phase === 'loading-font') && !adapterLoadErrorCode ? (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-black/20 px-6 text-center backdrop-blur-[2px]">
                 <LoaderCircle className="animate-spin" size={28} />
-                <div className="text-sm">{phaseLabel(session.state.phase, bootstrap.readerType)}</div>
+                <div className="text-sm">{i18nAttribute(phaseLabel(session.state.phase, bootstrap.readerType))}</div>
                 {session.state.phase === 'generating-pagination' ? (
                   <div className="w-full max-w-sm">
                     <p className="text-xs opacity-70"><I18nText>首次打开需要完成一次，之后将直接进入阅读。</I18nText></p>
@@ -507,14 +555,15 @@ export function ReaderEngineRuntime({
                 ) : null}
               </div>
             ) : null}
-            {session.state.lifecycle === 'error' || adapterLoadError ? (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-6 text-center backdrop-blur-sm">
+            {session.state.lifecycle === 'error' || adapterLoadErrorCode ? (
+              <div
+                className="absolute inset-0 z-20 flex items-center justify-center bg-black/45 p-6 text-center backdrop-blur-sm"
+                data-reader-error-code={session.state.error?.code ?? adapterLoadErrorCode}
+              >
                 <div className="w-full max-w-sm rounded-2xl bg-slate-950/90 p-5 text-white shadow-2xl">
                   <div className="text-base font-semibold"><I18nText>阅读器加载失败</I18nText></div>
                   <p className="mt-2 text-sm text-slate-300">{
-                    readerErrorMessage(session.state.error?.code, i18nAttribute)
-                      || adapterLoadError
-                      || session.state.error?.message
+                    readerErrorMessage(session.state.error?.code ?? adapterLoadErrorCode, i18nAttribute)
                       || i18nAttribute("请检查网络或文件是否仍然存在。")
                   }</p>
                   <div className="mt-4 grid grid-cols-2 gap-2">

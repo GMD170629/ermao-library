@@ -451,6 +451,7 @@ test('book detail requests a selected readable resource through the direct contr
   const selectedResource = {
     id: 'resource-2',
     bookId: 'direct-book',
+    sourceNodeId: 'resource-2-source-node',
     title: '第二资源',
     resourceIndex: 2,
     sortOrder: 1,
@@ -475,7 +476,7 @@ test('book detail requests a selected readable resource through the direct contr
     readable: true,
     readerType: 'pdf',
     kindleSendAvailable: false,
-    assets: [{ id: 'resource-2-asset', resourceId: 'resource-2', sourceNodeId: 'resource-2-source-node', role: 'PRIMARY', mimeType: 'application/pdf', sortOrder: 0, sizeBytes: 1024, size: '1 KB', url: '/api/assets/resource-2-asset', downloadUrl: '/api/assets/resource-2-asset?download=true' }]
+    assets: [{ id: 'resource-2-asset', title: 'Original PDF', resourceId: 'resource-2', sourceNodeId: 'resource-2-source-node', role: 'PRIMARY', mimeType: 'application/pdf', sourceFormat: 'PDF', sortOrder: 0, sizeBytes: 1024, size: '1 KB', mtimeMs: 1234, url: '/api/assets/resource-2-asset', downloadUrl: '/api/assets/resource-2-asset?download=true' }]
   };
   const requestedResourceIds: Array<string | null> = [];
   await page.unroute('**/api/**');
@@ -504,6 +505,7 @@ test('book detail requests a selected readable resource through the direct contr
         ok: true,
         data: {
           id: 'direct-book',
+          sourceNodeId: 'direct-book-node',
           title: '直接资源图书',
           author: '测试作者',
           description: '',

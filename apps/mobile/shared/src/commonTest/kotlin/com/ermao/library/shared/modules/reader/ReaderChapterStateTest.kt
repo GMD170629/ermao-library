@@ -3,6 +3,7 @@ package com.ermao.library.shared.modules.reader
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ReaderChapterStateTest {
@@ -162,6 +163,58 @@ class ReaderChapterStateTest {
                 resolveReaderChapterStatesFromLocation(units, location, 50.0),
             )
         }
+    }
+
+    @Test
+    fun canonicalNavigationProjectsChapterProgressionOntoTheWholePublication() {
+        val hrefs = MutableList(811) { index -> "Text/chapter-$index.xhtml" }
+        hrefs[66] = "OEBPS/Text/Vol02-Chapter017.xhtml"
+
+        assertEquals(
+            0.08173338,
+            checkNotNull(
+                resolveReflowableTotalProgressionFromNavigation(
+                    orderedResourceHrefs = hrefs,
+                    resourceHref = "./OEBPS/Text/Vol02-Chapter017.xhtml#visible",
+                    resourceProgression = 0.2857709863068069,
+                    totalProgression = null,
+                ),
+            ),
+            absoluteTolerance = 0.00000001,
+        )
+    }
+
+    @Test
+    fun totalProgressionWinsOverCanonicalNavigationProjection() {
+        assertEquals(
+            0.42,
+            resolveReflowableTotalProgressionFromNavigation(
+                orderedResourceHrefs = listOf("chapter.xhtml"),
+                resourceHref = "chapter.xhtml",
+                resourceProgression = 0.9,
+                totalProgression = 0.42,
+            ),
+        )
+    }
+
+    @Test
+    fun chapterProgressionAloneIsNeverReportedAsWholePublicationProgress() {
+        assertNull(
+            resolveReflowableTotalProgressionFromNavigation(
+                orderedResourceHrefs = listOf("known.xhtml"),
+                resourceHref = "missing.xhtml",
+                resourceProgression = 0.2857709863068069,
+                totalProgression = null,
+            ),
+        )
+        assertNull(
+            resolveReflowableTotalProgressionFromNavigation(
+                orderedResourceHrefs = emptyList(),
+                resourceHref = "known.xhtml",
+                resourceProgression = 0.2857709863068069,
+                totalProgression = null,
+            ),
+        )
     }
 
     @Test

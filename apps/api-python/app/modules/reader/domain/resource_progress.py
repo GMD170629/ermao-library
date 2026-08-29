@@ -50,4 +50,6 @@ def choose_continue_resource_id(resources: list[ResourceReadingState]) -> str | 
                 resource.resource_id,
             ),
         ).resource_id
-    return min(candidates, key=lambda resource: (resource.sort_order, resource.resource_id)).resource_id
+    return min(
+        candidates, key=lambda resource: (resource.sort_order, resource.resource_id)
+    ).resource_id

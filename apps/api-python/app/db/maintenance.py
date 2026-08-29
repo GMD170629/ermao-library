@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +14,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.db.file_lock import try_file_lock, unlock_file
 from app.models.settings import SystemSetting
 
 DATABASE_MAINTENANCE_SETTING_KEY = "databaseMaintenanceMode"
@@ -49,17 +49,14 @@ def _acquire_lock(
     lock_path = database_maintenance_lock_path(database_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+b")
-    operation = (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB
     deadline = monotonic() + max(0.0, timeout_seconds)
     while True:
-        try:
-            fcntl.flock(handle.fileno(), operation)
+        if try_file_lock(handle, exclusive=exclusive):
             return handle
-        except BlockingIOError:
-            if monotonic() >= deadline:
-                handle.close()
-                raise DatabaseMaintenanceLockTimeout() from None
-            sleep(min(0.01, max(0.0, deadline - monotonic())))
+        if monotonic() >= deadline:
+            handle.close()
+            raise DatabaseMaintenanceLockTimeout() from None
+        sleep(min(0.01, max(0.0, deadline - monotonic())))
 
 
 def acquire_database_writer_lease(
@@ -80,7 +77,7 @@ def release_database_maintenance_lock(handle: BinaryIO | None) -> None:
     if handle is None or handle.closed:
         return
     try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        unlock_file(handle)
     finally:
         handle.close()
 

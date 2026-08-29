@@ -1,5 +1,9 @@
 # Mobile Reader 全格式真机验收记录（2026-08-26）
 
+> 历史证据说明：本记录中的泛化 `KINDLE` 目录兼容与清理行为已被当前架构
+> 契约取代。现行系统不接受或迁移 `KINDLE`，而是从导入开始直接持久化
+> `MOBI`、`AZW`、`AZW3`、`PRC`；本文件保留旧结果仅用于追溯当时验收。
+
 ## 范围与判定
 
 本记录覆盖 Reader 的原始格式 EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT、
@@ -29,8 +33,8 @@ FLAT/VOLUMES 书库落盘与正式 `SCAN_LIBRARY` 队列导入；没有直接写
 | RAR | `山海邮差/单行本/02 雨师借伞.rar` | 仓库本地漫画测试语料；仅用于本项目测试，未声明对外再分发许可 | `c44581fefb77796942e4ede80c82ed1654fe4d7b8ceaeb54c5876b594268a19f` | `py_a483abf2783142ec8a3301153294580e` | READY |
 | IMAGE_DIR | `星港巡夜人/原始图片目录`（`01.png`、`02.png`） | 仓库本地原始 PAGE 测试语料；仅用于本项目测试，未声明对外再分发许可 | 两页均为 `427461f2fcbf52582b54a99e6ba0f08dd2bd9fa11f594ee0858db4b0bb46a36d` | `py_c157833c02c448e58d4a884c1a9f0760` | READY（2 PAGE） |
 
-MOBI、AZW、AZW3、PRC 在数据库中继续使用内部资源族 `KINDLE`，Reader v4
-在读取边界从原始文件名恢复精确 `sourceFormat`。本次验证输出依次为
+当前契约要求 MOBI、AZW、AZW3、PRC 在数据库和 Reader v4 边界均使用精确
+格式，不再从泛化资源族或文件名恢复。对应 `sourceFormat` 依次为
 `mobi`、`azw`、`azw3`、`prc`；对应 canonical MIME 依次为
 `application/x-mobipocket-ebook`、`application/vnd.amazon.ebook`、
 `application/vnd.amazon.ebook`、`application/x-mobipocket-ebook`。

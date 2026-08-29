@@ -29,6 +29,8 @@ from app.modules.system.public import PreparedSystemEvent
 
 LOGGER = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "shuku_starship.metadata_providers"
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedMetadataProviderOrderUpdate:
     provider_ids: tuple[str, ...]

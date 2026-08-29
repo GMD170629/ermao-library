@@ -26,6 +26,7 @@ class SourceNodeViolationCode(str, Enum):
     PARENT_PATH_MISMATCH = "PARENT_PATH_MISMATCH"
     PARENT_NOT_FOUND = "PARENT_NOT_FOUND"
     SELF_PARENT = "SELF_PARENT"
+    PHYSICAL_KIND_CHANGED = "PHYSICAL_KIND_CHANGED"
 
 
 class InvalidSourceNodeRelativePathError(Exception):

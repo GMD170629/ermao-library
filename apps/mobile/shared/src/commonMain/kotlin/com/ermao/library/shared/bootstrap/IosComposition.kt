@@ -183,17 +183,3 @@ fun createIosDownloadsGateway(
         ),
     )
 }
-
-fun createIosOnlinePublicationSession(
-    cookieStore: SecureCookiePayloadStore,
-    profile: ServerProfile,
-    source: com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource,
-): com.ermao.library.shared.modules.reader.application.OnlinePublicationSession {
-    require(profile.serverIdentity == source.namespace.serverIdentity)
-    return com.ermao.library.shared.modules.reader.application.OnlinePublicationSession(
-        source,
-        com.ermao.library.shared.modules.reader.infrastructure.KtorPublicationResourcePort(
-            ApiClientFactory(SerializedCookieVault(cookieStore)).create(profile),
-        ),
-    )
-}

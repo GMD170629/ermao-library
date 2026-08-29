@@ -202,6 +202,7 @@ internal fun ReaderScreen(
     val panelFocus = remember { ReaderPanel.entries.associateWith { FocusRequester() } }
     val morphology = controller?.morphology ?: ReaderMorphology.Reflowable
     val nativeUnavailable = controller?.unavailableControls(preferences).orEmpty()
+    val wideViewport = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp > 640
     var preferencesFailure by remember(controller) { mutableStateOf<ReaderCommandRejected?>(null) }
     val updatePreferences: (ReaderPreferences) -> Unit = { updated ->
         controller?.let { activeController ->
@@ -213,6 +214,7 @@ internal fun ReaderScreen(
         }
     }
     val controlEnabled: (ReaderControl) -> Boolean = { control ->
+        (control != ReaderControl.PageWidth || wideViewport) &&
         resolveReaderControl(control, morphology, capabilities, preferences, controller != null, nativeUnavailable) ==
             ReaderControlAvailability.Available
     }
@@ -264,9 +266,19 @@ internal fun ReaderScreen(
     ReaderWarmPageTheme(preferences.appearance.theme, preferences.appearance.themeMode) {
         val colors = WarmPageThemeValues.colors
         ReaderSystemBarAppearance(colors.canvas)
-        Box(Modifier.fillMaxSize().background(colors.canvas)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(colors.canvas)) {
+            val requestedPageWidth = when (morphology) {
+                ReaderMorphology.Reflowable -> preferences.epub.pageWidth
+                ReaderMorphology.Comic -> preferences.comic.pageWidth
+                ReaderMorphology.Pdf -> preferences.pdf.pageWidth
+            }.dp
+            val navigatorWidth = if (maxWidth > 640.dp) minOf(maxWidth, requestedPageWidth) else maxWidth
             AndroidView(
-                modifier = Modifier.fillMaxSize().testTag(READER_NAVIGATOR_TEST_TAG),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxHeight()
+                    .width(navigatorWidth)
+                    .testTag(READER_NAVIGATOR_TEST_TAG),
                 factory = { context ->
                     FragmentContainerView(context).apply {
                         id = READER_NAVIGATOR_CONTAINER_ID
@@ -984,10 +996,7 @@ private fun ReaderPreferenceSheet(
     }
     val populatedSections = sections.mapNotNull { section ->
         val settings = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings.filter {
-                it.section == section.id &&
-                morphology in it.formats &&
-                it.control != ReaderControl.Spread &&
-                it.id != "comicCoverSingle"
+            it.section == section.id && morphology in it.formats
         }
         if (settings.isEmpty()) null else section to settings
     }
@@ -1137,6 +1146,21 @@ private fun ReaderCatalogSetting(
     val value = setting.value(preferences)
     val available = setting.control?.let(enabled) ?: true
     val fixedSwipe = setting.id == "swipePageTurn" && !available
+    val unavailableReason = when {
+        "wideViewport" in setting.availabilityRules &&
+            androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp <= 640 -> "narrowViewport"
+        "paginatedReflowable" in setting.availabilityRules &&
+            preferences.epub.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll -> "scrollingMode"
+        "paginatedComic" in setting.availabilityRules &&
+            preferences.comic.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll -> "scrollingMode"
+        "doubleComicSpread" in setting.availabilityRules &&
+            preferences.comic.spreadMode != com.ermao.library.shared.modules.reader.ReaderComicSpreadMode.Double -> "requiresDoubleSpread"
+        "optimizationEnabled" in setting.availabilityRules && !preferences.epub.optimization.enabled -> "optimizationDisabled"
+        "publisherStylesOff" in setting.availabilityRules && preferences.epub.typography.preservePublisherStyles -> "publisherStylesActive"
+        "wakeLock" in setting.availabilityRules -> "wakeLockUnavailable"
+        "zoom" in setting.availabilityRules -> "zoomUnavailable"
+        else -> "notImplemented"
+    }.let(com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get)
     fun change(value: String) {
         var updated = setting.change(preferences, value)
         if (setting.id == "theme") updated = updated.copy(appearance = updated.appearance.copy(themeMode = ReaderThemeMode.Manual))
@@ -1201,7 +1225,12 @@ private fun ReaderCatalogSetting(
         }
         if (fixedSwipe) Text(stringResource(R.string.reader_swipe_fixed), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
         if (!available && !fixedSwipe && showUnavailableHint) {
-            Text(stringResource(R.string.reader_setting_unavailable_short), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
+            Text(
+                unavailableReason?.let { if (chinese) it.chinese else it.english }
+                    ?: stringResource(R.string.reader_setting_unavailable_short),
+                style = MaterialTheme.typography.bodySmall,
+                color = WarmPageThemeValues.colors.textSecondary,
+            )
         }
         if (setting.id == "letterSpacing" && !enabled(ReaderControl.NegativeLetterSpacing)) Text(stringResource(R.string.reader_negative_spacing_retained), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
         if (setting.id == "fontFamily") Text(stringResource(R.string.reader_font_mapping), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
@@ -1693,7 +1722,6 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.TxtEmpty -> R.string.reader_error_txt_empty
         ReaderErrorCode.OutOfMemoryRisk -> R.string.reader_error_memory
         ReaderErrorCode.PublicationTooLarge -> R.string.reader_error_publication_too_large
-        ReaderErrorCode.OnlineLimit -> R.string.reader_download_reason
         ReaderErrorCode.LocationRestoreFailed -> R.string.reader_error_location
         ReaderErrorCode.NetworkUnavailable -> R.string.reader_error_network
         ReaderErrorCode.ReaderEngineError -> R.string.reader_error_generic

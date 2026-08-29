@@ -195,7 +195,11 @@ for path in root.rglob("*.py"):
                     add_message(expression)
 print(json.dumps(sorted(messages), ensure_ascii=False))
 `;
-  const output = execFileSync('python3', ['-c', pythonSource, apiRoot], { encoding: 'utf8' });
+  const pythonExecutable = process.env.PYTHON_EXECUTABLE || 'python3';
+  const output = execFileSync(pythonExecutable, ['-X', 'utf8', '-c', pythonSource, apiRoot], {
+    encoding: 'utf8',
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+  });
   return new Set(JSON.parse(output));
 }
 

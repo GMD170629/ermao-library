@@ -35,6 +35,7 @@ RETIRED_SYSTEM_SETTING_KEYS = frozenset(
     }
 )
 
+
 def public_system_settings(values: dict[str, Any]) -> dict[str, Any]:
     public: dict[str, Any] = {
         f"{key}Configured": False for key in SENSITIVE_SYSTEM_SETTING_KEYS

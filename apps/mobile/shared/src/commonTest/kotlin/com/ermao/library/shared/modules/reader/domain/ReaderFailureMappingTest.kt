@@ -13,7 +13,7 @@ class ReaderFailureMappingTest {
     }
 
     @Test
-    fun `known online causes retain their precise error categories`() {
+    fun `known transport causes retain their precise error categories`() {
         val expected = mapOf(
             "UNAUTHORIZED" to ReaderErrorCode.Unauthorized,
             "FORBIDDEN" to ReaderErrorCode.Forbidden,
@@ -35,15 +35,23 @@ class ReaderFailureMappingTest {
             "RATE_LIMITED" to ReaderErrorCode.RateLimited,
             "NETWORK_UNAVAILABLE" to ReaderErrorCode.NetworkUnavailable,
             "UNAVAILABLE" to ReaderErrorCode.ServerUnavailable,
-            "PUBLICATION_ONLINE_LIMIT" to ReaderErrorCode.OnlineLimit,
-            "PUBLICATION_RESOURCE_TOO_LARGE" to ReaderErrorCode.OnlineLimit,
-            "PAYLOAD_TOO_LARGE" to ReaderErrorCode.OnlineLimit,
+            "PUBLICATION_RESOURCE_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
+            "BINARY_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
+            "PAYLOAD_TOO_LARGE" to ReaderErrorCode.PublicationTooLarge,
         )
         expected.forEach { (wireCode, readerCode) ->
             for (recoverable in listOf(false, true)) {
                 assertEquals(readerCode, readerErrorCodeForFailure(wireCode, recoverable), wireCode)
             }
         }
+    }
+
+    @Test
+    fun `retired online limit code has no compatibility mapping`() {
+        assertEquals(
+            ReaderErrorCode.ReaderEngineError,
+            readerErrorCodeForFailure("PUBLICATION_ONLINE_LIMIT", recoverable = false),
+        )
     }
 
     @Test

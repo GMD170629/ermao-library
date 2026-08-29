@@ -35,6 +35,38 @@ data class ReaderChapterUnit(
 
 enum class ReaderChapterState { Current, Read, Unread }
 
+/**
+ * Projects a reflowable resource position onto the whole Publication.
+ *
+ * The ordered href list is the canonical Reader bootstrap navigation order. A
+ * resource-local progression is meaningful only after its href is resolved in
+ * that order; it must never be used as a whole-book percentage on its own.
+ */
+fun resolveReflowableTotalProgressionFromNavigation(
+    orderedResourceHrefs: List<String>,
+    resourceHref: String?,
+    resourceProgression: Double?,
+    totalProgression: Double?,
+): Double? {
+    totalProgression
+        ?.takeIf(Double::isFinite)
+        ?.let { return it.coerceIn(0.0, 1.0) }
+    if (orderedResourceHrefs.isEmpty()) return null
+    val normalizedHref = resourceHref
+        ?.let(::normalizeReaderProgressResourceHref)
+        ?.takeIf(String::isNotEmpty)
+        ?: return null
+    val unitIndex = orderedResourceHrefs.indexOfFirst { href ->
+        normalizeReaderProgressResourceHref(href) == normalizedHref
+    }
+    if (unitIndex < 0) return null
+    val withinResource = resourceProgression
+        ?.takeIf(Double::isFinite)
+        ?.coerceIn(0.0, 1.0)
+        ?: 0.0
+    return ((unitIndex + withinResource) / orderedResourceHrefs.size).coerceIn(0.0, 1.0)
+}
+
 data class ReaderChapterListMetadata(
     val page: Int = 1,
     val pageSize: Int,
@@ -177,3 +209,6 @@ private fun normalizeReaderChapterHref(value: String): String {
 
 private fun normalizeReaderChapterResourceHref(value: String): String =
     normalizeReaderChapterHref(value).substringBefore('#')
+
+private fun normalizeReaderProgressResourceHref(value: String): String =
+    value.trim().replace('\\', '/').removePrefix("./").substringBefore('#')

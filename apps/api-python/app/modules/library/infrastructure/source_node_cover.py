@@ -52,7 +52,7 @@ class FilesystemSourceNodeCoverPublication(SourceNodeCoverPublicationPort):
         return PreparedSourceNodeCover(
             temporary_path=temporary_path,
             final_path=final_path,
-            stored_path=str(final_path.relative_to(self._storage_root)),
+            stored_path=final_path.relative_to(self._storage_root).as_posix(),
         )
 
     def publish(

@@ -315,7 +315,7 @@ def test_reader_and_media_resolve_the_same_canonical_asset_mime(
         ("book.prc", "PRC", "application/x-mobipocket-ebook"),
     ],
 )
-def test_kindle_catalog_family_preserves_exact_reader_source_format(
+def test_mobi_family_catalog_uses_persisted_exact_reader_source_format(
     db_session: Session,
     tmp_path: Path,
     filename: str,
@@ -329,7 +329,7 @@ def test_kindle_catalog_family_preserves_exact_reader_source_format(
         book_id=f"book-{expected_format.lower()}",
         resource_id=f"resource-{expected_format.lower()}",
         title=expected_format,
-        fmt="KINDLE",
+        fmt=expected_format,
         assets=(
             (f"asset-{expected_format.lower()}", str(source_path), "PRIMARY", None, 0),
         ),
@@ -344,7 +344,7 @@ def test_kindle_catalog_family_preserves_exact_reader_source_format(
     )
 
     assert context is not None
-    assert context.resource.format == "KINDLE"
+    assert context.resource.format == expected_format
     assert context.resource.source_format == expected_format
     assert assets[0].mime_type == expected_mime
     assert publication_source is not None

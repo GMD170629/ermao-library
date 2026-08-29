@@ -20,9 +20,12 @@ import kotlinx.serialization.json.Json
 
 class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink, DownloadBundleByteSink {
     override suspend fun inspect(request: DownloadSinkRequest): DownloadStoredBytes = withContext(Dispatchers.IO) {
-        val namespaceKey = sha256("${request.namespace.serverIdentity}|${request.namespace.userId}|${request.namespace.authorizationVersion}")
-        val artifactKey = sha256("${request.resourceId}:${request.assetId}") + "-" + sha256(request.taskId).take(16)
-        val relativeDirectory = "$namespaceKey/artifacts"
+        val artifactKey = taskArtifactKey(request.resourceId, request.assetId, request.taskId)
+        val relativeDirectory = relativeArtifactDirectory(
+            request.namespace.serverIdentity,
+            request.namespace.userId,
+            request.namespace.authorizationVersion,
+        )
         val isBundle = request.artifactKind == DownloadArtifactKind.OriginalPageSet
         val finalName = artifactKey + if (isBundle) ".bundle" else ".bin"
         if (hasLocalArtifact("$relativeDirectory/$finalName", request.expectedTotalBytes)) {
@@ -31,6 +34,28 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         val part = File(rootDirectory, "$relativeDirectory/$artifactKey.part")
         val size = if (part.isFile && !isBundle) part.length() else 0
         DownloadStoredBytes(if (size < request.expectedTotalBytes) size else 0)
+    }
+
+    override suspend fun discard(request: DownloadSinkRequest) = withContext(Dispatchers.IO) {
+        val artifactKey = taskArtifactKey(request.resourceId, request.assetId, request.taskId)
+        val directory = File(
+            rootDirectory,
+            relativeArtifactDirectory(
+                request.namespace.serverIdentity,
+                request.namespace.userId,
+                request.namespace.authorizationVersion,
+            ),
+        )
+        listOf(
+            File(directory, "$artifactKey.part"),
+            File(directory, "$artifactKey.bin"),
+            File(directory, "$artifactKey.bundle"),
+            File(directory, ".$artifactKey.bundle.part"),
+        ).forEach { candidate ->
+            if (candidate.exists() && !candidate.deleteRecursively()) {
+                throw AndroidDownloadStorageException("Unable to discard rebuilt download bytes")
+            }
+        }
     }
 
     override suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession {
@@ -49,15 +74,15 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
 
     override suspend fun beginBundle(request: DownloadBundleSinkRequest): DownloadBundleByteSinkSession =
         withContext(Dispatchers.IO) {
-            val namespaceKey = sha256(
-                "${request.namespace.serverIdentity}|${request.namespace.userId}|${request.namespace.authorizationVersion}",
+            val artifactKey = taskArtifactKey(request.resourceId, request.artifactId, request.taskId)
+            val relativeDirectory = relativeArtifactDirectory(
+                request.namespace.serverIdentity,
+                request.namespace.userId,
+                request.namespace.authorizationVersion,
             )
-            val artifactKey = sha256("${request.resourceId}:${request.artifactId}")
-            val taskKey = sha256(request.taskId).take(16)
-            val relativeDirectory = "$namespaceKey/artifacts"
             val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
-            val staging = File(directory, ".$artifactKey-$taskKey.bundle.part")
-            val final = File(directory, "$artifactKey-$taskKey.bundle")
+            val staging = File(directory, ".$artifactKey.bundle.part")
+            val final = File(directory, "$artifactKey.bundle")
             staging.deleteRecursively()
             final.deleteRecursively()
             require(staging.mkdirs()) { "Unable to create bundle staging directory" }
@@ -78,9 +103,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
     ): Session = withContext(Dispatchers.IO) {
         require(resourceId.isNotBlank())
         require(assetId.isNotBlank())
-        val namespaceKey = sha256("${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}")
-        val artifactKey = sha256("$resourceId:$assetId") + "-" + sha256(taskId).take(16)
-        val relativeDirectory = "$namespaceKey/artifacts"
+        val artifactKey = taskArtifactKey(resourceId, assetId, taskId)
+        val relativeDirectory = relativeArtifactDirectory(
+            namespace.serverIdentity,
+            namespace.userId,
+            namespace.authorizationVersion,
+        )
         val directory = File(rootDirectory, relativeDirectory).apply { mkdirs() }
         val part = File(directory, "$artifactKey.part")
         val final = File(directory, "$artifactKey.bin")
@@ -297,6 +325,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         const val DOWNLOAD_BUNDLE_CONTRACT_VERSION = 4
         const val BUNDLE_MANIFEST_NAME = "bundle.json"
         val BUNDLE_JSON = Json { encodeDefaults = true }
+
+        fun relativeArtifactDirectory(serverIdentity: String, userId: String, authorizationVersion: Long): String =
+            sha256("$serverIdentity|$userId|$authorizationVersion") + "/artifacts"
+
+        fun taskArtifactKey(resourceId: String, assetId: String, taskId: String): String =
+            sha256("$resourceId:$assetId") + "-" + sha256(taskId).take(16)
 
         fun extensionForMimeType(mimeType: String): String = when (mimeType.lowercase()) {
             "image/jpeg" -> "jpg"

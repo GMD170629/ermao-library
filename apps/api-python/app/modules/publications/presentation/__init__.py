@@ -1,1 +1,0 @@
-"""Publication HTTP presentation."""

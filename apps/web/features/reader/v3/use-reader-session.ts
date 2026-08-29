@@ -42,7 +42,9 @@ function readerOpenError(reason: unknown) {
   if (reason instanceof Error) {
     const code = 'code' in reason && typeof reason.code === 'string'
       ? reason.code
-      : 'READER_ENGINE_ERROR';
+      : /^[A-Z][A-Z0-9_]+$/.test(reason.message)
+        ? reason.message
+        : 'READER_ENGINE_ERROR';
     return { code, message: '阅读引擎失败，未提供详细原因。', recoverable: code !== 'NOVEL_DRM_PROTECTED', cause: reason };
   }
   return { code: 'READER_ENGINE_ERROR', message: '阅读引擎失败，未提供详细原因。', recoverable: true, cause: reason };

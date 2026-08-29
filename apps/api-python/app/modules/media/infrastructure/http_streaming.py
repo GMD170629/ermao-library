@@ -719,7 +719,7 @@ def _file_response(
         extra=f"user:{user_id}",
         as_attachment=as_attachment,
     )
-    version = f"{stat.st_size}:{int(stat.st_mtime * 1000)}"
+    version = f"{stat.st_size}:{stat.st_mtime_ns // 1_000_000}"
     headers["X-Asset-Version"] = version
     expected_version = request.headers.get("x-asset-version")
     if expected_version is not None and expected_version != version:

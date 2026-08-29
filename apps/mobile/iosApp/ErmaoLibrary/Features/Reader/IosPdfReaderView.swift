@@ -3,42 +3,47 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 struct IosPdfReaderView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosPdfReaderSession
     var onRetry: () -> Void = {}
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            content
-            if session.phase == .reading || session.phase == .background {
-                IosReaderControls(session: session, onClose: close)
-            }
-            if session.restoreWarning != nil {
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text("reader.restore.warning.message")
-                        Spacer()
-                        Button { session.dismissRestoreWarning() } label: { Image(systemName: "xmark") }
-                            .accessibilityLabel(Text("common.close"))
-                    }
-                    .padding().background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 14)).padding()
+        GeometryReader { geometry in
+            ZStack {
+                palette.background.ignoresSafeArea()
+                content
+                    .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pdfPageWidth))
+                    .frame(maxHeight: .infinity)
+                if session.phase == .reading || session.phase == .background {
+                    IosReaderControls(session: session, onClose: close)
                 }
-            }
-            if let snapshot = session.remoteProgressSnapshot,
-               let location = snapshot.locator as? ErmaoShared.PdfPublicationLocation {
-                IosPageRemoteProgressNotice(
-                    snapshot: snapshot,
-                    position: String(
-                        format: String(localized: "reader.page.number.format"),
-                        Int(location.pageIndex) + 1
-                    ),
-                    onOpen: { Task { await session.goToRemoteProgress() } },
-                    onClose: session.dismissRemoteProgressNotice
-                )
+                if session.restoreWarning != nil {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Text("reader.restore.warning.message")
+                            Spacer()
+                            Button { session.dismissRestoreWarning() } label: { Image(systemName: "xmark") }
+                                .accessibilityLabel(Text("common.close"))
+                        }
+                        .padding().background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 14)).padding()
+                    }
+                }
+                if let snapshot = session.remoteProgressSnapshot,
+                   let location = snapshot.locator as? ErmaoShared.PdfPublicationLocation {
+                    IosPageRemoteProgressNotice(
+                        snapshot: snapshot,
+                        position: String(
+                            format: String(localized: "reader.page.number.format"),
+                            Int(location.pageIndex) + 1
+                        ),
+                        onOpen: { Task { await session.goToRemoteProgress() } },
+                        onClose: session.dismissRemoteProgressNotice
+                    )
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -74,7 +79,7 @@ struct IosPdfReaderView: View {
     @ViewBuilder private var content: some View {
         switch session.phase {
         case .opening:
-            ProgressView("reader.opening").tint(.white)
+            ProgressView("reader.opening").tint(palette.accent)
         case let .failed(code):
             VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.triangle").font(.largeTitle)
@@ -83,7 +88,7 @@ struct IosPdfReaderView: View {
                 Button("reader.retry.open", action: onRetry)
                 Button("common.close") { dismiss() }
             }
-            .padding(24).foregroundStyle(.white)
+            .padding(24).foregroundStyle(palette.foreground)
         default:
             if let navigator = session.navigator {
                 PdfNavigatorHost(navigator: navigator).ignoresSafeArea()
@@ -91,6 +96,10 @@ struct IosPdfReaderView: View {
                 PdfiumNavigatorHost(navigator: navigator).ignoresSafeArea()
             }
         }
+    }
+
+    private var palette: ReaderPalette {
+        ReaderPalette(theme: session.preferences.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
     }
 
     private func close() {

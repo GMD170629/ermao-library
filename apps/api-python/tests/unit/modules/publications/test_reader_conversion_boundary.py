@@ -6,7 +6,6 @@ def test_reader_publication_call_graph_does_not_reference_import_conversion() ->
     active_reader_paths = (
         api_root / "app" / "modules" / "reader",
         api_root / "app" / "modules" / "publications",
-        api_root / "app" / "bootstrap" / "publications.py",
     )
 
     violations: list[str] = []

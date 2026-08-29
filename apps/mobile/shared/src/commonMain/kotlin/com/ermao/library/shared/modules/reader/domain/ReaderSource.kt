@@ -92,6 +92,12 @@ enum class ReaderSourceFormat(
     val isComic: Boolean
         get() = readerFormat == ReaderFormat.Comic
 
+    val isReflowable: Boolean
+        get() = when (this) {
+            Epub, Fb2, Txt, Mobi, Azw, Azw3, Prc -> true
+            else -> false
+        }
+
     companion object {
         /**
          * The backend derives these values from its supported audio extension table. Keep this
@@ -104,22 +110,40 @@ enum class ReaderSourceFormat(
     }
 }
 
-/** Native entry support has one format inventory for online and completed originals. */
+/** How the first-party Reader obtains publication bytes for a supported resource. */
+enum class ReaderDeliveryMode {
+    DownloadOriginal,
+    Stream,
+    Unsupported,
+}
+
+/** Native entry support has one authoritative format and delivery inventory. */
 object ReaderFormatSupport {
     fun canReadOriginal(readerType: String, format: String): Boolean {
         val source = ReaderSourceFormat.fromWireValue(format) ?: return false
-        val expected = when (source.readerFormat) {
-            ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text -> "reflowable"
-            ReaderFormat.Comic -> "comic"
-            ReaderFormat.Pdf -> "pdf"
-            ReaderFormat.Audio -> return false
+        val expected = when {
+            source.isReflowable -> "reflowable"
+            source.readerFormat == ReaderFormat.Comic -> "comic"
+            source.readerFormat == ReaderFormat.Pdf -> "pdf"
+            source.readerFormat == ReaderFormat.Audio -> return false
+            else -> return false
         }
         return readerType.trim().equals(expected, ignoreCase = true)
     }
 
-    fun canOpenOnline(readerType: String, format: String): Boolean =
-        canReadOriginal(readerType, format) ||
-            (readerType.trim().equals("reflowable", true) && format.trim().equals("KINDLE", true))
+    fun deliveryMode(readerType: String, format: String): ReaderDeliveryMode {
+        val source = ReaderSourceFormat.fromWireValue(format) ?: return ReaderDeliveryMode.Unsupported
+        val normalizedReaderType = readerType.trim().lowercase()
+        return when {
+            normalizedReaderType == "reflowable" && source.isReflowable ->
+                ReaderDeliveryMode.DownloadOriginal
+            normalizedReaderType == "pdf" && source == ReaderSourceFormat.Pdf ->
+                ReaderDeliveryMode.Stream
+            normalizedReaderType == "comic" && source.isComic ->
+                ReaderDeliveryMode.Stream
+            else -> ReaderDeliveryMode.Unsupported
+        }
+    }
 }
 
 sealed interface ReaderSource {
@@ -216,27 +240,5 @@ data class RemoteComicReaderSource(
         require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
         require(pages.isNotEmpty())
         require(pages.map(RemoteComicPage::pageIndex) == pages.indices.toList())
-    }
-}
-
-/** Server-owned original publication exposed through bounded chapter resources. */
-data class RemoteReflowableReaderSource(
-    override val resourceId: String,
-    override val displayTitle: String,
-    override val bookId: String,
-    override val assetId: String,
-    override val sourceFormat: ReaderSourceFormat,
-    val namespace: ReaderSyncNamespace,
-    val manifestApiPath: String,
-    val positionsApiPath: String,
-) : ReaderSource {
-    override val format: ReaderFormat = sourceFormat.readerFormat
-
-    init {
-        require(resourceId.isNotBlank() && bookId.isNotBlank() && assetId.isNotBlank())
-        require(displayTitle.isNotBlank())
-        require(format in setOf(ReaderFormat.Epub, ReaderFormat.Mobi, ReaderFormat.Text))
-        require(manifestApiPath.startsWith("/api/") && manifestApiPath.endsWith("/publication/manifest.json"))
-        require(positionsApiPath == manifestApiPath.removeSuffix("manifest.json") + "positions.json")
     }
 }

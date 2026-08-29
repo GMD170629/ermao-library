@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
-Status: Reader v4 cross-format exact-progress contract implemented; physical-device conformance pending
-Last updated: 2026-08-26
+Status: Reader v4 download-then-read contract implementation in progress; physical-device conformance pending
+Last updated: 2026-08-29
 
 This document is the single authoritative architecture contract for the native Reader and its Reader v4 cross-platform progress integration. If a Mobile phase document or historical acceptance artifact describes a different progress state machine, this document wins and the conflicting material must be removed rather than implemented as compatibility behavior. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -56,11 +56,10 @@ production identifiers are:
 
 The original library file is immutable and is the only persisted Reader artifact.
 Reader bootstrap, download, cache and recovery never create a derived EPUB, ZIP or
-unpacked publication directory. MOBI-family and TXT parsers expose bounded virtual
-Publication resources in memory. Web streams those resources through authenticated
-Publication routes; Android and iOS bind those same resources through the shared
-KMP OnlinePublicationSession. Explicit completed downloads and local imports use
-the original native parsers. Delivery may
+unpacked publication directory. Every first-party reflowable Reader validates and
+opens a complete original through its local parser. MOBI-family and TXT parsers expose
+bounded virtual Publication resources in memory; EPUB reads its original ZIP through
+a bounded local fetcher. Delivery may
 set CSP and apply the documented head-only security policy but does not rewrite the
 author body.
 
@@ -194,8 +193,8 @@ position but must not upload or label it cross-device synchronized.
 
 ## 8. Startup and session restoration policy
 
-An explicit deep link, chapter/page request, or bookmark always wins. Online
-Reader entry fetches a fresh bootstrap. When content is already local, bootstrap
+An explicit deep link, chapter/page request, or bookmark always wins. An authenticated
+Reader entry fetches a fresh lightweight bootstrap when network is available. When content is already local, bootstrap
 and local parsing are independent: bootstrap failure does not prevent the parser
 from opening the publication. With no pending mutation, the newest valid exact
 location for the same book and resource restores automatically. Invalid or
@@ -229,9 +228,9 @@ an identity reset, delete a database, or reinterpret locator payloads. Cleanup
 only removes obsolete automatic online body replicas and partials whose origin
 can be established, never ambiguous files or user-created offline content.
 
-Explicit Downloads stores and verifies the original authorized file. Online Reader never acquires a complete original. Parser and
-normalization identifiers remain diagnostics and never create a second persisted
-reading representation.
+Native Downloads and the Web Reader publication store verify the original authorized
+file before a reflowable Reader opens it. Parser and normalization identifiers remain
+diagnostics and never create a second persisted reading representation.
 
 ## 10. Platform adapters
 
@@ -254,19 +253,48 @@ Evidence and outstanding paths: [iOS 3.9.0 upgrade record](testing/ios-readium-3
 
 Web uses Readium TS. Its version-locked same-origin iframe bridge is isolated
 behind the adapter until the toolkit exposes a public first-visible-block API;
-failure to read the frame fails closed and disables exact sync.
+failure to read the frame fails closed and disables exact sync. Reflowable source
+resources come from the account/version-scoped browser original store, never a
+server RWPM or chapter endpoint.
 
-Online reflowable opening resolves manifest and positions, then binds requested original chapters/resources to native Readium. Metadata and HEAD never read chapter bodies. Application adapters keep their existing 8 MiB chapter, 32 MiB auxiliary-resource and 64 MiB body-cache limits; PDF requests remain at most 1 MiB and reject an ignored Range before body consumption. Native SDK ordinary caches are allowed: the product no longer requires deep SDK patches to enforce an exact aggregate cache budget. Owned sessions are closed on navigation/account changes.
+The shared `ReaderDeliveryMode` has three values. `DOWNLOAD_ORIGINAL` covers EPUB,
+FB2, TXT, MOBI, AZW, AZW3 and PRC; `STREAM` covers PDF and comics; unsupported
+formats do not enter Reader. The former online-readability gate and online-limit
+fallback are removed. PDF requests remain at most 1 MiB and reject an ignored Range
+before body consumption; comic page delivery and native SDK ordinary caches remain.
 
-Native Reader uses `ReaderLaunchCoordinator` for online, verified-local, visible-download and unavailable decisions. The default application admission limit is `ReaderAdmission.maximumPublicationBytes`: 2 GiB inclusive, including IMAGE_DIR member totals. This is not a guarantee that every admitted file can open. Whole-array platform limits, XML/decompression/image safety limits and engine failures remain independent. No settings screen, synthetic chapter splitting, format conversion, new indexing or incremental parser is introduced.
+Native Reader uses `ReaderLaunchCoordinator` for verified-local, required-download,
+stream and unavailable decisions. The default application admission limit is
+`ReaderAdmission.maximumPublicationBytes`: 2 GiB inclusive, including IMAGE_DIR
+member totals. This is not a guarantee that every admitted file can open. Whole-array
+platform limits, XML/decompression/image safety limits and engine failures remain
+independent. No synthetic chapter splitting, format conversion, persisted unpacked
+publication, new indexing or incremental parser is introduced.
 
-An online parser/size limit or unsupported PDF Range can select download after checking known local limitations. Authentication, corruption, revision changes and network errors do not. The transition observes the existing account-owned Downloads runtime, shows cover/title/reason, queue/download/parse states, real bytes and percentage, cancel and retry. The only complete-file transfer remains `DownloadResourceRuntime` / `KtorDownloadsGateway`; Reader has no download adapter of its own. Verified artifacts open without network and remain managed by Downloads. Closing detaches the launch and pauses only its owned transfer; late completion cannot open a closed or different-account reader. Local parse failure never loops or redownloads.
+Every missing reflowable original selects the visible loading transition. It observes
+or creates an account-owned Downloads task and shows cover/title, queue/download/parse
+states, real bytes and percentage, cancel and retry without an explanatory download
+reason. The only native complete-file transfer remains `DownloadResourceRuntime` /
+`KtorDownloadsGateway`; Reader has no download adapter of its own. Verified artifacts
+open without network and remain managed by Downloads. Closing detaches the launch and
+pauses only its owned transfer; late completion cannot open a closed or different-account
+reader. A missing/stale artifact is rebuilt through Downloads, while local parse failure
+never loops or redownloads. PDF and comic errors never select this transition.
 
 The original chapter target, or the latest persisted Reader progress, is restored after download using the existing progress owner. All file lengths, offsets and totals use 64-bit arithmetic. Product admission policy is passed to C through explicit open options; no duplicated 64/512 MiB file gate remains in native Reader. TXT/FB2 full materialization and MOBI parser memory behavior remain existing engine constraints; OS memory termination cannot be reliably recovered.
 
-The server still parses its existing original source when needed, without a prior import-index prerequisite. EPUB uses the original ZIP structure; TXT/FB2 defer XHTML generation until a chapter request; MOBI snapshots are coalesced and runtime-owned, invalidated by revision and released on eviction/shutdown. Parser budgets are unchanged. Only declared online source/cache admission failures use `PUBLICATION_ONLINE_LIMIT`; requested resource limits retain `PUBLICATION_RESOURCE_TOO_LARGE`. Actual format-parser resource failures use `PUBLICATION_PARSER_LIMIT`/`PUBLICATION_PARSER_MEMORY` and do not automatically select Downloads. Corruption and authentication remain distinct. Chapters remain whole.
+Reader v4 bootstrap for a reflowable resource is metadata/progress only. It neither
+opens a Publication nor materializes navigation and it exposes no manifest, positions
+or chapter-resource URL. Server parsers remain bounded infrastructure for import,
+metadata and exact Locator validation where still consumed; they are not a first-party
+body-delivery fallback. Corruption, authentication and parser-limit errors remain
+distinct.
 
-Web retains the existing online-only behavior, cache strategy and pinned dependency patches. The native download transition and ordinary SDK-cache concession do not apply to Web. See ADR 0024 and the native transition verification record for evidence and limitations.
+Web stores complete originals in a dedicated Reader Cache Storage adapter keyed by
+authorization namespace, resource, asset and `size:mtime` version. It has no persistent
+download task, pause or resume state. Cancellation aborts and deletes the incomplete
+entry; a later attempt starts at zero. Cold opening still requires fresh authorization
+and Reader metadata. See ADR 0025.
 
 FB2 uses `shuku-fb2-parser-v1 / shuku-fb2-publication-v1` on every client.
 The native platform XML parsers feed a shared bounded mixed-content decoder.
@@ -281,18 +309,18 @@ determined by the platform XML parser, without a second namespace validator.
 The documented `l:href`/`xmlns:xlink` repair only affects parser input, never the
 original file. This replaces the earlier MIME-signature and extra-prefix policy.
 
-Online native Publications bind the server-provided position list through an
-in-memory positions service without opening chapter bodies. Local imports and
-completed offline originals retain their parser-specific positions services.
+Every reflowable native Publication uses its parser-specific local positions service.
+The Web local adapters generate the same stable reading-order href and locator contract.
 These logical positions
 support explicit scrubber navigation only: percentage is still never an exact
 restoration or upload identity. Parser validation exceptions crossing KMP into
 Swift must be declared with `@Throws` and mapped to a stable Reader error,
 including blank/invalid TXT input.
 
-Library's `KINDLE` resource family is accepted only at the online Reader entry.
-Reader bootstrap resolves the exact MOBI/AZW/AZW3/PRC original before opening.
-It is not an offline artifact format or a reason to relax parser validation.
+Library persists and exposes MOBI-family originals only by their exact
+`MOBI`/`AZW`/`AZW3`/`PRC` format. Reader bootstrap, required download, local opening and
+restoration use that exact value directly. Generic `KINDLE` is unsupported
+and is never inferred from a filename or accepted as an online/offline format.
 
 Pinned libmobi's legacy MOBI6 HTML can omit the XHTML default namespace and the
 `mbp` prefix declaration. Native adapters bind these on the root element before
@@ -302,25 +330,26 @@ resource hrefs, body markup and locator projection stay unchanged. Existing
 namespace declarations are preserved. This is not a conversion artifact or a
 change to the parser/locator identity.
 
-Explicit offline downloads use Downloads' public DownloadResourceRuntime only.
+Native original downloads use Downloads' public DownloadResourceRuntime only.
 Its descriptor comes from Library Resource/Asset metadata, independently of Reader
 bootstrap. Android and iOS adapt storage, notifications and lifecycle; task creation,
 identity/version deduplication, pause, resume, retry, transfer validation, atomic
 publication and completion registration have one shared owner. Single files and
 IMAGE_DIR page sets share one transfer mechanism; only resource organization differs.
-Web uses the same original-asset download contract and lets the browser save it.
+Web uses the same original-asset descriptor and media contract through its Reader-owned
+browser publication store.
 The asset response carries `X-Asset-Version` (`sizeBytes:mtimeMillis`). Explicit
 Downloads sends the expected version on initial and resumed transfers. A mismatch
 returns `412 ASSET_VERSION_CHANGED` before streaming; the client rejects a missing
 or mismatched version header before opening a sink. This is independent of weak
-ETag cache validation and never falls back to a complete online Reader transfer.
+ETag cache validation and never falls back to server-delivered reflowable bodies.
 
-Reader can open completed original artifacts through Downloads' public contract.
-Native Reader may select the visible Downloads transition only for the typed online
-limitations described above. Ordinary retries request the failed chapter/page/range.
-Web never invokes an original-file transfer from its online Reader. Only obsolete
-online body caches/partials with identifiable provenance are removed; manual
-Downloads, local imports, bookmarks and progress are preserved by this migration.
+Reader opens completed original artifacts through Downloads' public contract. Native
+Reader selects the transition for every missing reflowable original. Ordinary PDF and
+comic retries request the failed page/range and never create an implicit task. Web Reader
+performs its original-file transfer directly into the browser store and reads that body.
+Only obsolete online body caches/partials with identifiable provenance are removed;
+manual Downloads, local imports, bookmarks and progress are preserved by this migration.
 
 ## 11. Verification requirements
 
@@ -345,16 +374,17 @@ Automated contracts must cover:
 - Nav-to-NCX fallback, invalid navigation-node filtering, and body failure independence;
 - source bytes remaining unchanged and no Reader derivative directory being created;
 - MOBI/TXT in-memory Publication href and Locator conformance across platforms;
-- cold open while non-current chapters/pages are blocked, with no original-file request,
-  download task, complete-file artifact or continuing background transfer;
-- oversized/unstructured TXT chapters, ignored Range, malformed length, interrupted
-  responses, concurrent reads, cancellation, revision changes and account isolation;
-- native visible download fallback, deduplication, resume, cancellation, storage failure,
+- a slow original response showing increasing bytes/percentage while Reader remains unopened,
+  followed by local reading with manifest/positions/chapter endpoints blocked;
+- interrupted responses, malformed length/version/MIME, cancellation without partial
+  publication, cache/task reuse, missing-file rebuild and account isolation;
+- native required-download deduplication, resume, cancellation, storage failure,
   original target/progress restoration and no late opening after cancellation/account change;
+- PDF/comic online retries and audio playback creating no implicit reflowable download task;
 - 2 GiB minus one / exactly 2 GiB / plus one admission, 64-bit totals and known allocation guards;
 - local parse failure without automatic redownload or online/local loops;
-- actual novel EPUB plus independent TXT measurements: server parse, first body,
-  first readable view, transferred bytes and peak body cache. Results must identify
+- actual novel EPUB plus independent TXT measurements: original transfer, local parse,
+  first readable view, transferred bytes and parser memory. Results must identify
   platform/device and distinguish measured evidence from pending acceptance.
 
 Android acceptance includes building and deploying the debug APK to an explicitly selected physical Android device, cold launching it, and running relevant instrumentation. iOS acceptance must use an `iosArm64`/`iphoneos` build and a connected physical iPhone or iPad. Simulator evidence is prohibited. Linux KMP compilation is useful static evidence but is not iOS runtime acceptance.
@@ -393,10 +423,21 @@ bookmarks, downloads or other accounts.
 The sole publisher setting is `preservePublisherStyles`, displayed as
 “出版方样式” / “Publisher Styles” under Advanced Settings → Paragraph and Content
 Styles. Native engines receive their public `publisherStyles` preference.
-Publication-specific effectiveness comes from the SDK preference editor. The
-pinned Web engine has no public master switch: Web displays off/disabled with
-an explanation and keeps regular user fonts, theme and typography. It must not
-simulate that master using CSS, document rewriting or bundled partial toggles.
+Publication-specific effectiveness comes from the SDK preference editor. Web
+implements the same bounded semantic at its presentation boundary: enabling it
+releases publisher-owned font family, weight, letter spacing, line height,
+paragraph indentation/spacing and alignment. Theme colors, font size, page
+geometry, reading mode and spread remain reader-owned. The released controls
+stay visible and retain their saved values while contextually unavailable;
+disabling Publisher Styles applies those values again without reopening or
+navigating the publication.
+
+`textPageWidth`, `comicPageWidth` and `pdfPageWidth` are logical widths: CSS px
+on Web, dp on Android and pt on iOS. At an available width of 640 or less the
+Navigator uses the full width and the control is contextually unavailable. On
+wider layouts only the Navigator content container is centered and constrained
+to `min(availableWidth, savedWidth)`; controls, gestures and safe areas retain
+the full viewport. The surrounding canvas uses the active Reader palette.
 
 The five themes and Web option values remain authoritative. Appearance contains
 text typography or comic/PDF page width and zoom; Settings contains interface,
@@ -426,9 +467,10 @@ page-turn behavior, and normal chapter jumps persist actual visible anchors.
 No SDK modification, custom scrolling JavaScript, new preference or navigator
 recreation is involved. This rule does not alter SDK-owned VoiceOver scrolling.
 
-`apps/web/public/fonts/reader` remains the licensed font resource owner. Native
-PingFang/Heiti/YaHei map to Source Han Sans, Songti to Source Han Serif and Kaiti
-to LXGW WenKai, through the existing public font declarations. Identical labels
+`apps/web/public/fonts/reader` remains the licensed font resource owner. The three
+font choices are PingFang, Songti and Kaiti. Native PingFang maps to Source Han
+Sans, Songti to Source Han Serif and Kaiti to LXGW WenKai, through the existing
+public font declarations. Identical labels
 do not promise identical glyph metrics across platforms. SDK sources remain
 unmodified and versions follow the approved baseline in section 10 (iOS 3.9.0);
 no private API or layout compensation is added.
@@ -499,8 +541,9 @@ format parsing. SDK versions follow the approved baseline in section 10; SDK
 sources remain unmodified. Historical 3.8.0 acceptance records are not current pins.
 
 Original bytes, in-memory TXT/FB2/MOBI Publications, existing chapter boundaries,
-and native preference submission are preserved. No conversion artifact, implicit
-complete download, synthetic chapter or typography validation is permitted.
+and native preference submission are preserved. Reflowable reading requires the
+verified complete original, but no conversion artifact, persisted unpacked publication,
+synthetic chapter or typography validation is permitted.
 Authentication, path safety, XXE/script/network isolation, transport/revision
 contracts and explicit budgets remain application responsibilities, with actual
 failure codes. The Reader error boundary retains stage, source and stable code;

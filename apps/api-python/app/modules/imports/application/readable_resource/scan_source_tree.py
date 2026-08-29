@@ -25,6 +25,7 @@ from app.modules.imports.domain.directory_probe import (
 from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
 from app.modules.imports.domain.resource_adapters import (
     ADAPTER_SPECS,
+    ResourceAdapterSpec,
     file_extension,
     match_file_adapters,
     unique_adapter_or_none,
@@ -142,22 +143,26 @@ class ScanLibrarySourceTree:
             interpretation = self._source_nodes.get_interpretation(node_id)
             resource = self._books_resources.get_resource_by_source_node(node_id)
             if resource is not None:
-                upgraded = self._upgrade_file_adapter_if_needed(
-                    config=config,
+                upgraded_adapter = self._refresh_file_adapter_if_needed(
                     resource=resource,
                     source_node_id=node_id,
                     source_name=relative.name,
                 )
-                created, enqueued = (
-                    (1, 1)
-                    if upgraded
-                    else (
+                if upgraded_adapter is not None:
+                    self._requeue_asset_import(
+                        config=config,
+                        resource_id=resource.id,
+                        source_node_id=node_id,
+                        adapter=upgraded_adapter,
+                    )
+                    created, enqueued = 1, 1
+                else:
+                    created, enqueued = (
                         0,
                         self._ensure_asset_for_resource(
                             config, resource.id, node_id, relative.name
                         ),
                     )
-                )
             elif interpretation is None or interpretation.result == "NODE_ONLY":
                 created, enqueued = self._recognize_regular_file(
                     config, node_id, relative, force_reprobe=True
@@ -261,7 +266,12 @@ class ScanLibrarySourceTree:
                                 outcome=SourceNodeViolationCode.PATH_KEY_COLLISION.value,
                             )
                             continue
-                        node = existing
+                        node, observation_changed = (
+                            self._source_nodes.refresh_observation(
+                                source_node_id=existing.id,
+                                entry=entry,
+                            )
+                        )
                     else:
                         node, created = self._source_nodes.insert_if_absent(
                             library_id=config.library_id,
@@ -270,6 +280,7 @@ class ScanLibrarySourceTree:
                         )
                         if created:
                             inserted += 1
+                        observation_changed = False
 
                     if kind is SourceNodePhysicalKind.DIRECTORY:
                         if (
@@ -331,14 +342,32 @@ class ScanLibrarySourceTree:
                             config.library_id, parsed.value
                         )
                         if resource is not None:
-                            if self._upgrade_file_adapter_if_needed(
-                                config=config,
+                            upgraded_adapter = self._refresh_file_adapter_if_needed(
                                 resource=resource,
                                 source_node_id=node.id,
                                 source_name=parsed.name,
-                            ):
+                            )
+                            if upgraded_adapter is not None:
+                                self._requeue_asset_import(
+                                    config=config,
+                                    resource_id=resource.id,
+                                    source_node_id=node.id,
+                                    adapter=upgraded_adapter,
+                                )
                                 resources_created += 1
                                 tasks_enqueued += 1
+                            elif observation_changed:
+                                adapter = self._adapter_for_resource(
+                                    resource, parsed.name
+                                )
+                                if adapter is not None:
+                                    self._requeue_asset_import(
+                                        config=config,
+                                        resource_id=resource.id,
+                                        source_node_id=node.id,
+                                        adapter=adapter,
+                                    )
+                                    tasks_enqueued += 1
                             else:
                                 tasks_enqueued += self._ensure_asset_for_resource(
                                     config, resource.id, node.id, parsed.name
@@ -360,9 +389,19 @@ class ScanLibrarySourceTree:
                                     termination_reason=None,
                                     recognized_at=self._clock.now(),
                                 )
-                            tasks_enqueued += self._ensure_asset_for_resource(
-                                config, owner.id, node.id, parsed.name
-                            )
+                            adapter = self._adapter_for_resource(owner, parsed.name)
+                            if observation_changed and adapter is not None:
+                                self._requeue_asset_import(
+                                    config=config,
+                                    resource_id=owner.id,
+                                    source_node_id=node.id,
+                                    adapter=adapter,
+                                )
+                                tasks_enqueued += 1
+                            else:
+                                tasks_enqueued += self._ensure_asset_for_resource(
+                                    config, owner.id, node.id, parsed.name
+                                )
                         elif interpretation is None or (
                             reprobe_node_only and interpretation.result == "NODE_ONLY"
                         ):
@@ -579,12 +618,18 @@ class ScanLibrarySourceTree:
 
         existing = self._books_resources.get_resource_by_source_node(node_id)
         if existing is not None:
-            if self._upgrade_file_adapter_if_needed(
-                config=config,
+            upgraded_adapter = self._refresh_file_adapter_if_needed(
                 resource=existing,
                 source_node_id=node_id,
                 source_name=relative_path.name,
-            ):
+            )
+            if upgraded_adapter is not None:
+                self._requeue_asset_import(
+                    config=config,
+                    resource_id=existing.id,
+                    source_node_id=node_id,
+                    adapter=upgraded_adapter,
+                )
                 return (1, 1)
             return (
                 0,
@@ -644,26 +689,25 @@ class ScanLibrarySourceTree:
         )
         return (1, enqueued)
 
-    def _upgrade_file_adapter_if_needed(
+    def _refresh_file_adapter_if_needed(
         self,
         *,
-        config: LibrarySourceTreeConfig,
         resource: ReadableResourceRecord,
         source_node_id: str,
         source_name: str,
-    ) -> bool:
+    ) -> ResourceAdapterSpec | None:
         adapter = unique_adapter_or_none(match_file_adapters(source_name))
         if adapter is None:
-            return False
+            return None
         identity = adapter_identity(adapter, source_name=source_name)
         if (
             resource.adapter_id == identity.adapter_id
             and resource.adapter_version == identity.adapter_version
             and resource.format == identity.format_label
         ):
-            return False
+            return None
 
-        refreshed = self._books_resources.refresh_resource_adapter(
+        self._books_resources.refresh_resource_adapter(
             resource_id=resource.id,
             adapter=identity,
         )
@@ -682,13 +726,42 @@ class ScanLibrarySourceTree:
             termination_reason=None,
             recognized_at=self._clock.now(),
         )
-        self._queue.requeue_asset_for_adapter_upgrade(
+        return adapter
+
+    def _requeue_asset_import(
+        self,
+        *,
+        config: LibrarySourceTreeConfig,
+        resource_id: str,
+        source_node_id: str,
+        adapter: ResourceAdapterSpec,
+    ) -> None:
+        self._books_resources.invalidate_asset_for_reimport(
+            resource_id=resource_id,
+            source_node_id=source_node_id,
+        )
+        self._queue.requeue_import_asset_task(
             library_id=config.library_id,
-            resource_id=refreshed.id,
+            resource_id=resource_id,
             source_node_id=source_node_id,
             role=adapter.asset_role,
         )
-        return True
+
+    @staticmethod
+    def _adapter_for_resource(
+        resource: ReadableResourceRecord,
+        source_name: str,
+    ) -> ResourceAdapterSpec | None:
+        extension = file_extension(source_name)
+        return next(
+            (
+                spec
+                for spec in ADAPTER_SPECS
+                if spec.adapter_id.value == resource.adapter_id
+                and extension in spec.file_extensions
+            ),
+            None,
+        )
 
     def _resolve_book_id(
         self,

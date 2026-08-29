@@ -37,9 +37,7 @@ enum class ReaderTapZones(val wireValue: String) {
 @Serializable
 enum class ReaderFontFamily(val wireValue: String) {
     @SerialName("pingfang") Pingfang("pingfang"),
-    @SerialName("heiti") Heiti("heiti"),
     @SerialName("songti") Songti("songti"),
-    @SerialName("yahei") Yahei("yahei"),
     @SerialName("kaiti") Kaiti("kaiti"),
 }
 
@@ -295,7 +293,7 @@ data class ReaderCapabilities(
             supportsPositiveLetterSpacing = true,
             supportsNegativeLetterSpacing = false,
             supportsPageMargins = true,
-            supportsPageWidth = false,
+            supportsPageWidth = true,
             supportsReadingMode = true,
             supportsSpreadMode = true,
             supportsParagraphLayout = true,

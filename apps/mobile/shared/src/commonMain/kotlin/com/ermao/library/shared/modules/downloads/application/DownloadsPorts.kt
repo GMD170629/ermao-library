@@ -63,6 +63,9 @@ interface DownloadByteSink {
     /** Reconcile durable bytes after interruption, including publication before catalog commit. */
     @Throws(Exception::class)
     suspend fun inspect(request: DownloadSinkRequest): DownloadStoredBytes = DownloadStoredBytes(request.resumeFromBytes)
+    /** Removes task-owned partial and published bytes before an exact task is rebuilt. */
+    @Throws(Exception::class)
+    suspend fun discard(request: DownloadSinkRequest) = Unit
     @Throws(Exception::class)
     suspend fun begin(request: DownloadSinkRequest): DownloadByteSinkSession
 }

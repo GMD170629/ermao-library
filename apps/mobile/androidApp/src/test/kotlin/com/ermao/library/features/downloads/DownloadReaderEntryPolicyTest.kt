@@ -1,6 +1,7 @@
 package com.ermao.library.features.downloads
 
 import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
 
 import com.ermao.library.features.downloads.model.AndroidDownloadNamespace
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
@@ -48,20 +49,21 @@ class DownloadReaderEntryPolicyTest {
     }
 
     @Test
-    fun kindleLibraryFamilyUsesBootstrapButNeverOpensAnAmbiguousLocalArtifact() {
+    fun genericKindleFormatIsRejectedForOnlineAndLocalReading() {
         assertEquals(
-            DownloadReaderEntryAction.OpenServerReader,
+            DownloadReaderEntryAction.ValidateUnsupportedAccess,
             downloadReaderEntryAction("reflowable", "KINDLE", null) { false },
         )
         assertEquals(
-            DownloadReaderEntryAction.OpenServerReader,
+            DownloadReaderEntryAction.ValidateUnsupportedAccess,
             downloadReaderEntryAction("reflowable", " kindle ", completedRecord("KINDLE")) {
-                error("A generic family cannot identify a verified local artifact")
+                error("Unsupported formats must not inspect a local artifact")
             },
         )
         assertFalse(ReaderFormatSupport.canReadOriginal("reflowable", "KINDLE"))
-        assertFalse(ReaderFormatSupport.canOpenOnline("audio", "KINDLE"))
-        assertFalse(ReaderFormatSupport.canOpenOnline("reflowable", "KFX"))
+        assertEquals(ReaderDeliveryMode.Unsupported, ReaderFormatSupport.deliveryMode("reflowable", "KINDLE"))
+        assertEquals(ReaderDeliveryMode.Unsupported, ReaderFormatSupport.deliveryMode("audio", "KINDLE"))
+        assertEquals(ReaderDeliveryMode.Unsupported, ReaderFormatSupport.deliveryMode("reflowable", "KFX"))
     }
 
     private fun completedRecord(format: String = "EPUB") = AndroidDownloadRecord(

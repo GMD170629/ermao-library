@@ -7,6 +7,7 @@ import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPageMargin
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTextAlignment
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
@@ -26,7 +27,11 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
         val colors = theme.colors
         return EpubPreferences(
             backgroundColor = color(colors.background),
-            columnCount = ColumnCount.ONE,
+            columnCount = when (epub.spreadMode) {
+                ReaderSpreadMode.Auto -> ColumnCount.AUTO
+                ReaderSpreadMode.Single -> ColumnCount.ONE
+                ReaderSpreadMode.Double -> ColumnCount.TWO
+            },
             fontFamily = fontFamily(epub.fontFamily),
             fontSize = epub.fontSize / READIUM_CSS_ROOT_FONT_SIZE,
             fontWeight = epub.fontWeight / NORMAL_FONT_WEIGHT,
@@ -64,7 +69,7 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
 
     private fun fontFamily(value: ReaderFontFamily): FontFamily = FontFamily(
         when (value) {
-            ReaderFontFamily.Pingfang, ReaderFontFamily.Heiti, ReaderFontFamily.Yahei -> "Shuku Sans"
+            ReaderFontFamily.Pingfang -> "Shuku Sans"
             ReaderFontFamily.Songti -> "Shuku Songti"
             ReaderFontFamily.Kaiti -> "Shuku Kaiti"
         },

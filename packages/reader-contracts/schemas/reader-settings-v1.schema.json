@@ -4,10 +4,12 @@
   "title": "Reader settings catalog",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "preferenceVersion", "sections", "optionGroups", "settings"],
+  "required": ["version", "preferenceVersion", "availabilityReasons", "availabilityRules", "sections", "optionGroups", "settings"],
   "properties": {
     "version": {"const": 1},
     "preferenceVersion": {"const": 5},
+    "availabilityReasons": {"type": "object", "additionalProperties": {"$ref": "#/$defs/label"}},
+    "availabilityRules": {"type": "object", "additionalProperties": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}},
     "sections": {"type": "array", "items": {"$ref": "#/$defs/section"}},
     "optionGroups": {"type": "object", "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/option"}}},
     "settings": {"type": "array", "items": {"$ref": "#/$defs/setting"}}

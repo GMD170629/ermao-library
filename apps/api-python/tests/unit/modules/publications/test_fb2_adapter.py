@@ -20,7 +20,9 @@ def test_fb2_body_contract_matches_native_shared_fixture() -> None:
     adapter = Fb2PublicationAdapter(corpus)
     source = _source(path)
     publication = adapter.open(source)
-    expected = json.loads((corpus / "reader-contract-bodies.json").read_text())
+    expected = json.loads(
+        (corpus / "reader-contract-bodies.json").read_text(encoding="utf-8")
+    )
 
     assert [link.href for link in publication.reading_order] == list(expected)
     for link in publication.reading_order:

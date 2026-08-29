@@ -15,10 +15,10 @@ from app.modules.publications.application.ports import (
 from app.modules.publications.domain.model import (
     NormalizedPublication,
     PublicationLink,
-    PublicationOnlineLimitError,
     PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
+    PublicationResourceTooLargeError,
     PublicationRevision,
     PublicationTocEntry,
     PublicationTxtEmptyError,
@@ -68,7 +68,7 @@ class _TxtSnapshot:
 
 def _decode_txt(content: bytes) -> str:
     if len(content) > MAX_TXT_SOURCE_BYTES:
-        raise PublicationOnlineLimitError("TXT source exceeds the size limit")
+        raise PublicationResourceTooLargeError("TXT source exceeds the size limit")
     candidates: tuple[tuple[str, bytes], ...]
     if content.startswith(b"\xef\xbb\xbf"):
         candidates = (("utf-8", content[3:]),)
@@ -288,7 +288,7 @@ class TxtPublicationAdapter(PublicationAdapter):
         )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
-            raise PublicationOnlineLimitError("TXT source exceeds the size limit")
+            raise PublicationResourceTooLargeError("TXT source exceeds the size limit")
         key = (
             str(source_path),
             stat_result.st_size,

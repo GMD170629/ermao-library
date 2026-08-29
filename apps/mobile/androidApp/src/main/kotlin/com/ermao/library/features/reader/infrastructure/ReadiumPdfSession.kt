@@ -89,7 +89,7 @@ internal class ReadiumPdfSession(
         supportsSystemTheme = true, supportsFontSize = false, supportsFontFamily = false,
         supportsFontWeight = false, supportsLineHeight = false,
         supportsPositiveLetterSpacing = false, supportsNegativeLetterSpacing = false,
-        supportsPageMargins = false, supportsPageWidth = false, supportsReadingMode = false,
+        supportsPageMargins = false, supportsPageWidth = true, supportsReadingMode = false,
         supportsSpreadMode = false, supportsParagraphLayout = false,
         supportsProgressStyles = true, supportsClock = true, supportsKeepAwake = true, supportsTapZones = true,
         supportsSwipeToggle = false, supportsPageTurnAnimation = false,
@@ -209,7 +209,6 @@ internal class ReadiumPdfSession(
     private suspend fun openPublication(): Publication = when (val currentSource = source) {
         is LocalReaderSource -> openLocalPublication(currentSource)
         is RemoteByteRangeReaderSource -> openRemotePublication(currentSource)
-        is com.ermao.library.shared.modules.reader.RemoteReflowableReaderSource,
         is RemoteComicReaderSource -> throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
     }
 

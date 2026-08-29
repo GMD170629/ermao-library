@@ -54,8 +54,9 @@ script isolation, protocol validity and resource budgets have separate owners.
 ## Reading preferences and setting catalog
 
 `reader-settings.json` (schema `schemas/reader-settings-v1.schema.json`) owns
-ordered panels/sections, stable setting IDs, bilingual labels, options and
-numeric constraints. `generate-reader-settings.py` generates literal Web
+ordered panels/sections, stable setting/control IDs, bilingual labels, options,
+numeric constraints, availability rules and bilingual disabled reasons.
+`generate-reader-settings.py` generates literal Web
 constants and typed KMP access/edit metadata plus iOS native localization keys.
 Do not edit generated files or add platform-owned setting lists. Run the generator
 then `python3 packages/reader-contracts/generate-reader-settings.py --check`.

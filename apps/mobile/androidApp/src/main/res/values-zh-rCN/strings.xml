@@ -381,7 +381,7 @@
     <string name="reader_comic_page">第 %1$d 页</string>
     <string name="reader_pdf_page">第 %1$d 页</string>
     <string name="reader_progress_remaining_percent">剩余 %1$d%%</string>
-    <string name="reader_font_mapping">苹方、黑体和微软雅黑使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。</string>
+    <string name="reader_font_mapping">苹方使用思源黑体；宋体使用思源宋体；楷体使用霞鹜文楷。</string>
     <string name="reader_negative_spacing_retained">已保存的负字间距仍保留，但暂不支持；当前生效值为 0。</string>
     <string name="reader_advanced_settings">高级设置</string>
     <string name="reader_done">完成</string>
@@ -595,7 +595,6 @@
     <string name="management_result_cover_not_selected">未选择封面</string>
     <string name="management_reading_status">阅读状态</string>
     <string name="reader_error_publication_changed">出版物已更新，请重新打开。</string>
-    <string name="reader_download_reason">此资源暂不支持在线阅读，将下载原文件后打开。</string>
     <string name="reader_download_preparing">正在解析已下载的书籍…</string>
     <string name="reader_download_failed">下载失败，可以重试。</string>
     <string name="reader_download_transferring">正在下载</string>

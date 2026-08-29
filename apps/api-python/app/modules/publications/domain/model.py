@@ -78,15 +78,9 @@ class PublicationParserError(PublicationCorruptError):
 
 
 class PublicationResourceTooLargeError(Exception):
-    """One requested chapter exceeds the bounded online resource contract."""
+    """The original or one requested resource exceeds a parser safety limit."""
 
     code = "PUBLICATION_RESOURCE_TOO_LARGE"
-
-
-class PublicationOnlineLimitError(PublicationResourceTooLargeError):
-    """The server's online parser budget cannot admit this original."""
-
-    code = "PUBLICATION_ONLINE_LIMIT"
 
 
 class PublicationChangedError(Exception):

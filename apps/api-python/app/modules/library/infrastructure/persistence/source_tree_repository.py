@@ -226,6 +226,36 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         self._session.flush()
         return self._to_record(row), True
 
+    def refresh_observation(
+        self,
+        *,
+        source_node_id: str,
+        entry: ObservedSourceEntry,
+    ) -> tuple[SourceNodeRecord, bool]:
+        row = self._session.get(LibrarySourceNode, source_node_id)
+        if row is None:
+            raise LookupError(source_node_id)
+        if row.path_key != entry.relative_path.path_key:
+            raise SourceNodeTopologyError(
+                SourceNodeViolationCode.PATH_KEY_COLLISION,
+                relative_path=entry.relative_path.value,
+            )
+        if row.physical_kind != entry.physical_kind.value:
+            raise SourceNodeTopologyError(
+                SourceNodeViolationCode.PHYSICAL_KIND_CHANGED,
+                relative_path=entry.relative_path.value,
+            )
+
+        version_changed = (
+            row.observed_size_bytes != entry.observed_size_bytes
+            or row.observed_mtime_ns != entry.observed_mtime_ns
+        )
+        row.observed_size_bytes = entry.observed_size_bytes
+        row.observed_mtime_ns = entry.observed_mtime_ns
+        row.observed_at = entry.observed_at
+        self._session.flush()
+        return self._to_record(row), version_changed
+
     def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
         root = self._session.get(LibrarySourceNode, source_node_id)
         if root is None:
@@ -493,6 +523,42 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         row.import_state = ResourceImportState.PENDING.value
         self._session.flush()
         return self._to_resource(row)
+
+    def invalidate_asset_for_reimport(
+        self,
+        *,
+        resource_id: str,
+        source_node_id: str,
+    ) -> bool:
+        asset = self._session.scalar(
+            select(LibraryResourceAsset).where(
+                LibraryResourceAsset.resource_id == resource_id,
+                LibraryResourceAsset.source_node_id == source_node_id,
+            )
+        )
+        if asset is None:
+            return False
+
+        asset.import_state = AssetImportState.PENDING.value
+        asset.failure_reason = None
+        self._session.execute(
+            delete(ReadableResourceNavigationUnit).where(
+                ReadableResourceNavigationUnit.resource_id == resource_id,
+                ReadableResourceNavigationUnit.asset_id == asset.id,
+            )
+        )
+        resource = self._session.get(LibraryReadableResource, resource_id)
+        if resource is None:
+            raise LookupError(resource_id)
+        resource.import_state = (
+            ResourceImportState.READY.value
+            if self.count_ready_assets(resource_id) >= 1
+            else ResourceImportState.PENDING.value
+        )
+        if asset.role == AssetRole.TRACK.value:
+            self.refresh_audio_resource_aggregates(resource_id)
+        self._session.flush()
+        return True
 
     def set_enablement(
         self,

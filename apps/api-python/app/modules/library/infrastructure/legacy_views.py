@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.media_capabilities import (
-    exact_source_format,
     kindle_send_available_for_format,
     require_reader_type_for_format,
     resolve_asset_mime_type,
@@ -176,9 +175,7 @@ def _resource_view(
             "sourceNodeId": asset.source_node_id,
             "role": asset.role,
             "title": asset_titles[asset.id],
-            "sourceFormat": exact_source_format(
-                resource_format=format_value, filename=source.name
-            ),
+            "sourceFormat": format_value,
             "mimeType": resolve_asset_mime_type(
                 resource_format=format_value,
                 asset_role=asset.role,

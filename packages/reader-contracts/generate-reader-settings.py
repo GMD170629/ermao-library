@@ -7,17 +7,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / 'apps/mobile/shared/src/commonMain/kotlin/com/ermao/library/shared/modules/reader'
-CATALOG = json.loads((Path(__file__).parent / 'reader-settings.json').read_text())
+CATALOG = json.loads((Path(__file__).parent / 'reader-settings.json').read_text(encoding='utf-8'))
 CHECK = argparse.ArgumentParser()
 CHECK.add_argument('--check', action='store_true')
 CHECK = CHECK.parse_args().check
 
 def write(path, content):
     if CHECK:
-        if not path.exists() or path.read_text() != content:
+        if not path.exists() or path.read_text(encoding='utf-8') != content:
             raise SystemExit(f'Stale generated Reader settings: {path.relative_to(ROOT)}')
     else:
-        path.write_text(content)
+        path.write_text(content, encoding='utf-8')
 
 def quote(value):
     return json.dumps(value, ensure_ascii=False)
@@ -25,14 +25,19 @@ def quote(value):
 rows = CATALOG['settings']
 sections = {s['id']: s for s in CATALOG['sections']}
 groups = CATALOG['optionGroups']
+availability_reasons = CATALOG['availabilityReasons']
+availability_rules = CATALOG['availabilityRules']
 assert len({r['id'] for r in rows}) == len(rows)
 for row in rows:
     assert row['section'] in sections
     assert row['options'] is None or row['options'] in groups
     assert row['label']['en-US'] and row['label']['zh-CN']
+setting_ids = {row['id'] for row in rows}
+for members in availability_rules.values():
+    assert set(members) <= setting_ids
 
 # iOS may rename native editable fields, but may not omit a catalog preference.
-ios_binding = (ROOT / 'apps/mobile/iosApp/ErmaoLibrary/Features/Reader/IosReaderControlSession.swift').read_text()
+ios_binding = (ROOT / 'apps/mobile/iosApp/ErmaoLibrary/Features/Reader/IosReaderControlSession.swift').read_text(encoding='utf-8')
 wire_fields = ios_binding.split('private static let wireFields:', 1)[1].split(']\n', 1)[0]
 assert set(re.findall(r'"([a-zA-Z.]+)":', wire_fields)) == {r['path'] for r in rows if r['path']}
 for row in rows:
@@ -48,7 +53,7 @@ ts += 'export const READER_SETTINGS_CATALOG = ' + json.dumps(CATALOG, ensure_asc
 
 
 # Resolve domain types from their owner; no parallel handwritten preference model.
-model = (BASE / 'domain/ReaderPreferences.kt').read_text()
+model = (BASE / 'domain/ReaderPreferences.kt').read_text(encoding='utf-8')
 classes = {}
 for name, body in re.findall(r'data class (\w+)\(\n(.*?)\n\)', model, re.S):
     classes[name] = dict(re.findall(r'val (\w+): (\w+)', body))
@@ -64,6 +69,10 @@ def copy_expression(parts, value, prefix='preferences'):
     return f'{prefix}.copy({field} = {replacement})'
 
 ts += "\nexport type ReaderSettingId = typeof READER_SETTINGS_CATALOG.settings[number]['id'];\n"
+ts += "export type ReaderControlId = NonNullable<typeof READER_SETTINGS_CATALOG.settings[number]['control']>;\n"
+ts += "export type ReaderControlAvailability = 'available' | 'temporarilyUnavailable' | 'notImplemented' | 'notApplicable';\n"
+ts += "export type ReaderAvailabilityReason = keyof typeof READER_SETTINGS_CATALOG.availabilityReasons;\n"
+ts += "export type ReaderSettingAvailabilityContext = Readonly<{ morphology: 'reflowable' | 'comic' | 'pdf'; ready: boolean; supportedControls: ReadonlySet<string>; nativeUnavailable?: ReadonlySet<string>; wideViewport: boolean; wakeLockSupported: boolean; canZoom: boolean; preferences: ReaderPreferences }>;\n"
 ts += "import { normalizeReaderPreferences } from './preferences';\nimport type { ReaderPreferences } from './types';\n"
 ts += "export function readerSettingValue(preferences: ReaderPreferences, id: ReaderSettingId): string {\n  switch (id) {\n"
 for row in rows:
@@ -80,6 +89,25 @@ for row in rows:
     value = 'value === \'true\'' if typ == 'Boolean' else 'Number(value)' if typ in ('Int','Double') else 'value'
     ts += f"    case {quote(row['id'])}: return normalizeReaderPreferences({ts_copy(row['path'].split('.'), value)});\n"
 ts += "    case 'reset': return normalizeReaderPreferences({});\n  }\n}\n"
+ts += '''export function readerSettingAvailability(id: ReaderSettingId, context: ReaderSettingAvailabilityContext): Readonly<{ availability: ReaderControlAvailability; reason?: ReaderAvailabilityReason }> {
+  const setting = READER_SETTINGS_CATALOG.settings.find((candidate) => candidate.id === id);
+  if (!setting || !(setting.formats as readonly string[]).includes(context.morphology)) return { availability: 'notApplicable' };
+  if (setting.control === null) return { availability: 'available' };
+  if (!context.supportedControls.has(setting.control)) return { availability: 'notImplemented', reason: 'notImplemented' };
+  if (!context.ready) return { availability: 'temporarilyUnavailable', reason: 'engineNotReady' };
+  if (context.nativeUnavailable?.has(setting.control)) return { availability: 'temporarilyUnavailable', reason: 'publicationConstraint' };
+  const rules = READER_SETTINGS_CATALOG.availabilityRules;
+  if (rules.wideViewport.includes(id as never) && !context.wideViewport) return { availability: 'temporarilyUnavailable', reason: 'narrowViewport' };
+  if (rules.wakeLock.includes(id as never) && !context.wakeLockSupported) return { availability: 'notImplemented', reason: 'wakeLockUnavailable' };
+  if (rules.zoom.includes(id as never) && !context.canZoom) return { availability: 'notImplemented', reason: 'zoomUnavailable' };
+  if (rules.paginatedReflowable.includes(id as never) && context.preferences.epub.flow === 'scrolled') return { availability: 'temporarilyUnavailable', reason: 'scrollingMode' };
+  if (rules.paginatedComic.includes(id as never) && context.preferences.comic.flow === 'scrolled') return { availability: 'temporarilyUnavailable', reason: 'scrollingMode' };
+  if (rules.doubleComicSpread.includes(id as never) && context.preferences.comic.spreadMode !== 'double') return { availability: 'temporarilyUnavailable', reason: 'requiresDoubleSpread' };
+  if (rules.optimizationEnabled.includes(id as never) && !context.preferences.epub.optimization.enabled) return { availability: 'temporarilyUnavailable', reason: 'optimizationDisabled' };
+  if (rules.publisherStylesOff.includes(id as never) && context.preferences.epub.typography.preservePublisherStyles) return { availability: 'temporarilyUnavailable', reason: 'publisherStylesActive' };
+  return { availability: 'available' };
+}
+'''
 write(ROOT / 'packages/reader-core/src/setting-catalog.generated.ts', ts)
 
 kt = '''// Generated by packages/reader-contracts/generate-reader-settings.py. Do not edit.
@@ -87,11 +115,12 @@ package com.ermao.library.shared.modules.reader.domain
 
 data class ReaderSettingOption(val value: String, val key: String, val chinese: String, val english: String)
 data class ReaderSettingSection(val id: String, val panel: String, val key: String, val chinese: String, val english: String, val advanced: Boolean)
+data class ReaderAvailabilityReasonDefinition(val id: String, val key: String, val chinese: String, val english: String)
 data class ReaderSettingDefinition(
     val id: String, val key: String, val section: String, val kind: String,
     val chinese: String, val english: String, val control: ReaderControl?,
     val formats: List<ReaderMorphology>, val options: List<ReaderSettingOption>,
-    val minimum: Double, val maximum: Double, val step: Double,
+    val minimum: Double, val maximum: Double, val step: Double, val availabilityRules: Set<String>,
 ) {
     fun value(preferences: ReaderPreferences): String = when (id) {
 '''
@@ -111,6 +140,9 @@ kt += '        "reset" -> resetReaderPreferences()\n        else -> error("Unkno
 for s in sections.values():
     args = [s['id'],s['panel'],'reader.catalog.section.'+s['id'],s['label']['zh-CN'],s['label']['en-US']]
     kt += '        ReaderSettingSection('+', '.join(map(quote,args))+', '+str(s['advanced']).lower()+'),\n'
+kt += '    )\n    val availabilityReasons: Map<String, ReaderAvailabilityReasonDefinition> = mapOf(\n'
+for name, label in availability_reasons.items():
+    kt += '        '+quote(name)+' to ReaderAvailabilityReasonDefinition('+', '.join(map(quote,[name,'reader.catalog.reason.'+name,label['zh-CN'],label['en-US']]))+'),\n'
 kt += '    )\n    val settings: List<ReaderSettingDefinition> = listOf(\n'
 forms = {'reflowable':'Reflowable','comic':'Comic','pdf':'Pdf'}
 for row in rows:
@@ -118,19 +150,21 @@ for row in rows:
     ctrl = 'ReaderControl.'+row['control'] if row['control'] else 'null'
     opts = ', '.join('ReaderSettingOption('+', '.join(map(quote,[o['value'],'reader.catalog.option.'+row['options']+'.'+o['value'],o['label']['zh-CN'],o['label']['en-US']]))+')' for o in groups.get(row['options'],[]))
     limits = row['limits'] or [0,0,0]
-    kt += '        ReaderSettingDefinition('+', '.join(map(quote,args))+', '+ctrl+', listOf('+', '.join('ReaderMorphology.'+forms[f] for f in row['formats'])+'), listOf('+opts+'), '+', '.join(str(float(v)) for v in limits)+'),\n'
+    rule_names = [name for name, members in availability_rules.items() if row['id'] in members]
+    kt += '        ReaderSettingDefinition('+', '.join(map(quote,args))+', '+ctrl+', listOf('+', '.join('ReaderMorphology.'+forms[f] for f in row['formats'])+'), listOf('+opts+'), '+', '.join(str(float(v)) for v in limits)+', setOf('+', '.join(map(quote, rule_names))+')),\n'
 kt += '    )\n}\n'
 write(BASE / 'domain/ReaderSettingsCatalog.generated.kt', kt)
 
 # iOS uses native localization lookup; these keys are generated, not separately authored.
 resource = ROOT / 'apps/mobile/iosApp/ErmaoLibrary/Resources/Localizable.xcstrings'
-localization = json.loads(resource.read_text())
+localization = json.loads(resource.read_text(encoding='utf-8'))
 strings = localization['strings']
 for key in list(strings):
     if key.startswith('reader.catalog.') and key != 'reader.catalog.unavailable': del strings[key]
 labels = [('reader.catalog.'+r['id'],r['label']) for r in rows]
 labels += [('reader.catalog.section.'+s['id'],s['label']) for s in sections.values() if s['label']['zh-CN']]
 labels += [('reader.catalog.option.'+name+'.'+o['value'],o['label']) for name,options in groups.items() for o in options]
+labels += [('reader.catalog.reason.'+name,label) for name,label in availability_reasons.items()]
 for key,label in labels:
     strings[key] = {'extractionState':'manual','localizations':{locale:{'stringUnit':{'state':'translated','value':label[source]}} for locale,source in [('en','en-US'),('zh-Hans','zh-CN')]}}
 write(resource,json.dumps(localization,ensure_ascii=False,indent=2)+'\n')

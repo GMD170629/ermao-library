@@ -474,7 +474,7 @@ def test_reader_v4_bootstrap_and_progress_are_resource_scoped(
         ("prc", "prc", "application/x-mobipocket-ebook"),
     ],
 )
-def test_reader_v4_kindle_family_bootstrap_preserves_original_format(
+def test_reader_v4_mobi_family_bootstrap_uses_persisted_exact_format(
     client: TestClient,
     db_session: Session,
     test_settings,
@@ -487,12 +487,12 @@ def test_reader_v4_kindle_family_bootstrap_preserves_original_format(
     source.write_bytes(b"original")
     resource, _asset = _add_resource(
         db_session,
-        book_id=f"book-kindle-{suffix}",
-        resource_id=f"resource-kindle-{suffix}",
-        asset_id=f"asset-kindle-{suffix}",
+        book_id=f"book-mobi-family-{suffix}",
+        resource_id=f"resource-mobi-family-{suffix}",
+        asset_id=f"asset-mobi-family-{suffix}",
         source_path=source,
-        title=f"Kindle {suffix}",
-        fmt="KINDLE",
+        title=f"MOBI family {suffix}",
+        fmt=expected_source_format.upper(),
         mime_type="application/octet-stream",
     )
 
@@ -503,7 +503,32 @@ def test_reader_v4_kindle_family_bootstrap_preserves_original_format(
     assert bootstrap["sourceFormat"] == expected_source_format
     assert bootstrap["resource"]["format"] == expected_source_format.upper()
     assert bootstrap["assets"][0]["mimeType"] == expected_mime
-    assert bootstrap["publication"]["kind"] == "reflowable"
+    assert "publication" not in bootstrap
+
+
+def test_reader_v4_rejects_removed_generic_kindle_format(
+    client: TestClient,
+    db_session: Session,
+    test_settings,
+) -> None:
+    _login(client, db_session)
+    source = test_settings.resolved_storage_root / "reader-source.kindle"
+    source.write_bytes(b"unsupported")
+    resource, _asset = _add_resource(
+        db_session,
+        book_id="book-generic-kindle",
+        resource_id="resource-generic-kindle",
+        asset_id="asset-generic-kindle",
+        source_path=source,
+        title="Unsupported generic format",
+        fmt="KINDLE",
+        mime_type="application/octet-stream",
+    )
+
+    response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "RESOURCE_FORMAT_UNSUPPORTED"
 
 
 def test_reader_v4_exact_save_after_reading_status_uses_current_revision(
@@ -1021,7 +1046,7 @@ def test_resource_reading_status_creates_clean_revisioned_progress(
     assert progress.revision == 1
 
 
-def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
+def test_reader_v4_bootstrap_does_not_generate_reflowable_navigation(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -1029,7 +1054,7 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
     _login(client, db_session)
     resource, _asset = _ebook_resource(db_session)
     epub = tmp_path / "without-units.epub"
-    _write_reader_epub(epub)
+    epub.write_bytes(b"not-an-epub: bootstrap must not parse this body")
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
     assert source_node is not None
     library = db_session.get(Library, "test-library")
@@ -1076,34 +1101,20 @@ def test_reader_v4_bootstrap_generates_missing_epub_navigation_once(
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-    assert [unit["title"] for unit in first_response.json()["data"]["units"]] == [
-        "第一章",
-        "第二章",
-    ]
-    assert set(first_response.json()["data"]["units"][0]) == {
-        "id",
-        "index",
-        "title",
-        "href",
-        "assetId",
-        "startMs",
-        "endMs",
-        "durationMs",
-        "metadata",
-    }
+    assert first_response.json()["data"]["units"] == []
+    assert "publication" not in first_response.json()["data"]
     assert (
         second_response.json()["data"]["units"]
         == first_response.json()["data"]["units"]
     )
     assert writes == []
-    assert db_session.query(ReadableResourceNavigationUnit).count() == 2
+    assert db_session.query(ReadableResourceNavigationUnit).count() == 0
     db_session.expire_all()
     navigation_cache = db_session.get(PublicationNavigationCache, resource.id)
-    assert navigation_cache is not None
-    assert navigation_cache.chapter_count == 2
+    assert navigation_cache is None
 
 
-def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
+def test_reader_v4_bootstrap_does_not_return_existing_reflowable_navigation(
     client: TestClient,
     db_session: Session,
     tmp_path: Path,
@@ -1156,28 +1167,21 @@ def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
     response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
 
     assert response.status_code == 200
-    assert [unit["href"] for unit in response.json()["data"]["units"]] == [
-        "OEBPS/Text/one.xhtml#start",
-        "OEBPS/Text/two.xhtml",
-    ]
+    assert response.json()["data"]["units"] == []
     stored_units = db_session.scalars(
         select(ReadableResourceNavigationUnit).order_by(
             ReadableResourceNavigationUnit.sort_order
         )
     ).all()
-    assert [unit.id for unit in stored_units] == [
-        response.json()["data"]["units"][0]["id"],
-        response.json()["data"]["units"][1]["id"],
-    ]
-    assert all(unit.id.startswith("pubnav_") for unit in stored_units)
+    assert [unit.id for unit in stored_units] == ["legacy-unit-one", "legacy-unit-two"]
     assert [unit.href for unit in stored_units] == [
-        "OEBPS/Text/one.xhtml#start",
-        "OEBPS/Text/two.xhtml",
+        "Text/one.xhtml#start",
+        "Text/two.xhtml",
     ]
-    assert all(
-        json.loads(unit.metadata_json)["hrefBase"] == "publication-root"
-        for unit in stored_units
-    )
+    assert [json.loads(unit.metadata_json) for unit in stored_units] == [
+        {"idref": "one"},
+        {"idref": "two"},
+    ]
     detail_units_response = client.get(
         f"/api/books/book-reader-v4/resources/{resource.id}/reading-units",
         params={"page": 1, "pageSize": 120},
@@ -1188,6 +1192,23 @@ def test_reader_v4_bootstrap_replaces_stale_navigation_with_publication_toc(
 def test_reader_v2_and_edition_file_routes_are_gone(client: TestClient) -> None:
     assert client.get("/api/reader/v2/editions/legacy/bootstrap").status_code == 404
     assert client.get("/api/editions/legacy/file").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        "manifest.json",
+        "positions.json",
+        "text/chapter-0001.xhtml",
+    ],
+)
+def test_reader_v4_online_reflowable_publication_routes_are_gone(
+    client: TestClient,
+    suffix: str,
+) -> None:
+    response = client.get(f"/api/reader/v4/resources/legacy/publication/{suffix}")
+
+    assert response.status_code == 404
 
 
 def test_reader_v4_bookmarks_fall_back_from_non_iso_created_at(
@@ -1574,7 +1595,7 @@ def test_reader_v4_bootstrap_only_returns_the_current_resource(
         asset_id="unsupported-sibling-asset",
         source_path=tmp_path / "unsupported.azw",
         title="其他卷册",
-        fmt="KINDLE",
+        fmt="KFX",
         mime_type="application/octet-stream",
     )
 

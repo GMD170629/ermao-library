@@ -212,7 +212,7 @@ class LibraryImportTaskQueuePort(Protocol):
     ) -> LibraryImportTaskRecord | None:
         """Create or requeue FAILED task; return None when already SUCCEEDED."""
 
-    def requeue_asset_for_adapter_upgrade(
+    def requeue_import_asset_task(
         self,
         *,
         library_id: str,
@@ -220,7 +220,7 @@ class LibraryImportTaskQueuePort(Protocol):
         source_node_id: str,
         role: AssetRole,
     ) -> LibraryImportTaskRecord:
-        """Requeue the asset after its owning adapter contract changes."""
+        """Requeue an asset after its source version or adapter contract changes."""
 
     def next_queued(self) -> LibraryImportTaskRecord | None: ...
 

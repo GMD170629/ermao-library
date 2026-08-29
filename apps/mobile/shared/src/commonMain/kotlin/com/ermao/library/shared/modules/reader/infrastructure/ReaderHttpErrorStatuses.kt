@@ -22,7 +22,6 @@ internal object ReaderHttpErrorStatuses {
         "PUBLICATION_TXT_EMPTY" to setOf(404),
         "PUBLICATION_RESOURCE_CHANGED" to setOf(409, 412),
         "PUBLICATION_RESOURCE_TOO_LARGE" to setOf(413),
-        "PUBLICATION_ONLINE_LIMIT" to setOf(413),
     )
     val comic: Map<String, Set<Int>> = mapOf(
         "ARCHIVE_PAGE_MISSING" to setOf(404),

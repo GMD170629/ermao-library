@@ -1,9 +1,14 @@
 # ADR 0024: 在线 Publication 与显式下载的独立所有权
 
-- 状态：采用；设备与性能验收尚未全部完成
+- 状态：已被 ADR 0025 取代；仅保留历史决策与当时证据
 - 日期：2026-08-28
 - 范围：Web、Android、iOS、Publication 后端与共享 Downloads
 - 关联：ADR 0014、0016、0020；`mobile-reader-architecture.md`
+
+> 2026-08-29：可重排图书交付已改为全端下载原文件后本地解析。
+> 本文描述的 online-first、Web online-only、按在线限制选择下载等规则不再是
+> 现行规范；现行合同见 ADR 0025。PDF／漫画的有界在线交付及 Downloads 的
+> 单一所有权仍被 ADR 0025 延续。
 
 ## 决策
 

@@ -17,8 +17,8 @@ from app.modules.library.application.resource_cover import (
     PreparedResourceCover,
     PublishedResourceCover,
     ResourceCoverContext,
-    ResourceCoverPublicationPort,
     ResourceCoverPort,
+    ResourceCoverPublicationPort,
 )
 
 _IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp"}
@@ -63,9 +63,7 @@ class SqlAlchemyResourceCover(ResourceCoverPort):
         metadata = self._db.get(LibraryReadableResourceMetadata, resource_id)
         return metadata.cover_path if metadata is not None else None
 
-    def mark_ready(
-        self, *, resource_id: str, cover_path: str, now: datetime
-    ) -> None:
+    def mark_ready(self, *, resource_id: str, cover_path: str, now: datetime) -> None:
         metadata = self._db.get(LibraryReadableResourceMetadata, resource_id)
         if metadata is None:
             raise LookupError(resource_id)
@@ -81,9 +79,7 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
         self._storage_root = storage_root.resolve()
         self._cover_root = self._storage_root / "covers" / "resources"
 
-    def prepare(
-        self, *, resource_id: str, content: bytes
-    ) -> PreparedResourceCover:
+    def prepare(self, *, resource_id: str, content: bytes) -> PreparedResourceCover:
         if not resource_id or Path(resource_id).name != resource_id:
             raise ValueError("invalid resource identifier")
         if not content or len(content) > MAX_RESOURCE_COVER_BYTES:
@@ -110,7 +106,7 @@ class FilesystemResourceCoverPublication(ResourceCoverPublicationPort):
         return PreparedResourceCover(
             temporary_path=temporary_path,
             final_path=final_path,
-            stored_path=str(final_path.relative_to(self._storage_root)),
+            stored_path=final_path.relative_to(self._storage_root).as_posix(),
         )
 
     def publish(

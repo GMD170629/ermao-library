@@ -65,6 +65,7 @@ class ResourceMetadataPort(Protocol):
         self, *, resource_id: str, changes: ResourceMetadataChanges, now: datetime
     ) -> None: ...
 
+
 class UnitOfWork(Protocol):
     def commit(self) -> None: ...
 

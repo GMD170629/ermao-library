@@ -111,8 +111,6 @@ class ResourceDetailQueries(Protocol):
 
     def list_assets(self, *, resource_id: str) -> tuple[ResourceAssetDetail, ...]: ...
 
-    def has_navigation_units(self, *, resource_id: str, unit_type: str) -> bool: ...
-
     def resolve_pdf_page_count(self, *, resource_id: str) -> int | None: ...
 
     def resolve_current_chapter(
@@ -122,12 +120,6 @@ class ResourceDetailQueries(Protocol):
         current_href: str | None,
         current_position: int | None,
     ) -> ResourceCurrentChapter | None: ...
-
-
-class ResourceNavigationPreparer(Protocol):
-    def prepare(
-        self, *, resource_id: str, context: ResourceDetailAccessScope
-    ) -> None: ...
 
 
 def _navigation_level(metadata_json: str | None) -> int | None:
@@ -148,13 +140,8 @@ class ListResourceDetails:
 
     MAX_PAGE_SIZE = 100
 
-    def __init__(
-        self,
-        queries: ResourceDetailQueries,
-        navigation: ResourceNavigationPreparer,
-    ) -> None:
+    def __init__(self, queries: ResourceDetailQueries) -> None:
         self._queries = queries
-        self._navigation = navigation
 
     def execute(
         self,
@@ -180,10 +167,6 @@ class ListResourceDetails:
         current_chapter: ResourceCurrentChapter | None = None
 
         if source_format in REFLOWABLE_FORMATS:
-            if not self._queries.has_navigation_units(
-                resource_id=resource_id, unit_type="chapter"
-            ):
-                self._navigation.prepare(resource_id=resource_id, context=context)
             units, total = self._queries.list_navigation_units(
                 resource_id=resource_id,
                 unit_type="chapter",
@@ -327,5 +310,4 @@ __all__ = [
     "ResourceDetailPage",
     "ResourceDetailQueries",
     "ResourceDetailResource",
-    "ResourceNavigationPreparer",
 ]

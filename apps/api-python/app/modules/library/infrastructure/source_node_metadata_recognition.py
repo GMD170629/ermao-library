@@ -173,6 +173,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             parsed = float(candidate_value)
             return parsed if math.isfinite(parsed) else None
 
+        abridged_value = value.get("abridged")
         return SourceNodeMetadataCandidate(
             id=identifier,
             source=str(value.get("source") or provider_id),
@@ -188,11 +189,7 @@ class ProviderSourceNodeMetadataRecognition(SourceNodeMetadataRecognitionPort):
             isbn=optional_string("isbn"),
             identifier=optional_string("identifier"),
             narrator=optional_string("narrator"),
-            abridged=(
-                value.get("abridged")
-                if isinstance(value.get("abridged"), bool)
-                else None
-            ),
+            abridged=abridged_value if isinstance(abridged_value, bool) else None,
             resource_index=optional_number("resourceIndex"),
             cover_url=optional_string("coverUrl"),
             confidence=confidence,

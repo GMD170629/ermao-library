@@ -8,7 +8,6 @@ import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
-import com.ermao.library.shared.modules.reader.domain.RemoteReflowableReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
@@ -23,8 +22,8 @@ data class ReaderBootstrapRequest(
     }
 }
 
-/** Identity of an online publication; never an offline transfer request. */
-data class ReaderRemotePublicationAccess(
+/** Authorized resource identity carried by Reader bootstrap metadata. */
+data class ReaderBootstrapResource(
     val resourceId: String,
     val displayTitle: String,
     val bookId: String,
@@ -47,11 +46,10 @@ data class ReaderRemotePublicationAccess(
 
 data class ReaderBootstrap(
     val target: ReaderProgressSyncTarget,
-    val remoteAccess: ReaderRemotePublicationAccess,
-    val publicationAccess: ReaderPublicationAccess? = null,
+    val resource: ReaderBootstrapResource,
     val pdfAccess: ReaderPdfAccess? = null,
     val remoteSnapshot: ReaderProgressSnapshotV4?,
-    /** Canonical Reader v4 navigation units. Native publications must never replace this list. */
+    /** Fixed-layout/audio navigation metadata. Reflowable navigation is always parsed locally. */
     val units: List<ReaderNavigationUnit> = emptyList(),
     val comicPages: List<ReaderComicPage> = emptyList(),
     val comicAccess: ReaderComicAccess? = null,
@@ -71,17 +69,16 @@ data class ReaderBootstrap(
         require(units.map(ReaderNavigationUnit::index).distinct().size == units.size) {
             "Reader navigation unit indexes are not unique"
         }
-        require(target.resourceId == remoteAccess.resourceId)
-        require(target.bookId == remoteAccess.bookId)
-        require(target.sourceFormat == remoteAccess.sourceFormat.readerFormat)
-        require(comicPages.isEmpty() || remoteAccess.sourceFormat.isComic)
+        require(target.resourceId == resource.resourceId)
+        require(target.bookId == resource.bookId)
+        require(target.sourceFormat == resource.sourceFormat.readerFormat)
+        require(!resource.sourceFormat.isReflowable || units.isEmpty()) {
+            "Reflowable Reader bootstrap must not contain server navigation units"
+        }
+        require(comicPages.isEmpty() || resource.sourceFormat.isComic)
         require((comicAccess == null) == comicPages.isEmpty())
-        require(pdfPages.isEmpty() || remoteAccess.sourceFormat == ReaderSourceFormat.Pdf)
-        require((publicationAccess != null) == (remoteAccess.sourceFormat.readerFormat in
-            setOf(com.ermao.library.shared.modules.reader.domain.ReaderFormat.Epub,
-                com.ermao.library.shared.modules.reader.domain.ReaderFormat.Mobi,
-                com.ermao.library.shared.modules.reader.domain.ReaderFormat.Text)))
-        require((pdfAccess != null) == (remoteAccess.sourceFormat == ReaderSourceFormat.Pdf))
+        require(pdfPages.isEmpty() || resource.sourceFormat == ReaderSourceFormat.Pdf)
+        require((pdfAccess != null) == (resource.sourceFormat == ReaderSourceFormat.Pdf))
         require(pageCount == null || pageCount > 0) { "Reader page count must be positive" }
         require(comicPages.map(ReaderComicPage::pageIndex) == comicPages.indices.toList()) {
             "Comic pages are not canonical and contiguous"
@@ -167,13 +164,6 @@ fun interface ReaderBootstrapGateway {
     suspend fun load(request: ReaderBootstrapRequest): ReaderBootstrapResult
 }
 
-data class ReaderPublicationAccess(val manifestApiPath: String, val positionsApiPath: String) {
-    init {
-        require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
-        require(positionsApiPath.startsWith("/api/") && '#' !in positionsApiPath)
-    }
-}
-
 data class ReaderPdfAccess(val apiPath: String, val expectedSizeBytes: Long) {
     init {
         require(apiPath.startsWith("/api/") && '#' !in apiPath)
@@ -197,7 +187,7 @@ class BootstrapReaderPublication(
         request: ReaderBootstrapRequest,
         bootstrap: ReaderBootstrap,
     ): ReaderPublicationBootstrapResult {
-        val access = bootstrap.remoteAccess
+        val access = bootstrap.resource
         if (access.sourceFormat == ReaderSourceFormat.Pdf) {
             val pdf = requireNotNull(bootstrap.pdfAccess)
             return ReaderPublicationBootstrapResult.Content(
@@ -217,12 +207,12 @@ class BootstrapReaderPublication(
                 ?: return ReaderPublicationBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
             return ReaderPublicationBootstrapResult.Content(
                 RemoteComicReaderSource(
-                    resourceId = bootstrap.remoteAccess.resourceId,
-                    displayTitle = bootstrap.remoteAccess.displayTitle,
-                    bookId = bootstrap.remoteAccess.bookId,
-                    assetId = bootstrap.remoteAccess.assetId,
+                    resourceId = bootstrap.resource.resourceId,
+                    displayTitle = bootstrap.resource.displayTitle,
+                    bookId = bootstrap.resource.bookId,
+                    assetId = bootstrap.resource.assetId,
                     namespace = request.namespace,
-                    sourceFormat = bootstrap.remoteAccess.sourceFormat,
+                    sourceFormat = bootstrap.resource.sourceFormat,
                     manifestApiPath = access.manifestApiPath,
                     pageApiPathTemplate = access.pageApiPathTemplate,
                     pages = bootstrap.comicPages.map {
@@ -238,20 +228,7 @@ class BootstrapReaderPublication(
                 bootstrap,
             )
         }
-        val publication = bootstrap.publicationAccess
-            ?: return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_UNSUPPORTED", false)
-        return ReaderPublicationBootstrapResult.Content(
-            RemoteReflowableReaderSource(
-                resourceId = access.resourceId,
-                displayTitle = access.displayTitle,
-                bookId = access.bookId,
-                assetId = requireNotNull(access.assetId),
-                sourceFormat = access.sourceFormat,
-                namespace = request.namespace,
-                manifestApiPath = publication.manifestApiPath,
-                positionsApiPath = publication.positionsApiPath,
-            ), bootstrap,
-        )
+        return ReaderPublicationBootstrapResult.Failure("READER_PUBLICATION_LOCAL_REQUIRED", false)
     }
 }
 

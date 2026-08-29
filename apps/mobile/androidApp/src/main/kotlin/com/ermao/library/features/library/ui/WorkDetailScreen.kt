@@ -1,6 +1,7 @@
 package com.ermao.library.features.library.ui
 
 import com.ermao.library.shared.modules.reader.ReaderFormatSupport
+import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
 
 import com.ermao.library.features.workmanagement.ManagementAnchor
 import com.ermao.library.shared.modules.workmanagement.ManagementMenuContext
@@ -826,7 +827,8 @@ private fun WorkDetailActionRow(
         val captionResource = when {
             selectedResource?.readerType.equals("audio", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
             selectedResource == null || !selectedResource.readable -> R.string.work_no_readable_resources
-            !ReaderFormatSupport.canOpenOnline(selectedResource.readerType, selectedResource.format) ->
+            ReaderFormatSupport.deliveryMode(selectedResource.readerType, selectedResource.format) ==
+                ReaderDeliveryMode.Unsupported ->
                 R.string.work_reader_renderer_pending
             else -> null
         }
@@ -2125,7 +2127,8 @@ internal fun workDetailPrimaryActionPresentation(
         enabled = selectedResource?.readable == true,
     )
     if (selectedResource == null || !selectedResource.readable ||
-        !ReaderFormatSupport.canOpenOnline(selectedResource.readerType, selectedResource.format)
+        ReaderFormatSupport.deliveryMode(selectedResource.readerType, selectedResource.format) ==
+            ReaderDeliveryMode.Unsupported
     ) {
         return WorkDetailPrimaryActionPresentation(
             intent = WorkDetailPrimaryActionIntent.Unavailable,

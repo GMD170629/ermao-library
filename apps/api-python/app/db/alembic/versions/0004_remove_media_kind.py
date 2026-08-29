@@ -24,4 +24,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise NotImplementedError("mediaKind removal is irreversible")
-

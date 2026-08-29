@@ -3,36 +3,23 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal, Never, cast, overload
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.media import media_page_index, media_streaming
-from app.bootstrap.publications import (
-    ensure_publication_navigation,
-    publication_runtime,
-)
 from app.bootstrap.reader import reader_resource_service
-from app.contracts.http import MessageError
-from app.contracts.http_errors import ErrorResponses, PayloadTooLargeError
+from app.contracts.http_errors import ErrorResponses
 from app.core.auth import get_current_user
 from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
-from app.modules.publications.public import (
-    PublicationAccessScope,
-    PublicationCorruptError,
-    PublicationNotFoundError,
-    PublicationResourceTooLargeError,
-    PublicationUnsupportedError,
-)
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAudioExactLocationDto,
@@ -119,10 +106,6 @@ _LOCATION_ADAPTER: TypeAdapter[ReaderLocation] = TypeAdapter(ReaderLocation)
 _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-_PUBLICATION_SERVER_FORMATS = frozenset(
-    {"epub", "mobi", "azw", "azw3", "prc", "txt", "fb2"}
-)
-LOGGER = logging.getLogger(__name__)
 _COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar", "image_dir"})
 _COMIC_IMAGE_VARIANTS: list[Literal["original", "data-saver"]] = [
     "original",
@@ -139,10 +122,8 @@ def _current_user(db: Session, request: Request, settings: Settings) -> User:
     return user
 
 
-def _service(
-    db: Session, settings: Settings, request: Request
-) -> ResourceReaderService:
-    return reader_resource_service(db, settings, publication_runtime(request))
+def _service(db: Session, settings: Settings) -> ResourceReaderService:
+    return reader_resource_service(db, settings)
 
 
 def _not_found() -> ReaderNotFoundError:
@@ -160,14 +141,6 @@ def _access_scope(db: Session, user: User) -> ReaderAccessScope:
     )
 
 
-def _publication_access_scope(scope: ReaderAccessScope) -> PublicationAccessScope:
-    return PublicationAccessScope(
-        is_admin=scope.is_admin,
-        can_view_manual_imports=scope.can_view_manual_imports,
-        library_ids=tuple(scope.library_ids),
-    )
-
-
 def _authorized_bootstrap(
     db: Session,
     request: Request,
@@ -179,7 +152,7 @@ def _authorized_bootstrap(
         raise _not_found()
     scope = _access_scope(db, user)
     try:
-        bootstrap = _service(db, settings, request).load_bootstrap(
+        bootstrap = _service(db, settings).load_bootstrap(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=scope,
@@ -187,13 +160,6 @@ def _authorized_bootstrap(
     except (ReaderResourceNotFound, ReaderResourceFormatUnsupported) as error:
         _raise_service_error(error)
     return user, scope, bootstrap
-
-
-def _runtime_session_factory(request: Request) -> sessionmaker[Session]:
-    factory: object = request.app.state.session_factory
-    if not isinstance(factory, sessionmaker):
-        raise TypeError("application session factory is unavailable")
-    return cast(sessionmaker[Session], factory)
 
 
 def _reader_type(resource_format: str) -> ReaderType:
@@ -464,7 +430,6 @@ def reader_bootstrap_v4(
         ReaderUnauthorizedError,
         ReaderNotFoundError,
         ReaderValidationError,
-        PayloadTooLargeError,
     ),
 ]:
     user = _current_user(db, request, settings)
@@ -472,32 +437,8 @@ def reader_bootstrap_v4(
         raise _not_found()
     user_id = user.id
     reader_scope = _access_scope(db, user)
-    publication_scope = _publication_access_scope(reader_scope)
     try:
-        ensure_publication_navigation(
-            _runtime_session_factory(request),
-            publication_runtime(request),
-        ).execute(resource_id=resource_id, access_scope=publication_scope)
-    except PublicationResourceTooLargeError as error:
-        raise PayloadTooLargeError(
-            MessageError(
-                message="Publication exceeds the online reading limit", code=error.code
-            )
-        ) from error
-    except (
-        OSError,
-        PublicationCorruptError,
-        PublicationNotFoundError,
-        PublicationUnsupportedError,
-    ) as error:
-        LOGGER.warning(
-            "reader_navigation_generation outcome=unavailable resource_id=%s "
-            "error_type=%s",
-            resource_id,
-            type(error).__name__,
-        )
-    try:
-        bootstrap = _service(db, settings, request).load_bootstrap(
+        bootstrap = _service(db, settings).load_bootstrap(
             user_id=user_id,
             resource_id=resource_id,
             access_scope=reader_scope,
@@ -511,17 +452,7 @@ def reader_bootstrap_v4(
     capabilities = capabilities_for_reader_type(reader_type)
     normalized_format = context.resource.source_format.lower()
     publication_access = None
-    if normalized_format in _PUBLICATION_SERVER_FORMATS:
-        publication_access = ReaderPublicationAccess(
-            kind="reflowable",
-            manifestUrl=(
-                f"/api/reader/v4/resources/{resource_id}/publication/manifest.json"
-            ),
-            positionsUrl=(
-                f"/api/reader/v4/resources/{resource_id}/publication/positions.json"
-            ),
-        )
-    elif normalized_format in _COMIC_SOURCE_FORMATS:
+    if normalized_format in _COMIC_SOURCE_FORMATS:
         publication_access = ReaderPublicationAccess(
             kind="comic",
             manifestUrl=f"/api/reader/v4/resources/{resource_id}/comic/manifest",
@@ -769,7 +700,7 @@ def set_resource_reading_status_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings, request).set_resource_reading_status(
+        progress = _service(db, settings).set_resource_reading_status(
             SetResourceReadingStatusCommand(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -813,7 +744,7 @@ def save_progress_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings, request).save_progress(
+        progress = _service(db, settings).save_progress(
             SaveProgressCommand(
                 user_id=user.id,
                 resource_id=resource_id,
@@ -867,7 +798,7 @@ def get_progress_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        progress = _service(db, settings, request).load_progress(
+        progress = _service(db, settings).load_progress(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=_access_scope(db, user),
@@ -916,7 +847,7 @@ def list_bookmarks_v4(
     if not can_access_resource(db, user, resource_id):
         raise _not_found()
     try:
-        bookmarks = _service(db, settings, request).list_bookmarks(
+        bookmarks = _service(db, settings).list_bookmarks(
             user_id=user.id,
             resource_id=resource_id,
             access_scope=_access_scope(db, user),
@@ -974,7 +905,7 @@ def replace_bookmarks_v4(
         for bookmark in payload.bookmarks
     ]
     try:
-        bookmarks = _service(db, settings, request).replace_bookmarks(
+        bookmarks = _service(db, settings).replace_bookmarks(
             ReplaceBookmarksCommand(
                 user_id=user.id,
                 resource_id=resource_id,

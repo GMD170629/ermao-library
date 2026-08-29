@@ -106,6 +106,28 @@ class DownloadResourceRuntime(
         observer: DownloadResourceObserver? = null,
         cancellation: DownloadCancellation? = null,
         expectedDescriptor: DownloadDescriptor? = null,
+    ): DownloadResourceResult = ensure(
+        context,
+        resourceId,
+        taskId,
+        sink,
+        observer,
+        cancellation,
+        expectedDescriptor,
+    )
+
+    /** Ensures one exact, readable task for the latest authorized resource descriptor.
+     * Paused/retryable transfers resume; stale, cancelled, terminal, or missing-file records are rebuilt.
+     */
+    @Throws(Exception::class)
+    suspend fun ensure(
+        context: DownloadRequestContext,
+        resourceId: String,
+        taskId: String,
+        sink: DownloadByteSink,
+        observer: DownloadResourceObserver? = null,
+        cancellation: DownloadCancellation? = null,
+        expectedDescriptor: DownloadDescriptor? = null,
     ): DownloadResourceResult = coroutineScope {
         cancellation?.attach(coroutineContext.job)
         try { queue.withLock {
@@ -122,14 +144,23 @@ class DownloadResourceRuntime(
         if (!descriptor.isDownloadable) return@withLock failure(
             resourceId, AppError(AppErrorKind.InvalidRequest, "DOWNLOAD_NOT_AVAILABLE_OFFLINE"), observer,
         )
-        val existing = catalog.findTask(descriptor)
+        val resourceTasks = catalog.listTasks(context.namespace).filter {
+            it.descriptor.identity.resourceId == resourceId
+        }
+        val exactTasks = resourceTasks.filter { it.matchesDescriptor(descriptor) }
+        var existing = exactTasks.firstOrNull { it.artifact != null }
+            ?: exactTasks.firstOrNull { it.status !in setOf(DownloadTaskStatus.Cancelled, DownloadTaskStatus.FailedTerminal) }
+        for (obsolete in resourceTasks.filter { it !== existing }) {
+            discard(obsolete, sink)
+        }
+        if (existing?.status in setOf(DownloadTaskStatus.Cancelled, DownloadTaskStatus.FailedTerminal)) {
+            discard(checkNotNull(existing), sink)
+            existing = null
+        }
         existing?.artifact?.let {
             observer.emit(existing.observation(DownloadResourceObservationKind.Completed, artifact = it))
             return@withLock DownloadResourceResult.Completed(it)
         }
-        if (existing?.status == DownloadTaskStatus.FailedTerminal) return@withLock failure(
-            resourceId, AppError(AppErrorKind.InvalidRequest, existing.failureCode ?: "DOWNLOAD_NOT_RETRYABLE"), observer,
-        )
         var task = existing ?: DownloadTask(taskId, descriptor).also {
             catalog.saveTask(it)
             observer.emit(it.observation(DownloadResourceObservationKind.TaskCreated))
@@ -203,6 +234,22 @@ class DownloadResourceRuntime(
             throw cancelled
         }
         } } finally { cancellation?.detach() }
+    }
+
+    private suspend fun discard(task: DownloadTask, sink: DownloadByteSink) {
+        val descriptor = task.descriptor
+        sink.discard(
+            DownloadSinkRequest(
+                namespace = descriptor.identity.namespace,
+                taskId = task.id,
+                resourceId = descriptor.identity.resourceId,
+                assetId = descriptor.identity.assetId,
+                expectedTotalBytes = descriptor.totalBytes,
+                resumeFromBytes = task.transferredBytes,
+                artifactKind = descriptor.artifactKind,
+            ),
+        )
+        catalog.deleteTask(descriptor.identity.namespace, task.id)
     }
 
     private fun failure(resourceId: String, error: AppError, observer: DownloadResourceObserver?, task: DownloadTask? = null): DownloadResourceResult.Failure {

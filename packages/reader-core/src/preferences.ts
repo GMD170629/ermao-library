@@ -81,6 +81,11 @@ function boolean(value: unknown, fallback: boolean) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function readerFontFamily(value: unknown, fallback: ReaderFontFamily): ReaderFontFamily {
+  if (value === 'heiti' || value === 'yahei') return 'pingfang';
+  return choice<ReaderFontFamily>(value, ['pingfang', 'songti', 'kaiti'], fallback);
+}
+
 function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], section: string) {
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     throw new TypeError(`Unsupported reader preference fields in ${section}`);
@@ -166,7 +171,7 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       fontSize: clamp(epub.fontSize, 14, 30, fallback.epub.fontSize, 0),
       lineHeight: clamp(epub.lineHeight, 1.4, 2.4, fallback.epub.lineHeight),
       pageWidth: clamp(epub.pageWidth, 600, 1350, fallback.epub.pageWidth, 0),
-      fontFamily: choice<ReaderFontFamily>(epub.fontFamily, ['pingfang', 'heiti', 'songti', 'yahei', 'kaiti'], fallback.epub.fontFamily),
+      fontFamily: readerFontFamily(epub.fontFamily, fallback.epub.fontFamily),
       fontWeight: choice(epub.fontWeight, [400, 500, 700] as const, fallback.epub.fontWeight),
       letterSpacing: clamp(epub.letterSpacing, -0.02, 0.08, fallback.epub.letterSpacing),
       pageMargin: choice(epub.pageMargin, ['narrow', 'standard', 'wide'], fallback.epub.pageMargin),

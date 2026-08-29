@@ -48,7 +48,18 @@ class ReaderPreferencesJson(private val json: Json) {
                 }))
             })
         } else document
-        return json.decodeFromJsonElement<ReaderPreferences>(migrated)
+        return json.decodeFromJsonElement<ReaderPreferences>(normalizeLegacyFontAlias(migrated))
+    }
+
+    private fun normalizeLegacyFontAlias(document: JsonObject): JsonObject {
+        val epub = document["epub"] as? JsonObject ?: return document
+        val fontFamily = epub["fontFamily"]?.jsonPrimitive?.contentOrNull
+        if (fontFamily !in LEGACY_SANS_FONT_ALIASES) return document
+        return JsonObject(document.toMutableMap().apply {
+            put("epub", JsonObject(epub.toMutableMap().apply {
+                put("fontFamily", JsonPrimitive("pingfang"))
+            }))
+        })
     }
 
     private fun decodeLegacy(document: JsonObject): ReaderPreferences {
@@ -97,5 +108,6 @@ class ReaderPreferencesJson(private val json: Json) {
             "publisherStyles",
             "textAlignment",
         )
+        val LEGACY_SANS_FONT_ALIASES = setOf("heiti", "yahei")
     }
 }

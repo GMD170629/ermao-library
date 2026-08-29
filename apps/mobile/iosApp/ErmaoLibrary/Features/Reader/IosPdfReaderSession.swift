@@ -163,7 +163,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             pageIndex = initialPage ?? 0
             phase = .reading
             pendingLaunchTargetPayload = nil
-            await progressCoordination?.checkForRemoteProgress()
+            await beginProgressSynchronization()
         } catch let failure as IosReaderFailure {
             await releaseRuntime()
             phase = .failed(failure.code)
@@ -310,9 +310,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         guard phase != .closed else { return }
         phase = .closing
         pendingSave?.cancel()
-        try? await persistCurrentPage()
-        try? await progressStore.retryPendingUpload()
-        try? await progressStore.awaitPendingUpload()
+        try? await persistCurrentPage(waitForSynchronization: false)
+        progressCoordination?.close()
         await releaseRuntime()
         phase = .closed
     }
@@ -412,7 +411,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         }
     }
 
-    private func persistCurrentPage() async throws {
+    private func persistCurrentPage(waitForSynchronization: Bool = true) async throws {
         guard hasReadingActivity,
               phase == .reading || phase == .background || phase == .closing
         else { return }
@@ -427,7 +426,9 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         guard let progress = makeProgress(index: index) else { return }
         let percent = progress.percent?.doubleValue ?? 0
         try await progressStore.save(progress: progress)
-        await progressCoordination?.refreshAfterSave()
+        if waitForSynchronization {
+            await progressCoordination?.refreshAfterSave()
+        }
         remoteProgressSnapshot = progressCoordination?.remoteSnapshot
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
@@ -513,7 +514,15 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         pageIndex = initialPage
         phase = .reading
         pendingLaunchTargetPayload = nil
-        await progressCoordination?.checkForRemoteProgress()
+        await beginProgressSynchronization()
+    }
+
+    private func beginProgressSynchronization() async {
+        if remoteSource == nil {
+            progressCoordination?.beginDeferredSynchronization()
+        } else {
+            await progressCoordination?.checkForRemoteProgress()
+        }
     }
 
     private func normalizedPageTitles(count: Int) -> [String] {

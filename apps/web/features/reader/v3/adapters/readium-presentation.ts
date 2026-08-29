@@ -25,11 +25,7 @@ export type ReadiumViewportPresentation = Readonly<{
   pageGutter: number;
 }>;
 
-/**
- * Readium Web currently exposes pagination and native touch swiping, but not
- * configurable continuous layout or swipe suppression. Keep the persisted
- * schema intact while presenting the effective values to this adapter.
- */
+/** Projects only the interaction values which the Web adapter cannot control. */
 export function projectReadiumEffectivePreferences(
   preferences: ReaderPreferences
 ): ReaderPreferences {
@@ -41,13 +37,8 @@ export function projectReadiumEffectivePreferences(
     },
     epub: {
       ...preferences.epub,
-      flow: 'paginated',
-      // Readium's responsive auto spread can expose the unused companion
-      // column of short front-matter resources as a turnable blank page.
-      // Keep the stored wire value compatible, but require an explicit user
-      // choice before enabling a two-page layout.
-      spreadMode: preferences.epub.spreadMode === 'double' ? 'double' : 'single',
-      typography: { ...preferences.epub.typography, preservePublisherStyles: false },
+      spreadMode: preferences.epub.spreadMode,
+      typography: { ...preferences.epub.typography },
       optimization: { ...preferences.epub.optimization }
     },
     comic: { ...preferences.comic },
@@ -66,7 +57,7 @@ export function resolveReadiumViewportPresentation(
     : epubPageWidth(preferences);
   const pageWidth = epubPageWidth(preferences);
   const viewportLayout = resolveEpubViewportLayout(normalizedWidth);
-  const columnCount = preferences.epub.spreadMode === 'double' ? 2 : 1;
+  const columnCount = preferences.epub.flow === 'paginated' && preferences.epub.spreadMode === 'double' ? 2 : 1;
 
   return {
     columnCount,
@@ -86,6 +77,7 @@ export function createReadiumEpubPreferences(
   const effective = projectReadiumEffectivePreferences(preferences);
   const layout = resolveReadiumViewportPresentation(effective, viewportWidth);
   const colors = readerThemeSurfaces[effective.appearance.theme];
+  const publisherStyles = effective.epub.typography.preservePublisherStyles;
 
   return {
     backgroundColor: colors.background,
@@ -94,19 +86,19 @@ export function createReadiumEpubPreferences(
     visitedColor: colors.link,
     selectionBackgroundColor: colors.accent,
     selectionTextColor: colors.background,
-    fontFamily: resolvedFont.stack,
+    fontFamily: publisherStyles ? null : resolvedFont.stack,
     fontSize: effective.epub.fontSize / BASE_EPUB_FONT_SIZE,
-    fontWeight: effective.epub.fontWeight,
+    fontWeight: publisherStyles ? null : effective.epub.fontWeight,
     // Readium rejects negative values. A null here clears any preceding native
     // value while the residual stylesheet applies Shuku's negative option.
-    letterSpacing: effective.epub.letterSpacing < 0
+    letterSpacing: publisherStyles || effective.epub.letterSpacing < 0
       ? null
       : effective.epub.letterSpacing,
-    lineHeight: effective.epub.lineHeight,
+    lineHeight: publisherStyles ? null : effective.epub.lineHeight,
     pageGutter: layout.pageGutter,
-    paragraphIndent: effective.epub.typography.paragraphIndent,
-    paragraphSpacing: effective.epub.typography.paragraphSpacing,
-    textAlign: effective.epub.typography.textAlign === 'publisher'
+    paragraphIndent: publisherStyles ? null : effective.epub.typography.paragraphIndent,
+    paragraphSpacing: publisherStyles ? null : effective.epub.typography.paragraphSpacing,
+    textAlign: publisherStyles || effective.epub.typography.textAlign === 'publisher'
       ? null
       : effective.epub.typography.textAlign === 'justify'
         ? READIUM_TEXT_ALIGNMENT.justify
@@ -116,11 +108,9 @@ export function createReadiumEpubPreferences(
     // page to its typography heuristic (about 1050px for the default font).
     maximalLineLength: null,
     minimalLineLength: null,
-    // Single/double is always explicit. Legacy auto preferences are projected
-    // to single before reaching this mapper.
-    columnCount: layout.columnCount,
+    columnCount: effective.epub.spreadMode === 'auto' ? null : layout.columnCount,
     constraint: layout.constraint,
-    scroll: false
+    scroll: effective.epub.flow === 'scrolled'
   };
 }
 
@@ -134,8 +124,9 @@ export function createReadiumResidualStyle(
 ): string {
   const effective = projectReadiumEffectivePreferences(preferences);
   const colors = readerThemeSurfaces[effective.appearance.theme];
+  const publisherStyles = effective.epub.typography.preservePublisherStyles;
   const protectedBody = 'body:is(#shuku-readium-guard#shuku-readium-guard#shuku-readium-guard, *)';
-  const fontFace = resolvedFont.embedded
+  const fontFace = !publisherStyles && resolvedFont.embedded
     ? `@font-face { font-family: "${resolvedFont.embedded.family}"; src: url("${resolvedFont.embedded.url}") format("woff2"); font-display: swap; font-style: normal; font-weight: 400; }`
     : '';
   const colorOverride = `
@@ -143,12 +134,12 @@ export function createReadiumResidualStyle(
       ${protectedBody} * { background-color: transparent !important; color: inherit !important; }
       ${protectedBody} a, ${protectedBody} a * { color: ${colors.link} !important; }
     `;
-  const fontOverride = `${protectedBody}, ${protectedBody} * { font-family: ${resolvedFont.stack} !important; }`;
-  const lineHeightOverride = `${protectedBody} { line-height: ${effective.epub.lineHeight} !important; } ${protectedBody} * { line-height: inherit !important; }`;
-  const negativeLetterSpacing = effective.epub.letterSpacing < 0
+  const fontOverride = publisherStyles ? '' : `${protectedBody}, ${protectedBody} * { font-family: ${resolvedFont.stack} !important; }`;
+  const lineHeightOverride = publisherStyles ? '' : `${protectedBody} { line-height: ${effective.epub.lineHeight} !important; } ${protectedBody} * { line-height: inherit !important; }`;
+  const negativeLetterSpacing = !publisherStyles && effective.epub.letterSpacing < 0
     ? `${protectedBody}, ${protectedBody} * { letter-spacing: ${effective.epub.letterSpacing}em !important; }`
     : '';
-  const paragraphAlignment = effective.epub.typography.textAlign === 'publisher'
+  const paragraphAlignment = publisherStyles || effective.epub.typography.textAlign === 'publisher'
     ? ''
     : `text-align: ${effective.epub.typography.textAlign} !important;`;
   return `
@@ -158,13 +149,13 @@ export function createReadiumResidualStyle(
     ${fontOverride}
     ${lineHeightOverride}
     ${negativeLetterSpacing}
-    [data-shuku-smart-paragraph="true"] {
+    ${publisherStyles ? '' : `[data-shuku-smart-paragraph="true"] {
       ${paragraphAlignment}
       margin-block-start: ${effective.epub.typography.paragraphSpacing}em !important;
       margin-block-end: ${effective.epub.typography.paragraphSpacing}em !important;
     }
     .shuku-smart-deduplicate-indent { text-indent: 0 !important; }
-    .shuku-smart-auto-indent { text-indent: ${effective.epub.typography.paragraphIndent}em !important; }
+    .shuku-smart-auto-indent { text-indent: ${effective.epub.typography.paragraphIndent}em !important; }`}
   `.trim();
 }
 

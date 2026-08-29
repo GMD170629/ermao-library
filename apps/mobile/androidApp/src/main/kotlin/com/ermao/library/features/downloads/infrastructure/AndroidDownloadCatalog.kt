@@ -150,7 +150,6 @@ class AndroidDownloadCatalog(
          */
         const val LEGACY_SINGLE_ASSET_SCHEMA_VERSION = 3
         const val CATALOG_SCHEMA_VERSION = 4
-        const val LEGACY_GENERIC_KINDLE_FORMAT = "KINDLE"
     }
 }
 

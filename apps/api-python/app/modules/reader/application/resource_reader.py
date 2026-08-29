@@ -30,7 +30,7 @@ from app.modules.reader.application.exact_location import (
 )
 from app.modules.reader.application.ports import (
     ReaderClock,
-    ReaderPublicationLocatorIndex,
+    ReaderLocatorIndex,
     ReaderResourceRepository,
     ReaderUnitOfWork,
 )
@@ -127,12 +127,12 @@ class ResourceReaderService:
         repository: ReaderResourceRepository,
         unit_of_work: ReaderUnitOfWork,
         clock: ReaderClock,
-        publication_locator_index: ReaderPublicationLocatorIndex,
+        locator_index: ReaderLocatorIndex,
     ) -> None:
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._clock = clock
-        self._publication_locator_index = publication_locator_index
+        self._locator_index = locator_index
 
     def get_context(self, resource_id: str) -> ReaderResourceContextDto | None:
         return self._repository.get_context(resource_id)
@@ -147,10 +147,15 @@ class ResourceReaderService:
         context = self._repository.get_visible_context(resource_id, access_scope)
         if context is None:
             raise ReaderResourceNotFound
-        if reader_type_for_format(context.resource.format) is None:
+        reader_type = reader_type_for_format(context.resource.format)
+        if reader_type is None:
             raise ReaderResourceFormatUnsupported
         assets = self._repository.list_assets(resource_id)
-        units = self._repository.list_navigation_units(resource_id)
+        units = (
+            []
+            if reader_type is ReaderType.REFLOWABLE
+            else self._repository.list_navigation_units(resource_id)
+        )
         selected_progress = self._repository.get_progress(user_id, resource_id)
         progress_by_resource_id = (
             {resource_id: selected_progress} if selected_progress is not None else {}
@@ -196,7 +201,7 @@ class ResourceReaderService:
                 expected=reader_type.value,
                 received=received_kind,
             )
-        location_is_valid = self._publication_locator_index.validate(
+        location_is_valid = self._locator_index.validate(
             resource_id=command.resource_id,
             access_scope=command.access_scope,
             location=command.location,

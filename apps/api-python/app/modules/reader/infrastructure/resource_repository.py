@@ -9,10 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.contracts.media_capabilities import (
-    exact_source_format,
-    resolve_asset_mime_type,
-)
+from app.contracts.media_capabilities import resolve_asset_mime_type
 from app.core.natural_sort import natural_sort_key
 from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
@@ -71,10 +68,7 @@ def _resource_dto(
         source_node_id=resource.source_node_id,
         title=title,
         format=resource.format,
-        source_format=exact_source_format(
-            resource_format=resource.format,
-            filename=source_node.name,
-        ),
+        source_format=resource.format.strip().upper(),
         resource_index=(
             resource_metadata.resource_index if resource_metadata is not None else None
         ),

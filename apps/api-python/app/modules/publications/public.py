@@ -6,7 +6,6 @@ from app.modules.publications.application.ensure_navigation import (
     EnsurePublicationNavigationResult,
     OpenPublicationNavigationResult,
 )
-from app.modules.publications.application.open_publication import OpenPublication
 from app.modules.publications.application.ports import PublicationAccessScope
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -21,7 +20,6 @@ __all__ = [
     "EnsurePublicationNavigationOutcome",
     "EnsurePublicationNavigationResult",
     "NormalizedPublication",
-    "OpenPublication",
     "OpenPublicationNavigationResult",
     "PublicationAccessScope",
     "PublicationCorruptError",

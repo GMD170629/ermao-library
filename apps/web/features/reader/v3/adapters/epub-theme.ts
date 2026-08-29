@@ -200,6 +200,7 @@ function paragraphIsSafe(element: HTMLParagraphElement) {
  */
 export function applyEpubSmartTypography(document: Document, preferences: ReaderPreferences) {
   clearSmartParagraphState(document);
+  if (preferences.epub.typography.preservePublisherStyles) return;
   const view = document.defaultView;
   document.querySelectorAll<HTMLParagraphElement>('p').forEach((paragraph) => {
     if (!paragraphIsSafe(paragraph)) return;

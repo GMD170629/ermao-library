@@ -7,12 +7,14 @@ import org.junit.Test
 
 class EpubContentSecurityPolicyTest {
     @Test
-    fun permitsOnlyBundledReaderFontsAtTheReadiumAssetOrigin() {
+    fun permitsOnlyBundledReaderFontPathsWithoutUsingAnInvalidCspHostname() {
         val decorated = EpubContentSecurityPolicy.decorateHtml(
             "<html><head></head><body><p>Text</p></body></html>".encodeToByteArray(),
         ).decodeToString()
-        assertTrue(decorated.contains("https://readium_assets/fonts/reader/"))
+        assertTrue(decorated.contains("https://*/fonts/reader/"))
+        assertTrue(!decorated.contains("https://readium_assets/fonts/reader/"))
         assertTrue(!decorated.contains("font-src *"))
+        assertTrue(!decorated.contains("font-src https:"))
     }
 
     @Test

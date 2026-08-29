@@ -19,6 +19,8 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
     private let clientID: String
     private var etag: String?
     private let networkMonitor = NWPathMonitor()
+    private var lifecycleTask: Task<Void, Never>?
+    private var isClosed = false
 
     init(
         runtime: ErmaoShared.ReaderProgressSyncRuntime,
@@ -36,23 +38,43 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
         runtime.coordinator.beginSession(snapshot: bootstrapSnapshot)
         networkMonitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
-            Task { @MainActor [weak self] in await self?.recoverPendingAndCheckRemote() }
+            Task { @MainActor [weak self] in self?.beginDeferredSynchronization() }
         }
         networkMonitor.start(queue: DispatchQueue(label: "reader.progress.network"))
     }
 
     deinit {
+        lifecycleTask?.cancel()
+        networkMonitor.cancel()
+        runtime.close()
+    }
+
+    func beginDeferredSynchronization() {
+        guard !isClosed else { return }
+        lifecycleTask?.cancel()
+        lifecycleTask = Task { @MainActor [weak self] in
+            await self?.recoverPendingAndCheckRemote()
+        }
+    }
+
+    func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        lifecycleTask?.cancel()
+        lifecycleTask = nil
         networkMonitor.cancel()
         runtime.close()
     }
 
     func checkForRemoteProgress() async {
+        guard !isClosed, !Task.isCancelled else { return }
         let result: ErmaoShared.ReaderProgressQueryResult
         do {
             result = try await server.load(target: target, etag: etag)
         } catch {
             return
         }
+        guard !isClosed, !Task.isCancelled else { return }
         if let current = result as? ErmaoShared.ReaderProgressQueryResultCurrent {
             etag = current.etag
             guard let snapshot = current.snapshot else { return }
@@ -69,8 +91,10 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
     }
 
     func recoverPendingAndCheckRemote() async {
+        guard !isClosed, !Task.isCancelled else { return }
         try? await runtime.store.retryPendingUpload()
         try? await runtime.store.awaitPendingUpload()
+        guard !isClosed, !Task.isCancelled else { return }
         remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
         await checkForRemoteProgress()
     }
@@ -78,7 +102,9 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
     /// Waits for the single-flight slot so a 409 becomes visible before the
     /// next user gesture. Network failures return without clearing pending.
     func refreshAfterSave() async {
+        guard !isClosed, !Task.isCancelled else { return }
         try? await runtime.coordinator.awaitIdle()
+        guard !isClosed, !Task.isCancelled else { return }
         remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
     }
 

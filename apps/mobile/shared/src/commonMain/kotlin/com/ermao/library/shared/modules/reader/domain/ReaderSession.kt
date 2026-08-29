@@ -33,7 +33,6 @@ enum class ReaderErrorCode(val wireValue: String) {
     NetworkUnavailable("NETWORK_UNAVAILABLE"),
     OutOfMemoryRisk("OUT_OF_MEMORY_RISK"),
     PublicationTooLarge("READER_PUBLICATION_TOO_LARGE"),
-    OnlineLimit("PUBLICATION_ONLINE_LIMIT"),
     ReaderEngineError("READER_ENGINE_ERROR"),
     LocationRestoreFailed("LOCATION_RESTORE_FAILED"),
     RangeUnsupported("PDF_RANGE_UNSUPPORTED"),
@@ -65,7 +64,7 @@ fun readerErrorCodeForFailure(
     ReaderErrorCode.entries.firstOrNull { it.wireValue == code }?.let { return it }
     return when (code) {
         "PUBLICATION_RESOURCE_CHANGED", "BINARY_VERSION_CHANGED", "CONFLICT" -> ReaderErrorCode.PublicationChanged
-        "PUBLICATION_RESOURCE_TOO_LARGE", "BINARY_TOO_LARGE", "PAYLOAD_TOO_LARGE" -> ReaderErrorCode.OnlineLimit
+        "PUBLICATION_RESOURCE_TOO_LARGE", "BINARY_TOO_LARGE", "PAYLOAD_TOO_LARGE" -> ReaderErrorCode.PublicationTooLarge
         "PUBLICATION_NOT_FOUND", "PUBLICATION_RESOURCE_NOT_FOUND", "NOT_FOUND", "GONE" -> ReaderErrorCode.PublicationUnavailable
         "READER_PUBLICATION_ASSET_MISSING" -> ReaderErrorCode.ResourceMissing
         "PUBLICATION_CORRUPT", "PUBLICATION_PARSE_FAILED", "PUBLICATION_MARKUP_INVALID",
