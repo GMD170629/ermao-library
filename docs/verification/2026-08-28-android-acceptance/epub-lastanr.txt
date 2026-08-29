@@ -1,0 +1,100 @@
+ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)
+  ANR time: 2026年8月28日 下午8:29:29
+  Reason: e103c50 com.ermao.library/com.ermao.library.features.reader.presentation.ReaderActivity (server) is not responding. Waited 5005ms for MotionEvent(action=DOWN)
+
+  mLastHomeActivityStartResult=2
+  mLastHomeActivityStartRecord:
+    packageName=com.miui.home processName=com.miui.home
+    launchedFromUid=0 launchedFromPackage=null launchedFromFeature=null userId=0
+    app=ProcessRecord{827f99e 14009:com.miui.home/u0a80}
+    Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] flg=0x10800100 cmp=com.miui.home/.launcher.Launcher }
+    rootOfTask=true task=Task{967b022 #6 type=home I=com.miui.home/.launcher.Launcher U=0 rootTaskId=1 visible=false mode=fullscreen translucent=true sz=1}
+    taskAffinity=null
+    mActivityComponent=com.miui.home/.launcher.Launcher
+    baseDir=/system/priv-app/MiuiHome/MiuiHome.apk
+    dataDir=/data/user/0/com.miui.home
+    stateNotNeeded=true componentSpecified=false mActivityType=home
+    compat={560dpi} labelRes=0x7f100093 icon=0x7f0801a9 theme=0x7f1100ce
+    mLastReportedConfigurations:
+      mGlobalConfig={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.3513 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+      mOverrideConfig={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.53 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+    CurrentConfiguration={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=home mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.57 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+    RequestedOverrideConfiguration={0.0 ?mcc?mnc ?localeList ?layoutDir ?swdp ?wdp ?hdp ?density ?lsize ?long ?ldr ?wideColorGamut ?orien ?uimode ?night ?touch ?keyb/?/? ?nav/? winConfig={ mBounds=Rect(0, 0 - 0, 0) mAppBounds=null mMaxBounds=Rect(0, 0 - 0, 0) mWindowingMode=undefined mDisplayWindowingMode=undefined mActivityType=home mAlwaysOnTop=undefined mRotation=undefined} as.34 ?fontWeightAdjustment themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+    taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=ff1b1b1f
+      backgroundColor=fff2f0f4 statusBarColor=0 navigationBarColor=0
+     backgroundColorFloating=fff2f0f4
+    launchFailed=false launchCount=0 lastLaunchTime=-14d2h40m18s747ms
+    mHaveState=true mIcicle=Bundle[mParcelledData.dataSize=22984]
+    state=STOPPED stopped=true delayedResume=false finishing=false
+    keysPaused=false inHistory=true mIsCastMode=false mIsLastFrame=false idle=true mStartingWindowState=STARTING_WINDOW_NOT_SHOWN
+    occludesParent=true noDisplay=false immersive=false launchMode=2
+    frozenBeforeDestroy=false forceNewConfig=false
+    mActivityType=home
+    windows=[Window{c9e094b u0 com.miui.home/com.miui.home.launcher.Launcher}, Window{2cc6231 u0 LauncherOverlayWindow:com.miui.personalassistant}]
+    windowType=2 hasVisible=true
+    mOccludesParent=true
+    mOrientation=SCREEN_ORIENTATION_PORTRAIT
+    mVisibleRequested=false mVisible=false mClientVisible=false reportedDrawn=false reportedVisible=false
+    mAppStopped=true
+    mNumInterestingWindows=2 mNumDrawnWindows=2 allDrawn=true lastAllDrawn=true)
+    startingData=null firstWindowDrawn=true mIsExiting=false
+    mMiuiConfigFlag=1
+    nowVisible=false lastVisibleTime=-5m38s597ms
+    resizeMode=RESIZE_MODE_RESIZEABLE
+    mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+    supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA
+    configChanges=0xff3
+    neverSandboxDisplayApis=false
+    alwaysSandboxDisplayApis=false
+    areBoundsLetterboxed=false
+        mCurrentUser=0
+      mLastStartReason=null
+      mLastStartActivityTimeMs=1970年1月1日 上午8:00:00
+      mLastStartActivityResult=0
+      mStartActivity:
+        packageName=com.ermao.library processName=com.ermao.library
+        launchedFromUid=10277 launchedFromPackage=com.ermao.library launchedFromFeature=null userId=0
+        app=ProcessRecord{999fa9e 5205:com.ermao.library/u0a277}
+        Intent { flg=0x10000000 cmp=com.ermao.library/.features.reader.presentation.ReaderActivity (has extras) }
+        rootOfTask=false task=Task{c63dbb4 #1849 type=standard A=10277:com.ermao.library U=0 visible=true mode=fullscreen translucent=false sz=2}
+        taskAffinity=10277:com.ermao.library
+        mActivityComponent=com.ermao.library/.features.reader.presentation.ReaderActivity
+        baseDir=/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk
+        dataDir=/data/user/0/com.ermao.library
+        stateNotNeeded=false componentSpecified=false mActivityType=standard
+        compat={560dpi} labelRes=0x7f0e0020 icon=0x7f0c0000 theme=0x7f0f0113
+        mLastReportedConfigurations:
+          mGlobalConfig={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.3839 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+          mOverrideConfig={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.1 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+        CurrentConfiguration={1.0 234mcc10mnc [zh_CN] ldltr sw411dp w411dp h859dp 560dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1440, 3200) mAppBounds=Rect(0, 137 - 1440, 3144) mMaxBounds=Rect(0, 0 - 1440, 3200) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} as.34 s.1 fontWeightAdjustment=0 themeChanged=0 themeChangedFlags=0 extraData = Bundle[{}] dt/?}
+        taskDescription: label="null" icon=null iconResource=/0 iconFilename=null primaryColor=fff5f5f5
+          backgroundColor=fffafafa statusBarColor=ff757575 navigationBarColor=ffffffff
+         backgroundColorFloating=ffffffff
+        launchFailed=false launchCount=1 lastLaunchTime=-8s551ms
+        mHaveState=false mIcicle=null
+        state=RESUMED stopped=false delayedResume=false finishing=false
+        keysPaused=false inHistory=true mIsCastMode=false mIsLastFrame=false idle=true mStartingWindowState=STARTING_WINDOW_NOT_SHOWN
+        occludesParent=true noDisplay=false immersive=false launchMode=0
+        frozenBeforeDestroy=false forceNewConfig=false
+        mActivityType=standard
+        windows=[Window{e103c50 u0 com.ermao.library/com.ermao.library.features.reader.presentation.ReaderActivity}]
+        windowType=2 hasVisible=true
+        mOccludesParent=true
+        mOrientation=SCREEN_ORIENTATION_UNSPECIFIED
+        mVisibleRequested=true mVisible=true mClientVisible=true reportedDrawn=true reportedVisible=true
+        mNumInterestingWindows=1 mNumDrawnWindows=1 allDrawn=true lastAllDrawn=true)
+        startingData=null firstWindowDrawn=true mIsExiting=false
+        mMiuiConfigFlag=1
+        nowVisible=true lastVisibleTime=-7s967ms
+        resizeMode=RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION
+        mLastReportedMultiWindowMode=false mLastReportedPictureInPictureMode=false
+        supportsSizeChanges=SIZE_CHANGES_UNSUPPORTED_METADATA
+        configChanges=0x3
+        neverSandboxDisplayApis=false
+        alwaysSandboxDisplayApis=false
+        areBoundsLetterboxed=false
+      mIntent=Intent { flg=0x10000000 cmp=com.ermao.library/.features.reader.presentation.ReaderActivity (has extras) }
+      mLaunchSingleTop=false mLaunchSingleInstance=false mLaunchSingleTask=false
+      mLaunchFlags=0x10000000 mDoResume=true mAddingToTask=true
+
+-------------------------------------------------------------------------------

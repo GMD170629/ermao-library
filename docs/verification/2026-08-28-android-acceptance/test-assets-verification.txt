@@ -1,0 +1,1 @@
+Verified 40 corpus files byte-for-byte against test APK assets; only root CORPUS.md documentation excluded.

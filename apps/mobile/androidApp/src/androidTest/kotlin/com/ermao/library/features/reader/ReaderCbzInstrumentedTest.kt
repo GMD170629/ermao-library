@@ -62,6 +62,7 @@ class ReaderCbzInstrumentedTest {
         ActivityScenario.launch<ReaderActivity>(
             ReaderActivity.createIntent(context, source, mismatchedServerHints),
         ).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "CBZ first page") {
                 it.imageNavigatorOrNull()?.view != null &&
                     (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.pageIndex == 0
@@ -80,6 +81,7 @@ class ReaderCbzInstrumentedTest {
         assertEquals("pages/1", (persisted?.location as? ComicReaderLocation)?.resourceHref)
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "restored CBZ second page") {
                 (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.let { location ->
                     location.pageIndex == 1 && location.resourceHref == "pages/1"

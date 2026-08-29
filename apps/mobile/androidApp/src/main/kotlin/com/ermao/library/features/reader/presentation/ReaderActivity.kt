@@ -12,6 +12,7 @@ import android.view.MotionEvent
 import android.view.KeyEvent
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
@@ -152,6 +153,7 @@ class ReaderActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         supportFragmentManager.fragmentFactory = readerNavigatorDummyFactory()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         removeRestoredNavigator()
         val runtime = (application as ErmaoLibraryApplication).mobileRuntime
         accountObservation = runtime.observeSession {

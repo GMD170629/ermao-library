@@ -1,0 +1,7 @@
+Starting: Intent { cmp=com.ermao.library/.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: com.ermao.library/.MainActivity
+TotalTime: 454
+WaitTime: 518
+Complete

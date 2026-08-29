@@ -1,0 +1,209 @@
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:377: Error: The resource R.string.reader_theme appears to be unused [UnusedResources]
+    <string name="reader_theme">Theme</string>
+            ~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:378: Error: The resource R.string.reader_reading_mode appears to be unused [UnusedResources]
+    <string name="reader_reading_mode">Reading mode</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:379: Error: The resource R.string.reader_comic_direction appears to be unused [UnusedResources]
+    <string name="reader_comic_direction">Reading direction</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:380: Error: The resource R.string.reader_comic_cover_single appears to be unused [UnusedResources]
+    <string name="reader_comic_cover_single">Show cover as a single page</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:381: Error: The resource R.string.reader_page_gap appears to be unused [UnusedResources]
+    <string name="reader_page_gap">Page gap</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:382: Error: The resource R.string.reader_pdf_zoom appears to be unused [UnusedResources]
+    <string name="reader_pdf_zoom">Zoom</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:383: Error: The resource R.string.reader_pdf_fit appears to be unused [UnusedResources]
+    <string name="reader_pdf_fit">Fit</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:384: Error: The resource R.string.reader_pdf_rotation appears to be unused [UnusedResources]
+    <string name="reader_pdf_rotation">Rotation</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:385: Error: The resource R.string.reader_pdf_crop_margins appears to be unused [UnusedResources]
+    <string name="reader_pdf_crop_margins">Crop margins</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:386: Error: The resource R.string.reader_left_to_right appears to be unused [UnusedResources]
+    <string name="reader_left_to_right">Left to right</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:387: Error: The resource R.string.reader_right_to_left appears to be unused [UnusedResources]
+    <string name="reader_right_to_left">Right to left</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:388: Error: The resource R.string.reader_fit_width appears to be unused [UnusedResources]
+    <string name="reader_fit_width">Fit width</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:389: Error: The resource R.string.reader_fit_page appears to be unused [UnusedResources]
+    <string name="reader_fit_page">Fit page</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:390: Error: The resource R.string.reader_crop_off appears to be unused [UnusedResources]
+    <string name="reader_crop_off">Off</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:391: Error: The resource R.string.reader_crop_auto appears to be unused [UnusedResources]
+    <string name="reader_crop_auto">Auto</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:392: Error: The resource R.string.reader_pixels appears to be unused [UnusedResources]
+    <string name="reader_pixels">%1$d px</string>
+            ~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:393: Error: The resource R.string.reader_degrees appears to be unused [UnusedResources]
+    <string name="reader_degrees">%1$d°</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:394: Error: The resource R.string.reader_mode_paged appears to be unused [UnusedResources]
+    <string name="reader_mode_paged">Paged</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:395: Error: The resource R.string.reader_mode_scroll appears to be unused [UnusedResources]
+    <string name="reader_mode_scroll">Continuous scroll</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:413: Error: The resource R.string.reader_narrow appears to be unused [UnusedResources]
+    <string name="reader_narrow">Narrow</string>
+            ~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:414: Error: The resource R.string.reader_standard appears to be unused [UnusedResources]
+    <string name="reader_standard">Standard</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:415: Error: The resource R.string.reader_wide appears to be unused [UnusedResources]
+    <string name="reader_wide">Wide</string>
+            ~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:416: Error: The resource R.string.reader_compact appears to be unused [UnusedResources]
+    <string name="reader_compact">Compact</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:417: Error: The resource R.string.reader_relaxed appears to be unused [UnusedResources]
+    <string name="reader_relaxed">Relaxed</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:418: Error: The resource R.string.reader_small appears to be unused [UnusedResources]
+    <string name="reader_small">Small</string>
+            ~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:419: Error: The resource R.string.reader_medium appears to be unused [UnusedResources]
+    <string name="reader_medium">Medium</string>
+            ~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:420: Error: The resource R.string.reader_large appears to be unused [UnusedResources]
+    <string name="reader_large">Large</string>
+            ~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:421: Error: The resource R.string.reader_interface appears to be unused [UnusedResources]
+    <string name="reader_interface">Reader interface</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:422: Error: The resource R.string.reader_progress_display appears to be unused [UnusedResources]
+    <string name="reader_progress_display">Progress display</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:423: Error: The resource R.string.reader_show_clock appears to be unused [UnusedResources]
+    <string name="reader_show_clock">Always show clock</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:424: Error: The resource R.string.reader_keep_awake appears to be unused [UnusedResources]
+    <string name="reader_keep_awake">Keep screen awake</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:425: Error: The resource R.string.reader_page_turn_settings appears to be unused [UnusedResources]
+    <string name="reader_page_turn_settings">Page turning</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:426: Error: The resource R.string.reader_page_turn_animation appears to be unused [UnusedResources]
+    <string name="reader_page_turn_animation">Button and key navigation animation</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:427: Error: The resource R.string.reader_page_width appears to be unused [UnusedResources]
+    <string name="reader_page_width">Maximum page width</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:428: Error: The resource R.string.reader_smart_optimization appears to be unused [UnusedResources]
+    <string name="reader_smart_optimization">Smart paragraph formatting</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:429: Error: The resource R.string.reader_deduplicate_indent appears to be unused [UnusedResources]
+    <string name="reader_deduplicate_indent">Remove duplicate indentation</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:430: Error: The resource R.string.reader_indent_unindented appears to be unused [UnusedResources]
+    <string name="reader_indent_unindented">Indent unindented paragraphs</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:431: Error: The resource R.string.reader_animation_slide appears to be unused [UnusedResources]
+    <string name="reader_animation_slide">Slide</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:432: Error: The resource R.string.reader_animation_off appears to be unused [UnusedResources]
+    <string name="reader_animation_off">Off</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:433: Error: The resource R.string.reader_tap_zones appears to be unused [UnusedResources]
+    <string name="reader_tap_zones">Tap zones</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:434: Error: The resource R.string.reader_swipe_page_turn appears to be unused [UnusedResources]
+    <string name="reader_swipe_page_turn">Swipe to turn page</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:435: Error: The resource R.string.reader_layout appears to be unused [UnusedResources]
+    <string name="reader_layout">Layout</string>
+            ~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:436: Error: The resource R.string.reader_spread_mode appears to be unused [UnusedResources]
+    <string name="reader_spread_mode">Pages</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:438: Error: The resource R.string.reader_text_alignment appears to be unused [UnusedResources]
+    <string name="reader_text_alignment">Text alignment</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:439: Error: The resource R.string.reader_keyboard_page_turn appears to be unused [UnusedResources]
+    <string name="reader_keyboard_page_turn">Keyboard page turning</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:440: Error: The resource R.string.reader_volume_page_turn appears to be unused [UnusedResources]
+    <string name="reader_volume_page_turn">Volume-key page turning</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:441: Error: The resource R.string.reader_reset_defaults appears to be unused [UnusedResources]
+    <string name="reader_reset_defaults">Restore reading defaults</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:442: Error: The resource R.string.reader_auto appears to be unused [UnusedResources]
+    <string name="reader_auto">Auto</string>
+            ~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:443: Error: The resource R.string.reader_percent appears to be unused [UnusedResources]
+    <string name="reader_percent">Percent</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:444: Error: The resource R.string.reader_current_position appears to be unused [UnusedResources]
+    <string name="reader_current_position">Current position</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:445: Error: The resource R.string.reader_remaining appears to be unused [UnusedResources]
+    <string name="reader_remaining">Remaining</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:446: Error: The resource R.string.reader_hidden appears to be unused [UnusedResources]
+    <string name="reader_hidden">Hidden</string>
+            ~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:447: Error: The resource R.string.reader_reversed appears to be unused [UnusedResources]
+    <string name="reader_reversed">Reversed</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:448: Error: The resource R.string.reader_disabled appears to be unused [UnusedResources]
+    <string name="reader_disabled">Off</string>
+            ~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:449: Error: The resource R.string.reader_single_page appears to be unused [UnusedResources]
+    <string name="reader_single_page">Single</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:450: Error: The resource R.string.reader_double_page appears to be unused [UnusedResources]
+    <string name="reader_double_page">Double</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:451: Error: The resource R.string.reader_left_align appears to be unused [UnusedResources]
+    <string name="reader_left_align">Left</string>
+            ~~~~~~~~~~~~~~~~~~~~~~~~
+/home/liumianti/ermao-library/apps/mobile/androidApp/src/main/res/values/strings.xml:452: Error: The resource R.string.reader_justify appears to be unused [UnusedResources]
+    <string name="reader_justify">Justified</string>
+            ~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "UnusedResources":
+   Unused resources make applications larger and slow down builds.
+
+
+   The unused resource check can ignore tests. If you want to include
+   resources that are only referenced from tests, consider packaging them in a
+   test source set instead.
+
+   You can include test sources in the unused resource check by setting the
+   system property lint.unused-resources.include-tests =true, and to exclude
+   them (usually for performance reasons), use
+   lint.unused-resources.exclude-tests =true.
+   ,
+
+   Available options:
+
+   **skip-libraries** (default is true):
+   Whether the unused resource check should skip reporting unused resources in libraries.
+
+   Many libraries will declare resources that are part of the library surface; other modules depending on the library will also reference the resources. To avoid reporting all these resources as unused (in the context of a library), the unused resource check normally skips reporting unused resources in libraries. Instead, run the unused resource check on the consuming app module (along with `checkDependencies=true`).
+
+   However, there are cases where you want to check that all the resources declared in a library are used; in that case, you can disable the skip option.
+
+   To configure this option, use a `lint.xml` file with an <option> like this:
+
+   ```xml
+   <lint>
+       <issue id="UnusedResources">
+           <option name="skip-libraries" value="true" />
+       </issue>
+   </lint>
+   ```
+
+58 errors

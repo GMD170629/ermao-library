@@ -72,13 +72,17 @@ class ReaderFb2InstrumentedTest {
     @Test
     fun opensRendersNavigatesAndCapturesExactLocationWithEpubNavigator() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "FB2 reader") {
                 it.controllerForTesting != null && it.navigatorOrNull()?.view != null
             }
+            val controller = AtomicReference<com.ermao.library.features.reader.application.ReaderScreenController>()
+                .also { reference -> scenario.onActivity { reference.set(checkNotNull(it.controllerForTesting)) } }
+                .get()
+            val tableOfContents = runBlocking { controller.loadTableOfContents() }
             scenario.onActivity { activity ->
-                val controller = checkNotNull(activity.controllerForTesting)
-                assertTrue(controller.tableOfContents.size >= 2)
-                assertTrue(controller.goTo(controller.tableOfContents.last().location))
+                assertTrue(tableOfContents.size >= 2)
+                assertTrue(checkNotNull(activity.controllerForTesting).goTo(tableOfContents.last().location))
             }
             waitUntil(scenario, "second FB2 chapter") {
                 (it.controllerForTesting?.currentLocation?.value as? ReflowReaderLocation)

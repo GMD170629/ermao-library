@@ -467,7 +467,7 @@ private fun ActivityScenario<VisualFixtureActivity>.localizedString(
     return checkNotNull(value)
 }
 
-private fun android.app.Instrumentation.captureStableWholeDisplay(): Bitmap {
+internal fun android.app.Instrumentation.captureStableWholeDisplay(): Bitmap {
     var previous: Bitmap? = null
     var stableTransitions = 0
     val deadline = SystemClock.uptimeMillis() + CAPTURE_STABLE_TIMEOUT_MILLIS

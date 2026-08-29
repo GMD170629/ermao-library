@@ -1,0 +1,134 @@
+
+> Process: com.ermao.library
+  PID: 5205
+  UID: 10277
+  Flags: 0x28e83e46
+  Package: com.ermao.library v1 (1.0.0)
+  Foreground: Yes
+  Process-Runtime: 158701131
+  Activity: com.ermao.library/.features.reader.presentation.ReaderActivity
+  Build: Xiaomi/mars/mars:12/SKQ1.211006.001/V13.0.13.0.SKACNXM:user/release-keys
+  Loading-Progress: 1.0
+  
+  ----- Output from /proc/pressure/memory -----
+  some avg10=0.00 avg60=0.00 avg300=0.02 total=46572413
+  full avg10=0.00 avg60=0.00 avg300=0.00 total=11827762
+  ----- End output from /proc/pressure/memory -----
+  
+  CPU usage from 83140ms to 0ms ago (2026-08-28 20:28:06.855 to 2026-08-28 20:29:29.995):
+    22% 5205/com.ermao.library: 19% user + 2.7% kernel / faults: 265612 minor 3 major
+    5.8% 1110/surfaceflinger: 3.1% user + 2.7% kernel / faults: 304 minor
+    5.6% 2539/system_server: 3.3% user + 2.3% kernel / faults: 10407 minor
+    2.3% 30042/kworker/u16:13-kverityd: 0% user + 2.3% kernel / faults: 42 minor
+    1.8% 25964/kworker/u16:1-devfreq_wq: 0% user + 1.8% kernel / faults: 35 minor
+    1.1% 30041/kworker/u16:12-kverityd: 0% user + 1.1% kernel / faults: 41 minor
+    1% 371/crtc_commit:132: 0% user + 1% kernel
+    0.9% 1047/vendor.qti.hardware.display.composer-service: 0.4% user + 0.4% kernel / faults: 24 minor
+    0.7% 375/pp_event: 0% user + 0.7% kernel
+    0.7% 26639/kworker/u16:10-qc_ufs_qos_swq: 0% user + 0.7% kernel / faults: 22 minor
+    0.7% 7238/com.android.systemui: 0.4% user + 0.3% kernel / faults: 799 minor
+    0.7% 30241/com.tencent.mm: 0.4% user + 0.2% kernel / faults: 2210 minor 25 major
+    0.5% 1727/cnss_diag: 0.4% user + 0.1% kernel
+    0.5% 404/ueventd: 0.4% user + 0% kernel
+    0.4% 1069/vendor.xiaomi.hardware.displayfeature@1.0-service: 0% user + 0.4% kernel
+    0.4% 1034/android.hardware.sensors@2.0-service.multihal: 0.2% user + 0.1% kernel
+> Subject: Input dispatching timed out (e103c50 com.ermao.library/com.ermao.library.features.reader.presentation.ReaderActivity (server) is not responding. Waited 5005ms for MotionEvent(action=DOWN))
+  
+  ----- pid 5205 at 2026-08-28 20:29:30.427911176+0800 -----
+  Cmd line: com.ermao.library
+  Build fingerprint: 'Xiaomi/mars/mars:12/SKQ1.211006.001/V13.0.13.0.SKACNXM:user/release-keys'
+  ABI: 'arm64'
+  Build type: optimized
+  Zygote loaded classes=19825 post zygote classes=11614
+  Dumping registered class loaders
+  #0 dalvik.system.PathClassLoader: [], parent #1
+  #1 java.lang.BootClassLoader: [], no parent
+  #2 dalvik.system.PathClassLoader: [/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes33.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes19.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes34.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes17.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes35.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes29.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes6.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes14.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes13.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes16.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes2.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes11.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes12.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes15.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes7.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes4.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes9.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes5.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes8.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes24.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes30.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes18.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes20.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes36.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes10.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes3.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes26.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes25.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes28.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes22.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes21.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes27.dex:/data/app/~~y9MkCrYypSRRFRrNq70uoQ==/com.ermao.library-g_8HKLgOw00fid521BLYDw==/base.apk!classes23.dex], parent #1
+  #3 dalvik.system.PathClassLoader: [/system/framework/QXPerformance.jar], parent #0
+  #4 dalvik.system.PathClassLoader: [/system/app/MiuiContentCatcher/MiuiContentCatcher.apk], parent #1
+  #5 dalvik.system.PathClassLoader: [/system/app/CatcherPatch/CatcherPatch.apk], parent #1
+  #6 dalvik.system.PathClassLoader: [/product/app/WebViewGoogle/WebViewGoogle.apk], parent #1
+  Done dumping class loaders
+  Classes initialized: 0 in 0
+  Intern table: 40339 strong; 1267 weak
+  JNI: CheckJNI is on; globals=559 (plus 143 weak)
+  Libraries: /product/app/WebViewGoogle/WebViewGoogle.apk!/lib/arm64-v8a/libmonochrome.so /system/lib64/libwebviewchromium_plat_support.so libandroid.so libaudioeffect_jni.so libcompiler_rt.so libforcedarkimpl.so libframework-connectivity-jni.so libicu_jni.so libjavacore.so libjavacrypto.so libjnigraphics.so libmedia_jni.so libmiui_runtime.so libopenjdk.so libqti_performance.so librs_jni.so librtp_jni.so libsfplugin_ccodec.so libsoundpool.so libstats_jni.so libwebviewchromium_loader.so (21)
+  Heap: 8% free, 34MB/37MB; 962633 objects
+  Dumping cumulative Gc timings
+  Start Dumping Averages for 7 iterations for concurrent copying
+  MarkingPhase:	Sum: 104.620ms Avg: 14.945ms
+  ForwardSoftReferences:	Sum: 58.079ms Avg: 8.297ms
+  ProcessMarkStack:	Sum: 56.349ms Avg: 8.049ms
+  ScanCardsForSpace:	Sum: 53.272ms Avg: 7.610ms
+  ScanImmuneSpaces:	Sum: 38.439ms Avg: 5.491ms
+  ClearFromSpace:	Sum: 20.049ms Avg: 2.864ms
+  VisitConcurrentRoots:	Sum: 19.521ms Avg: 2.788ms
+  SweepSystemWeaks:	Sum: 17.946ms Avg: 2.563ms
+  EnqueueFinalizerReferences:	Sum: 13.166ms Avg: 1.880ms
+> "main" prio=5 tid=1 Runnable
+    | group="main" sCount=0 ucsCount=0 flags=0 obj=0x729a3a38 self=0xb400007244806c00
+    | sysTid=5205 nice=-10 cgrp=top-app sched=0/0 handle=0x7245e5d4f8
+    | state=R schedstat=( 25839446671 405112904 12046 ) utm=2355 stm=228 core=7 HZ=100
+    | stack=0x7fd92cb000-0x7fd92cd000 stackSize=8188KB
+    | held mutexes= "mutator lock"(shared held)
+    at android.net.Uri.isAllowed(Uri.java:1972)
+    at android.net.Uri.encode(Uri.java:1900)
+    at android.net.Uri$PathPart.getEncoded(Uri.java:2176)
+    at android.net.Uri$HierarchicalUri.appendSspTo(Uri.java:1273)
+    at android.net.Uri$HierarchicalUri.makeUriString(Uri.java:1336)
+    at android.net.Uri$HierarchicalUri.toString(Uri.java:1326)
+    at org.readium.r2.shared.util.Url.equals(Url.kt:231)
+    at kotlin.jvm.internal.Intrinsics.areEqual(Intrinsics.java:169)
+    at org.readium.r2.shared.publication.Manifest.linkWithHref$deepLinkWithHref(Manifest.kt:74)
+    at org.readium.r2.shared.publication.Manifest.linkWithHref$find(Manifest.kt:85)
+    at org.readium.r2.shared.publication.Manifest.linkWithHref(Manifest.kt:91)
+    at org.readium.r2.shared.publication.Manifest.locatorFromLink(Manifest.kt:119)
+    at org.readium.r2.shared.publication.Publication.locatorFromLink(Publication.kt:153)
+    at com.ermao.library.features.reader.infrastructure.ReadiumEpubSession.prepare(ReadiumEpubSession.kt:315)
+    at com.ermao.library.features.reader.infrastructure.ReadiumEpubSession$prepare$1.invokeSuspend(ReadiumEpubSession.kt:-1)
+    at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+    at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+    at android.os.Handler.handleCallback(Handler.java:938)
+    at android.os.Handler.dispatchMessage(Handler.java:99)
+    at android.os.Looper.loopOnce(Looper.java:210)
+    at android.os.Looper.loop(Looper.java:299)
+    at android.app.ActivityThread.main(ActivityThread.java:8118)
+    at java.lang.reflect.Method.invoke(Native method)
+    at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:556)
+    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1045)
+  
+  "Signal Catcher" daemon prio=10 tid=6 Runnable
+> "main" prio=5 tid=1 Native
+    | group="main" sCount=1 ucsCount=0 flags=1 obj=0x729a3a38 self=0xb400007244806c00
+    | sysTid=2539 nice=-2 cgrp=foreground sched=0/0 handle=0x7245e5d4f8
+    | state=S schedstat=( 465591928998 160176096636 905525 ) utm=34730 stm=11829 core=2 HZ=100
+    | stack=0x7fd92cb000-0x7fd92cd000 stackSize=8188KB
+    | held mutexes=
+    native: #00 pc 00000000000dbd3c  /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+12)
+    native: #01 pc 0000000000017ea8  /system/lib64/libutils.so (android::Looper::pollInner(int)+184)
+    native: #02 pc 0000000000017d84  /system/lib64/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+116)
+    native: #03 pc 00000000001545b0  /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, long, int)+48)
+    at android.os.MessageQueue.nativePollOnce(Native method)
+    at android.os.MessageQueue.next(MessageQueue.java:337)
+    at android.os.Looper.loopOnce(Looper.java:168)
+    at android.os.Looper.loop(Looper.java:299)
+    at com.android.server.SystemServer.run(SystemServer.java:926)
+    at com.android.server.SystemServer.main(SystemServer.java:621)
+    at java.lang.reflect.Method.invoke(Native method)
+    at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:556)
+    at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1023)
+  
+  "perfetto_hprof_listener" prio=10 tid=3 Native (still starting up)
+    | group="" sCount=1 ucsCount=0 flags=1 obj=0x0 self=0xb400007244808800
+    | sysTid=2560 nice=-20 cgrp=foreground sched=0/0 handle=0x7180386cb0
+    | state=S schedstat=( 265421576 945383389 3986 ) utm=1 stm=25 core=1 HZ=100
+    | stack=0x718028f000-0x7180291000 stackSize=991KB
+    | held mutexes=
+    native: #00 pc 00000000000daad8  /apex/com.android.runtime/lib64/bionic/libc.so (read+8)
+    native: #01 pc 0000000000022408  /apex/com.android.art/lib64/libperfetto_hprof.so (void* std::__1::__thread_proxy<std::__1::tuple<std::__1::unique_ptr<std::__1::__thread_struct, std::__1::default_delete<std::__1::__thread_struct> >, ArtPlugin_Initialize::$_33> >(void*)+284)
+    native: #02 pc 00000000000efb14  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+264)
+    native: #03 pc 000000000008c35c  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+68)
+    (no managed stack frames)
+  
+  "Jit thread pool worker thread 0" daemon prio=5 tid=4 Native
+

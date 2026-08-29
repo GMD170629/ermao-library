@@ -1,5 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
+
 import com.ermao.library.archive.infrastructure.ArchiveCoreException
 import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
@@ -99,7 +101,7 @@ internal class ReadiumComicSession(
 
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
-    private val _preferences = MutableStateFlow(initialPreferences)
+    private val _preferences = MutableStateFlow(enforceAndroidSinglePagePreferences(initialPreferences))
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
     override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
@@ -121,6 +123,10 @@ internal class ReadiumComicSession(
     private var awaitingInitialObservation = true
     private var prepared = false
     private val saveMutex = Mutex()
+
+    override fun dismissRestoreWarning() {
+        _restoreWarning.value = null
+    }
 
     override suspend fun prepare(classLoader: ClassLoader): ImageNavigatorFragment {
         check(!prepared) { "Reader session is already prepared" }
@@ -196,7 +202,7 @@ internal class ReadiumComicSession(
         val initialLocator = restorePage?.let { page -> locatorFor(page, opened) }
         expectedRestore = restorePage
         if ((restorePlan.localProgress != null || restorePlan.remoteSnapshot != null) && initialLocator == null) {
-            _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+            publishReaderRestoreWarning(_restoreWarning, "comic", "candidate_resolution")
         } else if (restorePlan.usesLocalExact) {
             val location = restorePlan.localProgress?.location as? ComicReaderLocation
             _currentLocation.value = location
@@ -240,14 +246,14 @@ internal class ReadiumComicSession(
         locationJob = scope.launch {
             currentNavigator.currentLocator.collectLatest { locator ->
                 val location = locator.toCanonicalLocation() ?: run {
-                    _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+                    publishReaderRestoreWarning(_restoreWarning, "comic", "locator_mapping")
                     return@collectLatest
                 }
                 _currentLocation.value = location
                 expectedRestore?.let { expected ->
                     expectedRestore = null
                     if (expected.resourceHref != location.resourceHref || expected.pageIndex != location.pageIndex) {
-                        _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+                        publishReaderRestoreWarning(_restoreWarning, "comic", "exact_locator_verification")
                         return@collectLatest
                     }
                 }
@@ -312,9 +318,10 @@ internal class ReadiumComicSession(
     }
 
     override fun updatePreferences(updated: ReaderPreferences) {
-        if (_preferences.value == updated) return
-        persistPreferences(updated)
-        _preferences.value = updated
+        val supported = enforceAndroidSinglePagePreferences(updated)
+        if (_preferences.value == supported) return
+        persistPreferences(supported)
+        _preferences.value = supported
     }
 
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
@@ -367,8 +374,8 @@ internal class ReadiumComicSession(
         progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) {
-        _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+    } catch (error: Exception) {
+        publishReaderRestoreWarning(_restoreWarning, "comic", "progress_load", error)
         null
     }
 
@@ -395,6 +402,7 @@ internal class ReadiumComicSession(
             return@withLock
         }
         lastPersistedLocation = location
+        _restoreWarning.value = null
         val namespace = presentationNamespaceKey ?: return@withLock
         val bookId = source.bookId ?: return@withLock
         publishProgressUpdate(

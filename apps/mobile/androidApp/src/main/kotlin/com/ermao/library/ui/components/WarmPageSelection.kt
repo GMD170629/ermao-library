@@ -11,11 +11,13 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 data class WarmPageChoice<T>(
     val value: T,
     val label: String,
+    val enabled: Boolean = true,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,7 +39,7 @@ fun <T> WarmPageSegmentedControl(
             SegmentedButton(
                 selected = selected == option.value,
                 onClick = { onSelect(option.value) },
-                enabled = enabled,
+                enabled = enabled && option.enabled,
                 shape = when {
                     options.size == 1 -> RoundedCornerShape(theme.radii.control)
                     index == 0 -> RoundedCornerShape(
@@ -63,7 +65,14 @@ fun <T> WarmPageSegmentedControl(
                     if (selected == option.value) theme.colors.accentSoft else theme.colors.divider,
                 ),
                 icon = {},
-                label = { Text(text = option.label, style = theme.typography.label) },
+                label = {
+                    Text(
+                        text = option.label,
+                        style = theme.typography.label,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 modifier = Modifier.weight(1f),
             )
         }

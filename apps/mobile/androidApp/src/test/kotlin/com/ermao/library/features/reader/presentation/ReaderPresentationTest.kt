@@ -4,14 +4,18 @@ import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import org.junit.Test
 
 class ReaderPresentationTest {
     @Test
     fun progressScrubberTracksEveryReaderMorphology() {
         assertEquals(
-            0.4,
-            readerTotalProgression(ReflowReaderLocation(progression = 0.4), lastPageIndex = 0),
+            0.7,
+            readerTotalProgression(
+                ReflowReaderLocation(progression = 0.4, totalProgression = 0.7),
+                lastPageIndex = 0,
+            ),
         )
         assertEquals(
             0.5,
@@ -24,6 +28,10 @@ class ReaderPresentationTest {
         assertEquals(
             1.0,
             readerTotalProgression(PdfReaderLocation(0, 0.0), lastPageIndex = 0),
+        )
+        assertNull(
+            readerTotalProgression(ReflowReaderLocation(progression = 0.4), lastPageIndex = 0),
+            "Chapter progression must never be presented as whole-publication progress",
         )
     }
 }

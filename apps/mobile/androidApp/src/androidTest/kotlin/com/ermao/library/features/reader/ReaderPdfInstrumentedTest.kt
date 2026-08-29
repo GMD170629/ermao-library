@@ -62,6 +62,7 @@ class ReaderPdfInstrumentedTest {
     @Test
     fun parserPageCountWinsWhenServerMetadataDisagrees() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source, pageCount = 99)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "PDF navigator and canonical first page") { activity ->
                 activity.pdfNavigatorOrNull()?.view != null &&
                     (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { location ->
@@ -101,6 +102,7 @@ class ReaderPdfInstrumentedTest {
         }
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { reopened ->
+            reopened.keepReaderTestFixtureVisible()
             waitUntil(reopened, "new PDF session exact restoration") { activity ->
                 (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { restored ->
                     restored.pageIndex == 0 && restored.pageProgression == 0.0

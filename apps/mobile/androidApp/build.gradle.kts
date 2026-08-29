@@ -53,19 +53,6 @@ android {
 
     sourceSets.named("androidTest") {
         assets.directories.add(layout.buildDirectory.dir("generated/reader-test-assets").get().asFile.absolutePath)
-        assets.directories.add(
-            rootProject.layout.projectDirectory.dir("../../test-data/library/epub").asFile.absolutePath,
-        )
-        assets.directories.add(
-            rootProject.layout.projectDirectory.dir("../../test-data/library/mobi").asFile.absolutePath,
-        )
-        assets.directories.add(
-            rootProject.layout.projectDirectory.dir("../../test-data/library/comics").asFile.absolutePath,
-        )
-        assets.directories.add(
-            rootProject.layout.projectDirectory.dir("../../test-data/library/pdf").asFile.absolutePath,
-        )
-
     }
 
     packaging {
@@ -106,7 +93,13 @@ val syncReaderAssets by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("generated/reader-assets/fonts/reader"))
 }
 
-val syncReaderTestFb2Assets by tasks.registering(Sync::class) {
+val syncReaderTestAssets by tasks.registering(Sync::class) {
+    for (format in listOf("epub", "mobi", "comics", "pdf")) {
+        from(rootProject.layout.projectDirectory.dir("../../test-data/library/$format")) {
+            // Corpus documentation is not a runtime asset and has duplicate names.
+            exclude("CORPUS.md")
+        }
+    }
     from(rootProject.layout.projectDirectory.dir("../../test-data/library/fb2")) {
         into("fb2")
     }
@@ -117,7 +110,7 @@ tasks.named("preBuild") {
     dependsOn(rootProject.tasks.named("generateDesignTokens"))
     dependsOn(syncBrandAsset)
     dependsOn(syncReaderAssets)
-    dependsOn(syncReaderTestFb2Assets)
+    dependsOn(syncReaderTestAssets)
 }
 
 dependencies {

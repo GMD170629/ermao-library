@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
+import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
@@ -14,6 +15,7 @@ import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -61,6 +63,7 @@ class ReaderMobiInstrumentedTest {
         assertFalse(stored.resolveSibling("${stored.nameWithoutExtension}.epub").exists())
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             val deadline = SystemClock.uptimeMillis() + TEST_TIMEOUT_MILLIS
             var ready = false
             while (SystemClock.uptimeMillis() < deadline) {
@@ -68,7 +71,7 @@ class ReaderMobiInstrumentedTest {
                 val readerReady = AtomicBoolean(false)
                 scenario.onActivity { activity ->
                     readerReady.set(
-                        activity.controllerForTesting?.tableOfContents?.isNotEmpty() == true &&
+                        activity.controllerForTesting != null &&
                             activity.supportFragmentManager.fragments
                                 .filterIsInstance<EpubNavigatorFragment>()
                                 .singleOrNull()?.view != null,
@@ -81,6 +84,10 @@ class ReaderMobiInstrumentedTest {
                 SystemClock.sleep(POLL_MILLIS)
             }
             if (!ready) throw AssertionError("Timed out waiting for the MOBI product Reader")
+            val controller = AtomicReference<ReaderScreenController>()
+                .also { reference -> scenario.onActivity { reference.set(checkNotNull(it.controllerForTesting)) } }
+                .get()
+            assertTrue(runBlocking { controller.loadTableOfContents() }.isNotEmpty())
 
             scenario.onActivity { activity ->
                 checkNotNull(activity.controllerForTesting).updatePreferences(

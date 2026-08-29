@@ -1,0 +1,510 @@
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.workmanagement.BookManagementCoverTest:
+INSTRUMENTATION_STATUS: test=dirtyEditorRequiresDiscardConfirmation
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Failed to inject touch input.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains 'Edit' (ignoreCase: false))
+
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow(SemanticsNodeInteraction.kt:178)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow$default(SemanticsNodeInteraction.kt:150)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchSemanticsNode(SemanticsNodeInteraction.kt:84)
+	at androidx.compose.ui.test.ActionsKt.performTouchInput(Actions.kt:401)
+	at androidx.compose.ui.test.AndroidActions.performClickImpl(Actions.android.kt:23)
+	at androidx.compose.ui.test.ActionsKt.performClick(Actions.kt:59)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.dirtyEditorRequiresDiscardConfirmation(BookManagementCoverTest.kt:160)
+
+INSTRUMENTATION_STATUS: stream=
+Error in dirtyEditorRequiresDiscardConfirmation(com.ermao.library.features.workmanagement.BookManagementCoverTest):
+java.lang.AssertionError: Failed to inject touch input.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains 'Edit' (ignoreCase: false))
+
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow(SemanticsNodeInteraction.kt:178)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow$default(SemanticsNodeInteraction.kt:150)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchSemanticsNode(SemanticsNodeInteraction.kt:84)
+	at androidx.compose.ui.test.ActionsKt.performTouchInput(Actions.kt:401)
+	at androidx.compose.ui.test.AndroidActions.performClickImpl(Actions.android.kt:23)
+	at androidx.compose.ui.test.ActionsKt.performClick(Actions.kt:59)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.dirtyEditorRequiresDiscardConfirmation(BookManagementCoverTest.kt:160)
+
+INSTRUMENTATION_STATUS: test=dirtyEditorRequiresDiscardConfirmation
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu(BookManagementCoverTest.kt:118)
+
+INSTRUMENTATION_STATUS: stream=
+Error in tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu(com.ermao.library.features.workmanagement.BookManagementCoverTest):
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu(BookManagementCoverTest.kt:118)
+
+INSTRUMENTATION_STATUS: test=tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=chineseDarkMenuUsesLocalizedManagementActions
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=chineseDarkMenuUsesLocalizedManagementActions
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=longTitleCannotExpandTheNativeMenu
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.longTitleCannotExpandTheNativeMenu(BookManagementCoverTest.kt:139)
+
+INSTRUMENTATION_STATUS: stream=
+Error in longTitleCannotExpandTheNativeMenu(com.ermao.library.features.workmanagement.BookManagementCoverTest):
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.longTitleCannotExpandTheNativeMenu(BookManagementCoverTest.kt:139)
+
+INSTRUMENTATION_STATUS: test=longTitleCannotExpandTheNativeMenu
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Send to Kindle' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers(BookManagementCoverTest.kt:152)
+
+INSTRUMENTATION_STATUS: stream=
+Error in resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers(com.ermao.library.features.workmanagement.BookManagementCoverTest):
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Send to Kindle' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers(BookManagementCoverTest.kt:152)
+
+INSTRUMENTATION_STATUS: test=resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: expected:<60.0> but was:<0.0>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:577)
+	at org.junit.Assert.assertEquals(Assert.java:701)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests(BookManagementCoverTest.kt:130)
+
+INSTRUMENTATION_STATUS: stream=
+Error in menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests(com.ermao.library.features.workmanagement.BookManagementCoverTest):
+java.lang.AssertionError: expected:<60.0> but was:<0.0>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:577)
+	at org.junit.Assert.assertEquals(Assert.java:701)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests(BookManagementCoverTest.kt:130)
+
+INSTRUMENTATION_STATUS: test=menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=scrollingDoesNotOpenManagementMenu
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.workmanagement.BookManagementCoverTest
+INSTRUMENTATION_STATUS: current=7
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=scrollingDoesNotOpenManagementMenu
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.library.ui.DirectoryContentPresentationTest:
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=8
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=9
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=10
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=11
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: stream=
+Error in onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest):
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false]
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=12
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=13
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=14
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=15
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: stream=
+Error in onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest):
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false]
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=16
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=17
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=true]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=18
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=directoryMenuOnlyExposesItsOwnSubtreeDownload[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.library.ui.DirectoryContentPresentationTest
+INSTRUMENTATION_STATUS: current=19
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: stream=
+Error in onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest):
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+
+INSTRUMENTATION_STATUS: test=onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false]
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderTxtInstrumentedTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.reader.ReaderTxtInstrumentedTest:
+INSTRUMENTATION_STATUS: test=onlineMetadataRejectedByReadiumPreservesTheCauseAndStage
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderTxtInstrumentedTest
+INSTRUMENTATION_STATUS: current=20
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: expected:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=null)> but was:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=java.lang.IllegalArgumentException: Required value was null.)>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest$onlineMetadataRejectedByReadiumPreservesTheCauseAndStage$1.invokeSuspend(ReaderTxtInstrumentedTest.kt:128)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source:1)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest.onlineMetadataRejectedByReadiumPreservesTheCauseAndStage(ReaderTxtInstrumentedTest.kt:89)
+
+INSTRUMENTATION_STATUS: stream=
+Error in onlineMetadataRejectedByReadiumPreservesTheCauseAndStage(com.ermao.library.features.reader.ReaderTxtInstrumentedTest):
+java.lang.AssertionError: expected:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=null)> but was:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=java.lang.IllegalArgumentException: Required value was null.)>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest$onlineMetadataRejectedByReadiumPreservesTheCauseAndStage$1.invokeSuspend(ReaderTxtInstrumentedTest.kt:128)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source:1)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest.onlineMetadataRejectedByReadiumPreservesTheCauseAndStage(ReaderTxtInstrumentedTest.kt:89)
+
+INSTRUMENTATION_STATUS: test=onlineMetadataRejectedByReadiumPreservesTheCauseAndStage
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderEpubInstrumentedTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stream=
+com.ermao.library.features.reader.ReaderEpubInstrumentedTest:
+INSTRUMENTATION_STATUS: test=opensRendersNavigatesAndAppliesPreferencesWithReadium
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.ermao.library.features.reader.ReaderEpubInstrumentedTest
+INSTRUMENTATION_STATUS: current=21
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=21
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+INSTRUMENTATION_STATUS: stream=
+Error in opensRendersNavigatesAndAppliesPreferencesWithReadium(com.ermao.library.features.reader.ReaderEpubInstrumentedTest):
+java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+INSTRUMENTATION_STATUS: test=opensRendersNavigatesAndAppliesPreferencesWithReadium
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_RESULT: stream=
+
+Time: 49.372
+There were 10 failures:
+1) dirtyEditorRequiresDiscardConfirmation(com.ermao.library.features.workmanagement.BookManagementCoverTest)
+java.lang.AssertionError: Failed to inject touch input.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains 'Edit' (ignoreCase: false))
+
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow(SemanticsNodeInteraction.kt:178)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow$default(SemanticsNodeInteraction.kt:150)
+	at androidx.compose.ui.test.SemanticsNodeInteraction.fetchSemanticsNode(SemanticsNodeInteraction.kt:84)
+	at androidx.compose.ui.test.ActionsKt.performTouchInput(Actions.kt:401)
+	at androidx.compose.ui.test.AndroidActions.performClickImpl(Actions.android.kt:23)
+	at androidx.compose.ui.test.ActionsKt.performClick(Actions.kt:59)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.dirtyEditorRequiresDiscardConfirmation(BookManagementCoverTest.kt:160)
+2) tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu(com.ermao.library.features.workmanagement.BookManagementCoverTest)
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.tapAndScrollKeepTheirOwnersWhileLongPressOpensMenu(BookManagementCoverTest.kt:118)
+3) longTitleCannotExpandTheNativeMenu(com.ermao.library.features.workmanagement.BookManagementCoverTest)
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Edit' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.longTitleCannotExpandTheNativeMenu(BookManagementCoverTest.kt:139)
+4) resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers(com.ermao.library.features.workmanagement.BookManagementCoverTest)
+java.lang.AssertionError: Assert failed: The component with Text + InputText + EditableText contains 'Send to Kindle' (ignoreCase: false) is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.resourceMenuTargetsThePressedResourceAndKeepsKindleForOrdinaryUsers(BookManagementCoverTest.kt:152)
+5) menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests(com.ermao.library.features.workmanagement.BookManagementCoverTest)
+java.lang.AssertionError: expected:<60.0> but was:<0.0>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:577)
+	at org.junit.Assert.assertEquals(Assert.java:701)
+	at com.ermao.library.features.workmanagement.BookManagementCoverTest.menuUsesPressPointInsteadOfCoverBoundsAndReopensWithoutRequests(BookManagementCoverTest.kt:130)
+6) onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=0, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest)
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+7) onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=1, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest)
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+8) onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact[resources=3, root=false](com.ermao.library.features.library.ui.DirectoryContentPresentationTest)
+java.lang.AssertionError: Assert failed: The component with TestTag = 'work-directory-download' is not displayed!
+	at androidx.compose.ui.test.AssertionsKt.assertIsDisplayed(Assertions.kt:34)
+	at com.ermao.library.features.library.ui.DirectoryContentPresentationTest.onlyBookRootRestoresIdentityAndActionsWhileChildDirectoryStaysCompact(DirectoryContentPresentationTest.kt:140)
+9) onlineMetadataRejectedByReadiumPreservesTheCauseAndStage(com.ermao.library.features.reader.ReaderTxtInstrumentedTest)
+java.lang.AssertionError: expected:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=null)> but was:<ReaderError(code=InvalidResponse, safeContext={code=PUBLICATION_MANIFEST_INVALID, source=parser, stage=manifest}, cause=java.lang.IllegalArgumentException: Required value was null.)>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:120)
+	at org.junit.Assert.assertEquals(Assert.java:146)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest$onlineMetadataRejectedByReadiumPreservesTheCauseAndStage$1.invokeSuspend(ReaderTxtInstrumentedTest.kt:128)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:256)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:54)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlockingImpl(Builders.kt:30)
+	at kotlinx.coroutines.BuildersKt.runBlockingImpl(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK(Builders.concurrent.kt:172)
+	at kotlinx.coroutines.BuildersKt.runBlockingK(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__Builders_concurrentKt.runBlockingK$default(Builders.concurrent.kt:157)
+	at kotlinx.coroutines.BuildersKt.runBlockingK$default(Unknown Source:1)
+	at com.ermao.library.features.reader.ReaderTxtInstrumentedTest.onlineMetadataRejectedByReadiumPreservesTheCauseAndStage(ReaderTxtInstrumentedTest.kt:89)
+10) opensRendersNavigatesAndAppliesPreferencesWithReadium(com.ermao.library.features.reader.ReaderEpubInstrumentedTest)
+java.lang.AssertionError: Timed out waiting for computed WebView preferences
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.waitUntilValue(ReaderEpubInstrumentedTest.kt:313)
+	at com.ermao.library.features.reader.ReaderEpubInstrumentedTest.opensRendersNavigatesAndAppliesPreferencesWithReadium(ReaderEpubInstrumentedTest.kt:118)
+
+FAILURES!!!
+Tests run: 21,  Failures: 10
+
+
+INSTRUMENTATION_CODE: -1

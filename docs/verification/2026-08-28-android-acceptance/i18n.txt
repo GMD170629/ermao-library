@@ -1,0 +1,5 @@
+
+> @shuku/web@1.0.0 i18n:check /home/liumianti/ermao-library/apps/web
+> node scripts/generate-i18n-catalog.mjs
+
+Validated 2066 messages across zh-CN and en-US catalogs

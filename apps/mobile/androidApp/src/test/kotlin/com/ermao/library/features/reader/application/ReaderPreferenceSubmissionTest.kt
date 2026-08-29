@@ -58,6 +58,7 @@ class ReaderPreferenceSubmissionTest {
         override fun goNext(): Boolean = error("Settings must not navigate")
         override fun goTo(location: ReaderLocation): Boolean = error("Settings must not restore an anchor")
         override fun goToTotalProgression(totalProgression: Double): Boolean = error("Settings must not seek")
+        override fun dismissRestoreWarning() = Unit
         override fun dismissResumeNotice() = Unit
         override fun returnToResumeNotice(): Boolean = error("Settings must not restore progress")
         override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null

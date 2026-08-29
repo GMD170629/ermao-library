@@ -1,5 +1,7 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
+
 import com.ermao.library.shared.modules.reader.PdfRangeLoader
 import com.ermao.library.shared.modules.reader.PdfRangeFailure
 
@@ -97,7 +99,7 @@ internal class ReadiumPdfSession(
     )
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
-    private val _preferences = MutableStateFlow(initialPreferences)
+    private val _preferences = MutableStateFlow(enforceAndroidSinglePagePreferences(initialPreferences))
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
     override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
@@ -111,6 +113,10 @@ internal class ReadiumPdfSession(
         private set
 
     private var publication: Publication? = null
+
+    override fun dismissRestoreWarning() {
+        _restoreWarning.value = null
+    }
     private var navigator: PdfNavigatorFragment<*, *>? = null
     private var submitNavigatorPreferences: ((ReaderPreferences) -> Unit)? = null
     private var nativeDocument: ShukuPdfiumDocument? = null
@@ -171,7 +177,7 @@ internal class ReadiumPdfSession(
         val initialLocator = restorePage?.let(positions::get)
         expectedRestorePage = restorePage
         if ((restorePlan.localProgress != null || restorePlan.remoteSnapshot != null) && initialLocator == null) {
-            _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+            publishReaderRestoreWarning(_restoreWarning, "pdf", "candidate_resolution")
         } else if (restorePlan.usesLocalExact) {
             val location = restorePlan.localProgress?.location as? PdfReaderLocation
             _currentLocation.value = location
@@ -309,7 +315,7 @@ internal class ReadiumPdfSession(
         locationJob = scope.launch {
             currentNavigator.currentLocator.collectLatest { locator ->
                 val page = locator.pageIndex()?.takeIf(::isValidPage) ?: run {
-                    _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+                    publishReaderRestoreWarning(_restoreWarning, "pdf", "locator_mapping")
                     return@collectLatest
                 }
                 val location = page.toLocation()
@@ -317,7 +323,7 @@ internal class ReadiumPdfSession(
                 expectedRestorePage?.let { expected ->
                     expectedRestorePage = null
                     if (expected != page) {
-                        _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+                        publishReaderRestoreWarning(_restoreWarning, "pdf", "exact_locator_verification")
                         return@collectLatest
                     }
                 }
@@ -376,10 +382,11 @@ internal class ReadiumPdfSession(
         return moved
     }
     override fun updatePreferences(updated: ReaderPreferences) {
-        if (_preferences.value == updated) return
-        persistPreferences(updated)
-        _preferences.value = updated
-        submitNavigatorPreferences?.invoke(updated)
+        val supported = enforceAndroidSinglePagePreferences(updated)
+        if (_preferences.value == supported) return
+        persistPreferences(supported)
+        _preferences.value = supported
+        submitNavigatorPreferences?.invoke(supported)
     }
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
     override fun removeBookmark(id: String) = Unit
@@ -427,8 +434,8 @@ internal class ReadiumPdfSession(
         progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (_: Exception) {
-        _restoreWarning.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
+    } catch (error: Exception) {
+        publishReaderRestoreWarning(_restoreWarning, "pdf", "progress_load", error)
         null
     }
     private suspend fun persist(location: PdfReaderLocation) = saveMutex.withLock {
@@ -445,6 +452,7 @@ internal class ReadiumPdfSession(
             return@withLock
         }
         lastPersistedLocation = location
+        _restoreWarning.value = null
         val namespace = presentationNamespaceKey ?: return@withLock
         val bookId = source.bookId ?: return@withLock
         publishProgressUpdate(createReaderProgressPresentationUpdate(

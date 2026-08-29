@@ -125,7 +125,9 @@ class ReaderTxtInstrumentedTest {
                     assertEquals(stage, translated.stage)
                     assertTrue(translated.cause is IllegalArgumentException)
                     assertEquals(ReaderErrorCode.InvalidResponse, failure.readerError.code)
-                    assertEquals(OnlinePublicationFailure.invalidMetadata(stage).readerError, failure.readerError)
+                    val expectedError = OnlinePublicationFailure.invalidMetadata(stage).readerError
+                    assertEquals(expectedError.safeContext, failure.readerError.safeContext)
+                    assertTrue(failure.readerError.cause is IllegalArgumentException)
                     assertFalse(ReaderAdmission.permitsDownload(failure.readerError.code))
                 }
                 assertEquals(listOf("manifest.json", "positions.json"), requests)
@@ -138,13 +140,17 @@ class ReaderTxtInstrumentedTest {
     @Test
     fun opensRendersNavigatesAndCapturesExactLocationWithEpubNavigator() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "TXT reader") {
                 it.controllerForTesting != null && it.navigatorOrNull()?.view != null
             }
+            val controller = AtomicReference<com.ermao.library.features.reader.application.ReaderScreenController>()
+                .also { reference -> scenario.onActivity { reference.set(checkNotNull(it.controllerForTesting)) } }
+                .get()
+            val tableOfContents = runBlocking { controller.loadTableOfContents() }
             scenario.onActivity { activity ->
-                val controller = checkNotNull(activity.controllerForTesting)
-                assertEquals(2, controller.tableOfContents.size)
-                assertTrue(controller.goTo(controller.tableOfContents.last().location))
+                assertEquals(2, tableOfContents.size)
+                assertTrue(checkNotNull(activity.controllerForTesting).goTo(tableOfContents.last().location))
             }
             waitUntil(scenario, "second TXT chapter") {
                 (it.controllerForTesting?.currentLocation?.value as? ReflowReaderLocation)

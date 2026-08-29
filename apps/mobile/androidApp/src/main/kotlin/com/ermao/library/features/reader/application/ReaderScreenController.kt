@@ -52,6 +52,15 @@ internal interface ReaderScreenController {
     val bookmarkSyncPending: StateFlow<Boolean>
     val tableOfContents: List<ReaderTocEntry>
 
+    /**
+     * Loads and caches the navigation tree for this reader session.
+     *
+     * Paged readers expose their lightweight page list immediately. Reflowable
+     * readers may defer expensive locator resolution until the user opens the
+     * contents panel.
+     */
+    suspend fun loadTableOfContents(): List<ReaderTocEntry> = tableOfContents
+
     fun unavailableControls(preferences: ReaderPreferences): Set<com.ermao.library.shared.modules.reader.ReaderControl> = emptySet()
 
     fun goPrevious(): Boolean
@@ -79,6 +88,8 @@ internal interface ReaderScreenController {
     }
 
     fun goToTotalProgression(totalProgression: Double): Boolean
+
+    fun dismissRestoreWarning()
 
     fun dismissResumeNotice()
 

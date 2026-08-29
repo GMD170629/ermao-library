@@ -20,11 +20,14 @@ import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
 import com.ermao.library.shared.modules.reader.ReaderProgress
+import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import com.ermao.library.shared.modules.reader.TextQuote
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +38,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -73,16 +77,18 @@ class ReaderEpubInstrumentedTest {
     @Test
     fun opensRendersNavigatesAndAppliesPreferencesWithReadium() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
             scenario.onActivity { activity -> assertFalse(activity.controlsVisibleForTesting) }
             val initial = currentLocation(scenario)
             assertNotNull(initial.engineLocator)
             assertTrue(renderedText(scenario).contains("第一章"))
+            val tableOfContents = runBlocking { controller(scenario).loadTableOfContents() }
 
             scenario.onActivity { activity ->
                 val controller = checkNotNull(activity.controllerForTesting)
-                assertTrue(controller.tableOfContents.isNotEmpty())
-                val secondChapter = controller.tableOfContents.last().location
+                assertTrue(tableOfContents.isNotEmpty())
+                val secondChapter = tableOfContents.last().location
                 assertTrue(controller.goTo(secondChapter))
             }
             waitUntil(scenario, "second chapter location") {
@@ -115,10 +121,11 @@ class ReaderEpubInstrumentedTest {
                     navigator.settings.value.theme == Theme.DARK &&
                     abs((navigator.settings.value.lineHeight ?: 0.0) - 1.6) < 0.01
             }
-            waitUntilValue("computed WebView preferences") {
-                evaluateJavascript(
-                    scenario,
-                    """
+            try {
+                waitUntilValue("computed WebView preferences") {
+                    evaluateJavascript(
+                        scenario,
+                        """
                         (() => {
                           const viewport = document.querySelector('meta[name="viewport"]');
                           const paragraph = document.querySelector('p');
@@ -136,15 +143,47 @@ class ReaderEpubInstrumentedTest {
                             paragraphStyle.color === 'rgb(226, 232, 240)' &&
                             rootStyle.backgroundColor === 'rgb(15, 23, 42)';
                         })()
+                        """.trimIndent(),
+                    ) == "true"
+                }
+            } catch (error: AssertionError) {
+                val diagnostic = evaluateJavascript(
+                    scenario,
+                    """
+                        (() => {
+                          const viewport = document.querySelector('meta[name="viewport"]');
+                          const paragraph = document.querySelector('p');
+                          const rootStyle = getComputedStyle(document.documentElement);
+                          const paragraphStyle = paragraph && getComputedStyle(paragraph);
+                          return JSON.stringify({
+                            viewport: viewport && viewport.content,
+                            innerWidth: window.innerWidth,
+                            fontSize: paragraphStyle && paragraphStyle.fontSize,
+                            lineHeight: paragraphStyle && paragraphStyle.lineHeight,
+                            fontFamily: paragraphStyle && paragraphStyle.fontFamily,
+                            fonts: [...document.fonts].map(font => ({family: font.family, status: font.status})),
+                            baseUri: document.baseURI,
+                            fontFaces: [...document.styleSheets].flatMap(sheet => {
+                              try { return [...sheet.cssRules].filter(rule => rule.type === CSSRule.FONT_FACE_RULE).map(rule => rule.cssText); }
+                              catch (_) { return []; }
+                            }),
+                            fontResources: performance.getEntriesByType('resource')
+                              .map(entry => entry.name)
+                              .filter(name => name.includes('/fonts/')),
+                            color: paragraphStyle && paragraphStyle.color,
+                            backgroundColor: rootStyle.backgroundColor
+                          });
+                        })()
                     """.trimIndent(),
-                ) == "true"
+                )
+                throw AssertionError("Computed WebView preferences did not settle: $diagnostic", error)
             }
 
             scenario.onActivity { activity ->
                 val preferences = checkNotNull(activity.controllerForTesting).preferences.value
                 assertEquals(1.6, preferences.epub.lineHeight, 0.01)
                 val controller = checkNotNull(activity.controllerForTesting)
-                assertTrue(controller.goTo(controller.tableOfContents.last().location))
+                assertTrue(controller.goTo(tableOfContents.last().location))
             }
             waitUntil(scenario, "security fixture chapter location") {
                 currentLocationOrNull(it)?.resourceKey?.contains("chapter2.xhtml") == true
@@ -173,12 +212,99 @@ class ReaderEpubInstrumentedTest {
     }
 
     @Test
-    fun savesClosesAndRestoresTheExactReaderLocation() {
-        val saved = ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+    fun continuousScrollSupportsTapZoneViewportTurnsAndForcesSinglePage() {
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
             scenario.onActivity { activity ->
                 val controller = checkNotNull(activity.controllerForTesting)
-                assertTrue(controller.goTo(controller.tableOfContents.last().location))
+                controller.updatePreferences(
+                    controller.preferences.value.copy(
+                        epub = controller.preferences.value.epub.copy(
+                            flow = ReaderReadingMode.ContinuousScroll,
+                            spreadMode = ReaderSpreadMode.Double,
+                        ),
+                    ),
+                )
+            }
+            waitUntil(scenario, "continuous scroll preferences") { activity ->
+                val controller = activity.controllerForTesting ?: return@waitUntil false
+                activity.navigatorOrNull()?.settings?.value?.scroll == true &&
+                    controller.preferences.value.epub.spreadMode == ReaderSpreadMode.Single
+            }
+            evaluateJavascript(
+                scenario,
+                "document.body.style.minHeight = '400vh'; document.scrollingElement.scrollTop = 0; true",
+            )
+
+            scenario.onActivity { activity ->
+                assertTrue(checkNotNull(activity.controllerForTesting).goNext())
+            }
+            waitUntilValue("continuous scroll forward viewport turn") {
+                evaluateJavascript(scenario, "document.scrollingElement.scrollTop").trim('"').toDoubleOrNull()
+                    ?.let { it > 1.0 } == true
+            }
+            val advanced = evaluateJavascript(scenario, "document.scrollingElement.scrollTop")
+                .trim('"')
+                .toDouble()
+
+            scenario.onActivity { activity ->
+                assertTrue(checkNotNull(activity.controllerForTesting).goPrevious())
+            }
+            waitUntilValue("continuous scroll backward viewport turn") {
+                evaluateJavascript(scenario, "document.scrollingElement.scrollTop").trim('"').toDoubleOrNull()
+                    ?.let { it < advanced - 1.0 } == true
+            }
+        }
+    }
+
+    @Test
+    fun loadsContentsOnceAndSeeksUsingWholePublicationProgress() {
+        ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
+            waitForReader(scenario)
+            val activeController = controller(scenario)
+            assertTrue(activeController.tableOfContents.isEmpty())
+
+            val firstContents = runBlocking { activeController.loadTableOfContents() }
+            val cachedContents = runBlocking { activeController.loadTableOfContents() }
+            assertTrue(firstContents.isNotEmpty())
+            assertSame(firstContents, cachedContents)
+
+            waitUntil(scenario, "initial whole-publication progression") {
+                currentLocationOrNull(it)?.totalProgression != null
+            }
+            val initial = currentLocation(scenario)
+            val initialTotal = checkNotNull(initial.totalProgression)
+            val seekAccepted = AtomicBoolean(false)
+            scenario.onActivity { activity ->
+                seekAccepted.set(checkNotNull(activity.controllerForTesting).goToTotalProgression(0.8))
+            }
+            assertTrue(seekAccepted.get())
+            waitUntil(scenario, "whole-publication seek") {
+                val location = currentLocationOrNull(it)
+                location?.resourceKey?.contains("chapter2.xhtml") == true &&
+                    (location.totalProgression ?: -1.0) > initialTotal
+            }
+            waitUntilValue("whole-publication seek rendering") { renderedText(scenario).contains("第二章") }
+            val moved = currentLocation(scenario)
+            assertNotNull(moved.totalProgression)
+            assertTrue(checkNotNull(moved.totalProgression) > initialTotal)
+            runBlocking { activeController.flush() }
+            val persisted = runBlocking { progressStore.load(sourceId) }?.location as? ReflowReaderLocation
+            assertTrue(checkNotNull(persisted?.totalProgression) > initialTotal)
+        }
+    }
+
+    @Test
+    fun savesClosesAndRestoresTheExactReaderLocation() {
+        val saved = ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
+            waitForReader(scenario)
+            val tableOfContents = runBlocking { controller(scenario).loadTableOfContents() }
+            scenario.onActivity { activity ->
+                val controller = checkNotNull(activity.controllerForTesting)
+                assertTrue(controller.goTo(tableOfContents.last().location))
             }
             waitUntil(scenario, "saved chapter location") {
                 currentLocationOrNull(it)?.let { location ->
@@ -228,6 +354,7 @@ class ReaderEpubInstrumentedTest {
         }
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { reopened ->
+            reopened.keepReaderTestFixtureVisible()
             waitForReader(reopened)
             waitUntil(reopened, "restored chapter location") {
                 currentLocationOrNull(it)?.resourceKey?.contains("chapter2.xhtml") == true
@@ -264,6 +391,7 @@ class ReaderEpubInstrumentedTest {
         )
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
+            scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
             waitUntil(scenario, "missing exact resource warning") {
                 it.controllerForTesting?.restoreWarning?.value?.code == ReaderErrorCode.LocationRestoreFailed
