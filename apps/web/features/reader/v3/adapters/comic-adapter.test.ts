@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_READER_PREFERENCES, type OperationToken, type ReaderCommand } from '@shuku/reader-core';
+import {
+  DEFAULT_READER_PREFERENCES,
+  READER_SAFETY_RULE_IDS,
+  type OperationToken,
+  type ReaderCommand
+} from '@shuku/reader-core';
 import { ComicReaderAdapter } from './comic-adapter';
+import { readerSafetyFailure } from '../security/reader-safety-policy';
+
+const COMIC_REVISION = `sha256:${'a'.repeat(64)}`;
 
 type FakeListener = (event: Record<string, unknown>) => void;
 
@@ -223,6 +231,7 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   const events: Array<{ type: string; location?: { kind: string; pageIndex?: number } }> = [];
   adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
     initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     onInputIntent: (intent) => {
       if (intent.type !== 'command') return;
@@ -306,6 +315,7 @@ test('comic navigation promotes immediately while the native image is still load
   let sequence = 1;
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
     initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
 
@@ -353,6 +363,49 @@ test('comic navigation promotes immediately while the native image is still load
   adapter.dispose();
 });
 
+test('comic policy blocks one unsafe page without requesting it or rejecting the publication', async () => {
+  const ownerDocument = new FakeDocument();
+  const container = new FakeElement(ownerDocument);
+  let pageRequests = 0;
+  const safetyError = readerSafetyFailure(READER_SAFETY_RULE_IDS.COMIC_PAGE_MIME);
+  const adapter = new ComicReaderAdapter({
+    container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
+    initialPages: [{ pageIndex: 0, resourceHref: 'pages/0', safetyError }],
+    pageUrl: () => {
+      pageRequests += 1;
+      return '/must-not-be-requested';
+    }
+  });
+
+  await adapter.open({
+    sessionId: 'comic-session',
+    operation: operation(1, 'bootstrap'),
+    signal: new AbortController().signal,
+    source: {
+      bookId: 'book-1',
+      kind: 'comic',
+      sourceFormat: 'cbz',
+      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      contentUrl: '/comic',
+      resourceId: 'resource-1',
+      totalPages: 1
+    },
+    initialLocation: null,
+    preferences: DEFAULT_READER_PREFERENCES
+  });
+
+  assert.equal(pageRequests, 0);
+  assert.equal(adapter.getViewModel().status, 'ready');
+  assert.equal(adapter.getViewModel().visiblePages[0]?.url, '');
+  const currentSlot = container.children[0]?.children[0]?.children[1];
+  const placeholder = currentSlot?.children[0]?.children[0]?.children[0];
+  assert.equal(placeholder?.dataset.readerSafetyRuleId, READER_SAFETY_RULE_IDS.COMIC_PAGE_MIME);
+  assert.equal(placeholder?.dataset.readerSafetyErrorCode, safetyError.code);
+  adapter.dispose();
+});
+
 test('comic continuous flow keeps every lazy image mounted and only explicit navigation changes scrollTop', async () => {
   FakeIntersectionObserver.latest = null;
   const ownerDocument = new FakeDocument();
@@ -371,6 +424,7 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   };
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
     initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
 
@@ -399,9 +453,9 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   const images = slots.map((slot) => slot.children[0]);
   assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
   assert.deepEqual(images.map((image) => image.src), [
-    '/api/reader/v4/resources/resource-1/comic/pages/0?imageVariant=original',
-    '/api/reader/v4/resources/resource-1/comic/pages/1?imageVariant=original',
-    '/api/reader/v4/resources/resource-1/comic/pages/2?imageVariant=original'
+    `/api/reader/v4/resources/resource-1/comic/pages/0?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
+    `/api/reader/v4/resources/resource-1/comic/pages/1?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
+    `/api/reader/v4/resources/resource-1/comic/pages/2?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`
   ]);
   const preloadObserver = FakeIntersectionObserver.latest as FakeIntersectionObserver | null;
   assert.ok(preloadObserver);
@@ -451,6 +505,7 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
   const container = new FakeElement(ownerDocument);
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
     initialPages: [0, 1].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 })),
     onInputIntent: () => false
   });
@@ -498,6 +553,7 @@ test('comic signal fallback removes source listeners after abort and session boo
   const container = new FakeElement(ownerDocument);
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
     initialPages: [0, 1, 2].map((pageIndex) => ({ pageIndex, resourceHref: `pages/${pageIndex}`, width: 600, height: 900 }))
   });
   type SignalCombiner = (first: AbortSignal, second: AbortSignal) => {

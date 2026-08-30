@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.local/contracts/reader-safety-conformance-report-v1.schema.json",
+  "title": "Reader safety conformance report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyId", "policyVersion", "policyDigest", "consumer", "engine", "results", "omissions"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "policyId": {"const": "shuku.reader-safety"},
+    "policyVersion": {"type": "integer", "minimum": 1},
+    "policyDigest": {"$ref": "#/$defs/sha256"},
+    "consumer": {"enum": ["BACKEND", "WEB", "KMP", "ANDROID"]},
+    "engine": {"type": "string", "minLength": 1, "maxLength": 160},
+    "results": {
+      "type": "array",
+      "minItems": 0,
+      "items": {"$ref": "#/$defs/result"}
+    },
+    "omissions": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {"$ref": "#/$defs/omission"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "omission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "reasonCode", "requiredGate"],
+      "properties": {
+        "caseId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"},
+        "reasonCode": {
+          "enum": [
+            "KMP_NATIVE_PRODUCTION_ADAPTER_UNAVAILABLE",
+            "ANDROID_PRODUCTION_ADAPTER_UNAVAILABLE"
+          ]
+        },
+        "requiredGate": {
+          "enum": [
+            "ANDROID_OR_IOS_NATIVE_CONFORMANCE",
+            "ANDROID_INSTRUMENTED_OR_PHYSICAL_DEVICE"
+          ]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId", "inputSha256", "terminalRuleId", "action", "errorCode", "orderedRuleEvents", "semanticProjectionSha256"],
+      "properties": {
+        "caseId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"},
+        "inputSha256": {"$ref": "#/$defs/sha256"},
+        "terminalRuleId": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.]{2,95}$"},
+        "action": {"enum": ["ALLOW", "SANITIZE", "BLOCK_RESOURCE", "REJECT_PUBLICATION"]},
+        "errorCode": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "orderedRuleEvents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "semanticProjectionSha256": {
+          "oneOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

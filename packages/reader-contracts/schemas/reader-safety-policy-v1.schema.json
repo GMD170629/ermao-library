@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.local/contracts/reader-safety-policy-v1.schema.json",
+  "title": "Shuku Reader safety policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "policyId", "policyVersion", "policyDigest", "consumers", "implementationFailureCodes", "formats", "budgets", "profiles", "rules", "platformDefenses"],
+  "properties": {
+    "$schema": {"const": "./schemas/reader-safety-policy-v1.schema.json"},
+    "schemaVersion": {"const": 1},
+    "policyId": {"const": "shuku.reader-safety"},
+    "policyVersion": {"type": "integer", "minimum": 1},
+    "policyDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "consumers": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}},
+    "implementationFailureCodes": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["ENGINE_POLICY_ALGORITHM_UNSUPPORTED", "PLATFORM_POLICY_ALGORITHM_UNSUPPORTED"]}},
+    "formats": {"type": "array", "minItems": 15, "uniqueItems": true, "items": {"$ref": "#/$defs/format"}},
+    "budgets": {"$ref": "#/$defs/budgets"},
+    "profiles": {"$ref": "#/$defs/profiles"},
+    "rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/rule"}},
+    "platformDefenses": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/platformDefense"}}
+  },
+  "$defs": {
+    "consumer": {"enum": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    "formatId": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,31}$", "not": {"const": "KINDLE"}},
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "morphology", "deliveryMode", "lifecycle", "extension", "canonicalMimeType", "acceptedMimeTypes", "requiredConsumers"],
+      "properties": {
+        "id": {"$ref": "#/$defs/formatId"},
+        "morphology": {"enum": ["REFLOWABLE", "PDF", "COMIC", "AUDIO"]},
+        "deliveryMode": {"enum": ["DOWNLOAD_ORIGINAL", "STREAM", "PLAYER"]},
+        "lifecycle": {"enum": ["ACTIVE", "RECEIVE_ONLY"]},
+        "extension": {"type": ["string", "null"], "pattern": "^\\.[a-z0-9][a-z0-9._+-]{0,15}$"},
+        "canonicalMimeType": {"type": ["string", "null"], "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"},
+        "acceptedMimeTypes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"}},
+        "requiredConsumers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}}
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["originalMaxBytes", "binaryResourceMaxBytes", "archiveEntryMaxCount", "archiveExpandedMaxBytes", "archiveEntryMaxBytes", "archiveCompressionRatioMax", "xmlControlDocumentMaxBytes", "reflowableMarkupMaxBytes", "fb2TextMaxBytes", "fb2MaxDepth", "fb2MaxNodes", "fb2TextMaxCharacters", "fb2EncodedImageMaxBytes", "fb2DecodedImageMaxBytes", "fb2DecodedImagesTotalMaxBytes", "txtMemoryMaxBytes", "txtChunkMaxCharacters", "pdfPageMaxCount", "pdfRenderMaxPixels", "pdfCanvasMaxDimension", "pdfRangeChunkBytes", "pdfRangeRequestMaxBytes", "pdfRangeMaxConcurrent", "pdfRangeMemoryCacheMaxBytes", "comicPageMaxCount", "comicPageMaxBytes", "comicManifestMaxBytes", "comicExpandedMaxBytes", "comicCompressionRatioMax", "audioTrackMaxCount", "audioChapterMaxCount", "audioMetadataMaxBytes", "audioArtworkMaxBytes"],
+      "properties": {
+        "originalMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "binaryResourceMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "archiveEntryMaxCount": {"$ref": "#/$defs/positiveInteger"}, "archiveExpandedMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "archiveEntryMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "archiveCompressionRatioMax": {"$ref": "#/$defs/positiveInteger"}, "xmlControlDocumentMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "reflowableMarkupMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "fb2TextMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "fb2MaxDepth": {"$ref": "#/$defs/positiveInteger"}, "fb2MaxNodes": {"$ref": "#/$defs/positiveInteger"}, "fb2TextMaxCharacters": {"$ref": "#/$defs/positiveInteger"}, "fb2EncodedImageMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "fb2DecodedImageMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "fb2DecodedImagesTotalMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "txtMemoryMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "txtChunkMaxCharacters": {"$ref": "#/$defs/positiveInteger"}, "pdfPageMaxCount": {"$ref": "#/$defs/positiveInteger"}, "pdfRenderMaxPixels": {"$ref": "#/$defs/positiveInteger"}, "pdfCanvasMaxDimension": {"$ref": "#/$defs/positiveInteger"}, "pdfRangeChunkBytes": {"$ref": "#/$defs/positiveInteger"}, "pdfRangeRequestMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "pdfRangeMaxConcurrent": {"$ref": "#/$defs/positiveInteger"}, "pdfRangeMemoryCacheMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "comicPageMaxCount": {"$ref": "#/$defs/positiveInteger"}, "comicPageMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "comicManifestMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "comicExpandedMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "comicCompressionRatioMax": {"$ref": "#/$defs/positiveInteger"}, "audioTrackMaxCount": {"$ref": "#/$defs/positiveInteger"}, "audioChapterMaxCount": {"$ref": "#/$defs/positiveInteger"}, "audioMetadataMaxBytes": {"$ref": "#/$defs/positiveInteger"}, "audioArtworkMaxBytes": {"$ref": "#/$defs/positiveInteger"}
+      }
+    },
+    "positiveInteger": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reflowable", "pdf", "comic", "audio"],
+      "properties": {
+        "reflowable": {"$ref": "#/$defs/reflowableProfile"},
+        "pdf": {"$ref": "#/$defs/pdfProfile"},
+        "comic": {"$ref": "#/$defs/comicProfile"},
+        "audio": {"$ref": "#/$defs/audioProfile"}
+      }
+    },
+    "stringSet": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "doctype": {"type": "object", "additionalProperties": false, "required": ["name", "publicId", "systemId"], "properties": {"name": {"const": "html"}, "publicId": {"type": "string", "minLength": 1}, "systemId": {"type": "string", "format": "uri"}}},
+    "uriAttributePolicy": {"type": "object", "additionalProperties": false, "required": ["elements", "attribute", "syntax", "purpose"], "properties": {"elements": {"$ref": "#/$defs/stringSet"}, "attribute": {"type": "string", "pattern": "^[a-z][a-z0-9:-]*$"}, "syntax": {"enum": ["SCALAR", "SRCSET", "SPACE_SEPARATED", "CSS"]}, "purpose": {"enum": ["SUBRESOURCE", "USER_NAVIGATION", "ALWAYS_REMOVE"]}}},
+    "reflowableProfile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["safeDoctypes", "externalDtdResolution", "rejectInternalSubset", "rejectCustomEntities", "namedEntityCodepoints", "readingOrderMarkupMimeTypes", "embeddedImageExtensionsByMimeType", "sanitizedElements", "sanitizedAttributes", "sanitizedAttributePrefixes", "sanitizedMetaHttpEquivValues", "blockedAuthorSchemes", "remoteSubresourceSchemes", "userNavigationSchemes", "trustedRuntimeSchemes", "uriAttributePolicies", "allowedFontObfuscationAlgorithms", "svgSanitizedElements", "cssTextElements", "cssSanitizedConstructs", "archiveFatalFindings"],
+      "properties": {
+        "safeDoctypes": {"type": "array", "minItems": 4, "items": {"$ref": "#/$defs/doctype"}},
+        "externalDtdResolution": {"const": false}, "rejectInternalSubset": {"const": true}, "rejectCustomEntities": {"const": true},
+        "namedEntityCodepoints": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9]+$"}, "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 1114111}},
+        "readingOrderMarkupMimeTypes": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["application/xhtml+xml", "text/html"]}},
+        "embeddedImageExtensionsByMimeType": {"type": "object", "minProperties": 4, "maxProperties": 4, "propertyNames": {"pattern": "^image/(jpeg|png|gif|webp)$"}, "additionalProperties": {"type": "string", "pattern": "^\.(jpg|png|gif|webp)$"}},
+        "sanitizedElements": {"$ref": "#/$defs/stringSet"}, "sanitizedAttributes": {"$ref": "#/$defs/stringSet"}, "sanitizedAttributePrefixes": {"$ref": "#/$defs/stringSet"}, "sanitizedMetaHttpEquivValues": {"$ref": "#/$defs/stringSet"}, "blockedAuthorSchemes": {"$ref": "#/$defs/stringSet"}, "remoteSubresourceSchemes": {"$ref": "#/$defs/stringSet"}, "userNavigationSchemes": {"$ref": "#/$defs/stringSet"}, "trustedRuntimeSchemes": {"$ref": "#/$defs/stringSet"}, "uriAttributePolicies": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/uriAttributePolicy"}}, "allowedFontObfuscationAlgorithms": {"$ref": "#/$defs/stringSet"}, "svgSanitizedElements": {"$ref": "#/$defs/stringSet"}, "cssTextElements": {"$ref": "#/$defs/stringSet"}, "cssSanitizedConstructs": {"$ref": "#/$defs/stringSet"}, "archiveFatalFindings": {"$ref": "#/$defs/stringSet"}
+      }
+    },
+    "pdfProfile": {"type": "object", "additionalProperties": false, "required": ["blockedActions", "requireFinitePageGeometry", "requireIdentityContentEncoding", "requireStrongRevision", "allowWholeResponseFallback"], "properties": {"blockedActions": {"$ref": "#/$defs/stringSet"}, "requireFinitePageGeometry": {"const": true}, "requireIdentityContentEncoding": {"const": true}, "requireStrongRevision": {"const": true}, "allowWholeResponseFallback": {"const": false}}},
+    "comicProfile": {"type": "object", "additionalProperties": false, "required": ["allowedPageMimeTypes", "pageMimeTypesByExtension", "archiveFatalFindings", "singlePageDecodeFailureAction", "manifestRevisionRequired"], "properties": {"allowedPageMimeTypes": {"type": "array", "minItems": 4, "uniqueItems": true, "items": {"type": "string", "pattern": "^image/(jpeg|png|gif|webp)$"}}, "pageMimeTypesByExtension": {"type": "object", "minProperties": 5, "propertyNames": {"pattern": "^\\.[a-z0-9]+$"}, "additionalProperties": {"type": "string", "pattern": "^image/(jpeg|png|gif|webp)$"}}, "archiveFatalFindings": {"$ref": "#/$defs/stringSet"}, "singlePageDecodeFailureAction": {"const": "BLOCK_RESOURCE"}, "manifestRevisionRequired": {"const": true}}},
+    "audioProfile": {"type": "object", "additionalProperties": false, "required": ["containerMimeTypes", "codecDecision", "blockedRedirectSchemes", "requireFiniteNonNegativeDuration", "requireOrderedTrackIdentity"], "properties": {"containerMimeTypes": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^\\.[a-z0-9]+$"}, "additionalProperties": {"type": "string", "pattern": "^audio/[a-z0-9.+-]+$"}}, "codecDecision": {"const": "ENGINE_CAPABILITY"}, "blockedRedirectSchemes": {"$ref": "#/$defs/stringSet"}, "requireFiniteNonNegativeDuration": {"const": true}, "requireOrderedTrackIdentity": {"const": true}}},
+    "rule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "formats", "stage", "algorithm", "parameterRefs", "action", "errorCode", "requiredConsumers"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.]{2,95}$"}, "formats": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/formatId"}}, "stage": {"$ref": "#/$defs/stage"}, "algorithm": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"}, "parameterRefs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(budgets|profiles|formats)(\\.[A-Za-z][A-Za-z0-9]*)*$"}}, "action": {"enum": ["ALLOW", "SANITIZE", "BLOCK_RESOURCE", "REJECT_PUBLICATION"]}, "errorCode": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}, "requiredConsumers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}}
+      }
+    },
+    "stage": {"enum": ["ADMISSION", "PARSE", "SANITIZE", "RESOURCE", "RENDER", "DELIVERY", "PLAYBACK"]},
+    "platformDefense": {"type": "object", "additionalProperties": false, "required": ["id", "formats", "stage", "requiredConsumers"], "properties": {"id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,95}$"}, "formats": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/formatId"}}, "stage": {"$ref": "#/$defs/stage"}, "requiredConsumers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}}}}
+  }
+}

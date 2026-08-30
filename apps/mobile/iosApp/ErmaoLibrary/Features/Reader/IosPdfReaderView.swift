@@ -1,4 +1,3 @@
-import ReadiumNavigator
 import SwiftUI
 @preconcurrency import ErmaoShared
 
@@ -91,8 +90,6 @@ struct IosPdfReaderView: View {
             .padding(24).foregroundStyle(palette.foreground)
         default:
             if let navigator = session.navigator {
-                PdfNavigatorHost(navigator: navigator).ignoresSafeArea()
-            } else if let navigator = session.pdfiumNavigator {
                 PdfiumNavigatorHost(navigator: navigator).ignoresSafeArea()
             }
         }
@@ -149,12 +146,6 @@ struct IosPageRemoteProgressNotice: View {
             date.formatted(date: .abbreviated, time: .shortened)
         )
     }
-}
-
-private struct PdfNavigatorHost: UIViewControllerRepresentable {
-    let navigator: PDFNavigatorViewController
-    func makeUIViewController(context: Context) -> PDFNavigatorViewController { navigator }
-    func updateUIViewController(_ uiViewController: PDFNavigatorViewController, context: Context) {}
 }
 
 private struct PdfiumNavigatorHost: UIViewControllerRepresentable {

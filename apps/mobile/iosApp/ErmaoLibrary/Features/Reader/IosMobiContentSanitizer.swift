@@ -4,35 +4,33 @@ import Foundation
 enum IosPublicationSecurityError: Error, Sendable {
     case invalidEncoding
     case invalidMarkup
-    case unsafeEntity
-    case sizeLimit
+    case rejected(ruleId: String, errorCode: String)
 }
 
+/// Renderer-only actions for native reflowable readers.
+///
+/// Markup, declaration, URI, and CSS decisions belong to the generated KMP safety
+/// policy. This type only adapts the sanitized result to Readium/WebKit and keeps
+/// the parser projection in sync with the sanitized in-memory document.
 enum IosPublicationSecurityPolicy {
-    static let profile = "ios-v2"
-    private static let maximumMarkupBytes = 64 * 1_024 * 1_024
     private static let contentSecurityPolicy =
         "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; " +
         "frame-src 'none'; child-src 'none'; object-src 'none'; script-src 'none'; " +
-        // Readium serves its own CSS and declared fonts from a separate, local-only asset origin.
-        // Author scripts/network access remain forbidden; do not allow the whole readium: scheme.
         "style-src 'self' readium://assets blob: 'unsafe-inline'; img-src 'self' blob: data:; " +
         "font-src 'self' readium://assets blob: data:; media-src 'self' blob: data:"
-    private static let securityStyle =
-        "iframe,frame,object,embed,applet{display:none!important;}" +
-        "input,button,select,textarea{pointer-events:none!important;}"
-
     private static var securityHead: String {
-        #"<meta http-equiv="Content-Security-Policy" content=""# +
+        let meta = #"<meta http-equiv="Content-Security-Policy" content="# +
             contentSecurityPolicy +
-            #"" data-shuku-security-profile=""# + profile + #""/>"# +
-            #"<style data-shuku-security-profile=""# + profile + #"">"# +
-            securityStyle + "</style>"
+            #""/>"#
+        let selectors = ErmaoShared.PublicKt.readerSafetySanitizedElementSelectors()
+            .joined(separator: ",")
+        let style = selectors.isEmpty ? "" : "<style>\(selectors){display:none!important;}</style>"
+        return meta + style
     }
 
     /// Only for XHTML emitted by the owned TXT/FB2 templates, never original chapters.
-    static func generatedChapter(_ markup: String) -> Data {
-        Data(markup.replacingOccurrences(of: "<head>", with: "<head>" + securityHead).utf8)
+    static func generatedChapter(_ markup: String) throws -> Data {
+        try decorate(data: Data(markup.utf8))
     }
 
     static func isMarkup(_ resource: String) -> Bool {
@@ -43,57 +41,54 @@ enum IosPublicationSecurityPolicy {
     }
 
     static func decorate(data: Data) throws -> Data {
-        guard !data.isEmpty, data.count <= maximumMarkupBytes else {
-            throw IosPublicationSecurityError.sizeLimit
+        guard !data.isEmpty else {
+            throw IosPublicationSecurityError.invalidMarkup
         }
         let markup = try decode(data)
-        _ = try validate(markup)
-        let lexicalMarkup = maskNonMarkup(markup)
-        guard let lexicalOpen = lexicalMarkup.range(
-            of: #"(?i)<(?:[A-Za-z_][\w.-]*:)?head\b[^>]*>"#,
-            options: .regularExpression
-        ), let open = Range(NSRange(lexicalOpen, in: lexicalMarkup), in: markup),
-              let lexicalClose = lexicalMarkup.range(
-                  of: #"(?i)</(?:[A-Za-z_][\w.-]*:)?head\s*>"#,
-                  options: .regularExpression,
-                  range: lexicalOpen.upperBound ..< lexicalMarkup.endIndex
-              ), let close = Range(NSRange(lexicalClose, in: lexicalMarkup), in: markup)
+        let sanitized = try sanitize(markup, sourceByteCount: Int64(data.count))
+        let safeMarkup = sanitized.markup
+        guard let open = HEAD_OPEN.firstMatch(in: safeMarkup),
+              let close = HEAD_CLOSE.firstMatch(in: safeMarkup, after: open.range.upperBound)
         else {
             throw IosPublicationSecurityError.invalidMarkup
         }
-        var safeHead = String(markup[open.upperBound ..< close.lowerBound])
-        safeHead = replacing(
-            #"(?i)<(?:[A-Za-z_][\w.-]*:)?base\b[^>]*(?:/\s*)?>"#,
-            in: safeHead,
-            with: ""
-        )
-        safeHead = replacing(
-            #"(?is)<(?:[A-Za-z_][\w.-]*:)?meta\b(?=[^>]*\bhttp-equiv\s*=\s*[\"'](?:content-security-policy|refresh)[\"'])[^>]*(?:/\s*)?>"#,
-            in: safeHead,
-            with: ""
-        )
-        var result = String(markup[..<open.upperBound]) + securityHead + safeHead + markup[close.lowerBound...]
-        if let declaration = result.range(
-            of: #"(?i)<\?xml\b[^?]*\?>"#,
-            options: .regularExpression
-        ) {
-            let updated = replacing(
-                #"(?i)encoding\s*=\s*[\"'][^\"']+[\"']"#,
-                in: String(result[declaration]),
-                with: #"encoding="utf-8""#
-            )
-            result.replaceSubrange(declaration, with: updated)
-        }
-        let decorated = Data(result.utf8)
-        return decorated
+        let headStart = open.range.upperBound
+        let originalHead = String(safeMarkup[headStart ..< close.range.lowerBound])
+        let viewport = META_TAG.find(in: originalHead).contains { match in
+            NAME.find(in: match.value).contains {
+                $0.groups["value"]?.lowercased() == "viewport"
+            }
+        } ? "" : DEVICE_VIEWPORT
+        let decorated = String(safeMarkup[..<headStart]) + securityHead + viewport + originalHead +
+            String(safeMarkup[close.range.lowerBound...])
+        return Data(normalizeXmlDeclaration(decorated).utf8)
     }
 
     static func locatorBodyProjection(data: Data) throws -> [[String: String]] {
-        try validate(decode(data)).map { element in
+        let markup = try decode(data)
+        let sanitized = try sanitize(markup, sourceByteCount: Int64(data.count))
+        return try parse(sanitized.parserMarkup).map { element in
             var value = ["path": element.path, "localName": element.localName]
             if let id = element.id { value["id"] = id }
             if let text = element.text { value["text"] = text }
             return value
+        }
+    }
+
+    private static func sanitize(
+        _ markup: String,
+        sourceByteCount: Int64
+    ) throws -> ErmaoShared.ReaderSanitizedMarkup {
+        do {
+            return try ErmaoShared.ReaderSafetyFacade().requireSanitizedMarkup(
+                markup: markup,
+                sourceByteCount: sourceByteCount
+            )
+        } catch let error as ErmaoShared.ReaderSafetyException {
+            throw IosPublicationSecurityError.rejected(
+                ruleId: error.failure.ruleId,
+                errorCode: error.failure.errorCode
+            )
         }
     }
 
@@ -115,7 +110,7 @@ enum IosPublicationSecurityPolicy {
                 of: #"(?i)encoding\s*=\s*[\"'](?<encoding>[^\"']+)[\"']"#,
                 options: .regularExpression
             ).map { String(declaration![$0]) } ?? "utf-8"
-            guard encoding.lowercased().contains("utf-8") || encoding == "utf-8" else {
+            guard encoding.lowercased().contains("utf-8") else {
                 throw IosPublicationSecurityError.invalidEncoding
             }
             decoded = String(data: data, encoding: .utf8)
@@ -126,9 +121,7 @@ enum IosPublicationSecurityPolicy {
         return decoded
     }
 
-    private static func validate(_ markup: String) throws -> [LocatorElementProjection] {
-        try validateDeclarations(markup)
-        let parserMarkup = replacingStandardEntitiesForParsing(markup)
+    private static func parse(_ parserMarkup: String) throws -> [LocatorElementProjection] {
         let delegate = StrictXhtmlDelegate()
         let parser = XMLParser(data: Data(parserMarkup.utf8))
         parser.shouldProcessNamespaces = true
@@ -140,74 +133,72 @@ enum IosPublicationSecurityPolicy {
         return delegate.bodyProjection
     }
 
-    private static func validateDeclarations(_ markup: String) throws {
-        let lexicalMarkup = maskNonMarkup(markup)
-        let fullRange = NSRange(location: 0, length: (lexicalMarkup as NSString).length)
-        let entity = try! NSRegularExpression(pattern: #"(?i)<!ENTITY\b"#)
-        guard entity.firstMatch(in: lexicalMarkup, range: fullRange) == nil else {
-            throw IosPublicationSecurityError.unsafeEntity
+    private static func normalizeXmlDeclaration(_ markup: String) -> String {
+        guard let declaration = markup.range(
+            of: #"(?i)<\?xml\b[^?]*\?>"#,
+            options: .regularExpression
+        ) else {
+            return markup
         }
-
-        let opens = try! NSRegularExpression(pattern: #"(?i)<!DOCTYPE\b"#)
-            .matches(in: lexicalMarkup, range: fullRange)
-        guard !opens.isEmpty else { return }
-        let declarations = try! NSRegularExpression(
-            pattern: #"(?is)<!DOCTYPE\b[^>]*>"#
-        ).matches(in: lexicalMarkup, range: fullRange)
-        guard opens.count == 1, declarations.count == 1,
-              opens[0].range.location == declarations[0].range.location
-        else {
-            throw IosPublicationSecurityError.unsafeEntity
-        }
-
-        let declaration = (lexicalMarkup as NSString).substring(with: declarations[0].range)
-        let declarationRange = NSRange(location: 0, length: (declaration as NSString).length)
-        let safeDoctype = try! NSRegularExpression(
-            pattern: #"(?is)\A<!DOCTYPE\s+html\s*(?:PUBLIC\s+[\"']-//W3C//DTD\s+XHTML\s+(?:1\.1|1\.0\s+(?:Strict|Transitional|Frameset))//EN[\"']\s+[\"']https?://www\.w3\.org/TR/(?:xhtml11/DTD/xhtml11\.dtd|xhtml1/DTD/xhtml1-(?:strict|transitional|frameset)\.dtd)[\"'])?\s*>\z"#
+        let replacement = String(markup[declaration]).replacingOccurrences(
+            of: #"(?i)encoding\s*=\s*[\"'][^\"']+[\"']"#,
+            with: #"encoding="utf-8"#,
+            options: .regularExpression
         )
-        let safeMatch = safeDoctype.firstMatch(in: declaration, range: declarationRange)
-        let prefix = (lexicalMarkup as NSString)
-            .substring(to: declarations[0].range.location)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard safeMatch?.range == declarationRange, prefix.isEmpty else {
-            throw IosPublicationSecurityError.unsafeEntity
+        var result = markup
+        result.replaceSubrange(declaration, with: replacement)
+        return result
+    }
+
+    private struct RegexMatch {
+        let range: Range<String.Index>
+        let value: String
+        let groups: [String: String]
+    }
+
+    private struct Regex {
+        let expression: NSRegularExpression
+
+        init(_ pattern: String) {
+            expression = try! NSRegularExpression(pattern: pattern)
+        }
+
+        func firstMatch(in value: String, after: String.Index? = nil) -> RegexMatch? {
+            let start = after?.utf16Offset(in: value) ?? 0
+            let nsRange = NSRange(location: start, length: value.utf16.count - start)
+            guard let match = expression.firstMatch(in: value, range: nsRange),
+                  let range = Range(match.range, in: value)
+            else { return nil }
+            var groups: [String: String] = [:]
+            let valueRange = match.range(withName: "value")
+            if valueRange.location != NSNotFound, let captured = Range(valueRange, in: value) {
+                groups["value"] = String(value[captured])
+            }
+            return RegexMatch(range: range, value: String(value[range]), groups: groups)
+        }
+
+        func find(in value: String) -> [RegexMatch] {
+            expression.matches(
+                in: value,
+                range: NSRange(location: 0, length: value.utf16.count)
+            ).compactMap { match in
+                guard let range = Range(match.range, in: value) else { return nil }
+                var groups: [String: String] = [:]
+                let valueRange = match.range(withName: "value")
+                if valueRange.location != NSNotFound, let captured = Range(valueRange, in: value) {
+                    groups["value"] = String(value[captured])
+                }
+                return RegexMatch(range: range, value: String(value[range]), groups: groups)
+            }
         }
     }
 
-    private static func replacingStandardEntitiesForParsing(_ markup: String) -> String {
-        let lexicalMarkup = maskNonMarkup(markup)
-        let fullRange = NSRange(location: 0, length: (lexicalMarkup as NSString).length)
-        let references = try! NSRegularExpression(pattern: #"&nbsp;"#)
-            .matches(in: lexicalMarkup, range: fullRange)
-        let result = NSMutableString(string: markup)
-        for reference in references.reversed() {
-            result.replaceCharacters(in: reference.range, with: "&#xA0;")
-        }
-        return result as String
-    }
-
-    private static func replacing(_ pattern: String, in source: String, with replacement: String) -> String {
-        source.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
-    }
-
-    private static func maskNonMarkup(_ markup: String) -> String {
-        let masked = NSMutableString(string: markup)
-        let expression = try! NSRegularExpression(
-            pattern: #"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>"#,
-            options: [.dotMatchesLineSeparators]
-        )
-        let matches = expression.matches(
-            in: markup,
-            range: NSRange(location: 0, length: masked.length)
-        )
-        for match in matches.reversed() {
-            masked.replaceCharacters(
-                in: match.range,
-                with: String(repeating: " ", count: match.range.length)
-            )
-        }
-        return masked as String
-    }
+    private static let DEVICE_VIEWPORT =
+        #"<meta name="viewport" content="width=device-width, initial-scale=1.0"/>"#
+    private static let HEAD_OPEN = Regex(#"(?i)<(?:[A-Za-z_][\w.-]*:)?head\b[^>]*>"#)
+    private static let HEAD_CLOSE = Regex(#"(?i)</(?:[A-Za-z_][\w.-]*:)?head\s*>"#)
+    private static let META_TAG = Regex(#"(?i)<(?:[A-Za-z_][\w.-]*:)?meta\b[^>]*(?:/\s*)?>"#)
+    private static let NAME = Regex(#"(?i)\bname\s*=\s*[\"'](?<value>[^\"']+)[\"']"#)
 }
 
 private struct LocatorElementProjection: Equatable {

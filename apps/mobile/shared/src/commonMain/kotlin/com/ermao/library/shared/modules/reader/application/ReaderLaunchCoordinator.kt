@@ -12,22 +12,43 @@ import com.ermao.library.shared.modules.downloads.DownloadTask
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.ReaderDeliveryMode
 import com.ermao.library.shared.modules.reader.domain.ReaderFormatSupport
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFailure
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
 
 /** Admission is not an engine allocation or successful-opening guarantee. */
 object ReaderAdmission {
-    const val maximumPublicationBytes: Long = 2L * 1024 * 1024 * 1024
+    val maximumPublicationBytes: Long =
+        ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
 
     fun accepts(bytes: Long): Boolean = bytes in 0..maximumPublicationBytes
 
     fun localFailure(format: String, bytes: Long): ReaderErrorCode? = when {
         !accepts(bytes) -> ReaderErrorCode.PublicationTooLarge
-        // Both TXT adapters cross the Kotlin String/ByteArray boundary. Do not attempt
-        // an allocation which is known to be unrepresentable, even on 64-bit devices.
-        format.lowercase() in setOf("txt", "fb2") && bytes > Int.MAX_VALUE - 8L ->
+        bytes > localMemoryBudget(format) ->
             ReaderErrorCode.OutOfMemoryRisk
         else -> null
     }
+
+    fun localSafetyFailure(format: String, bytes: Long): ReaderSafetyFailure? = when {
+        !accepts(bytes) ->
+            ReaderSafetyFacade().failureFor(ReaderSafetyRuleId.COMMON_ORIGINAL_MAX_BYTES)
+        ReaderSafetyPolicy.formatPolicy(format)?.id == ReaderSafetyFormat.TXT &&
+            bytes > ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES) ->
+            ReaderSafetyFacade().failureFor(ReaderSafetyRuleId.TXT_MEMORY_BUDGET)
+        else -> null
+    }
+
+    private fun localMemoryBudget(format: String): Long =
+        when (ReaderSafetyPolicy.formatPolicy(format)?.id) {
+            ReaderSafetyFormat.TXT ->
+                ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES)
+            else -> maximumPublicationBytes
+        }
 
     fun progress(received: Long, total: Long): Double {
         require(total > 0 && received in 0..total)
@@ -48,7 +69,10 @@ sealed interface ReaderLaunch {
     }
     data class Local(val artifact: CompletedDownloadArtifact) : ReaderLaunch
     data class Download(val descriptor: DownloadDescriptor) : ReaderLaunch
-    data class Unavailable(val code: ReaderErrorCode) : ReaderLaunch
+    data class Unavailable(
+        val code: ReaderErrorCode,
+        val safetyFailure: ReaderSafetyFailure? = null,
+    ) : ReaderLaunch
 }
 
 /** Resolves fresh authorization and exact asset identity when reachable.
@@ -82,7 +106,10 @@ class ReaderLaunchCoordinator(
                     .filter { descriptor.matches(it.descriptor) }
                     .maxByOrNull { it.completedAtEpochMillis }
                 when {
-                    localFailure != null -> ReaderLaunch.Unavailable(localFailure)
+                    localFailure != null -> ReaderLaunch.Unavailable(
+                        localFailure,
+                        ReaderAdmission.localSafetyFailure(descriptor.format, descriptor.totalBytes),
+                    )
                     local != null -> local(local)
                     descriptor.deliveryMode() == ReaderDeliveryMode.DownloadOriginal -> ReaderLaunch.Download(descriptor)
                     descriptor.deliveryMode() == ReaderDeliveryMode.Stream -> ReaderLaunch.Stream(descriptor)
@@ -108,7 +135,10 @@ class ReaderLaunchCoordinator(
         val descriptor = artifact.descriptor
         val failure = ReaderAdmission.localFailure(descriptor.format, descriptor.totalBytes)
         return when {
-            failure != null -> ReaderLaunch.Unavailable(failure)
+            failure != null -> ReaderLaunch.Unavailable(
+                failure,
+                ReaderAdmission.localSafetyFailure(descriptor.format, descriptor.totalBytes),
+            )
             !ReaderFormatSupport.canReadOriginal(descriptor.readerType.name.lowercase(), descriptor.format) ->
                 ReaderLaunch.Unavailable(ReaderErrorCode.UnsupportedFormat)
             else -> ReaderLaunch.Local(artifact)

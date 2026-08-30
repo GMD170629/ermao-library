@@ -51,6 +51,7 @@ export type ComicAdapterOptions = {
   onInputIntent?: ReaderAdapterInputHandler;
   pageUrl?: (context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) => string;
   initialPages?: ComicPageMeta[];
+  revision: string;
   onViewModel?: (model: ComicViewModel) => void;
   onEndOfResource?: () => void;
 };
@@ -59,9 +60,15 @@ function clampPage(page: number, pageCount: number) {
   return Math.max(0, Math.min(Math.max(0, pageCount - 1), Math.round(Number.isFinite(page) ? page : 0)));
 }
 
-function defaultPageUrl(context: ReaderAdapterOpenContext, pageIndex: number, preferences: ReaderPreferences, retry: number) {
+function defaultPageUrl(
+  context: ReaderAdapterOpenContext,
+  pageIndex: number,
+  preferences: ReaderPreferences,
+  retry: number,
+  revision: string
+) {
   if (context.source.kind !== 'comic') throw new Error('COMIC_SOURCE_INVALID');
-  const parameters = new URLSearchParams({ imageVariant: preferences.comic.imageVariant });
+  const parameters = new URLSearchParams({ imageVariant: preferences.comic.imageVariant, revision });
   if (retry > 0) parameters.set('retry', String(retry));
   return `${context.source.comicPageUrlTemplate.replace('{pageIndex}', encodeURIComponent(String(pageIndex)))}?${parameters}`;
 }
@@ -70,6 +77,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private readonly container: HTMLElement;
   private readonly pageUrl: NonNullable<ComicAdapterOptions['pageUrl']>;
   private readonly initialPages?: ComicPageMeta[];
+  private readonly revision: string;
   private readonly onEndOfResource?: ComicAdapterOptions['onEndOfResource'];
   private readonly onInputIntent?: ComicAdapterOptions['onInputIntent'];
   private readonly track: ComicSpreadTrackDriver;
@@ -148,7 +156,11 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   constructor(options: ComicAdapterOptions) {
     super();
     this.container = options.container;
-    this.pageUrl = options.pageUrl ?? defaultPageUrl;
+    if (!/^sha256:[a-f0-9]{64}$/.test(options.revision)) throw new Error('READER_COMIC_MANIFEST_INVALID');
+    this.revision = options.revision;
+    this.pageUrl = options.pageUrl ?? ((context, pageIndex, preferences, retry) => (
+      defaultPageUrl(context, pageIndex, preferences, retry, this.revision)
+    ));
     this.initialPages = options.initialPages;
     this.onEndOfResource = options.onEndOfResource;
     this.onInputIntent = options.onInputIntent;
@@ -617,7 +629,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         return {
           pageIndex: page,
           ...this.pageMeta.get(page),
-          url: this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0)
+          url: this.pageSource(page)
         };
       })
     });
@@ -646,10 +658,12 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     const context = this.openContext;
     const preferences = this.preferences;
     if (!context || !preferences) throw new StaleReaderOperationError();
+    if (this.pageMeta.get(page)?.safetyError) return '';
     return this.pageUrl(context, page, preferences, this.retryCounts.get(page) ?? 0);
   }
 
   private retryPage(page: number) {
+    if (this.pageMeta.get(page)?.safetyError) return;
     this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
     if (this.preferences?.comic.flow === 'scrolled') this.renderContinuous();
     else this.track.render();

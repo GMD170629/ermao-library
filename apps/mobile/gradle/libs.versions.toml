@@ -19,6 +19,7 @@ junit4 = "4.13.2"
 desugar-jdk-libs = "2.1.5"
 readium = "3.3.0"
 jsoup = "1.22.2"
+commons-compress = "1.27.1"
 android-compile-sdk = "36"
 android-min-sdk = "26"
 android-target-sdk = "36"
@@ -64,6 +65,7 @@ readium-streamer = { module = "org.readium.kotlin-toolkit:readium-streamer", ver
 readium-navigator = { module = "org.readium.kotlin-toolkit:readium-navigator", version.ref = "readium" }
 readium-adapter-pdfium = { module = "org.readium.kotlin-toolkit:readium-adapter-pdfium", version.ref = "readium" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

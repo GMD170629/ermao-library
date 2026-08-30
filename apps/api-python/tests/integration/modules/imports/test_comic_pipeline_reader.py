@@ -124,12 +124,24 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     )
     assert manifest_response.status_code == 200, manifest_response.text
     manifest = manifest_response.json()["data"]
+    assert manifest["schemaVersion"] == 2
     assert manifest["kind"] == "comic"
     assert manifest["sourceFormat"] == "cbz"
     assert len(manifest["readingOrder"]) == 2
+    assert manifest["revision"].startswith("sha256:")
 
-    page_response = client.get(f"/api/reader/v4/resources/{resource.id}/comic/pages/0")
+    stale_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        params={"revision": "sha256:" + "0" * 64},
+    )
+    assert stale_response.status_code == 412
+    assert stale_response.json()["error"]["code"] == "COMIC_RESOURCE_CHANGED"
+    page_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        params={"revision": manifest["revision"]},
+    )
     assert page_response.status_code == 200, page_response.text
+    assert page_response.headers["x-comic-revision"] == manifest["revision"]
     assert page_response.headers["content-type"].startswith("image/")
     assert page_response.content
 
@@ -184,13 +196,17 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     )
     assert manifest_response.status_code == 200, manifest_response.text
     manifest = manifest_response.json()["data"]
+    assert manifest["schemaVersion"] == 2
     assert manifest["sourceFormat"] == "image_dir"
     assert [page["title"] for page in manifest["readingOrder"]] == [
         "page2.png",
         "page10.png",
     ]
 
-    page_response = client.get(f"/api/reader/v4/resources/{resource.id}/comic/pages/0")
+    page_response = client.get(
+        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        params={"revision": manifest["revision"]},
+    )
     assert page_response.status_code == 200, page_response.text
     assert page_response.headers["content-type"].startswith("image/")
     assert page_response.content

@@ -3,6 +3,12 @@
 Status: Superseded in Mobile identity and persistence terms by ADR 0020; exact-location semantics remain accepted
 Date: 2026-08-14
 
+Safety note (2026-08-31): ADR 0026 supersedes this ADR's requirement that a
+platform security adapter never alter author `body` content. Exact-location and
+source-byte preservation remain accepted, but contract-directed `SANITIZE`
+actions may remove dangerous authored nodes, attributes and references from the
+in-memory Publication. They never mutate or persist a derived original.
+
 ## Context
 
 Reader v4 has not been released and has no production data. Its earlier design

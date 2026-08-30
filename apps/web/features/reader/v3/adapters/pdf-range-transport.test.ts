@@ -3,11 +3,13 @@ import test from 'node:test';
 import {
   PDF_RANGE_CHUNK_BYTES,
   PDF_RANGE_MAX_REQUEST_BYTES,
+  READER_SAFETY_RULE_IDS,
   planPdfByteRanges
 } from '@shuku/reader-core';
 import { PdfRangeByteSource, PdfRangeError, type PdfRangeAccess } from './pdf-range-transport';
+import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 
-const ETAG = 'W/"2097135-1786742400"';
+const ETAG = '"2097135-1786742400"';
 
 function fixtureBytes(chunkCount = 8) {
   const bytes = new Uint8Array(PDF_RANGE_CHUNK_BYTES * chunkCount - 17);
@@ -28,6 +30,8 @@ function rangeResponse(bytes: Uint8Array, init?: RequestInit) {
   const headers = new Headers({
     'Accept-Ranges': 'bytes',
     ETag: ETAG,
+    'Content-Type': 'application/pdf',
+    'Content-Encoding': 'identity',
     'Content-Length': String(bytes.byteLength)
   });
   if (init?.method === 'HEAD') return new Response(null, { status: 200, headers });
@@ -91,23 +95,53 @@ test('uses only validated 206 responses and reuses cached chunks', async () => {
   assert.ok(metrics.firstByteMilliseconds !== null && metrics.firstByteMilliseconds >= 0);
 });
 
-test('weak ETag never becomes an If-Range validator and oversized reads send no request', async () => {
+test('strong ETag becomes the If-Range validator and oversized reads send no extra request', async () => {
   const bytes = fixtureBytes();
   let requests = 0;
   const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
     if (init?.method !== 'HEAD') {
       requests += 1;
-      assert.equal(new Headers(init?.headers).get('If-Range'), null);
+      assert.equal(new Headers(init?.headers).get('If-Range'), ETAG);
     }
     return rangeResponse(bytes, init);
   });
   await source.prepare(new AbortController().signal);
-  await assert.rejects(source.read(0, PDF_RANGE_MAX_REQUEST_BYTES + 1), { code: 'PDF_RANGE_INVALID' });
+  await assert.rejects(
+    source.read(0, PDF_RANGE_MAX_REQUEST_BYTES + 1),
+    (reason: unknown) => reason instanceof PdfRangeError
+      && reason.code === 'PDF_RANGE_INVALID'
+      && reason.ruleId === READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL
+  );
   assert.equal(requests, 1);
   source.abort();
 });
 
-test('rejects a silent full-file fallback with PDF_RANGE_UNSUPPORTED', async () => {
+test('HEAD admission rejects weak revisions and wrong MIME through their generated rules', async () => {
+  const bytes = fixtureBytes();
+  const weakRevision = new PdfRangeByteSource(access(bytes), async (_input, init) => {
+    const response = rangeResponse(bytes, init);
+    response.headers.set('ETag', `W/${ETAG}`);
+    return response;
+  });
+  await assert.rejects(
+    weakRevision.prepare(new AbortController().signal),
+    (reason: unknown) => reason instanceof PdfRangeError
+      && reason.ruleId === READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL
+  );
+
+  const wrongMime = new PdfRangeByteSource(access(bytes), async (_input, init) => {
+    const response = rangeResponse(bytes, init);
+    response.headers.set('Content-Type', 'application/octet-stream');
+    return response;
+  });
+  await assert.rejects(
+    wrongMime.prepare(new AbortController().signal),
+    (reason: unknown) => reason instanceof ReaderSafetyPolicyError
+      && reason.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
+  );
+});
+
+test('rejects a silent full-file fallback through the generated PDF Range rule', async () => {
   const bytes = fixtureBytes(2);
   const source = new PdfRangeByteSource(access(bytes), async (_input, init) => {
     if (init?.method === 'HEAD') return rangeResponse(bytes, init);
@@ -118,7 +152,9 @@ test('rejects a silent full-file fallback with PDF_RANGE_UNSUPPORTED', async () 
   });
   await assert.rejects(
     source.prepare(new AbortController().signal),
-    (reason: unknown) => reason instanceof PdfRangeError && reason.code === 'PDF_RANGE_UNSUPPORTED'
+    (reason: unknown) => reason instanceof PdfRangeError
+      && reason.code === 'PDF_RANGE_INVALID'
+      && reason.ruleId === READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL
   );
 });
 

@@ -1,9 +1,13 @@
 package com.ermao.library.shared.modules.reader.domain
 
-const val PDF_RANGE_CHUNK_BYTES: Int = 256 * 1024
-const val PDF_RANGE_MAX_REQUEST_BYTES: Int = 1024 * 1024
-const val PDF_RANGE_MAX_CONCURRENT_REQUESTS: Int = 2
-const val PDF_RANGE_MEMORY_CACHE_BYTES: Int = 8 * 1024 * 1024
+val PDF_RANGE_CHUNK_BYTES: Int =
+    ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RANGE_CHUNK_BYTES).toBoundedInt()
+val PDF_RANGE_MAX_REQUEST_BYTES: Int =
+    ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RANGE_REQUEST_MAX_BYTES).toBoundedInt()
+val PDF_RANGE_MAX_CONCURRENT_REQUESTS: Int =
+    ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RANGE_MAX_CONCURRENT).toBoundedInt()
+val PDF_RANGE_MEMORY_CACHE_BYTES: Int =
+    ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RANGE_MEMORY_CACHE_MAX_BYTES).toBoundedInt()
 
 typealias PdfReaderErrorCode = ReaderErrorCode
 
@@ -42,4 +46,9 @@ fun planPdfByteRanges(begin: Long, endExclusive: Long, length: Long): List<PdfBy
 
 private fun lengthPrefixed(vararg values: String): String = buildString {
     values.forEach { value -> append(value.length).append(':').append(value) }
+}
+
+private fun Long.toBoundedInt(): Int {
+    require(this in 1..Int.MAX_VALUE.toLong())
+    return toInt()
 }

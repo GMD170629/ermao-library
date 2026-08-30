@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.local/contracts/reader-safety-fixture-manifest-v1.schema.json",
+  "title": "Reader safety conformance fixture manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "policyId", "policyVersion", "policyDigest", "cases"],
+  "properties": {
+    "$schema": {"const": "../../schemas/reader-safety-fixture-manifest-v1.schema.json"},
+    "schemaVersion": {"const": 1},
+    "policyId": {"const": "shuku.reader-safety"},
+    "policyVersion": {"type": "integer", "minimum": 1},
+    "policyDigest": {"$ref": "#/$defs/sha256"},
+    "cases": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/case"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "consumer": {"enum": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "format", "input", "inputSha256", "requiredConsumers", "expected"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"},
+        "format": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,31}$", "not": {"const": "KINDLE"}},
+        "input": {"type": "string"},
+        "inputSha256": {"$ref": "#/$defs/sha256"},
+        "requiredConsumers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/consumer"}},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["triggered", "action", "terminalRuleId", "errorCode", "orderedRuleEvents", "semanticProjection", "semanticProjectionSha256"],
+      "properties": {
+        "triggered": {"type": "boolean"},
+        "action": {"enum": ["ALLOW", "SANITIZE", "BLOCK_RESOURCE", "REJECT_PUBLICATION"]},
+        "terminalRuleId": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.]{2,95}$"},
+        "errorCode": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{2,95}$"},
+        "orderedRuleEvents": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "semanticProjection": {"type": ["string", "null"]},
+        "semanticProjectionSha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]}
+      }
+    }
+  }
+}

@@ -58,7 +58,9 @@ docs/testing/screenshots/
 /build/
 /NUL/
 classes.jar
-apps/mobile/native/pdfium/artifacts/
+# Android PDFium acceptance artifacts are repository inputs and are tracked via Git LFS.
+# iOS remains local until the physical-device freeze gate is complete.
+apps/mobile/native/pdfium/artifacts/ios/
 apps/mobile/design-qa/evidence/*.xml
 apps/mobile/design-qa/android-warm-page-v2/__pycache__/
 apps/mobile/design-qa/android-warm-page-v2/runs/**/*.png

@@ -8498,7 +8498,7 @@
         }
       }
     },
-    "reader.error.DRM_PROTECTED": {
+    "reader.error.PUBLICATION_DRM_UNSUPPORTED": {
       "localizations": {
         "en": {
           "stringUnit": {
@@ -8623,22 +8623,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "PDF 缓存读写失败。"
-          }
-        }
-      }
-    },
-    "reader.error.PDF_ENCRYPTED": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Encrypted or password-protected PDFs are not supported."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "加密或密码保护的 PDF 暂不支持阅读。"
           }
         }
       }
@@ -11684,7 +11668,7 @@
         }
       }
     },
-    "reader.error.READER_PUBLICATION_TOO_LARGE": {
+    "reader.error.PUBLICATION_TOO_LARGE": {
       "localizations": {
         "en": {
           "stringUnit": {

@@ -23,48 +23,76 @@ struct IosImageDirectoryBundle: Sendable {
         }
         let manifestURL = directory.appendingPathComponent("bundle.json")
         let manifestValues = try manifestURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        let maximumManifestBytes = ErmaoShared.PublicKt.readerSafetyComicManifestMaxBytes()
         guard manifestValues.isRegularFile == true, manifestValues.isSymbolicLink != true,
-              let manifestSize = manifestValues.fileSize, manifestSize > 0, manifestSize <= 2 * 1_024 * 1_024 else {
+              let manifestSize = manifestValues.fileSize, manifestSize > 0,
+              Int64(manifestSize) <= maximumManifestBytes else {
             throw IosReaderFailure(code: .corruptFile)
         }
         let manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL))
+        let maximumPageCount = ErmaoShared.PublicKt.readerSafetyComicPageMaxCount()
+        let maximumExpandedBytes = ErmaoShared.PublicKt.readerSafetyComicExpandedMaxBytes()
+        var declaredTotalBytes: Int64 = 0
+        for member in manifest.members {
+            let (nextTotal, overflow) = declaredTotalBytes.addingReportingOverflow(member.sizeBytes)
+            guard !overflow else { throw IosReaderFailure(code: .corruptFile) }
+            declaredTotalBytes = nextTotal
+        }
         guard manifest.contractVersion == 4,
               manifest.artifactKind == "OriginalPageSet",
               manifest.resourceId == expectedResourceID,
               !manifest.artifactId.isEmpty,
               !manifest.members.isEmpty,
-              manifest.members.count <= 20_000,
+              Int64(manifest.members.count) <= maximumPageCount,
               manifest.members.map(\.sequenceIndex) == Array(manifest.members.indices),
               Set(manifest.members.map(\.assetId)).count == manifest.members.count,
-              manifest.members.reduce(Int64(0), { $0 + $1.sizeBytes }) == manifest.totalBytes,
-              manifest.totalBytes > 0, manifest.totalBytes <= 4 * 1_024 * 1_024 * 1_024 else {
+              declaredTotalBytes == manifest.totalBytes,
+              manifest.totalBytes > 0, manifest.totalBytes <= maximumExpandedBytes else {
             throw IosReaderFailure(code: .corruptFile)
         }
         let root = directory.standardizedFileURL.resolvingSymlinksInPath()
-        let mapped = try manifest.members.map { member -> Member in
+        let unresolvedRoot = directory.standardizedFileURL
+        let maximumPageBytes = ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes()
+        let allowedMimeTypes = Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes())
+        var mapped: [Member] = []
+        for member in manifest.members {
             guard !member.assetId.isEmpty,
-                  member.sizeBytes > 0, member.sizeBytes <= 64 * 1_024 * 1_024,
-                  ["image/jpeg", "image/png", "image/gif", "image/webp"].contains(member.mimeType),
                   !member.fileName.isEmpty, !member.fileName.hasPrefix("."),
                   !member.fileName.contains("/"), !member.fileName.contains("\\") else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-            let fileURL = root.appendingPathComponent(member.fileName).standardizedFileURL.resolvingSymlinksInPath()
-            guard fileURL.deletingLastPathComponent() == root else { throw IosReaderFailure(code: .corruptFile) }
-            let fileValues = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-            guard fileValues.isRegularFile == true, fileValues.isSymbolicLink != true,
-                  Int64(fileValues.fileSize ?? -1) == member.sizeBytes,
-                  Self.detectImageMime(fileURL) == member.mimeType else {
+            let unresolvedFileURL = unresolvedRoot.appendingPathComponent(member.fileName).standardizedFileURL
+            guard unresolvedFileURL.deletingLastPathComponent() == unresolvedRoot else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-            return Member(
+            guard member.sizeBytes > 0 else { throw IosReaderFailure(code: .corruptFile) }
+            guard member.sizeBytes <= maximumPageBytes,
+                  allowedMimeTypes.contains(member.mimeType) else {
+                // Page byte and MIME findings are BLOCK_RESOURCE decisions.
+                continue
+            }
+            let fileValues = try unresolvedFileURL.resourceValues(
+                forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+            )
+            guard fileValues.isRegularFile == true,
+                  fileValues.isSymbolicLink != true,
+                  Int64(fileValues.fileSize ?? -1) == member.sizeBytes else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            let fileURL = unresolvedFileURL.resolvingSymlinksInPath()
+            guard fileURL.deletingLastPathComponent() == root else {
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            guard Self.detectImageMime(fileURL) == member.mimeType else { continue }
+            mapped.append(Member(
                 assetID: member.assetId,
-                sequenceIndex: member.sequenceIndex,
+                sequenceIndex: mapped.count,
                 mimeType: member.mimeType,
                 sizeBytes: member.sizeBytes,
                 fileURL: fileURL
-            )
+            ))
         }
+        guard !mapped.isEmpty else { throw IosReaderFailure(code: .corruptFile) }
         resourceID = manifest.resourceId
         artifactID = manifest.artifactId
         totalBytes = manifest.totalBytes
@@ -88,12 +116,23 @@ struct IosImageDirectoryBundle: Sendable {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: 16) else { return nil }
-        if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF { return "image/jpeg" }
-        if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
-        if data.count >= 6, String(data: data.prefix(6), encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true { return "image/gif" }
-        if data.count >= 12, String(data: data.prefix(4), encoding: .ascii) == "RIFF",
-           String(data: data[8 ..< 12], encoding: .ascii) == "WEBP" { return "image/webp" }
-        return nil
+        let fileExtension: String?
+        if data.count >= 3, data[0] == 0xFF, data[1] == 0xD8, data[2] == 0xFF {
+            fileExtension = ".jpg"
+        } else if data.starts(with: [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+            fileExtension = ".png"
+        } else if data.count >= 6,
+                  String(data: data.prefix(6), encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true {
+            fileExtension = ".gif"
+        } else if data.count >= 12, String(data: data.prefix(4), encoding: .ascii) == "RIFF",
+                  String(data: data[8 ..< 12], encoding: .ascii) == "WEBP" {
+            fileExtension = ".webp"
+        } else {
+            fileExtension = nil
+        }
+        return fileExtension.flatMap {
+            ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: $0)
+        }
     }
 
     private struct Manifest: Codable {
@@ -161,7 +200,9 @@ struct IosImageDirectoryPublicationFactory {
             guard let mediaType = MediaType(page.mediaType) else { return nil }
             return Link(href: page.resourceHref, mediaType: mediaType, title: page.title)
         }
-        guard links.count == pages.count else { throw IosReaderFailure(code: .corruptFile) }
+        guard links.count == pages.count,
+              let fallbackMediaType = pages.first.flatMap({ MediaType($0.mediaType) })
+        else { throw IosReaderFailure(code: .corruptFile) }
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
@@ -177,7 +218,7 @@ struct IosImageDirectoryPublicationFactory {
             ),
             container: container,
             servicesBuilder: PublicationServicesBuilder(
-                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: MediaType("image/*")!)
+                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: fallbackMediaType)
             )
         )
         return IosOpenedReadiumPublication(publication: publication) { publication.close() }

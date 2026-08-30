@@ -7,6 +7,9 @@ import com.ermao.library.shared.modules.downloads.DownloadArtifactKind
 import com.ermao.library.shared.modules.downloads.DownloadBundleMemberSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadSinkRequest
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
 import java.nio.file.Files
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
@@ -88,6 +91,49 @@ class AtomicDownloadFileSinkTest {
             bundle.abort()
 
             assertFalse(root.walkTopDown().any { it.name == "bundle.json" || it.name.endsWith(".bundle") })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun originalPageSetSinkEnforcesGeneratedComicBudgetsAndMimePolicy() = runTest {
+        val root = Files.createTempDirectory("download-page-set-policy-test").toFile()
+        try {
+            val sink = AtomicDownloadFileSink(root)
+            fun request(memberCount: Int, expectedTotalBytes: Long) = DownloadBundleSinkRequest(
+                namespace = DownloadNamespace("server", "user", 1),
+                taskId = "task-$memberCount-$expectedTotalBytes",
+                resourceId = "resource",
+                artifactId = "page-set:resource",
+                artifactKind = DownloadArtifactKind.OriginalPageSet,
+                memberCount = memberCount,
+                expectedTotalBytes = expectedTotalBytes,
+            )
+
+            assertFailsWith<IllegalArgumentException> {
+                sink.beginBundle(request(readerSafetyComicPageMaxCount().toInt() + 1, 1))
+            }
+            assertFailsWith<IllegalArgumentException> {
+                sink.beginBundle(request(1, readerSafetyComicExpandedMaxBytes() + 1))
+            }
+            val invalidMime = sink.beginBundle(request(1, 1))
+            assertFailsWith<IllegalArgumentException> {
+                invalidMime.beginMember(DownloadBundleMemberSinkRequest("page", 0, "image/svg+xml", 1))
+            }
+            invalidMime.abort()
+            val oversizedPage = sink.beginBundle(request(1, readerSafetyComicPageMaxBytes() + 1))
+            assertFailsWith<IllegalArgumentException> {
+                oversizedPage.beginMember(
+                    DownloadBundleMemberSinkRequest(
+                        "page",
+                        0,
+                        "image/png",
+                        readerSafetyComicPageMaxBytes() + 1,
+                    ),
+                )
+            }
+            oversizedPage.abort()
         } finally {
             root.deleteRecursively()
         }

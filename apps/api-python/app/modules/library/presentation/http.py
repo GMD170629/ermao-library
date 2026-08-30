@@ -332,10 +332,16 @@ def _publication_navigation_error(error: Exception):
             code="PUBLICATION_UNSUPPORTED",
         )
     if isinstance(error, PublicationResourceTooLargeError):
+        code = getattr(error, "code", "PUBLICATION_RESOURCE_TOO_LARGE")
+        rule_id = getattr(error, "rule_id", None)
+        corrupt_params: dict[str, object] | None = (
+            {"ruleId": rule_id} if isinstance(rule_id, str) else None
+        )
         return fail(
             "图书文件超过可解析大小限制",
             status_code=413,
-            code="PUBLICATION_RESOURCE_TOO_LARGE",
+            code=code,
+            params=corrupt_params,
         )
     if isinstance(error, PublicationReadError):
         return fail(
@@ -344,8 +350,17 @@ def _publication_navigation_error(error: Exception):
             code="PUBLICATION_READ_FAILED",
         )
     if isinstance(error, PublicationCorruptError):
-        code = getattr(error, "code", "PUBLICATION_CORRUPT")
-        return fail("图书文件无法解析", status_code=422, code=code)
+        code = getattr(error, "code", PublicationCorruptError.code)
+        rule_id = getattr(error, "rule_id", None)
+        params: dict[str, object] | None = (
+            {"ruleId": rule_id} if isinstance(rule_id, str) else None
+        )
+        return fail(
+            "图书文件无法解析",
+            status_code=422,
+            code=code,
+            params=params,
+        )
     return fail("图书目录解析失败", status_code=422, code="PUBLICATION_PARSE_FAILED")
 
 

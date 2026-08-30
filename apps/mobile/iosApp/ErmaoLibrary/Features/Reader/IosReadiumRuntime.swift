@@ -28,11 +28,7 @@ final class IosReadiumRuntime {
         let retriever = AssetRetriever(httpClient: httpClient)
         assetRetriever = retriever
         publicationOpener = PublicationOpener(
-            parser: DefaultPublicationParser(
-                httpClient: httpClient,
-                assetRetriever: retriever,
-                pdfFactory: DefaultPDFDocumentFactory()
-            ),
+            parser: EPUBParser(),
             contentProtections: [],
             onCreatePublication: secureEpubPublication
         )
@@ -50,6 +46,8 @@ final class IosReadiumRuntime {
                 return IosOpenedReadiumPublication(publication: publication) { publication.close() }
             } catch IosTxtPublicationError.invalidEncoding {
                 throw IosReaderFailure(code: .txtEncodingUnsupported)
+            } catch let error as IosPublicationSecurityError {
+                throw IosReaderFailure.security(error)
             } catch let failure as IosReaderFailure {
                 throw failure
             } catch {
@@ -63,53 +61,23 @@ final class IosReadiumRuntime {
                 return IosOpenedReadiumPublication(publication: publication) { publication.close() }
             } catch IosFb2PublicationError.limitExceeded {
                 throw IosReaderFailure(code: .outOfMemoryRisk)
+            } catch let error as IosPublicationSecurityError {
+                throw IosReaderFailure.security(error)
             } catch let failure as IosReaderFailure {
                 throw failure
             } catch {
                 throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
             }
-        case .pdf:
-            return try await openPDF(managed)
         default:
             throw IosReaderFailure(code: .unsupportedFormat)
         }
-    }
-
-    private func openPDF(_ managed: IosManagedPublication) async throws -> IosOpenedReadiumPublication {
-        guard let fileURL = FileURL(url: managed.fileURL) else {
-            throw IosReaderFailure(code: .resourceMissing)
-        }
-        let asset: ReadiumShared.Asset
-        switch await assetRetriever.retrieve(url: fileURL) {
-        case let .success(value): asset = value
-        case let .failure(error): throw IosReaderFailure(code: .engineError, underlyingError: error as NSError)
-        }
-        let publication: Publication
-        switch await publicationOpener.open(asset: asset, allowUserInteraction: false) {
-        case let .success(value): publication = value
-        case let .failure(error):
-            switch error {
-            case .formatNotSupported:
-                throw IosReaderFailure(code: .unsupportedFormat)
-            case .reading:
-                throw IosReaderFailure(code: .parseFailed, underlyingError: error as NSError)
-            }
-        }
-        guard publication.conforms(to: .pdf) else {
-            publication.close()
-            throw IosReaderFailure(code: .unsupportedFormat)
-        }
-        guard !publication.isRestricted else {
-            publication.close()
-            throw IosReaderFailure(code: .drmProtected)
-        }
-        return IosOpenedReadiumPublication(publication: publication) { publication.close() }
     }
 
     private func openEPUB(_ managed: IosManagedPublication) async throws -> IosOpenedReadiumPublication {
         guard let fileURL = FileURL(url: managed.fileURL) else {
             throw IosReaderFailure(code: .resourceMissing)
         }
+        try await IosEpubArchiveSafetyPreflight.verify(fileURL: managed.fileURL)
         let asset: ReadiumShared.Asset
         switch await assetRetriever.retrieve(url: fileURL) {
         case let .success(value): asset = value
@@ -126,7 +94,7 @@ final class IosReadiumRuntime {
         }
         guard !publication.isRestricted else {
             publication.close()
-            throw IosReaderFailure(code: .drmProtected)
+            throw IosReaderFailure.safety(ErmaoShared.PublicKt.readerSafetyDrmFailure())
         }
         return IosOpenedReadiumPublication(publication: publication) {
             publication.close()
@@ -146,7 +114,15 @@ final class IosReadiumRuntime {
                 await result.close()
             }
         } catch let error as IosMobiCoreError {
+            if error.status == .drmProtected {
+                throw IosReaderFailure.safety(
+                    ErmaoShared.PublicKt.readerSafetyDrmFailure(),
+                    underlyingError: error as NSError
+                )
+            }
             throw IosReaderFailure(code: Self.failureCode(error.status), underlyingError: error as NSError)
+        } catch let error as IosPublicationSecurityError {
+            throw IosReaderFailure.security(error)
         } catch let error as IosMobiPublicationError {
             switch error {
             case .closed, .invalidResourceIndex, .invalidResourcePath,
@@ -163,7 +139,7 @@ final class IosReadiumRuntime {
     private static func failureCode(_ status: IosMobiCoreStatus) -> IosReaderFailureCode {
         switch status {
         case .drmProtected:
-            .drmProtected
+            .engineError
         case .unsupported:
             .unsupportedFormat
         case .limitExceeded, .outOfMemory:

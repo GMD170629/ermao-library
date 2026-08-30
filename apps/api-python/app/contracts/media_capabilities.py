@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePosixPath
+
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_FORMATS,
+    ReaderSafetyMorphology,
+    reader_safety_comic_page_mime_type,
+    reader_safety_format_policy,
+)
 
 
 class ReaderType(StrEnum):
@@ -26,57 +32,21 @@ class MediaFormatCapability:
     preparation: PublicationPreparation = PublicationPreparation.READY
 
 
+_READER_TYPE_BY_MORPHOLOGY = {
+    ReaderSafetyMorphology.REFLOWABLE: ReaderType.REFLOWABLE,
+    ReaderSafetyMorphology.COMIC: ReaderType.COMIC,
+    ReaderSafetyMorphology.PDF: ReaderType.PDF,
+    ReaderSafetyMorphology.AUDIO: ReaderType.AUDIO,
+}
 _FORMAT_CAPABILITIES = {
-    capability.source_format: capability
-    for capability in (
-        MediaFormatCapability("EPUB", ReaderType.REFLOWABLE),
-        MediaFormatCapability("MOBI", ReaderType.REFLOWABLE),
-        MediaFormatCapability("AZW", ReaderType.REFLOWABLE),
-        MediaFormatCapability("AZW3", ReaderType.REFLOWABLE),
-        MediaFormatCapability("PRC", ReaderType.REFLOWABLE),
-        MediaFormatCapability("TXT", ReaderType.REFLOWABLE),
-        MediaFormatCapability("FB2", ReaderType.REFLOWABLE),
-        MediaFormatCapability("CBZ", ReaderType.COMIC),
-        MediaFormatCapability("ZIP", ReaderType.COMIC),
-        MediaFormatCapability("CBR", ReaderType.COMIC),
-        MediaFormatCapability("RAR", ReaderType.COMIC),
-        MediaFormatCapability("IMAGE_DIR", ReaderType.COMIC),
-        MediaFormatCapability("PDF", ReaderType.PDF),
-        MediaFormatCapability("AUDIO", ReaderType.AUDIO),
-        MediaFormatCapability("AUDIOBOOK", ReaderType.AUDIO),
-        MediaFormatCapability("AUDIOBOOK_DIR", ReaderType.AUDIO),
-        MediaFormatCapability("M4B", ReaderType.AUDIO),
-        MediaFormatCapability("M4A", ReaderType.AUDIO),
-        MediaFormatCapability("MP3", ReaderType.AUDIO),
+    format_policy.id.value: MediaFormatCapability(
+        format_policy.id.value,
+        _READER_TYPE_BY_MORPHOLOGY[format_policy.morphology],
     )
+    for format_policy in READER_SAFETY_FORMATS.values()
 }
 _KINDLE_SEND = frozenset({"EPUB", "PDF"})
 _GENERIC_MIME_TYPES = frozenset({"", "application/octet-stream", "binary/octet-stream"})
-_CANONICAL_PUBLICATION_MIME_TYPES: dict[str, str] = {
-    "EPUB": "application/epub+zip",
-    "MOBI": "application/x-mobipocket-ebook",
-    "AZW": "application/vnd.amazon.ebook",
-    "AZW3": "application/vnd.amazon.ebook",
-    "PRC": "application/x-mobipocket-ebook",
-    "TXT": "text/plain",
-    "FB2": "application/x-fictionbook+xml",
-    "CBZ": "application/vnd.comicbook+zip",
-    "ZIP": "application/zip",
-    "CBR": "application/vnd.comicbook-rar",
-    "RAR": "application/vnd.rar",
-    "PDF": "application/pdf",
-    "M4B": "audio/mp4",
-    "M4A": "audio/mp4",
-    "MP3": "audio/mpeg",
-}
-_IMAGE_MIME_TYPES_BY_SUFFIX: dict[str, str] = {
-    ".avif": "image/avif",
-    ".gif": "image/gif",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-}
 
 
 def capability_for_format(resource_format: str) -> MediaFormatCapability | None:
@@ -108,7 +78,8 @@ def canonical_publication_mime_type(resource_format: str) -> str | None:
     have one synthetic downloadable artifact.
     """
 
-    return _CANONICAL_PUBLICATION_MIME_TYPES.get(resource_format.strip().upper())
+    format_policy = reader_safety_format_policy(resource_format)
+    return format_policy.canonical_mime_type if format_policy is not None else None
 
 
 def resolve_asset_mime_type(
@@ -129,10 +100,10 @@ def resolve_asset_mime_type(
     normalized_role = asset_role.strip().upper()
     normalized_format = resource_format.strip().upper()
     if normalized_role == "PAGE" or normalized_format == "IMAGE_DIR":
-        suffix = PurePosixPath(filename).suffix.lower()
-        image_mime_type = _IMAGE_MIME_TYPES_BY_SUFFIX.get(suffix)
-        if image_mime_type is not None:
-            return image_mime_type
+        extension = "." + filename.rsplit(".", 1)[-1] if "." in filename else ""
+        return (
+            reader_safety_comic_page_mime_type(extension) or "application/octet-stream"
+        )
 
     if normalized_role == "PRIMARY":
         canonical = canonical_publication_mime_type(normalized_format)

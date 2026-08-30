@@ -11,17 +11,94 @@ final class PdfReaderTests: XCTestCase {
         #endif
     }
 
-    func testReadiumPositionMapsToCanonicalZeroBasedPage() {
-        XCTAssertEqual(IosPdfPositionPolicy.pageIndex(position: 1, pageCount: 3), 0)
-        XCTAssertEqual(IosPdfPositionPolicy.pageIndex(position: 3, pageCount: 3), 2)
-        XCTAssertNil(IosPdfPositionPolicy.pageIndex(position: 0, pageCount: 3))
-        XCTAssertNil(IosPdfPositionPolicy.pageIndex(position: 4, pageCount: 3))
-    }
-
     func testOnlyCanonicalPageTopProgressionIsAccepted() {
         XCTAssertTrue(IosPdfPositionPolicy.accepts(pageProgression: 0))
         XCTAssertFalse(IosPdfPositionPolicy.accepts(pageProgression: 0.0001))
         XCTAssertFalse(IosPdfPositionPolicy.accepts(pageProgression: 1))
+    }
+
+    func testLocalPdfiumByteSourceReadsExactRandomRangesWithoutChangingOriginal() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).pdf")
+        let original = Data((0 ..< 251).map { UInt8($0) })
+        try original.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let reader = try IosPdfiumLocalFileReader(fileURL: file)
+        defer { reader.close() }
+
+        XCTAssertEqual(reader.length, UInt64(original.count))
+        XCTAssertEqual(read(reader, offset: 17, size: 31), original.subdata(in: 17 ..< 48))
+        XCTAssertEqual(read(reader, offset: 233, size: 18), original.subdata(in: 233 ..< 251))
+        XCTAssertNil(read(reader, offset: 250, size: 2))
+        XCTAssertNil(read(reader, offset: 0, size: 0))
+        XCTAssertEqual(try Data(contentsOf: file), original)
+    }
+
+    func testClosedLocalPdfiumByteSourceCannotRead() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).pdf")
+        try Data([1, 2, 3, 4]).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let reader = try IosPdfiumLocalFileReader(fileURL: file)
+
+        reader.close()
+
+        XCTAssertNil(read(reader, offset: 0, size: 1))
+    }
+
+    @MainActor
+    func testLocalPdfOpensThroughRepositoryPdfiumDocument() async throws {
+        #if canImport(ShukuPdfium)
+        XCTAssertTrue(IosPdfiumFeatureFlags.nativeLibraryMatchesLock)
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).pdf")
+        let original = minimalPdf()
+        try original.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let managed = IosManagedPublication(
+            resourceID: "resource-pdfium-local",
+            displayTitle: "Local PDFium",
+            fileURL: file,
+            byteCount: Int64(original.count),
+            bookID: "book-pdfium-local",
+            assetID: "asset-pdfium-local",
+            namespace: "namespace-pdfium-local",
+            sourceFormat: .pdf
+        )
+
+        let document = try await IosPdfiumDocument.open(publication: managed)
+        defer { document.close() }
+
+        XCTAssertEqual(document.pageCount, 1)
+        let size = try await document.pageSize(0)
+        XCTAssertEqual(size.width, 200, accuracy: 0.01)
+        XCTAssertEqual(size.height, 300, accuracy: 0.01)
+        XCTAssertEqual(try Data(contentsOf: file), original)
+        #else
+        XCTFail("The locked repository-owned ShukuPdfium artifact is required on physical iOS.")
+        #endif
+    }
+
+    @MainActor
+    func testReadiumRuntimeHasNoPdfFallback() async throws {
+        let managed = IosManagedPublication(
+            resourceID: "resource-no-readium-pdf",
+            displayTitle: "No Readium PDF",
+            fileURL: URL(fileURLWithPath: "/not-opened-by-readium.pdf"),
+            byteCount: 1,
+            bookID: nil,
+            assetID: nil,
+            namespace: nil,
+            sourceFormat: .pdf
+        )
+
+        do {
+            _ = try await IosReadiumRuntime().open(managed)
+            XCTFail("PDF must never enter the Readium/PDFKit runtime.")
+        } catch let failure as IosReaderFailure {
+            XCTAssertEqual(failure.code, .unsupportedFormat)
+        }
     }
 
     func testPageCountBindingIsSourceScoped() throws {
@@ -88,5 +165,41 @@ final class PdfReaderTests: XCTestCase {
             apiPath: "/api/assets/asset-pdf",
             expectedSizeBytes: 2 * Int64(256 * 1024)
         )
+    }
+
+    private func minimalPdf() -> Data {
+        var body = "%PDF-1.4\n"
+        var offsets: [Int] = [0]
+        let objects = [
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 300] /Resources <<>> /Contents 4 0 R >>\nendobj\n",
+            "4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n",
+        ]
+        for object in objects {
+            offsets.append(body.utf8.count)
+            body += object
+        }
+        let xrefOffset = body.utf8.count
+        body += "xref\n0 5\n0000000000 65535 f \n"
+        for offset in offsets.dropFirst() {
+            body += String(format: "%010d 00000 n \n", offset)
+        }
+        body += "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n\(xrefOffset)\n%%EOF\n"
+        return Data(body.utf8)
+    }
+
+    private func read(
+        _ reader: IosPdfiumLocalFileReader,
+        offset: UInt64,
+        size: UInt64
+    ) -> Data? {
+        guard size > 0, size <= UInt64(Int.max) else { return nil }
+        var data = Data(count: Int(size))
+        let copied = data.withUnsafeMutableBytes { buffer in
+            guard let destination = buffer.baseAddress else { return false }
+            return reader.copy(offset: offset, size: size, destination: destination)
+        }
+        return copied ? data : nil
     }
 }

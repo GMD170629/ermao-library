@@ -1,5 +1,13 @@
 package com.ermao.library.mobi.infrastructure
 
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.readerSafetyBinaryResourceMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
+import com.ermao.library.shared.modules.reader.readerSafetyOriginalMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyReadingOrderMarkupMimeTypes
+import com.ermao.library.shared.modules.reader.readerSafetyReflowableMarkupMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyReflowableMarkupMaxBytesFailure
+import com.ermao.library.shared.modules.reader.readerSafetyRequiredReadingOrderMarkupFailure
 import org.readium.r2.streamer.parser.epub.EpubPositionsService
 
 import java.io.File
@@ -24,7 +32,7 @@ import org.readium.r2.shared.util.resource.Resource
 import org.readium.r2.shared.util.resource.SingleResourceContainer
 
 const val MOBI_PUBLICATION_NORMALIZATION_IDENTIFIER =
-    "ermao-mobi-core-v1+shuku-locator-dom-v2"
+    "ermao-mobi-core-v1+shuku-locator-dom-v3"
 
 /**
  * Creates a Readium reflowable Publication backed by one live `MobiCoreBook`.
@@ -38,10 +46,9 @@ class MobiReadiumPublicationFactory {
     fun open(
         file: File,
         transformContainer: (Container<Resource>) -> Container<Resource> = { it },
-        maximumFileBytes: Long = Long.MAX_VALUE,
     ): MobiReadiumPublication {
         val book = try {
-            MobiCoreBook.open(file, maximumFileBytes)
+            MobiCoreBook.open(file, readerSafetyOriginalMaxBytes())
         } catch (error: Throwable) {
             throw error.toPublicationOpenException()
         }
@@ -57,11 +64,7 @@ class MobiReadiumPublicationFactory {
                         "Unsupported MOBI resource media type: ${resource.mediaType}"
                     },
                     decodedLength = resource.decodedLength,
-                ).also { descriptor ->
-                    require(descriptor.decodedLength in 0..MAXIMUM_RESOURCE_BYTES) {
-                        "MOBI resource exceeds the runtime limit"
-                    }
-                }
+                ).also { descriptor -> require(descriptor.decodedLength >= 0L) }
             }
             require(descriptors.map(MobiResourceDescriptor::href).toSet().size == descriptors.size) {
                 "MOBI virtual HREFs are not unique"
@@ -74,18 +77,19 @@ class MobiReadiumPublicationFactory {
             require(readingIndices.toSet().size == readingIndices.size) {
                 "MOBI reading order contains a duplicate resource"
             }
-            require(readingIndices.all { descriptors[it].mediaType in REFLOWABLE_MEDIA_TYPES }) {
-                "MOBI reading order contains a non-reflowable resource"
+            val readingOrderMarkupMimeTypes = readerSafetyReadingOrderMarkupMimeTypes().toSet()
+            if (readingIndices.any { descriptors[it].mediaType.toString() !in readingOrderMarkupMimeTypes }) {
+                throw ReaderSafetyException(readerSafetyRequiredReadingOrderMarkupFailure())
             }
             info.coverResourceIndex?.let { coverIndex ->
                 require(coverIndex in descriptors.indices) { "MOBI cover references an unknown resource" }
             }
 
-            val resources = descriptors.map { descriptor ->
+            val readingIndexSet = readingIndices.toSet()
+            val resources = applyMobiResourceBudgets(descriptors, readingIndexSet).map { descriptor ->
                 MobiLazyResource(book, descriptor)
             }
             val resourceByIndex = resources.associateBy { it.descriptor.index }
-            val readingIndexSet = readingIndices.toSet()
             val readingOrder = readingIndices.map { index ->
                 resourceByIndex.getValue(index).link(
                     rels = if (index == info.coverResourceIndex) setOf(COVER_REL) else emptySet(),
@@ -191,8 +195,8 @@ class MobiReadiumPublicationFactory {
                 entry.fragment
                     ?.takeIf(String::isNotBlank)
                     ?.also { fragment ->
-                        require(fragment.length <= MAXIMUM_FRAGMENT_LENGTH && fragment.none(Char::isISOControl)) {
-                            "MOBI TOC contains an unsafe fragment"
+                        require(fragment.none(Char::isISOControl)) {
+                            "MOBI TOC contains an invalid fragment"
                         }
                     }
                     ?.let(resourceUrl::addFragment)
@@ -210,7 +214,7 @@ class MobiReadiumPublicationFactory {
     }
 
     private fun exactVirtualHref(value: String): String {
-        require(value.isNotBlank() && value == value.trim() && value.length <= MAXIMUM_HREF_LENGTH) {
+        require(value.isNotBlank() && value == value.trim()) {
             "libmobi produced an empty virtual HREF"
         }
         val normalized = value.lowercase()
@@ -234,15 +238,10 @@ class MobiReadiumPublicationFactory {
 
     private companion object {
         const val COVER_REL = "cover"
-        const val MAXIMUM_FRAGMENT_LENGTH = 2_048
-        const val MAXIMUM_HREF_LENGTH = 4_096
-        const val MAXIMUM_RESOURCE_BYTES = 64L * 1024L * 1024L
-        val REFLOWABLE_MEDIA_TYPES = setOf(MediaType.XHTML, MediaType.HTML)
     }
 }
 
 enum class MobiPublicationErrorKind {
-    DrmProtected,
     Unsupported,
     Corrupt,
     LimitExceeded,
@@ -288,6 +287,21 @@ internal data class MobiResourceDescriptor(
     val mediaType: MediaType,
     val decodedLength: Long,
 )
+
+/** Applies generated REJECT/BLOCK_RESOURCE actions without reading or rewriting resource bytes. */
+internal fun applyMobiResourceBudgets(
+    descriptors: List<MobiResourceDescriptor>,
+    readingIndices: Set<Int>,
+): List<MobiResourceDescriptor> {
+    descriptors.asSequence()
+        .filter { descriptor -> descriptor.index in readingIndices }
+        .firstOrNull { descriptor -> descriptor.decodedLength > readerSafetyReflowableMarkupMaxBytes() }
+        ?.let { throw ReaderSafetyException(readerSafetyReflowableMarkupMaxBytesFailure()) }
+    return descriptors.filter { descriptor ->
+        descriptor.index in readingIndices ||
+            descriptor.decodedLength <= readerSafetyBinaryResourceMaxBytes()
+    }
+}
 
 internal class MobiLazyResource(
     private val book: MobiCoreBook,
@@ -372,13 +386,17 @@ private class MobiPublicationContainer(
 
 private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-private fun Throwable.toPublicationOpenException(): MobiPublicationOpenException {
+private fun Throwable.toPublicationOpenException(): Exception {
+    if (this is ReaderSafetyException) return this
     if (this is MobiPublicationOpenException) return this
+    if (this is MobiCoreException && status == MobiCoreStatus.DrmProtected) {
+        return ReaderSafetyException(readerSafetyDrmFailure())
+    }
     val kind = when (this) {
         is OutOfMemoryError -> MobiPublicationErrorKind.OutOfMemory
         is IOException -> MobiPublicationErrorKind.Io
         is MobiCoreException -> when (status) {
-            MobiCoreStatus.DrmProtected -> MobiPublicationErrorKind.DrmProtected
+            MobiCoreStatus.DrmProtected -> error("DRM failures must use the generated Reader safety contract")
             MobiCoreStatus.Unsupported -> MobiPublicationErrorKind.Unsupported
             MobiCoreStatus.LimitExceeded -> MobiPublicationErrorKind.LimitExceeded
             MobiCoreStatus.OutOfMemory -> MobiPublicationErrorKind.OutOfMemory

@@ -5,6 +5,10 @@
 - 范围：Web、Android、iOS、Reader v4 与共享 Downloads
 - 取代：ADR 0024 中的可重排 online-first／Web online-only 决策
 
+安全补充（2026-08-31）：ADR 0026 统一定义三端及后端的格式/MIME、预算、
+过滤动作与错误码。本 ADR 保持完整原文件下载、任务所有权和禁止派生出版物的
+决定；下载后的内存 Publication 可以按生成契约执行 `SANITIZE`。
+
 ## 决策
 
 `EPUB`、`FB2`、`TXT`、`MOBI`、`AZW`、`AZW3`、`PRC` 在所有第一方
@@ -18,8 +22,8 @@ PDF 和漫画继续使用现有页面／Range 在线交付，不因在线错误�
 
 下载工件以 `namespace + resourceId + assetId + size:mtime` 标识，并校验实际
 格式、MIME 与长度。原文件是唯一持久化 Reader 正文；不得转换、持久化解包
-目录或生成派生出版物。2 GiB 准入以及 DRM、XML、ZIP、图片、分配和解析器硬
-限制继续生效。
+目录或生成派生出版物。准入、DRM、XML、ZIP、图片、分配和解析器硬限制由
+ADR 0026 的稳定规则 ID 定义并继续生效。
 
 ## 所有权
 

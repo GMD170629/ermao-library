@@ -136,6 +136,6 @@ class AndroidPdfiumByteSourceTest {
     }
 
     private companion object {
-        const val CHUNK = PDF_RANGE_CHUNK_BYTES
+        val CHUNK = PDF_RANGE_CHUNK_BYTES
     }
 }

@@ -3,12 +3,14 @@ package com.ermao.library.shared.modules.reader.application
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
 import com.ermao.library.shared.modules.reader.domain.ReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
 import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.domain.isValidComicRevision
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
 data class ReaderBootstrapRequest(
@@ -115,11 +117,13 @@ data class ReaderComicAccess(
     val manifestApiPath: String,
     val pageApiPathTemplate: String,
     val imageVariants: Set<String>,
+    val revision: String,
 ) {
     init {
         require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
         require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
         require(imageVariants == setOf("original", "data-saver"))
+        require(isValidComicRevision(revision)) { "Reader comic revision is invalid" }
     }
 }
 
@@ -142,7 +146,7 @@ data class ReaderComicPage(
         require(pageIndex >= 0)
         require(resourceHref.isNotBlank() && !resourceHref.startsWith('/') && '\\' !in resourceHref)
         require(resourceHref.split('/').none { it.isBlank() || it == "." || it == ".." })
-        require(mediaType in setOf("image/jpeg", "image/png", "image/gif", "image/webp"))
+        require(mediaType in ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes)
         require(width == null || width > 0)
         require(height == null || height > 0)
         require(title == null || title.isNotBlank())
@@ -215,6 +219,7 @@ class BootstrapReaderPublication(
                     sourceFormat = bootstrap.resource.sourceFormat,
                     manifestApiPath = access.manifestApiPath,
                     pageApiPathTemplate = access.pageApiPathTemplate,
+                    revision = access.revision,
                     pages = bootstrap.comicPages.map {
                         com.ermao.library.shared.modules.reader.domain.RemoteComicPage(
                             pageIndex = it.pageIndex,

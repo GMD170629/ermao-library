@@ -6,9 +6,10 @@ from __future__ import annotations
 class AudioInspectionError(ValueError):
     """A source cannot satisfy the audiobook media-inspection contract."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, rule_id: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.rule_id = rule_id
 
 
 class AudioTrackLimitExceededError(RuntimeError):
@@ -22,15 +23,31 @@ class AudioTrackLimitExceededError(RuntimeError):
         path: str,
         limit: int,
         observed_count: int,
+        code: str | None = None,
+        rule_id: str | None = None,
     ) -> None:
         super().__init__(f"有声书音轨超过 {limit} 条，请拆分目录后重新导入")
+        if code is not None:
+            self.code = code
         self.path = path
         self.limit = limit
         self.observed_count = observed_count
+        self.rule_id = rule_id
 
 
 class ComicArchiveError(RuntimeError):
     """Base error for comic archive inspection and entry reads."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        rule_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.rule_id = rule_id
 
 
 class ComicArchiveEncryptedError(ComicArchiveError):

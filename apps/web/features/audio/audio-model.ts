@@ -78,7 +78,8 @@ export function beginAudioResourceSwitch(
     pendingResourceId: requestedResourceId,
     pendingSummary,
     loadError: null,
-    error: null
+    error: null,
+    safetyError: null
   };
 }
 
@@ -86,7 +87,8 @@ export function failAudioResourceSwitch(
   previous: AudioPlaybackState,
   requestedResourceId: string,
   message: string,
-  pendingSummary: AudioLaunchSummary | null = null
+  pendingSummary: AudioLaunchSummary | null = null,
+  safetyError: AudioPlaybackState['safetyError'] = null
 ): AudioPlaybackState {
   return {
     ...previous,
@@ -95,7 +97,8 @@ export function failAudioResourceSwitch(
       : 'error',
     pendingResourceId: requestedResourceId,
     pendingSummary,
-    loadError: message
+    loadError: message,
+    safetyError
   };
 }
 

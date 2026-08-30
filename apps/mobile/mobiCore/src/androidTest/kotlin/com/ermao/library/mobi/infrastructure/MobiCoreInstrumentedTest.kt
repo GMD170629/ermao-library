@@ -3,6 +3,9 @@ package com.ermao.library.mobi.infrastructure
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
+import com.ermao.library.shared.modules.reader.readerSafetyOriginalMaxBytes
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -37,7 +40,7 @@ class MobiCoreInstrumentedTest {
 
         fixtureNames.forEach { fixtureName ->
             val fixture = copyAsset(fixtureName)
-            MobiCoreBook.open(fixture).use { book ->
+            MobiCoreBook.open(fixture, readerSafetyOriginalMaxBytes()).use { book ->
                 val info = book.info()
                 assertTrue(info.resourceCount > 0)
                 assertTrue(info.readingOrderCount > 0)
@@ -70,7 +73,7 @@ class MobiCoreInstrumentedTest {
     fun hostAndAndroidProduceIdenticalAbiV1GoldenSnapshots() {
         listOf("01-basic-mobi6", "11-upstream-huff-cdic").forEach { fixtureBaseName ->
             val fixture = copyAsset("$fixtureBaseName.mobi")
-            val actual = MobiCoreBook.open(fixture).use(::snapshot)
+            val actual = MobiCoreBook.open(fixture, readerSafetyOriginalMaxBytes()).use(::snapshot)
             val expected = context.assets.open("$fixtureBaseName.abi-v1.snapshot")
                 .bufferedReader(Charsets.UTF_8)
                 .use { it.readText() }
@@ -89,7 +92,7 @@ class MobiCoreInstrumentedTest {
         val closedRssSamples = mutableListOf<Long>()
         val elapsed = measureTimeMillis {
             repeat(LARGE_FILE_LIFECYCLE_ITERATIONS) {
-                MobiCoreBook.open(largeFixture).use { book ->
+                MobiCoreBook.open(largeFixture, readerSafetyOriginalMaxBytes()).use { book ->
                     val info = book.info()
                     assertTrue(info.resourceCount > 0)
                     val readingResource = book.readingOrderResourceIndex(0)
@@ -115,7 +118,10 @@ class MobiCoreInstrumentedTest {
 
     @Test
     fun closeIsIdempotentAndClosedHandleCannotBeRead() {
-        val book = MobiCoreBook.open(copyAsset("01-basic-mobi6.mobi"))
+        val book = MobiCoreBook.open(
+            copyAsset("01-basic-mobi6.mobi"),
+            readerSafetyOriginalMaxBytes(),
+        )
         book.close()
         book.close()
         val failure = runCatching { book.info() }.exceptionOrNull()
@@ -200,7 +206,9 @@ class MobiCoreInstrumentedTest {
             "negative-synthetic-azw4.azw4" to MobiCoreStatus.Unsupported,
         )
         expectations.forEach { (fixtureName, expectedStatus) ->
-            val failure = runCatching { MobiCoreBook.open(copyAsset(fixtureName)) }.exceptionOrNull()
+            val failure = runCatching {
+                MobiCoreBook.open(copyAsset(fixtureName), readerSafetyOriginalMaxBytes())
+            }.exceptionOrNull()
             assertTrue(failure is MobiCoreException)
             assertTrue((failure as MobiCoreException).status == expectedStatus)
         }
@@ -209,7 +217,6 @@ class MobiCoreInstrumentedTest {
     @Test
     fun productionFactoryTranslatesNativeFailuresToStableKinds() {
         val expectations = mapOf(
-            "negative-synthetic-drm-header.mobi" to MobiPublicationErrorKind.DrmProtected,
             "negative-truncated.mobi" to MobiPublicationErrorKind.Corrupt,
             "negative-synthetic-kfx.kfx" to MobiPublicationErrorKind.Unsupported,
         )
@@ -221,6 +228,14 @@ class MobiCoreInstrumentedTest {
             assertEquals(expectedKind, (failure as MobiPublicationOpenException).kind)
             assertTrue(failure.message?.contains(fixtureName) != true)
         }
+
+        val drmFailure = runCatching {
+            MobiReadiumPublicationFactory().open(copyAsset("negative-synthetic-drm-header.mobi"))
+        }.exceptionOrNull()
+        assertTrue(drmFailure is ReaderSafetyException)
+        val expected = readerSafetyDrmFailure()
+        assertEquals(expected.ruleId, (drmFailure as ReaderSafetyException).failure.ruleId)
+        assertEquals(expected.errorCode, drmFailure.failure.errorCode)
     }
 
     private fun copyAsset(name: String, outputName: String = name): File {

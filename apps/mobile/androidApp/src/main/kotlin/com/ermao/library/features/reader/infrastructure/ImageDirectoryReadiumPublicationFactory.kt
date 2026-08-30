@@ -1,6 +1,12 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.ReaderComicPage
+import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicManifestMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMimeType
 import java.io.File
 import java.nio.file.Files
 import kotlinx.serialization.Serializable
@@ -90,29 +96,37 @@ internal class ImageDirectoryReadiumPublicationFactory {
         require(directory.isDirectory && !Files.isSymbolicLink(directory.toPath())) { "IMAGE_DIR bundle is missing" }
         val manifestFile = File(directory, MANIFEST_NAME)
         require(manifestFile.isFile && !Files.isSymbolicLink(manifestFile.toPath())) { "IMAGE_DIR manifest is missing" }
-        require(manifestFile.length() in 1..MAX_MANIFEST_BYTES) { "IMAGE_DIR manifest is too large" }
+        require(manifestFile.length() in 1..readerSafetyComicManifestMaxBytes()) {
+            "IMAGE_DIR manifest is too large"
+        }
         val manifest = JSON.decodeFromString<BundleManifest>(manifestFile.readText())
         require(manifest.contractVersion == BUNDLE_CONTRACT_VERSION)
         require(manifest.artifactKind == "OriginalPageSet")
         require(manifest.resourceId == expectedResourceId)
-        require(manifest.members.size in 1..MAX_PAGE_COUNT)
+        require(manifest.members.isNotEmpty() &&
+            manifest.members.size.toLong() <= readerSafetyComicPageMaxCount())
         require(manifest.members.map(BundleMember::sequenceIndex) == manifest.members.indices.toList())
         require(manifest.members.map(BundleMember::assetId).distinct().size == manifest.members.size)
         require(manifest.members.sumOf(BundleMember::sizeBytes) == manifest.totalBytes)
-        require(manifest.totalBytes in 1..MAX_EXPANDED_BYTES)
+        require(manifest.totalBytes in 1..readerSafetyComicExpandedMaxBytes())
         val rootPath = directory.canonicalFile.toPath()
-        manifest.members.forEach { member ->
+        val readableMembers = manifest.members.mapNotNull { member ->
             require(member.assetId.isNotBlank())
-            require(member.mimeType in IMAGE_MIME_TYPES)
-            require(member.sizeBytes in 1..MAX_PAGE_BYTES)
             require(member.fileName.isSafeFileName())
             val file = File(directory, member.fileName)
             val filePath = file.canonicalFile.toPath()
-            require(filePath.parent == rootPath && file.isFile && !Files.isSymbolicLink(filePath))
-            require(file.length() == member.sizeBytes)
-            require(detectImageMime(file) == member.mimeType) { "IMAGE_DIR page content does not match MIME" }
+            require(filePath.parent == rootPath && !Files.isSymbolicLink(filePath))
+            if (member.mimeType !in readerSafetyAllowedComicPageMimeTypes() ||
+                member.sizeBytes !in 1..readerSafetyComicPageMaxBytes() ||
+                !file.isFile || file.length() != member.sizeBytes ||
+                detectImageMime(file) != member.mimeType
+            ) {
+                return@mapNotNull null
+            }
+            member
         }
-        return manifest
+        require(readableMembers.isNotEmpty()) { "IMAGE_DIR contains no readable pages" }
+        return manifest.copy(members = readableMembers)
     }
 
     @Serializable
@@ -142,11 +156,15 @@ internal class ImageDirectoryReadiumPublicationFactory {
         val count = file.inputStream().buffered().use { it.read(bytes) }
         val header = bytes.copyOf(count.coerceAtLeast(0))
         return when {
-            header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte() -> "image/jpeg"
-            header.size >= PNG_SIGNATURE.size && PNG_SIGNATURE.indices.all { header[it] == PNG_SIGNATURE[it] } -> "image/png"
-            header.size >= 6 && header.copyOfRange(0, 6).decodeToString() in setOf("GIF87a", "GIF89a") -> "image/gif"
+            header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte() ->
+                readerSafetyComicPageMimeType(".jpg")
+            header.size >= PNG_SIGNATURE.size && PNG_SIGNATURE.indices.all { header[it] == PNG_SIGNATURE[it] } ->
+                readerSafetyComicPageMimeType(".png")
+            header.size >= 6 && header.copyOfRange(0, 6).decodeToString() in setOf("GIF87a", "GIF89a") ->
+                readerSafetyComicPageMimeType(".gif")
             header.size >= 12 && header.copyOfRange(0, 4).decodeToString() == "RIFF" &&
-                header.copyOfRange(8, 12).decodeToString() == "WEBP" -> "image/webp"
+                header.copyOfRange(8, 12).decodeToString() == "WEBP" ->
+                readerSafetyComicPageMimeType(".webp")
             else -> null
         }
     }
@@ -154,11 +172,6 @@ internal class ImageDirectoryReadiumPublicationFactory {
     private companion object {
         const val BUNDLE_CONTRACT_VERSION = 4
         const val MANIFEST_NAME = "bundle.json"
-        const val MAX_MANIFEST_BYTES = 2L * 1024 * 1024
-        const val MAX_PAGE_COUNT = 20_000
-        const val MAX_PAGE_BYTES = 64L * 1024 * 1024
-        const val MAX_EXPANDED_BYTES = 4L * 1024 * 1024 * 1024
-        val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
         val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
         val JSON = Json { ignoreUnknownKeys = false }
     }

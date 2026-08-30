@@ -1,5 +1,12 @@
-import { parsePublicationLocation } from '@shuku/reader-core';
+import {
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_PROFILES,
+  READER_SAFETY_RULE_IDS,
+  parsePublicationLocation
+} from '@shuku/reader-core';
 import { withBasePath } from '../../lib/base-path';
+import { readBoundedResponse, ResponseLimitError } from '../../shared/api/bounded-response';
+import { rejectReaderSafety } from '../reader/v3/security/reader-safety-policy';
 import { clamp, orderedChapters, orderedTracks } from './audio-model';
 import type { AudioBootstrap, AudioChapter, AudioLocation, AudioResourceSummary, AudioTrack } from './types';
 
@@ -21,17 +28,41 @@ function numberValue(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function safeNonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+const AUDIO_MIME_TYPES = new Set<string>(Object.values(READER_SAFETY_PROFILES.audio.containerMimeTypes));
+
+function audioAssetUrl(value: unknown, assetId: string): string {
+  const raw = stringValue(value, `/api/assets/${encodeURIComponent(assetId)}`).trim();
+  if (!raw.startsWith('/') || raw.startsWith('//') || !raw.split('?', 1)[0]?.includes('/api/')) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_REDIRECT_POLICY);
+  }
+  return withBasePath(raw);
+}
+
 function normalizeTrack(value: unknown, index: number): AudioTrack | null {
   const item = record(value);
   const assetId = stringValue(item.id ?? item.assetId).trim();
   if (!assetId) return null;
+  const mimeType = stringValue(item.mimeType).split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  if (!AUDIO_MIME_TYPES.has(mimeType)) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_CONTAINER_MIME);
+  }
+  const durationMs = safeNonNegativeInteger(item.durationMs);
+  if (durationMs === null) rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
+  const sizeBytes = item.sizeBytes === undefined ? null : safeNonNegativeInteger(item.sizeBytes);
+  if (item.sizeBytes !== undefined && (sizeBytes === null || sizeBytes > READER_SAFETY_BUDGETS.originalMaxBytes)) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_ORIGINAL_MAX_BYTES);
+  }
   return {
     assetId,
     title: stringValue(item.title, `音轨 ${index + 1}`),
-    url: withBasePath(stringValue(item.url, `/api/assets/${encodeURIComponent(assetId)}`)),
-    mimeType: stringValue(item.mimeType, 'audio/mpeg'),
+    url: audioAssetUrl(item.url, assetId),
+    mimeType,
     codec: nullableString(item.codec),
-    durationMs: Math.max(0, numberValue(item.durationMs)),
+    durationMs,
     discNumber: typeof item.discNumber === 'number' ? numberValue(item.discNumber) : null,
     trackNumber: typeof item.trackNumber === 'number' ? numberValue(item.trackNumber) : null,
     sortOrder: numberValue(item.sortOrder, index)
@@ -43,13 +74,17 @@ function normalizeChapter(value: unknown, index: number): AudioChapter | null {
   const id = stringValue(item.id).trim();
   const assetId = stringValue(item.assetId).trim();
   if (!id || !assetId) return null;
-  const startMs = Math.max(0, numberValue(item.startMs));
+  const startMs = safeNonNegativeInteger(item.startMs);
+  const endMs = safeNonNegativeInteger(item.endMs);
+  if (startMs === null || endMs === null || endMs < startMs) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
+  }
   return {
     id,
     title: stringValue(item.title, `章节 ${index + 1}`),
     assetId,
     startMs,
-    endMs: Math.max(startMs, numberValue(item.endMs, startMs)),
+    endMs,
     sortOrder: numberValue(item.sortOrder ?? item.index, index)
   };
 }
@@ -86,6 +121,10 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
       .map(normalizeTrack)
       .filter((track): track is AudioTrack => track !== null)
   );
+  if (tracks.length > READER_SAFETY_BUDGETS.audioTrackMaxCount
+    || new Set(tracks.map((track) => track.assetId)).size !== tracks.length) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
+  }
   if (tracks.length === 0) throw new Error('这个有声资源还没有可播放的音频资产');
   const trackIds = new Set(tracks.map((track) => track.assetId));
   const chapters = orderedChapters(
@@ -93,7 +132,19 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
       .map(normalizeChapter)
       .filter((chapter): chapter is AudioChapter => chapter !== null && trackIds.has(chapter.assetId))
   );
-  const calculatedDuration = tracks.reduce((sum, track) => sum + track.durationMs, 0);
+  if (chapters.length > READER_SAFETY_BUDGETS.audioChapterMaxCount
+    || new Set(chapters.map((chapter) => chapter.id)).size !== chapters.length
+    || chapters.some((chapter) => {
+      const track = tracks.find((candidate) => candidate.assetId === chapter.assetId);
+      return !track || chapter.endMs > track.durationMs;
+    })) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
+  }
+  const calculatedDuration = tracks.reduce((sum, track) => {
+    const total = sum + track.durationMs;
+    if (!Number.isSafeInteger(total)) rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
+    return total;
+  }, 0);
   const progressSnapshot = record(raw.progressSnapshot);
   const resume = parsePublicationLocation(progressSnapshot.locator);
   if (raw.progressSnapshot !== null && raw.progressSnapshot !== undefined && !resume) {
@@ -135,9 +186,22 @@ export async function fetchAudioBootstrap(resourceId: string, signal?: AbortSign
   const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bootstrap`, {
     credentials: 'same-origin',
     cache: 'no-store',
+    redirect: 'error',
     signal
   });
-  const payload: unknown = await response.json().catch(() => null);
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = await readBoundedResponse(response, READER_SAFETY_BUDGETS.audioMetadataMaxBytes);
+  } catch (reason) {
+    if (reason instanceof ResponseLimitError && reason.code === 'RESPONSE_TOO_LARGE') {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_METADATA_BUDGET, { cause: reason });
+    }
+    throw reason;
+  }
+  const payload: unknown = (() => {
+    try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+    catch { return null; }
+  })();
   if (!response.ok) {
     const error = record(payload) as ErrorPayload;
     throw new Error(error.error?.message ?? error.detail ?? `读取有声书启动信息失败（${response.status}）`);

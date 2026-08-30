@@ -4,7 +4,6 @@ package com.ermao.library.shared.modules.reader.infrastructure
 class MobiMarkupEnvelope {
     @Throws(IllegalArgumentException::class)
     fun prepare(markup: String): String {
-        require(markup.length in 1..64 * 1024 * 1024) { "MOBI markup exceeds the size limit" }
         val root = ROOT.find(markup) ?: return markup
         val tag = root.groups[1] ?: return markup
         val attributes = tag.value
@@ -14,7 +13,9 @@ class MobiMarkupEnvelope {
         }
         if (declarations.isEmpty()) return markup
         val opening = attributes.dropLast(1) + declarations + ">"
-        return markup.replaceRange(tag.range, opening)
+        val tagStart = root.value.indexOf(tag.value)
+        require(tagStart >= 0) { "MOBI root tag position is invalid" }
+        return markup.replaceRange(tagStart, tagStart + tag.value.length, opening)
     }
 
     private companion object {

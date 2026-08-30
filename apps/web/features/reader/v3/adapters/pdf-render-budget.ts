@@ -1,5 +1,7 @@
-export const PDF_MAX_CANVAS_PIXELS = 12_000_000;
-export const PDF_MAX_CANVAS_DIMENSION = 4096;
+import { READER_SAFETY_BUDGETS } from '@shuku/reader-core';
+
+export const PDF_MAX_CANVAS_PIXELS = READER_SAFETY_BUDGETS.pdfRenderMaxPixels;
+export const PDF_MAX_CANVAS_DIMENSION = READER_SAFETY_BUDGETS.pdfCanvasMaxDimension;
 
 export type PdfRenderBudgetInput = {
   cssWidth: number;

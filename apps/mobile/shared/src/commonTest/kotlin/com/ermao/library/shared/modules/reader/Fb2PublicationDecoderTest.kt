@@ -1,5 +1,8 @@
 package com.ermao.library.shared.modules.reader
 
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -34,14 +37,34 @@ class Fb2PublicationDecoderTest {
         incomplete.startElement("FictionBook", emptyMap())
         assertFailsWith<IllegalArgumentException> { incomplete.finish("Book", emptyList()) }
         assertFailsWith<IllegalArgumentException> { incomplete.endElement("body") }
-        repeat(127) { incomplete.startElement("section", emptyMap()) }
-        assertFailsWith<IllegalArgumentException> { incomplete.startElement("section", emptyMap()) }
+        repeat(ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_DEPTH).toInt() - 1) {
+            incomplete.startElement("section", emptyMap())
+        }
+        val failure = assertFailsWith<ReaderSafetyException> {
+            incomplete.startElement("section", emptyMap())
+        }
+        assertEquals("FB2.STRUCTURE_BUDGET", failure.failure.ruleId)
+        assertEquals("PUBLICATION_PARSER_LIMIT", failure.failure.errorCode)
 
         val duplicate = Fb2PublicationDecoder()
         duplicate.element("FictionBook") {
             element("body") { repeat(2) { element("section", mapOf("id" to "same")) {} } }
         }
         assertFailsWith<IllegalArgumentException> { duplicate.finish("Book", emptyList()) }
+    }
+
+    @Test
+    fun generatedEmbeddedImageCatalogAllowsBlockedResourcesToBeOmitted() {
+        val decoder = Fb2PublicationDecoder()
+        decoder.element("FictionBook") {
+            element("body") { element("section") { element("p") { text("Readable") } } }
+            element("binary", mapOf("id" to "bad", "content-type" to "image/png")) {
+                text("not-base64")
+            }
+        }
+
+        assertEquals(listOf("bad"), decoder.embeddedImages().map { it.identifier })
+        assertTrue(decoder.finish("Book", emptyList()).resources.isNotEmpty())
     }
 
     @Test

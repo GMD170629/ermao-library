@@ -21,6 +21,16 @@ from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_COMIC_PROFILE,
+    ReaderSafetyBudgetName,
+    ReaderSafetyFormat,
+    ReaderSafetyRuleId,
+    reader_safety_budget,
+    reader_safety_comic_page_mime_type,
+    reader_safety_format_policy,
+    reader_safety_rule,
+)
 from app.core.config import Settings, get_settings
 from app.infrastructure.comic_archives import (
     ComicArchiveBackendUnavailableError,
@@ -50,6 +60,14 @@ SMALL_COVER_CACHE_VERSION = 1
 SMALL_COVER_QUALITIES = (82, 74, 66, 58, 50, 42, 34, 26, 18, 10)
 PSE_PAGE_CACHE_VERSION = 1
 PSE_PAGE_JPEG_QUALITY = 88
+COMIC_PAGE_MAX_BYTES = reader_safety_budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES)
+PDF_RANGE_REQUEST_MAX_BYTES = reader_safety_budget(
+    ReaderSafetyBudgetName.PDF_RANGE_REQUEST_MAX_BYTES
+)
+_PDF_FORMAT_POLICY = reader_safety_format_policy(ReaderSafetyFormat.PDF.value)
+if _PDF_FORMAT_POLICY is None or _PDF_FORMAT_POLICY.canonical_mime_type is None:
+    raise RuntimeError("generated Reader safety policy is missing PDF MIME")
+PDF_MEDIA_TYPE = _PDF_FORMAT_POLICY.canonical_mime_type
 
 
 def _revalidate_regular_file(path: Path | None) -> Path | None:
@@ -166,6 +184,11 @@ def _parse_byte_range(
 def _weak_etag(size: int, mtime_ms: int, extra: str = "") -> str:
     suffix = f"-{extra.encode('utf-8').hex()}" if extra else ""
     return f'W/"{size:x}-{mtime_ms:x}{suffix}"'
+
+
+def _strong_etag(size: int, mtime_ns: int, extra: str = "") -> str:
+    identity = f"{size}:{mtime_ns}:{extra}".encode()
+    return f'"{hashlib.sha256(identity).hexdigest()}"'
 
 
 def _not_modified(request: Request, etag: str, last_modified: str) -> bool:
@@ -305,7 +328,46 @@ def _comic_page_image_variant(request: Request) -> str:
 
 
 def _is_comic_page_image(media_type: str | None) -> bool:
-    return _base_media_type(media_type).startswith("image/")
+    return (
+        _base_media_type(media_type)
+        in READER_SAFETY_COMIC_PROFILE.allowed_page_mime_types
+    )
+
+
+def _reader_policy_error(
+    rule_id: ReaderSafetyRuleId,
+    message: str,
+    *,
+    status_code: int,
+) -> Response:
+    rule = reader_safety_rule(rule_id)
+    code = rule.error_code.value if rule.error_code is not None else None
+    return fail(
+        message,
+        status_code=status_code,
+        code=code,
+        params={"ruleId": rule_id.value},
+    )
+
+
+def _validate_comic_page_delivery(
+    *,
+    media_type: str | None,
+    size: int,
+) -> Response | None:
+    if not _is_comic_page_image(media_type):
+        return _reader_policy_error(
+            ReaderSafetyRuleId.COMIC_PAGE_MIME,
+            "Comic page MIME is not allowed.",
+            status_code=422,
+        )
+    if size > COMIC_PAGE_MAX_BYTES:
+        return _reader_policy_error(
+            ReaderSafetyRuleId.COMIC_PAGE_MAX_BYTES,
+            "Comic page exceeds the size limit.",
+            status_code=413,
+        )
+    return None
 
 
 def _comic_page_cache_path(settings: Settings, cache_key: str) -> Path:
@@ -719,6 +781,13 @@ def _file_response(
         extra=f"user:{user_id}",
         as_attachment=as_attachment,
     )
+    is_pdf = _base_media_type(resolved_media_type) == PDF_MEDIA_TYPE
+    if is_pdf:
+        headers["ETag"] = _strong_etag(
+            stat.st_size,
+            stat.st_mtime_ns,
+            f"user:{user_id}",
+        )
     version = f"{stat.st_size}:{stat.st_mtime_ns // 1_000_000}"
     headers["X-Asset-Version"] = version
     expected_version = request.headers.get("x-asset-version")
@@ -736,9 +805,34 @@ def _file_response(
         return Response(status_code=304, headers=headers)
     byte_range = None
     range_header = request.headers.get("range")
-    if range_header and _should_use_range(
-        request, headers["ETag"], headers["Last-Modified"]
-    ):
+    use_range = bool(
+        range_header
+        and _should_use_range(request, headers["ETag"], headers["Last-Modified"])
+    )
+    if range_header and is_pdf and not use_range:
+        if handle is not None:
+            handle.close()
+        return _reader_policy_error(
+            ReaderSafetyRuleId.PDF_RANGE_PROTOCOL,
+            "PDF range revision does not match.",
+            status_code=412,
+        )
+    if range_header and is_pdf:
+        if_range = request.headers.get("if-range")
+        if (
+            if_range is None
+            or if_range.startswith("W/")
+            or not if_range.startswith('"')
+        ):
+            if handle is not None:
+                handle.close()
+            return _reader_policy_error(
+                ReaderSafetyRuleId.PDF_RANGE_PROTOCOL,
+                "PDF range requires a strong revision.",
+                status_code=412,
+            )
+    if use_range:
+        assert range_header is not None
         kind, parsed = _parse_byte_range(range_header, stat.st_size)
         if kind == "invalid":
             if handle is not None:
@@ -761,6 +855,20 @@ def _file_response(
             response.headers["Content-Range"] = f"bytes */{stat.st_size}"
             return response
         byte_range = parsed
+        if (
+            is_pdf
+            and byte_range is not None
+            and byte_range[1] - byte_range[0] + 1 > PDF_RANGE_REQUEST_MAX_BYTES
+        ):
+            if handle is not None:
+                handle.close()
+            policy_response = _reader_policy_error(
+                ReaderSafetyRuleId.PDF_RANGE_PROTOCOL,
+                "PDF range exceeds the request limit.",
+                status_code=416,
+            )
+            policy_response.headers["Content-Range"] = f"bytes */{stat.st_size}"
+            return policy_response
 
     # Metadata probes from HTMLAudioElement and proxies frequently use HEAD.
     # Return exactly the GET headers/status without consuming a stream slot or
@@ -897,38 +1005,64 @@ def _send_zip_entry(
     except (OSError, ComicArchiveError) as error:
         if archive is not None:
             archive.close()
-        if isinstance(error, ComicArchiveEncryptedError):
+        policy_code = getattr(error, "code", None)
+        policy_rule_id = getattr(error, "rule_id", None)
+        if isinstance(policy_code, str) and isinstance(policy_rule_id, str):
+            code = policy_code
+            message = "The comic archive was rejected by the Reader safety policy."
+            status_code = 422
+        elif isinstance(error, ComicArchiveEncryptedError):
             code, message = (
                 "ARCHIVE_ENCRYPTED",
                 "The comic archive requires a password.",
             )
+            status_code = 404
         elif isinstance(error, ComicArchiveMultiVolumeError):
             code, message = (
                 "ARCHIVE_PART_MISSING",
                 "The comic archive requires additional volumes.",
             )
+            status_code = 404
         elif isinstance(error, ComicArchiveBackendUnavailableError):
             code, message = (
                 "ARCHIVE_FORMAT_SETUP_FAILED",
                 "The archive extraction backend is unavailable.",
             )
+            status_code = 404
         else:
             code, message = (
                 "ARCHIVE_OPEN_FAILED",
                 "The archive reader could not open the requested page.",
             )
+            status_code = 404
         logger.warning(
             "comic_page_open_failed",
             extra={"asset_id": asset_id, "code": code, "reason": type(error).__name__},
         )
-        response = fail(message, status_code=404, code=code)
+        response = fail(
+            message,
+            status_code=status_code,
+            code=code,
+            params={"ruleId": policy_rule_id}
+            if isinstance(policy_rule_id, str)
+            else None,
+        )
         response.headers["X-Error-Code"] = code
         return response
     request.state.user_id = user_id
     resolved_media_type = (
-        media_type or mimetypes.guess_type(entry_name)[0] or "application/octet-stream"
+        media_type
+        or reader_safety_comic_page_mime_type(Path(entry_name).suffix)
+        or "application/octet-stream"
     )
     size = int(info.file_size)
+    policy_error = _validate_comic_page_delivery(
+        media_type=resolved_media_type,
+        size=size,
+    )
+    if policy_error is not None:
+        archive.close()
+        return policy_error
     headers = _response_headers(
         size,
         archive_path.stat().st_mtime,
@@ -1039,12 +1173,26 @@ def _send_original_comic_page_file(
     route: str = "volume-page",
     asset_id: str | None = None,
 ) -> Response:
+    resolved_path = _revalidate_regular_file(path)
+    if resolved_path is None:
+        return fail("文件不存在", status_code=404)
+    resolved_media_type = (
+        media_type
+        or reader_safety_comic_page_mime_type(resolved_path.suffix)
+        or "application/octet-stream"
+    )
+    policy_error = _validate_comic_page_delivery(
+        media_type=resolved_media_type,
+        size=resolved_path.stat().st_size,
+    )
+    if policy_error is not None:
+        return policy_error
     return _with_comic_page_variant_header(
         _send_file(
-            path,
+            resolved_path,
             request,
             user_id,
-            media_type=media_type,
+            media_type=resolved_media_type,
             route=route,
             asset_id=asset_id,
         ),
@@ -1089,8 +1237,16 @@ def _send_comic_page_file(
     if path is None:
         return fail("文件不存在", status_code=404)
     resolved_media_type = (
-        media_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        media_type
+        or reader_safety_comic_page_mime_type(path.suffix)
+        or "application/octet-stream"
     )
+    policy_error = _validate_comic_page_delivery(
+        media_type=resolved_media_type,
+        size=path.stat().st_size,
+    )
+    if policy_error is not None:
+        return policy_error
     if variant != COMIC_PAGE_DATA_SAVER_VARIANT or not _is_comic_page_image(
         resolved_media_type
     ):
@@ -1171,9 +1327,15 @@ def _send_comic_page_zip_entry(
             info = archive.getinfo(entry_name)
             resolved_media_type = (
                 media_type
-                or mimetypes.guess_type(entry_name)[0]
+                or reader_safety_comic_page_mime_type(Path(entry_name).suffix)
                 or "application/octet-stream"
             )
+            policy_error = _validate_comic_page_delivery(
+                media_type=resolved_media_type,
+                size=info.file_size,
+            )
+            if policy_error is not None:
+                return policy_error
             if not _is_comic_page_image(resolved_media_type):
                 return _send_original_comic_page_zip_entry(
                     archive_path,

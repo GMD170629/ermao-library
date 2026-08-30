@@ -81,6 +81,7 @@
 		B07600000000000000000076 /* IosReaderProgressStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07600000000000000000076 /* IosReaderProgressStore.swift */; };
 		B07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */; };
 		B07800000000000000000078 /* IosReadiumRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07800000000000000000078 /* IosReadiumRuntime.swift */; };
+		B25000000000000000000250 /* IosEpubArchiveSafetyPreflight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25000000000000000000250 /* IosEpubArchiveSafetyPreflight.swift */; };
 		B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07900000000000000000079 /* IosEpubReaderSession.swift */; };
 		B08000000000000000000080 /* IosEpubReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08000000000000000000080 /* IosEpubReaderView.swift */; };
 		B08400000000000000000084 /* IosReaderLocalDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F08400000000000000000084 /* IosReaderLocalDatabase.swift */; };
@@ -157,6 +158,7 @@
 		BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */ = {isa = PBXBuildFile; productRef = PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */; };
 		BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0500000000000000000005 /* ErmaoMobiCore */; };
 		BR0700000000000000000007 /* ErmaoArchiveCore in Frameworks */ = {isa = PBXBuildFile; productRef = PR0700000000000000000007 /* ErmaoArchiveCore */; };
+		BR0800000000000000000008 /* ReadiumZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = PR0800000000000000000008 /* ReadiumZIPFoundation */; };
 		A17400000000000000000174 /* DownloadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17400000000000000000174 /* DownloadModels.swift */; };
 		A17500000000000000000175 /* DownloadCenterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17500000000000000000175 /* DownloadCenterStore.swift */; };
 		A17600000000000000000176 /* DownloadCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E17600000000000000000176 /* DownloadCenterView.swift */; };
@@ -167,6 +169,9 @@
 		C21100000000000000000211 /* reader-contract-bodies.json in Resources */ = {isa = PBXBuildFile; fileRef = D21100000000000000000211; };
 		C22100000000000000000221 /* txt-decoding-v1.json in Resources */ = {isa = PBXBuildFile; fileRef = D22100000000000000000221; };
 		C21200000000000000000212 /* source_test_book_fb2.fb2 in Resources */ = {isa = PBXBuildFile; fileRef = D21200000000000000000212; };
+		C22200000000000000000222 /* reader-normalization-v3.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = D22200000000000000000222; };
+		C22300000000000000000223 /* reader-normalization-v3.json in Resources */ = {isa = PBXBuildFile; fileRef = D22300000000000000000223; };
+		C22400000000000000000224 /* reader-normalization-v3.sha256 in Resources */ = {isa = PBXBuildFile; fileRef = D22400000000000000000224; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -261,6 +266,7 @@
 		F07600000000000000000076 /* IosReaderProgressStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderProgressStore.swift; sourceTree = "<group>"; };
 		F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumSwiftLocatorMapper.swift; sourceTree = "<group>"; };
 		F07800000000000000000078 /* IosReadiumRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReadiumRuntime.swift; sourceTree = "<group>"; };
+		F25000000000000000000250 /* IosEpubArchiveSafetyPreflight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubArchiveSafetyPreflight.swift; sourceTree = "<group>"; };
 		F07900000000000000000079 /* IosEpubReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderSession.swift; sourceTree = "<group>"; };
 		F08000000000000000000080 /* IosEpubReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosEpubReaderView.swift; sourceTree = "<group>"; };
 		F08400000000000000000084 /* IosReaderLocalDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderLocalDatabase.swift; sourceTree = "<group>"; };
@@ -344,6 +350,9 @@
 		D21100000000000000000211 /* reader-contract-bodies.json */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-contract-bodies.json"; path = "../../../test-data/library/fb2/reader-contract-bodies.json"; sourceTree = SOURCE_ROOT; };
 		D22100000000000000000221 /* txt-decoding-v1.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "txt-decoding-v1.json"; path = "../../../packages/reader-contracts/fixtures/txt-decoding-v1.json"; sourceTree = SOURCE_ROOT; };
 		D21200000000000000000212 /* source_test_book_fb2.fb2 */ = {isa = PBXFileReference; lastKnownFileType = file; name = "source_test_book_fb2.fb2"; path = "../../../test-data/library/fb2/source_test_book_fb2.fb2"; sourceTree = SOURCE_ROOT; };
+		D22200000000000000000222 /* reader-normalization-v3.xhtml */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-normalization-v3.xhtml"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/chapter.xhtml"; sourceTree = SOURCE_ROOT; };
+		D22300000000000000000223 /* reader-normalization-v3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-normalization-v3.json"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/projection.json"; sourceTree = SOURCE_ROOT; };
+		D22400000000000000000224 /* reader-normalization-v3.sha256 */ = {isa = PBXFileReference; lastKnownFileType = text; name = "reader-normalization-v3.sha256"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/projection.sha256"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -374,6 +383,7 @@
 				BR0600000000000000000006 /* ReadiumAdapterGCDWebServer in Frameworks */,
 				BR0500000000000000000005 /* ErmaoMobiCore in Frameworks */,
 				BR0700000000000000000007 /* ErmaoArchiveCore in Frameworks */,
+				BR0800000000000000000008 /* ReadiumZIPFoundation in Frameworks */,
 				B08700000000000000000087 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -661,6 +671,7 @@
 				F07600000000000000000076 /* IosReaderProgressStore.swift */,
 				F07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift */,
 				F07800000000000000000078 /* IosReadiumRuntime.swift */,
+				F25000000000000000000250 /* IosEpubArchiveSafetyPreflight.swift */,
 				F07900000000000000000079 /* IosEpubReaderSession.swift */,
 				F08000000000000000000080 /* IosEpubReaderView.swift */,
 				C01200000000000000000004 /* IosReaderControlAdapters.swift */,
@@ -747,6 +758,7 @@
 				PR0600000000000000000006 /* ReadiumAdapterGCDWebServer */,
 				PR0500000000000000000005 /* ErmaoMobiCore */,
 				PR0700000000000000000007 /* ErmaoArchiveCore */,
+				PR0800000000000000000008 /* ReadiumZIPFoundation */,
 			);
 			productName = ErmaoLibrary;
 			productReference = F80000000000000000000800 /* ErmaoLibrary.app */;
@@ -823,6 +835,7 @@
 			mainGroup = G00000000000000000000000;
 			packageReferences = (
 				PK0100000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit 3.9.0" */,
+				PK0500000000000000000005 /* XCRemoteSwiftPackageReference "ZIPFoundation 3.0.1" */,
 				PK0300000000000000000003 /* XCLocalSwiftPackageReference "../native/mobi-core" */,
 				PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */,
 			);
@@ -857,6 +870,9 @@
 				C21100000000000000000211 /* reader-contract-bodies.json in Resources */,
 				C22100000000000000000221 /* txt-decoding-v1.json in Resources */,
 				C21000000000000000000210 /* reader-contract.fb2 in Resources */,
+				C22200000000000000000222 /* reader-normalization-v3.xhtml in Resources */,
+				C22300000000000000000223 /* reader-normalization-v3.json in Resources */,
+				C22400000000000000000224 /* reader-normalization-v3.sha256 in Resources */,
 				B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */,
 				B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */,
 				B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */,
@@ -991,6 +1007,7 @@
 				B07600000000000000000076 /* IosReaderProgressStore.swift in Sources */,
 				B07700000000000000000077 /* ReadiumSwiftLocatorMapper.swift in Sources */,
 				B07800000000000000000078 /* IosReadiumRuntime.swift in Sources */,
+				B25000000000000000000250 /* IosEpubArchiveSafetyPreflight.swift in Sources */,
 				B07900000000000000000079 /* IosEpubReaderSession.swift in Sources */,
 				B08000000000000000000080 /* IosEpubReaderView.swift in Sources */,
 				C01100000000000000000004 /* IosReaderControlAdapters.swift in Sources */,
@@ -1316,6 +1333,14 @@
 				revision = de07026e9f825a5791f27a7ac4cd6bb1a784ab8d;
 			};
 		};
+		PK0500000000000000000005 /* XCRemoteSwiftPackageReference "ZIPFoundation 3.0.1" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/ZIPFoundation.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.0.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1348,6 +1373,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = PK0400000000000000000004 /* XCLocalSwiftPackageReference "../native/archive-core" */;
 			productName = ErmaoArchiveCore;
+		};
+		PR0800000000000000000008 /* ReadiumZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PK0500000000000000000005 /* XCRemoteSwiftPackageReference "ZIPFoundation 3.0.1" */;
+			productName = ReadiumZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

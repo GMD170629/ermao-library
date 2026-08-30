@@ -28,7 +28,15 @@
   "iosArchitectures": [
     "ios-arm64"
   ],
-  "artifacts": [],
+  "artifacts": [
+    {
+      "platform": "android",
+      "path": "artifacts/android/shuku-pdfium.aar",
+      "sha256": "85845f50929d9e854ff7c2ecf5b8d5fee5e13a89c2d0b0615fcf24c0998e3110",
+      "sizeBytes": 6603703,
+      "licensePath": "artifacts/licenses/THIRD_PARTY_NOTICES.txt"
+    }
+  ],
   "licenses": [
     "PDFium BSD-3-Clause",
     "PDFium third_party license bundle"

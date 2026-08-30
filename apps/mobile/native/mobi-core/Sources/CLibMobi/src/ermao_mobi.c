@@ -641,7 +641,7 @@ void ermao_mobi_default_options(ErmaoMobiOpenOptions *options) {
     }
     options->struct_size = (uint32_t) sizeof(*options);
     options->max_read_bytes = ERMAO_MOBI_MAX_READ_BYTES;
-    options->max_file_bytes = ERMAO_MOBI_MAX_FILE_BYTES;
+    options->max_file_bytes = 0u;
 }
 
 ErmaoMobiStatus ermao_mobi_open(
@@ -653,17 +653,14 @@ ErmaoMobiStatus ermao_mobi_open(
         return ERMAO_MOBI_INVALID_ARGUMENT;
     }
     *out_book = NULL;
-    ErmaoMobiOpenOptions effective;
-    ermao_mobi_default_options(&effective);
-    if (options != NULL) {
-        if (options->struct_size < sizeof(*options)
-            || options->max_file_bytes == 0u
-            || options->max_read_bytes == 0u
-            || options->max_read_bytes > ERMAO_MOBI_MAX_READ_BYTES) {
-            return ERMAO_MOBI_INVALID_ARGUMENT;
-        }
-        effective = *options;
+    if (options == NULL
+        || options->struct_size < sizeof(*options)
+        || options->max_file_bytes == 0u
+        || options->max_read_bytes == 0u
+        || options->max_read_bytes > ERMAO_MOBI_MAX_READ_BYTES) {
+        return ERMAO_MOBI_INVALID_ARGUMENT;
     }
+    const ErmaoMobiOpenOptions effective = *options;
 
     struct stat file_stat;
     errno = 0;

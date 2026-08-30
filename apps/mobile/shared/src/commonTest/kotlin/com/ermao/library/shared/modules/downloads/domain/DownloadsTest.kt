@@ -1,5 +1,8 @@
 package com.ermao.library.shared.modules.downloads.domain
 
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -86,6 +89,39 @@ class DownloadsTest {
         assertFailsWith<IllegalArgumentException> {
             DownloadSource("/api/unrelated/file", "application/zip", 10)
         }
+    }
+
+    @Test
+    fun originalPageSetEnforcesGeneratedComicAdmission() {
+        fun page(index: Int, mimeType: String = "image/png", bytes: Long = 1) = DownloadBundleMember(
+            assetId = "page-$index",
+            sequenceIndex = index,
+            source = DownloadSource("/api/assets/page-$index", mimeType, bytes),
+        )
+        fun descriptorFor(members: List<DownloadBundleMember>) = DownloadDescriptor(
+            identity = DownloadIdentity(namespace("server", "user", 1), "book", "resource", "page-set"),
+            bookTitle = "Book",
+            bookAuthor = null,
+            coverApiPath = null,
+            resourceTitle = "Pages",
+            format = "image_dir",
+            readerType = DownloadReaderType.Comic,
+            source = members.first().source,
+            artifactKind = DownloadArtifactKind.OriginalPageSet,
+            members = members,
+        )
+
+        assertFailsWith<IllegalArgumentException> { descriptorFor(listOf(page(0, "image/svg+xml"))) }
+        assertFailsWith<IllegalArgumentException> {
+            descriptorFor(listOf(page(0, bytes = readerSafetyComicPageMaxBytes() + 1)))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            descriptorFor((0..readerSafetyComicPageMaxCount().toInt()).map(::page))
+        }
+        val fullPages = readerSafetyComicExpandedMaxBytes() / readerSafetyComicPageMaxBytes()
+        val members = (0 until fullPages.toInt()).map { page(it, bytes = readerSafetyComicPageMaxBytes()) } +
+            page(fullPages.toInt(), bytes = 1)
+        assertFailsWith<IllegalArgumentException> { descriptorFor(members) }
     }
 
     private fun namespace(server: String, user: String, version: Long) = DownloadNamespace(server, user, version)

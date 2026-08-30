@@ -31,6 +31,7 @@ import com.ermao.library.shared.modules.reader.createReaderProgressPresentationU
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
 import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
+import com.ermao.library.shared.modules.reader.readerSafetyComicArchiveDetectorFailure
 import java.io.FileNotFoundException
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -165,8 +166,16 @@ internal class ReadiumComicSession(
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         } catch (error: ArchiveCoreException) {
+            val safetyFailure = readerSafetyComicArchiveDetectorFailure(error.stableCode)
             throw ReaderOpenFailure(
-                ReaderError(readerErrorCodeForFailure(error.stableCode, recoverable = false)),
+                ReaderError(
+                    code = safetyFailure?.let { failure ->
+                        readerErrorCodeForFailure(failure.errorCode, recoverable = false)
+                    } ?: readerErrorCodeForFailure(error.stableCode, recoverable = false),
+                    safeContext = safetyFailure?.let { failure ->
+                        mapOf("ruleId" to failure.ruleId, "errorCode" to failure.errorCode)
+                    }.orEmpty(),
+                ),
                 cause = error,
             )
         } catch (error: IllegalArgumentException) {

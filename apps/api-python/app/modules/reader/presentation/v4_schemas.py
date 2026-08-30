@@ -466,9 +466,10 @@ class ReaderComicManifestPage(ReaderWireModel):
 
 
 class ReaderComicManifestData(ReaderWireModel):
-    schema_version: Literal[1] = Field(1, alias="schemaVersion")
+    schema_version: Literal[2] = Field(2, alias="schemaVersion")
     kind: Literal["comic"] = "comic"
     resource_id: str = Field(alias="resourceId", min_length=1)
+    revision: str = Field(min_length=71, max_length=71)
     source_format: Literal["cbz", "zip", "cbr", "rar", "image_dir"] = Field(
         alias="sourceFormat"
     )

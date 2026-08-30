@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.local/contracts/reader-safety-conformance-suite-v1.schema.json",
+  "title": "Reader safety executable conformance suite v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "policyId", "policyVersion", "policyDigest", "fixtureManifest", "cases"],
+  "properties": {
+    "$schema": {"const": "../../schemas/reader-safety-conformance-suite-v1.schema.json"},
+    "schemaVersion": {"const": 1},
+    "policyId": {"const": "shuku.reader-safety"},
+    "policyVersion": {"type": "integer", "minimum": 1},
+    "policyDigest": {"$ref": "#/$defs/sha256"},
+    "fixtureManifest": {"const": "manifest.json"},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "consumer": {"enum": ["BACKEND", "WEB", "KMP", "ANDROID"]},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ruleId", "evaluator", "semanticProjection", "consumers"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"},
+        "ruleId": {"type": "string", "pattern": "^[A-Z][A-Z0-9_.]{2,95}$"},
+        "evaluator": {
+          "enum": [
+            "REFLOWABLE_MARKUP",
+            "REFLOWABLE_NAMED_ENTITIES",
+            "REFLOWABLE_MARKUP_SANITIZE",
+            "REFLOWABLE_URI",
+            "REFLOWABLE_CSS",
+            "REFLOWABLE_SVG",
+            "ARCHIVE_STRUCTURE",
+            "EPUB_ARCHIVE_CRC",
+            "ORIGINAL_BYTES",
+            "FB2_STRUCTURE",
+            "PDF_ACTIVE_ACTIONS",
+            "PDF_PAGE_GEOMETRY",
+            "PDF_RANGE_PROTOCOL",
+            "COMIC_PAGE_MIME",
+            "COMIC_PAGE_COUNT",
+            "COMIC_PAGE_DECODE",
+            "COMIC_REVISION",
+            "AUDIO_CONTAINER_MIME",
+            "AUDIO_CODEC",
+            "AUDIO_CHAPTER_BOUNDS",
+            "DRM_ALGORITHM",
+            "EXACT_FORMAT_MIME",
+            "BINARY_RESOURCE_BYTES",
+            "OPTIONAL_RESOURCE",
+            "REQUIRED_READING_ORDER_MARKUP",
+            "XML_CONTROL_DOCUMENT_BYTES",
+            "REFLOWABLE_MARKUP_BYTES",
+            "EPUB_ARCHIVE_ENTRY_COUNT",
+            "EPUB_ARCHIVE_EXPANDED_BYTES",
+            "EPUB_ARCHIVE_ENTRY_BYTES",
+            "EPUB_ARCHIVE_COMPRESSION_RATIO",
+            "FB2_IMAGE_BUDGET",
+            "TXT_MEMORY_BYTES",
+            "TXT_CHUNK_CHARACTERS",
+            "PDF_RENDER_BUDGET",
+            "COMIC_ARCHIVE_STRUCTURE",
+            "COMIC_ARCHIVE_BUDGET",
+            "COMIC_PAGE_BYTES",
+            "COMIC_MANIFEST_BYTES",
+            "AUDIO_ORIGINAL_BYTES",
+            "AUDIO_METADATA_BUDGET",
+            "AUDIO_REDIRECT_POLICY"
+          ]
+        },
+        "semanticProjection": {
+          "enum": [
+            "ROOT_LOCAL_NAME",
+            "SANITIZED_TEXT",
+            "SANITIZED_MARKUP",
+            "INPUT",
+            "FONT_OBFUSCATION",
+            "NONE"
+          ]
+        },
+        "consumers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/consumer"}
+        }
+      }
+    }
+  }
+}

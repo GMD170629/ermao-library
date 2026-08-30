@@ -1,4 +1,5 @@
 #include "archive_core.h"
+#include "reader_safety_policy.generated.h"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -122,8 +123,17 @@ static int image_path(const char *path) {
     if (length == 0 || length >= sizeof(lowered)) return 0;
     for (index = 0; index < length; index++) lowered[index] = (char)tolower((unsigned char)extension[index]);
     lowered[length] = '\0';
-    return strcmp(lowered, "jpg") == 0 || strcmp(lowered, "jpeg") == 0 ||
-        strcmp(lowered, "png") == 0 || strcmp(lowered, "gif") == 0 || strcmp(lowered, "webp") == 0;
+    return ermao_reader_safety_comic_extension_allowed(lowered);
+}
+
+static int compression_ratio_exceeded(int64_t expanded_bytes, int64_t compressed_bytes) {
+    const int64_t maximum_ratio = ERMAO_READER_SAFETY_COMIC_COMPRESSION_RATIO_MAX;
+    int64_t quotient;
+    if (expanded_bytes <= 0) return 0;
+    if (compressed_bytes <= 0 || maximum_ratio <= 0) return 1;
+    quotient = expanded_bytes / compressed_bytes;
+    return quotient > maximum_ratio ||
+        (quotient == maximum_ratio && expanded_bytes % compressed_bytes != 0);
 }
 
 static int natural_compare(const void *left_value, const void *right_value) {
@@ -190,8 +200,9 @@ int ermao_archive_open(
     struct archive *reader = NULL;
     struct archive_entry *entry = NULL;
     ermao_archive *value = NULL;
-    size_t entries_seen = 0;
+    size_t pages_seen = 0;
     int64_t expanded_bytes = 0;
+    int64_t compressed_bytes;
     int status;
     size_t index;
     if (result != NULL) *result = NULL;
@@ -215,6 +226,7 @@ int ermao_archive_open(
     }
     while ((status = archive_read_next_header(reader, &entry)) == ARCHIVE_OK) {
         const char *entry_path = archive_entry_pathname_utf8(entry);
+        int is_image;
         int64_t size;
         if (entry_path == NULL) entry_path = archive_entry_pathname(entry);
         if (!safe_path(entry_path)) {
@@ -230,14 +242,8 @@ int ermao_archive_open(
             set_error(error, "ARCHIVE_ENTRY_TYPE_INVALID", "Archive contains a non-regular entry");
             goto failure;
         }
-        entries_seen++;
-        if (entries_seen > limits.maximum_entries) {
-            set_error(error, "ARCHIVE_ENTRY_LIMIT_EXCEEDED", "Archive contains too many entries");
-            goto failure;
-        }
-        if (!archive_entry_size_is_set(entry) || (size = archive_entry_size(entry)) < 0 ||
-            size > limits.maximum_page_bytes) {
-            set_error(error, "ARCHIVE_PAGE_LIMIT_EXCEEDED", "Archive entry size is invalid");
+        if (!archive_entry_size_is_set(entry) || (size = archive_entry_size(entry)) < 0) {
+            set_error(error, "ARCHIVE_DATA_INVALID", "Archive entry size is invalid");
             goto failure;
         }
         if (expanded_bytes > limits.maximum_expanded_bytes - size) {
@@ -249,7 +255,17 @@ int ermao_archive_open(
             set_error(error, "ARCHIVE_ENCRYPTED", "Archive contains encrypted entries");
             goto failure;
         }
-        if (image_path(entry_path) && !append_page(value, entry_path, size, error)) goto failure;
+        is_image = image_path(entry_path);
+        if (is_image) {
+            pages_seen++;
+            if (pages_seen > limits.maximum_entries) {
+                set_error(error, "ARCHIVE_PAGE_COUNT_EXCEEDED", "Archive contains too many image pages");
+                goto failure;
+            }
+            /* COMIC.PAGE_MAX_BYTES is BLOCK_RESOURCE: omit only this page. */
+            if (size > 0 && size <= limits.maximum_page_bytes &&
+                !append_page(value, entry_path, size, error)) goto failure;
+        }
         status = archive_read_data_skip(reader);
         if (status != ARCHIVE_OK && status != ARCHIVE_WARN) {
             set_reader_error(error, "ARCHIVE_DATA_INVALID", archive_error_string(reader));
@@ -262,6 +278,11 @@ int ermao_archive_open(
     }
     if (archive_read_has_encrypted_entries(reader) == 1) {
         set_error(error, "ARCHIVE_ENCRYPTED", "Archive contains encrypted entries");
+        goto failure;
+    }
+    compressed_bytes = archive_filter_bytes(reader, -1);
+    if (compression_ratio_exceeded(expanded_bytes, compressed_bytes)) {
+        set_error(error, "ARCHIVE_COMPRESSION_RATIO_EXCEEDED", "Archive compression ratio is too large");
         goto failure;
     }
     archive_read_free(reader);

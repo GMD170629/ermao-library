@@ -1,4 +1,5 @@
 import Foundation
+@preconcurrency import ErmaoShared
 import ErmaoArchiveCore
 
 struct IosArchiveCoreFailure: Error, Sendable {
@@ -24,10 +25,11 @@ final class IosArchiveCore: @unchecked Sendable {
         }
         var opened: OpaquePointer?
         var error = ermao_archive_error()
+        let maximumPageCount = ErmaoShared.PublicKt.readerSafetyComicPageMaxCount()
         let limits = ermao_archive_limits(
-            maximum_entries: 10_000,
-            maximum_page_bytes: 64 * 1_024 * 1_024,
-            maximum_expanded_bytes: 4 * 1_024 * 1_024 * 1_024
+            maximum_entries: Int(maximumPageCount),
+            maximum_page_bytes: ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes(),
+            maximum_expanded_bytes: ErmaoShared.PublicKt.readerSafetyComicExpandedMaxBytes()
         )
         let result = fileURL.withUnsafeFileSystemRepresentation { path in
             path.map { ermao_archive_open($0, limits, &opened, &error) } ?? 0
@@ -36,7 +38,7 @@ final class IosArchiveCore: @unchecked Sendable {
         handle = opened
         do {
             let count = ermao_archive_page_count(opened)
-            guard count > 0, count <= 10_000 else {
+            guard count > 0, Int64(count) <= maximumPageCount else {
                 throw IosArchiveCoreFailure(
                     stableCode: "ARCHIVE_ENTRY_LIMIT_EXCEEDED",
                     detail: "Archive page count is invalid"
@@ -71,7 +73,9 @@ final class IosArchiveCore: @unchecked Sendable {
             throw IosArchiveCoreFailure(stableCode: "ARCHIVE_PAGE_OUT_OF_RANGE", detail: "Archive page is unavailable")
         }
         let size = pages[index].sizeBytes
-        guard size > 0, size <= Int64(Int.max) else {
+        guard size > 0,
+              size <= ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes(),
+              size <= Int64(Int.max) else {
             throw IosArchiveCoreFailure(stableCode: "ARCHIVE_PAGE_LIMIT_EXCEEDED", detail: "Archive page is too large")
         }
         var bytes = Data(count: Int(size))

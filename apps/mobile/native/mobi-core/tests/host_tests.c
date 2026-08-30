@@ -20,6 +20,13 @@ static void make_path(char *path, size_t capacity, const char *directory, const 
     assert(written > 0 && (size_t) written < capacity);
 }
 
+static ErmaoMobiOpenOptions test_open_options(void) {
+    ErmaoMobiOpenOptions options;
+    ermao_mobi_default_options(&options);
+    options.max_file_bytes = UINT64_MAX;
+    return options;
+}
+
 static void expect_open_status(
     const char *directory,
     const char *name,
@@ -28,7 +35,8 @@ static void expect_open_status(
     char path[4096];
     make_path(path, sizeof(path), directory, name);
     ErmaoMobiBook *book = NULL;
-    const ErmaoMobiStatus actual = ermao_mobi_open(path, NULL, &book);
+    const ErmaoMobiOpenOptions options = test_open_options();
+    const ErmaoMobiStatus actual = ermao_mobi_open(path, &options, &book);
     if (actual != expected) fprintf(stderr, "%s: expected %s, actual %s\n", name,
         ermao_mobi_status_name(expected), ermao_mobi_status_name(actual));
     assert(actual == expected);
@@ -51,7 +59,8 @@ static char *copy_string(
 
 static void exercise_book(const char *path) {
     ErmaoMobiBook *book = NULL;
-    assert(ermao_mobi_open(path, NULL, &book) == ERMAO_MOBI_OK);
+    const ErmaoMobiOpenOptions options = test_open_options();
+    assert(ermao_mobi_open(path, &options, &book) == ERMAO_MOBI_OK);
     assert(book != NULL);
 
     ErmaoMobiBookInfo book_info = {.struct_size = sizeof(book_info)};
@@ -121,6 +130,7 @@ static void exercise_abi_edges(const char *directory) {
     options.max_file_bytes = 1u;
     assert(ermao_mobi_open(path, &options, &book) == ERMAO_MOBI_LIMIT_EXCEEDED);
     ermao_mobi_default_options(&options);
+    options.max_file_bytes = UINT64_MAX;
     options.max_read_bytes = 1u;
     assert(ermao_mobi_open(path, &options, &book) == ERMAO_MOBI_OK);
 
@@ -154,7 +164,8 @@ static void exercise_abi_edges(const char *directory) {
     assert(strcmp(ermao_mobi_status_name((ErmaoMobiStatus) 999), "internal") == 0);
     ermao_mobi_close(&book);
 
-    assert(ermao_mobi_open(directory, NULL, &book) == ERMAO_MOBI_UNSUPPORTED);
+    options = test_open_options();
+    assert(ermao_mobi_open(directory, &options, &book) == ERMAO_MOBI_UNSUPPORTED);
 }
 
 int main(int argc, char **argv) {
@@ -163,9 +174,10 @@ int main(int argc, char **argv) {
     assert(strstr(ermao_mobi_parser_identifier(), "85dcfe803fc2a210") != NULL);
 
     ErmaoMobiBook *book = NULL;
+    const ErmaoMobiOpenOptions options = test_open_options();
     assert(ermao_mobi_open(NULL, NULL, &book) == ERMAO_MOBI_INVALID_ARGUMENT);
     assert(ermao_mobi_open("", NULL, &book) == ERMAO_MOBI_INVALID_ARGUMENT);
-    assert(ermao_mobi_open("/definitely/missing/ermao.mobi", NULL, &book) == ERMAO_MOBI_FILE_NOT_FOUND);
+    assert(ermao_mobi_open("/definitely/missing/ermao.mobi", &options, &book) == ERMAO_MOBI_FILE_NOT_FOUND);
 
     if (argc != 2) {
         fprintf(stderr, "usage: %s <corpus-directory>\n", argv[0]);
@@ -212,7 +224,7 @@ int main(int argc, char **argv) {
     expect_open_status(argv[1], "negative-synthetic-azw4.azw4", ERMAO_MOBI_CORRUPT);
 
     for (uint32_t iteration = 0u; iteration < 1000u; iteration++) {
-        assert(ermao_mobi_open(first_fixture, NULL, &book) == ERMAO_MOBI_OK);
+        assert(ermao_mobi_open(first_fixture, &options, &book) == ERMAO_MOBI_OK);
         ermao_mobi_close(&book);
     }
     puts("ermao_mobi_host_tests: ok");

@@ -535,6 +535,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             progressCoordination?.beginDeferredSynchronization()
         } catch let failure as IosReaderFailure {
             await failOpening(failure)
+        } catch let error as IosPublicationSecurityError {
+            await failOpening(IosReaderFailure.security(error))
         } catch {
             await failOpening(IosReaderFailure(code: .engineError, underlyingError: error as NSError))
         }

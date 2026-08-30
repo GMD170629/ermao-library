@@ -6,6 +6,9 @@ import com.ermao.library.shared.modules.reader.domain.PDF_RANGE_MEMORY_CACHE_BYT
 import com.ermao.library.shared.modules.reader.domain.PdfByteRange
 import com.ermao.library.shared.modules.reader.domain.PdfRangeCacheIdentity
 import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFailure
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -17,7 +20,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class PdfRangeFailure(val code: PdfReaderErrorCode, val recoverable: Boolean) : Exception(code.wireValue)
+class PdfRangeFailure(
+    val code: PdfReaderErrorCode,
+    val recoverable: Boolean,
+    val safetyFailure: ReaderSafetyFailure? = null,
+) : Exception(code.wireValue)
 
 /** Both native engines share acquisition, coalescing, bounds, cancellation and session memory. */
 class PdfRangeLoader(
@@ -35,7 +42,8 @@ class PdfRangeLoader(
     suspend fun probe() = owned {
         when (val result = server.probe(source)) {
             PdfRangeProbeResult.Available -> Unit
-            is PdfRangeProbeResult.Failure -> throw PdfRangeFailure(result.code, result.recoverable)
+            is PdfRangeProbeResult.Failure ->
+                throw PdfRangeFailure(result.code, result.recoverable, result.safetyFailure)
         }
     }
 
@@ -64,7 +72,7 @@ class PdfRangeLoader(
     suspend fun drainRequested(): Boolean = owned {
         var requested: Pending
         do { requested = pending.value } while (!pending.compareAndSet(requested, requested.copy(ranges = emptySet())))
-        if (requested.invalid) throw PdfRangeFailure(PdfReaderErrorCode.RangeInvalid, false)
+        if (requested.invalid) throw pdfRangePolicyFailure()
         for (range in requested.ranges) acquire(range)
         requested.ranges.isNotEmpty()
     }
@@ -102,11 +110,12 @@ class PdfRangeLoader(
                 coroutineContext.ensureActive()
                 if (pending.value.closed || pending.value.generation != generation) return@withLock
                 if (result.range != range || result.bytes.size.toLong() != range.endExclusive - range.begin) {
-                    throw PdfRangeFailure(PdfReaderErrorCode.RangeInvalid, false)
+                    throw pdfRangePolicyFailure()
                 }
                 cache.writeAlignedRange(identity, range.begin, result.bytes)
             }
-            is PdfRangeReadResult.Failure -> throw PdfRangeFailure(result.code, result.recoverable)
+            is PdfRangeReadResult.Failure ->
+                throw PdfRangeFailure(result.code, result.recoverable, result.safetyFailure)
         }
     }
 
@@ -134,3 +143,9 @@ class PdfRangeLoader(
         return result
     }
 }
+
+private fun pdfRangePolicyFailure(): PdfRangeFailure = PdfRangeFailure(
+    code = PdfReaderErrorCode.RangeInvalid,
+    recoverable = false,
+    safetyFailure = ReaderSafetyFacade().failureFor(ReaderSafetyRuleId.PDF_RANGE_PROTOCOL),
+)

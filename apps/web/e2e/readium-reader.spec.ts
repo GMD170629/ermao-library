@@ -107,21 +107,38 @@ test('Readium opens a cached original EPUB without manifest, positions or chapte
   expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
 });
 
-test('Readium rejects a malicious local EPUB without a remote publication fallback', async ({ page }) => {
+test('Readium sanitizes active EPUB content and never lets authored content initiate network requests', async ({ page }) => {
   const requests: string[] = [];
+  let authoredNetworkRequests = 0;
   page.on('request', (request) => requests.push(new URL(request.url()).pathname));
+  await page.route('https://reader-safety.invalid/**', async (route) => {
+    authoredNetworkRequests += 1;
+    await route.abort();
+  });
   await installReaderRoutes(page, null, 0, [{
     href: 'chapter1.xhtml',
     title: 'Unsafe',
-    body: '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Unsafe</title></head><body><a href="javascript:alert(1)">unsafe</a></body></html>'
+    body: `<?xml version="1.0"?>
+      <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+      <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Sanitized</title>
+      <style>@import url("https://reader-safety.invalid/author.css"); .remote{background:url("https://reader-safety.invalid/background.png")}</style>
+      <script id="authored-active-script">fetch("https://reader-safety.invalid/script-fetch")</script></head><body onload="fetch('https://reader-safety.invalid/onload')">
+      <h1 id="safe-heading">安全正文仍然可读</h1>
+      <a id="unsafe-link" href="javascript:alert(1)">unsafe</a>
+      <img id="remote-image" src="https://reader-safety.invalid/remote.png" alt="remote"/>
+      <svg xmlns="http://www.w3.org/2000/svg"><image id="remote-svg" href="https://reader-safety.invalid/vector.png"/></svg>
+      </body></html>`
   }]);
 
   await page.goto('/reader/epub-resource');
-  const shell = page.locator('[data-reader-shell="v3"]');
-  const error = shell.locator('[data-reader-error-code]');
-  await expect(error).toBeVisible();
-  await expect(error).toHaveAttribute('data-reader-error-code', 'PUBLICATION_SECURITY_REJECTED');
-  await expect(shell.locator('iframe')).toHaveCount(0);
+  const frame = await visibleReadiumFrame(page);
+  const content = frame.contentFrame();
+  await expect(content.locator('#safe-heading')).toBeVisible();
+  await expect(content.locator('#authored-active-script')).toHaveCount(0);
+  await expect(content.locator('#unsafe-link')).not.toHaveAttribute('href', /.+/);
+  await expect(content.locator('#remote-image')).not.toHaveAttribute('src', /.+/);
+  await expect(content.locator('#remote-svg')).not.toHaveAttribute('href', /.+/);
+  await expect.poll(() => authoredNetworkRequests).toBe(0);
   expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
   expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
 });

@@ -103,6 +103,7 @@ export type AudioPlaybackState = {
   sleepTimerEndsAt: number | null;
   sleepTimerMode: AudioSleepTimerMode;
   error: string | null;
+  safetyError: ReaderSafetyFailure | null;
 };
 
 export type LoadAudioResourceOptions = {
@@ -132,3 +133,4 @@ export type AudioPlaybackContextValue = AudioPlaybackState & {
   setVolume: (volume: number) => void;
   setSleepTimer: (value: number | 'chapter' | null) => void;
 };
+import type { ReaderSafetyFailure } from '@shuku/reader-core';

@@ -189,6 +189,7 @@ class KtorReaderBootstrapGatewayTest {
         assertEquals(ReaderFormat.Comic, comicContent.target.sourceFormat)
         assertEquals("pages/0", comicContent.comicPages.single().resourceHref)
         assertEquals("/api/reader/v4/resources/resource-1/comic/manifest", comicContent.comicAccess?.manifestApiPath)
+        assertEquals(COMIC_REVISION, comicContent.comicAccess?.revision)
         assertEquals(1, comicManifestRequests)
     }
 
@@ -287,8 +288,9 @@ class KtorReaderBootstrapGatewayTest {
         const val PDF_UNIT = """{"id":"pdf-page-1","index":0,"title":"Page 1","href":"page-1","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageNumber":1}}"""
         const val PDF_UNITS = """"units":[$PDF_UNIT]"""
         const val COMIC_UNITS = """"units":[{"id":"comic-page-1","index":0,"title":"Page 1","href":"pages/0","assetId":"asset-1","startMs":null,"endMs":null,"durationMs":null,"metadata":{"pageIndex":0}}]"""
-        const val COMIC_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"cbz","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/jpeg","width":1200,"height":1800,"sizeBytes":1234}]}"""
-        const val IMAGE_DIRECTORY_MANIFEST = """{"schemaVersion":1,"kind":"comic","resourceId":"resource-1","sourceFormat":"image_dir","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/png","width":1200,"height":1800,"sizeBytes":1234}]}"""
+        const val COMIC_REVISION = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        const val COMIC_MANIFEST = """{"schemaVersion":2,"revision":"$COMIC_REVISION","kind":"comic","resourceId":"resource-1","sourceFormat":"cbz","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/jpeg","width":1200,"height":1800,"sizeBytes":1234}]}"""
+        const val IMAGE_DIRECTORY_MANIFEST = """{"schemaVersion":2,"revision":"$COMIC_REVISION","kind":"comic","resourceId":"resource-1","sourceFormat":"image_dir","pageCount":1,"readingOrder":[{"pageIndex":0,"resourceHref":"pages/0","title":"Page 1","mediaType":"image/png","width":1200,"height":1800,"sizeBytes":1234}]}"""
         const val REFLOWABLE_PUBLICATION = """"publication":null"""
         const val COMIC_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"]}"""
         const val IMAGE_DIRECTORY_PUBLICATION = """"publication":{"kind":"comic","manifestUrl":"/api/reader/v4/resources/resource-1/comic/manifest","pageUrlTemplate":"/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}","imageVariants":["original","data-saver"]}"""

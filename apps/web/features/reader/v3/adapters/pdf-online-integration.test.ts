@@ -38,6 +38,7 @@ test('pinned PDF renderer opens and renders with all non-current content blocked
   const fetcher: typeof fetch = async (_input, init) => {
     if (init?.method === 'HEAD') return new Response(null, { headers: {
       'Accept-Ranges': 'bytes', 'Content-Length': String(bytes.length), 'Content-Type': 'application/pdf',
+      ETag: '"pdf-online-fixture-v1"',
     } });
     const range = new Headers(init?.headers).get('range');
     assert.ok(range, 'the reader must never request a complete original');
@@ -52,6 +53,7 @@ test('pinned PDF renderer opens and renders with all non-current content blocked
     return new Response(bytes.slice(begin, end), { status: 206, headers: {
       'Content-Range': `bytes ${begin}-${end - 1}/${bytes.length}`,
       'Content-Length': String(end - begin), 'Content-Type': 'application/pdf',
+      ETag: '"pdf-online-fixture-v1"',
     } });
   };
   const source = new PdfRangeByteSource({ url: '/api/assets/pdf', length: bytes.length }, fetcher);

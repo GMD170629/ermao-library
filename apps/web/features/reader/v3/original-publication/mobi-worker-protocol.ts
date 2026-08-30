@@ -1,3 +1,5 @@
+import type { ReaderSafetyRuleId } from '@shuku/reader-core';
+
 export type MobiResourceDescriptor = Readonly<{
   index: number;
   category: number;
@@ -30,4 +32,4 @@ export type MobiWorkerResponse =
   | Readonly<{ requestId: number; ok: true; type: 'open'; result: MobiOpenResult }>
   | Readonly<{ requestId: number; ok: true; type: 'read'; bytes: ArrayBuffer }>
   | Readonly<{ requestId: number; ok: true; type: 'close' }>
-  | Readonly<{ requestId: number; ok: false; code: string }>;
+  | Readonly<{ requestId: number; ok: false; code: string; ruleId?: ReaderSafetyRuleId }>;

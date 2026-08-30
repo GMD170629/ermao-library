@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 
+import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import type {
   MobiOpenResult,
   MobiResourceDescriptor,
@@ -7,10 +8,15 @@ import type {
   MobiWorkerRequest,
   MobiWorkerResponse
 } from './mobi-worker-protocol';
+import {
+  ReaderSafetyImplementationError,
+  ReaderSafetyPolicyError,
+  rejectReaderSafety
+} from '../security/reader-safety-policy';
 
 const ABI_VERSION = 1;
-const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
-const MAX_RESOURCE_BYTES = 256 * 1024 * 1024;
+const MAX_FILE_BYTES = READER_SAFETY_BUDGETS.originalMaxBytes;
+const MAX_RESOURCE_BYTES = READER_SAFETY_BUDGETS.archiveEntryMaxBytes;
 const INDEX_NONE = 0xffff_ffff;
 const RUNTIME_URL = '/vendor/mobi-core/ermao-mobi.mjs';
 const MANIFEST_URL = '/vendor/mobi-core/artifact-manifest.json';
@@ -92,7 +98,9 @@ function copyString(functionName: string, prefix: readonly number[]): string | n
     if (first !== 0 && first !== 13) assertStatus(first);
     const required = getValue(requiredPointer, 'i32') >>> 0;
     if (required <= 1) return null;
-    if (required > MAX_RESOURCE_BYTES) throw new Error('MOBI_STRING_LIMIT');
+    if (required > MAX_RESOURCE_BYTES) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_BINARY_RESOURCE_MAX_BYTES);
+    }
     const buffer = malloc(required);
     try {
       assertStatus(ccall(functionName, 'number', [...prefix.map(() => 'number'), 'number', 'number', 'number'], [...prefix, buffer, required, requiredPointer]));
@@ -167,7 +175,8 @@ function validFilename(value: string): boolean {
 }
 
 async function openBook(blob: Blob, filename: string): Promise<MobiOpenResult> {
-  if (blob.size <= 0 || blob.size > MAX_FILE_BYTES || !validFilename(filename)) throw new Error('MOBI_INPUT_INVALID');
+  if (blob.size > MAX_FILE_BYTES) rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
+  if (!validFilename(filename)) throw new Error('MOBI_INPUT_INVALID');
   await loadRuntime();
   closeBook();
   const fs = filesystem();
@@ -206,7 +215,9 @@ async function openBook(blob: Blob, filename: string): Promise<MobiOpenResult> {
         setValue(resourceInfo, 24, 'i32');
         assertStatus(ccall('ermao_mobi_get_resource_info', 'number', ['number', 'number', 'number'], [bookPointer, index, resourceInfo]));
         const decodedLength = u64(resourceInfo + 16);
-        if (decodedLength > MAX_RESOURCE_BYTES) throw new Error('MOBI_RESOURCE_LIMIT');
+        if (decodedLength > MAX_RESOURCE_BYTES) {
+          rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_BINARY_RESOURCE_MAX_BYTES);
+        }
         resources.push({
           index,
           category: getValue(resourceInfo + 4, 'i32') >>> 0,
@@ -268,7 +279,9 @@ function readResource(resourceIndex: number): ArrayBuffer {
     setValue(info, 24, 'i32');
     assertStatus(ccall('ermao_mobi_get_resource_info', 'number', ['number', 'number', 'number'], [bookPointer, resourceIndex, info]));
     const length = u64(info + 16);
-    if (length > MAX_RESOURCE_BYTES) throw new Error('MOBI_RESOURCE_LIMIT');
+    if (length > MAX_RESOURCE_BYTES) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_BINARY_RESOURCE_MAX_BYTES);
+    }
     const output = new Uint8Array(length);
     const buffer = malloc(Math.min(256 * 1024, Math.max(1, length)));
     const outRead = malloc(4);
@@ -334,6 +347,13 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
     respond({ requestId: incoming.requestId, ok: true, type: 'close' });
   })().catch((reason) => {
     const code = reason instanceof Error ? reason.message : 'MOBI_WORKER_FAILED';
-    respond({ requestId: incoming.requestId, ok: false, code });
+    respond({
+      requestId: incoming.requestId,
+      ok: false,
+      code,
+      ...(reason instanceof ReaderSafetyPolicyError || reason instanceof ReaderSafetyImplementationError
+        ? { ruleId: reason.ruleId }
+        : {})
+    });
   });
 });

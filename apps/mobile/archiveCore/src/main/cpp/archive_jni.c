@@ -54,20 +54,29 @@ Java_com_ermao_library_archive_infrastructure_ArchiveCoreNative_version(JNIEnv *
 
 JNIEXPORT jlong JNICALL
 Java_com_ermao_library_archive_infrastructure_ArchiveCoreNative_open(
-    JNIEnv *env, jobject receiver, jbyteArray path
+    JNIEnv *env,
+    jobject receiver,
+    jbyteArray path,
+    jint maximum_entries,
+    jlong maximum_page_bytes,
+    jlong maximum_expanded_bytes
 ) {
-    ermao_archive_limits limits = {10000U, 64LL * 1024LL * 1024LL, 4LL * 1024LL * 1024LL * 1024LL};
+    ermao_archive_limits limits;
     ermao_archive_error error = {{0}, {0}};
     ermao_archive *archive = NULL;
     jsize path_length;
     char *utf8_path;
     (void)receiver;
-    if (path == NULL || (path_length = (*env)->GetArrayLength(env, path)) <= 0) {
+    if (path == NULL || (path_length = (*env)->GetArrayLength(env, path)) <= 0 ||
+        maximum_entries <= 0 || maximum_page_bytes <= 0 || maximum_expanded_bytes <= 0) {
         strcpy(error.code, "ARCHIVE_ARGUMENT_INVALID");
-        strcpy(error.message, "Archive path is invalid");
+        strcpy(error.message, "Archive path or limits are invalid");
         throw_error(env, &error);
         return 0;
     }
+    limits.maximum_entries = (size_t)maximum_entries;
+    limits.maximum_page_bytes = (int64_t)maximum_page_bytes;
+    limits.maximum_expanded_bytes = (int64_t)maximum_expanded_bytes;
     utf8_path = malloc((size_t)path_length + 1U);
     if (utf8_path == NULL) {
         strcpy(error.code, "ARCHIVE_OUT_OF_MEMORY");

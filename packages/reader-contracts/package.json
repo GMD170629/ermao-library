@@ -2,7 +2,13 @@
   "name": "@shuku/reader-contracts",
   "version": "1.0.0",
   "private": true,
+  "scripts": {
+    "generate:safety": "python3 generate-reader-safety-policy.py",
+    "check:safety": "python3 generate-reader-safety-policy.py --check && python3 check-reader-safety-boundaries.py",
+    "test:safety": "python3 -m unittest discover -s tests -p 'test_*.py'"
+  },
   "files": [
+    "reader-safety-policy.json",
     "schemas",
     "fixtures"
   ]

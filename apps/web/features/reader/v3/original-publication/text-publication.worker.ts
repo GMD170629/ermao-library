@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 
+import { READER_SAFETY_BUDGETS, READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import type {
   TextPublicationChapter,
   TextPublicationFormat,
@@ -8,10 +9,15 @@ import type {
   TextWorkerResponse
 } from './text-worker-protocol';
 import { parseStrictFb2 } from './strict-fb2-parser';
+import {
+  ReaderSafetyImplementationError,
+  ReaderSafetyPolicyError,
+  rejectReaderSafety
+} from '../security/reader-safety-policy';
 
-const MAX_TEXT_BYTES = 2 * 1024 * 1024 * 1024;
-const MAX_TEXT_MEMORY_BYTES = 64 * 1024 * 1024;
-const TXT_CHUNK_CHARS = 64 * 1024;
+const MAX_TEXT_BYTES = READER_SAFETY_BUDGETS.originalMaxBytes;
+const MAX_TEXT_MEMORY_BYTES = READER_SAFETY_BUDGETS.txtMemoryMaxBytes;
+const TXT_CHUNK_CHARS = READER_SAFETY_BUDGETS.txtChunkMaxCharacters;
 
 function property(value: unknown, key: PropertyKey): unknown {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
@@ -43,15 +49,15 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
-async function decodeText(blob: Blob): Promise<string> {
-  if (blob.size <= 0 || blob.size > MAX_TEXT_BYTES) throw new Error('PUBLICATION_PARSER_LIMIT');
-  if (blob.size > MAX_TEXT_MEMORY_BYTES) throw new Error('PUBLICATION_PARSER_MEMORY');
+async function decodeText(blob: Blob, format: TextPublicationFormat): Promise<string> {
+  if (blob.size > MAX_TEXT_BYTES) rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
+  if (format === 'txt' && blob.size > MAX_TEXT_MEMORY_BYTES) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.TXT_MEMORY_BUDGET);
+  }
+  if (format === 'fb2' && blob.size > READER_SAFETY_BUDGETS.fb2TextMaxBytes) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
+  }
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  if (
-    bytes.some((value) => value === 0)
-    && !(bytes[0] === 0xff && bytes[1] === 0xfe)
-    && !(bytes[0] === 0xfe && bytes[1] === 0xff)
-  ) throw new Error('PUBLICATION_TXT_NUL_CHARACTER');
   const candidates: readonly Readonly<{ encoding: string; offset: number }>[] = bytes[0] === 0xff && bytes[1] === 0xfe
     ? [{ encoding: 'utf-16le', offset: 2 }]
     : bytes[0] === 0xfe && bytes[1] === 0xff
@@ -118,7 +124,7 @@ function parseFb2(value: string, fallbackTitle: string): TextPublicationResult {
 }
 
 async function openText(blob: Blob, format: TextPublicationFormat, fallbackTitle: string): Promise<TextPublicationResult> {
-  const value = await decodeText(blob);
+  const value = await decodeText(blob, format);
   return format === 'txt' ? parseTxt(value, fallbackTitle) : parseFb2(value, fallbackTitle);
 }
 
@@ -139,6 +145,9 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
       ok: false,
       code: reason instanceof Error && /^[A-Z][A-Z0-9_]+$/.test(reason.message)
         ? reason.message
-        : 'PUBLICATION_PARSE_FAILED'
+        : 'PUBLICATION_PARSE_FAILED',
+      ...(reason instanceof ReaderSafetyPolicyError || reason instanceof ReaderSafetyImplementationError
+        ? { ruleId: reason.ruleId }
+        : {})
     }));
 });

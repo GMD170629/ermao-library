@@ -37,6 +37,7 @@ class ResourcePage(HttpContractModel):
 class ResourcePagesPayload(HttpContractModel):
     pages: list[ResourcePage]
     total: int = Field(ge=0)
+    revision: str = Field(min_length=71, max_length=71)
 
 
 class ResourcePagesResponse(HttpContractModel):

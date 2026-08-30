@@ -67,12 +67,14 @@ final class IosReaderNavigationCache {
         bootstrap: ErmaoShared.ReaderBootstrap
     ) {
         let previous = load(serverIdentity: serverIdentity, userID: userID, resourceID: resourceID)
+        let comicPageLimit = Int(clamping: ErmaoShared.PublicKt.readerSafetyComicPageMaxCount())
+        let pdfPageLimit = Int(clamping: ErmaoShared.PublicKt.readerSafetyPdfPageMaxCount())
         let units = bootstrap.units.isEmpty ? previous?.units ?? [] : bootstrap.units.prefix(20_000).map {
             IosReaderNavigationSnapshot.Unit(id: $0.id, title: $0.title, href: $0.href)
         }
         let comicPages = bootstrap.comicPages.isEmpty
             ? previous?.comicPages ?? []
-            : bootstrap.comicPages.prefix(20_000).map {
+            : bootstrap.comicPages.prefix(comicPageLimit).map {
                 IosReaderNavigationSnapshot.ComicPage(
                     href: $0.resourceHref,
                     mediaType: $0.mediaType,
@@ -83,7 +85,7 @@ final class IosReaderNavigationCache {
             }
         let pdfPageTitles = bootstrap.pdfPages.isEmpty
             ? previous?.pdfPageTitles ?? []
-            : bootstrap.pdfPages.prefix(20_000).map(\.title)
+            : bootstrap.pdfPages.prefix(pdfPageLimit).map(\.title)
         let snapshot = IosReaderNavigationSnapshot(
             units: units,
             comicPages: comicPages,
@@ -561,9 +563,9 @@ final class IosReaderComposition: ObservableObject {
 
     private static func localNormalizationVersion(for format: ErmaoShared.ReaderSourceFormat) -> String {
         switch format {
-        case .epub: "shuku-epub-locator-dom-v2"
+        case .epub: "shuku-epub-locator-dom-v3"
         case .txt: "shuku-txt-publication-v2"
-        case .fb2: "shuku-fb2-publication-v1"
+        case .fb2: "shuku-fb2-publication-v2"
         case .cbz, .zip, .cbr, .rar: "shuku-comic-pages-v1"
         case .imagedir: "shuku-image-dir-pages-v1"
         case .pdf: "shuku-pdf-pages-v1"
@@ -711,6 +713,9 @@ final class IosReaderBootstrapHost: ObservableObject {
         } else if launch is ReaderLaunchStream {
             try await open(request)
         } else if let unavailable = launch as? ReaderLaunchUnavailable {
+            if let failure = unavailable.safetyFailure {
+                throw IosReaderFailure.safety(failure)
+            }
             throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: unavailable.code))
         } else {
             throw IosReaderFailure(code: .engineError)
@@ -780,6 +785,9 @@ final class IosReaderBootstrapHost: ObservableObject {
                 do {
                     let completed = try await coordinator.complete(descriptor: descriptor)
                     guard completed is ReaderLaunchLocal else {
+                        if let failure = (completed as? ReaderLaunchUnavailable)?.safetyFailure {
+                            throw IosReaderFailure.safety(failure)
+                        }
                         let code = (completed as? ReaderLaunchUnavailable)?.code
                         throw IosReaderFailure(
                             code: code.map { IosReaderFailureCode(sharedCode: $0) } ?? .resourceMissing

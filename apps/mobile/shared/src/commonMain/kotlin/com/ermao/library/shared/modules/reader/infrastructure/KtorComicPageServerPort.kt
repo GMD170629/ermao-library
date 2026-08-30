@@ -7,6 +7,9 @@ import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.reader.application.ComicPageReadResult
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.domain.ReaderComicImageVariant
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import com.ermao.library.shared.modules.reader.domain.RemoteComicReaderSource
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
@@ -26,8 +29,15 @@ class KtorComicPageServerPort internal constructor(
         }
         val path = source.pageApiPathTemplate.replace("{pageIndex}", pageIndex.toString())
         when (val result = client.loadAuthenticatedBinary(
-            "$path?imageVariant=${variant.wireValue}", MAXIMUM_PAGE_BYTES, IMAGE_TYPES,
-            errorCodeStatuses = ReaderHttpErrorStatuses.comic,
+            apiPath = path,
+            maximumBytes = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.COMIC_PAGE_MAX_BYTES).toInt(),
+            allowedMimeTypes = ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes.toSet(),
+            queryParameters = mapOf(
+                "imageVariant" to listOf(variant.wireValue),
+                "revision" to listOf(source.revision),
+            ),
+            errorCodeStatuses = ReaderHttpErrorStatuses.comic +
+                (comicResourceChanged to setOf(PRECONDITION_FAILED_STATUS)),
         )) {
             is ApiResult.Failure -> ComicPageReadResult.Failure(
                 if (result.error.kind == AppErrorKind.PayloadTooLarge) "COMIC_OUT_OF_MEMORY_RISK" else result.error.code,
@@ -36,6 +46,12 @@ class KtorComicPageServerPort internal constructor(
                 source = readerFailureSource(result.error.kind),
             )
             is ApiResult.Success -> {
+                if (result.metadata.firstHeader(COMIC_REVISION_HEADER) != source.revision) {
+                    return@withClient ComicPageReadResult.Failure(
+                        comicResourceChanged,
+                        recoverable = false,
+                    )
+                }
                 val actualVariant = if (result.metadata.firstHeader("X-Comic-Image-Variant") == ReaderComicImageVariant.DataSaver.wireValue) {
                     ReaderComicImageVariant.DataSaver
                 } else ReaderComicImageVariant.Original
@@ -54,8 +70,11 @@ class KtorComicPageServerPort internal constructor(
     }
 
     private companion object {
-        const val MAXIMUM_PAGE_BYTES = 32 * 1024 * 1024
-        val IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+        const val COMIC_REVISION_HEADER = "X-Comic-Revision"
+        const val PRECONDITION_FAILED_STATUS = 412
+        val comicResourceChanged = requireNotNull(
+            ReaderSafetyPolicy.rule(ReaderSafetyRuleId.COMIC_MANIFEST_REVISION).errorCode,
+        ).name
     }
 }
 

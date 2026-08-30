@@ -13,10 +13,10 @@ enum class ReaderSessionPhase {
 enum class ReaderErrorCode(val wireValue: String) {
     UnsupportedFormat("UNSUPPORTED_FORMAT"),
     CorruptFile("CORRUPT_FILE"),
-    DrmProtected("DRM_PROTECTED"),
+    DrmProtected(ReaderSafetyErrorCode.PUBLICATION_DRM_UNSUPPORTED.name),
     ParseFailed("PARSE_FAILED"),
     ReadFailed("PUBLICATION_READ_FAILED"),
-    SecurityRejected("PUBLICATION_SECURITY_REJECTED"),
+    SecurityRejected(ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED.name),
     ResourceMissing("RESOURCE_MISSING"),
     PublicationUnavailable("PUBLICATION_UNAVAILABLE"),
     PublicationChanged("PUBLICATION_CHANGED"),
@@ -32,15 +32,14 @@ enum class ReaderErrorCode(val wireValue: String) {
     TxtEmpty("PUBLICATION_TXT_EMPTY"),
     NetworkUnavailable("NETWORK_UNAVAILABLE"),
     OutOfMemoryRisk("OUT_OF_MEMORY_RISK"),
-    PublicationTooLarge("READER_PUBLICATION_TOO_LARGE"),
+    PublicationTooLarge(ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE.name),
     ReaderEngineError("READER_ENGINE_ERROR"),
     LocationRestoreFailed("LOCATION_RESTORE_FAILED"),
     RangeUnsupported("PDF_RANGE_UNSUPPORTED"),
-    RangeInvalid("PDF_RANGE_INVALID"),
+    RangeInvalid(ReaderSafetyErrorCode.PDF_RANGE_INVALID.name),
     PdfEngineLimit("PDF_ENGINE_PROGRESS_LIMIT"),
     ResourceChanged("PDF_RESOURCE_CHANGED"),
     CacheIo("PDF_CACHE_IO"),
-    Encrypted("PDF_ENCRYPTED"),
     Invalid("PDF_INVALID"),
     PageLoadFailed("PDF_PAGE_LOAD_FAILED"),
     RenderFailed("PDF_RENDER_FAILED"),
@@ -61,16 +60,16 @@ fun readerErrorCodeForFailure(
     recoverable: Boolean,
 ): ReaderErrorCode {
     val code = failureCode.trim().uppercase()
+    readerErrorCodeForSafetyFailure(code)?.let { return it }
     ReaderErrorCode.entries.firstOrNull { it.wireValue == code }?.let { return it }
     return when (code) {
         "PUBLICATION_RESOURCE_CHANGED", "BINARY_VERSION_CHANGED", "CONFLICT" -> ReaderErrorCode.PublicationChanged
         "PUBLICATION_RESOURCE_TOO_LARGE", "BINARY_TOO_LARGE", "PAYLOAD_TOO_LARGE" -> ReaderErrorCode.PublicationTooLarge
         "PUBLICATION_NOT_FOUND", "PUBLICATION_RESOURCE_NOT_FOUND", "NOT_FOUND", "GONE" -> ReaderErrorCode.PublicationUnavailable
         "READER_PUBLICATION_ASSET_MISSING" -> ReaderErrorCode.ResourceMissing
-        "PUBLICATION_CORRUPT", "PUBLICATION_PARSE_FAILED", "PUBLICATION_MARKUP_INVALID",
+        "PUBLICATION_PARSE_FAILED", "PUBLICATION_MARKUP_INVALID",
         "PUBLICATION_STRUCTURE_INVALID" -> ReaderErrorCode.ParseFailed
-        "PUBLICATION_DRM_PROTECTED" -> ReaderErrorCode.DrmProtected
-        "PUBLICATION_PARSER_LIMIT", "PUBLICATION_PARSER_MEMORY" -> ReaderErrorCode.OutOfMemoryRisk
+        "PUBLICATION_PARSER_MEMORY" -> ReaderErrorCode.OutOfMemoryRisk
         "READER_PUBLICATION_ASSET_INVALID" -> ReaderErrorCode.CorruptFile
         "PUBLICATION_UNSUPPORTED", "READER_PUBLICATION_UNSUPPORTED", "READER_BOOTSTRAP_UNSUPPORTED" -> ReaderErrorCode.UnsupportedFormat
         "TIMEOUT" -> ReaderErrorCode.RequestTimeout
@@ -96,6 +95,35 @@ fun readerErrorCodeForFailure(
         else -> ReaderErrorCode.ReaderEngineError
     }
 }
+
+private fun readerErrorCodeForSafetyFailure(code: String): ReaderErrorCode? =
+    ReaderSafetyErrorCode.entries.firstOrNull { it.name == code }?.let { safetyCode ->
+        when (safetyCode) {
+            ReaderSafetyErrorCode.PUBLICATION_CORRUPT -> ReaderErrorCode.ParseFailed
+            ReaderSafetyErrorCode.PUBLICATION_DRM_UNSUPPORTED -> ReaderErrorCode.DrmProtected
+            ReaderSafetyErrorCode.PUBLICATION_MIME_MISMATCH -> ReaderErrorCode.CorruptFile
+            ReaderSafetyErrorCode.PUBLICATION_PARSER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk
+            ReaderSafetyErrorCode.PUBLICATION_RESOURCE_BLOCKED -> ReaderErrorCode.ResourceMissing
+            ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED -> ReaderErrorCode.SecurityRejected
+            ReaderSafetyErrorCode.PUBLICATION_TOO_LARGE -> ReaderErrorCode.PublicationTooLarge
+            ReaderSafetyErrorCode.PDF_PAGE_LIMIT -> ReaderErrorCode.PdfEngineLimit
+            ReaderSafetyErrorCode.PDF_RANGE_INVALID -> ReaderErrorCode.RangeInvalid
+            ReaderSafetyErrorCode.PDF_RENDER_LIMIT -> ReaderErrorCode.OutOfMemoryRisk
+            ReaderSafetyErrorCode.COMIC_MIME_MISMATCH,
+            ReaderSafetyErrorCode.COMIC_PAGE_BLOCKED,
+            -> ReaderErrorCode.ComicPageDecodeFailed
+            ReaderSafetyErrorCode.COMIC_RESOURCE_CHANGED -> ReaderErrorCode.PublicationChanged
+            ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED -> ReaderErrorCode.ComicArchiveCorrupt
+            ReaderSafetyErrorCode.AUDIO_DURATION_INVALID,
+            ReaderSafetyErrorCode.AUDIO_METADATA_LIMIT,
+            ReaderSafetyErrorCode.AUDIO_MIME_MISMATCH,
+            ReaderSafetyErrorCode.AUDIO_SECURITY_REJECTED,
+            ReaderSafetyErrorCode.ENGINE_CODEC_UNSUPPORTED,
+            ReaderSafetyErrorCode.ENGINE_POLICY_ALGORITHM_UNSUPPORTED,
+            ReaderSafetyErrorCode.PLATFORM_POLICY_ALGORITHM_UNSUPPORTED,
+            -> ReaderErrorCode.ReaderEngineError
+        }
+    }
 
 data class ReaderError(
     val code: ReaderErrorCode,

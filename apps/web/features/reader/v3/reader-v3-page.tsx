@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  READER_SAFETY_RULES,
+  READER_SAFETY_RULE_IDS,
   comparePublicationLocations,
   publicationNavigationHref,
   type ReaderLocation,
@@ -41,6 +43,8 @@ import { useI18n as useAttributeI18n } from '@/i18n/provider';
 import type { OriginalDownloadProgress } from './original-publication/browser-publication-store';
 
 const openingStorageKey = 'shuku:reader:opening';
+const PUBLICATION_CORRUPT_POLICY_ERROR =
+  READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP].errorCode;
 
 function requireReflowableSourceFormat(bootstrap: ReaderBootstrap) {
   if (bootstrap.readerType !== 'reflowable' || !bootstrap.sourceFormat) {
@@ -450,7 +454,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
             ORIGINAL_DESCRIPTOR_INVALID: '原文件下载信息无效。',
             ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH: '原文件格式与媒体类型不匹配。',
             PUBLICATION_PROCESSING: '内容仍在准备中，请稍后重试',
-            PUBLICATION_CORRUPT: '文件已损坏，无法打开',
+            [PUBLICATION_CORRUPT_POLICY_ERROR]: '文件已损坏，无法打开',
             PUBLICATION_DRM: '受 DRM 保护的文件无法打开',
             PUBLICATION_FAILED: '内容准备失败，请重新导入'
           } as const)[reason.code]

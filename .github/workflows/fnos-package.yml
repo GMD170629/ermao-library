@@ -8,6 +8,7 @@ on:
       - 'apps/web/components/**'
       - 'apps/web/features/**'
       - 'apps/web/lib/**'
+      - 'apps/web/scripts/**'
       - 'apps/web/public/icons/**'
       - 'apps/web/public/manifest.webmanifest'
       - 'apps/web/public/sw.js'
@@ -15,9 +16,12 @@ on:
       - 'apps/web/next.config.js'
       - 'apps/api-python/app/core/**'
       - 'apps/api-python/app/db/**'
+      - 'apps/api-python/tests/conformance/**'
       - 'apps/api-python/pyproject.toml'
       - 'apps/api-python/uv.lock'
       - 'apps/web/package.json'
+      - 'packages/reader-contracts/**'
+      - 'packages/reader-core/**'
       - 'pnpm-lock.yaml'
       - '.gitmodules'
       - 'third_party/foliate-js/**'
@@ -95,6 +99,25 @@ jobs:
           pnpm --filter @shuku/web test
           pnpm --filter @shuku/web i18n:check
           pnpm --filter @shuku/web build
+
+      - name: Compare executable Reader safety reports
+        run: |
+          pnpm --filter @shuku/web conformance:reader-safety
+          python3 apps/api-python/tests/conformance/reader_safety_conformance.py \
+            --output artifacts/reader-safety-conformance/backend.json
+          python3 packages/reader-contracts/verify-reader-safety-conformance.py \
+            --require-consumer BACKEND \
+            --require-consumer WEB \
+            artifacts/reader-safety-conformance/backend.json \
+            artifacts/reader-safety-conformance/web.json
+
+      - name: Upload Reader safety reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reader-safety-web-backend-conformance
+          path: artifacts/reader-safety-conformance/*.json
+          if-no-files-found: error
 
       - name: Validate fnOS package templates
         env:

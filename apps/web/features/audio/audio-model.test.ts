@@ -96,7 +96,7 @@ test('lets the media element decide unknown codec support', () => {
 
 test('resource switching keeps the previous playback until the request commits or fails', () => {
   const bootstrap = normalizeAudioBootstrap(payload, 'resource-1');
-  const previous: AudioPlaybackState = { lifecycle: 'playing', bootstrap, resourceId: bootstrap.resource.id, pendingResourceId: null, pendingSummary: null, loadError: null, bookId: bootstrap.book.id, trackIndex: 0, track: bootstrap.tracks[0] ?? null, chapter: null, positionMs: 0, durationMs: 10_000, absolutePositionMs: 0, totalDurationMs: 30_000, playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1, sleepTimerEndsAt: null, sleepTimerMode: null, error: null };
+  const previous: AudioPlaybackState = { lifecycle: 'playing', bootstrap, resourceId: bootstrap.resource.id, pendingResourceId: null, pendingSummary: null, loadError: null, bookId: bootstrap.book.id, trackIndex: 0, track: bootstrap.tracks[0] ?? null, chapter: null, positionMs: 0, durationMs: 10_000, absolutePositionMs: 0, totalDurationMs: 30_000, playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1, sleepTimerEndsAt: null, sleepTimerMode: null, error: null, safetyError: null };
   const loading = beginAudioResourceSwitch(previous, 'resource-2');
   assert.equal(loading.resourceId, 'resource-1');
   assert.equal(loading.pendingResourceId, 'resource-2');

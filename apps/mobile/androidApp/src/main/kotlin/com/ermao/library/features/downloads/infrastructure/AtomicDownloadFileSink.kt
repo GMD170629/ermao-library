@@ -10,6 +10,13 @@ import com.ermao.library.shared.modules.downloads.DownloadBundleByteSinkSession
 import com.ermao.library.shared.modules.downloads.DownloadBundleMemberSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadBundleSinkRequest
 import com.ermao.library.shared.modules.downloads.DownloadSinkRequest
+import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicManifestMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMimeType
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageExtensionForMimeType
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +81,8 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
 
     override suspend fun beginBundle(request: DownloadBundleSinkRequest): DownloadBundleByteSinkSession =
         withContext(Dispatchers.IO) {
+            require(request.memberCount.toLong() <= readerSafetyComicPageMaxCount())
+            require(request.expectedTotalBytes <= readerSafetyComicExpandedMaxBytes())
             val artifactKey = taskArtifactKey(request.resourceId, request.artifactId, request.taskId)
             val relativeDirectory = relativeArtifactDirectory(
                 request.namespace.serverIdentity,
@@ -139,15 +148,20 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         if (file.isFile) return file.length() > 0L && (expectedBytes == null || file.length() == expectedBytes)
         if (!file.isDirectory) return false
         val manifestFile = File(file, BUNDLE_MANIFEST_NAME)
-        if (!manifestFile.isFile || manifestFile.length() > 8 * 1024 * 1024) return false
+        if (!manifestFile.isFile || manifestFile.length() !in 1..readerSafetyComicManifestMaxBytes()) return false
         val manifest = try { BUNDLE_JSON.decodeFromString<BundleManifest>(manifestFile.readText()) }
         catch (_: kotlinx.serialization.SerializationException) { return false }
         if (manifest.contractVersion != DOWNLOAD_BUNDLE_CONTRACT_VERSION ||
             manifest.artifactKind != DownloadArtifactKind.OriginalPageSet.name || manifest.members.isEmpty() ||
+            manifest.members.size.toLong() > readerSafetyComicPageMaxCount() ||
+            manifest.totalBytes !in 1..readerSafetyComicExpandedMaxBytes() ||
             (expectedBytes != null && manifest.totalBytes != expectedBytes) ||
             manifest.members.map { it.sequenceIndex } != manifest.members.indices.toList() ||
             manifest.members.map { it.fileName }.distinct().size != manifest.members.size ||
-            manifest.members.any { it.sizeBytes <= 0 || it.sizeBytes > manifest.totalBytes } ||
+            manifest.members.any {
+                it.sizeBytes !in 1..readerSafetyComicPageMaxBytes() ||
+                    it.mimeType !in readerSafetyAllowedComicPageMimeTypes()
+            } ||
             manifest.members.sumOf { it.sizeBytes } != manifest.totalBytes) return false
         return manifest.members.all { member ->
             val page = File(file, member.fileName)
@@ -219,6 +233,8 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
             check(!closed) { "Download bundle is closed" }
             require(request.sequenceIndex in 0 until this@BundleSession.request.memberCount)
             require(request.sequenceIndex !in committedMembers) { "Download bundle member is duplicated" }
+            require(request.mimeType in readerSafetyAllowedComicPageMimeTypes())
+            require(request.expectedBytes <= readerSafetyComicPageMaxBytes())
             val extension = extensionForMimeType(request.mimeType)
             val stableName = request.sequenceIndex.toString().padStart(6, '0') + "-" +
                 sha256(request.assetId).take(16) + ".$extension"
@@ -267,8 +283,12 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
                 totalBytes = request.expectedTotalBytes,
                 members = members,
             )
+            val encodedManifest = BUNDLE_JSON.encodeToString(manifest).encodeToByteArray()
+            require(encodedManifest.size.toLong() <= readerSafetyComicManifestMaxBytes()) {
+                "Download bundle manifest is too large"
+            }
             FileOutputStream(File(stagingDirectory, BUNDLE_MANIFEST_NAME)).use { output ->
-                output.write(BUNDLE_JSON.encodeToString(manifest).encodeToByteArray())
+                output.write(encodedManifest)
                 output.fd.sync()
             }
             atomicReplace(stagingDirectory, finalDirectory)
@@ -332,26 +352,26 @@ class AtomicDownloadFileSink(private val rootDirectory: File) : DownloadByteSink
         fun taskArtifactKey(resourceId: String, assetId: String, taskId: String): String =
             sha256("$resourceId:$assetId") + "-" + sha256(taskId).take(16)
 
-        fun extensionForMimeType(mimeType: String): String = when (mimeType.lowercase()) {
-            "image/jpeg" -> "jpg"
-            "image/png" -> "png"
-            "image/gif" -> "gif"
-            "image/webp" -> "webp"
-            else -> throw IllegalArgumentException("Unsupported bundle member MIME type")
-        }
+        fun extensionForMimeType(mimeType: String): String =
+            requireNotNull(readerSafetyComicPageExtensionForMimeType(mimeType)) {
+                "Unsupported bundle member MIME type"
+            }.removePrefix(".")
 
         fun detectImageMime(file: File): String? {
             val bytes = ByteArray(16)
             val count = file.inputStream().buffered().use { it.read(bytes) }
             val header = bytes.copyOf(count.coerceAtLeast(0))
             return when {
-                header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte() -> "image/jpeg"
+                header.size >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() &&
+                    header[2] == 0xFF.toByte() -> readerSafetyComicPageMimeType(".jpg")
                 header.size >= 8 && header.copyOfRange(0, 8).contentEquals(
                     byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
-                ) -> "image/png"
-                header.size >= 6 && header.copyOfRange(0, 6).decodeToString() in setOf("GIF87a", "GIF89a") -> "image/gif"
+                ) -> readerSafetyComicPageMimeType(".png")
+                header.size >= 6 && header.copyOfRange(0, 6).decodeToString() in
+                    setOf("GIF87a", "GIF89a") -> readerSafetyComicPageMimeType(".gif")
                 header.size >= 12 && header.copyOfRange(0, 4).decodeToString() == "RIFF" &&
-                    header.copyOfRange(8, 12).decodeToString() == "WEBP" -> "image/webp"
+                    header.copyOfRange(8, 12).decodeToString() == "WEBP" ->
+                    readerSafetyComicPageMimeType(".webp")
                 else -> null
             }
         }

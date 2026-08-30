@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
 import { fetchReaderBootstrap } from './api';
 
 const cases = [
@@ -71,12 +72,16 @@ test('PDF and comic remain streamed while audio never enters the Reader download
         requests.push(url);
         if (url.endsWith('/comic/manifest')) {
           return Response.json({ ok: true, data: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             kind: 'comic',
             resourceId,
+            revision: `sha256:${'a'.repeat(64)}`,
             sourceFormat: 'cbz',
-            pageCount: 1,
-            readingOrder: [{ pageIndex: 0, resourceHref: 'pages/0', mediaType: 'image/jpeg' }]
+            pageCount: 2,
+            readingOrder: [
+              { pageIndex: 0, resourceHref: 'pages/0', mediaType: 'image/svg+xml', sizeBytes: 42 },
+              { pageIndex: 1, resourceHref: 'pages/1', mediaType: 'image/jpeg', sizeBytes: 42 }
+            ]
           } });
         }
         const format = readerType === 'pdf' ? 'pdf' : 'cbz';
@@ -103,6 +108,12 @@ test('PDF and comic remain streamed while audio never enters the Reader download
       };
       const bootstrap = await fetchReaderBootstrap(resourceId, new AbortController().signal);
       assert.equal(bootstrap.source.kind, readerType);
+      assert.equal(bootstrap.comicRevision, readerType === 'comic' ? `sha256:${'a'.repeat(64)}` : null);
+      if (readerType === 'comic') {
+        assert.equal(bootstrap.pages.length, 2);
+        assert.equal(bootstrap.pages[0]?.safetyError?.ruleId, READER_SAFETY_RULE_IDS.COMIC_PAGE_MIME);
+        assert.equal(bootstrap.pages[1]?.safetyError, undefined);
+      }
       assert.equal(requests.some((url) => url.startsWith('/api/resources/')), false);
       assert.equal(requests.some((url) => url.includes('/api/assets/')), false);
     }

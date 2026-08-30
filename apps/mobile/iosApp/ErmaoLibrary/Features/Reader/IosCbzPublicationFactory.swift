@@ -46,8 +46,8 @@ struct IosCbzArchiveIndex: Sendable {
             throw iosArchiveReaderFailure(failure)
         }
         defer { core.close() }
-        pages = core.pages.map { page in
-            let mediaType = Self.imageMediaType(page.path) ?? "image/*"
+        let mappedPages = core.pages.compactMap { page in
+            guard let mediaType = Self.imageMediaType(page.path) else { return nil }
             return IosCbzPage(
                 pageIndex: page.index,
                 resourceHref: "pages/\(page.index)",
@@ -57,6 +57,8 @@ struct IosCbzArchiveIndex: Sendable {
                 title: page.path.split(separator: "/").last.map(String.init)
             )
         }
+        guard !mappedPages.isEmpty else { throw IosCbzError.invalidArchive }
+        pages = mappedPages
     }
 
     func requireCanonicalPages(_ candidate: [IosCbzPage]) throws {
@@ -66,13 +68,8 @@ struct IosCbzArchiveIndex: Sendable {
     }
 
     static func imageMediaType(_ name: String) -> String? {
-        switch name.split(separator: ".").last?.lowercased() {
-        case "jpg", "jpeg": "image/jpeg"
-        case "png": "image/png"
-        case "gif": "image/gif"
-        case "webp": "image/webp"
-        default: nil
-        }
+        guard let fileExtension = name.split(separator: ".").last?.lowercased() else { return nil }
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".\(fileExtension)")
     }
 
 
@@ -92,8 +89,8 @@ struct IosCbzPublicationFactory {
         } catch {
             throw IosReaderFailure(code: .comicArchiveOpenFailed, underlyingError: error as NSError)
         }
-        let localPages = core.pages.map { page in
-            let mediaType = IosCbzArchiveIndex.imageMediaType(page.path) ?? "image/*"
+        let localPages = core.pages.compactMap { page in
+            guard let mediaType = IosCbzArchiveIndex.imageMediaType(page.path) else { return nil }
             return IosCbzPage(
                 pageIndex: page.index,
                 resourceHref: "pages/\(page.index)",
@@ -104,6 +101,10 @@ struct IosCbzPublicationFactory {
                     ? pageTitleHints[page.index].title
                     : page.path.split(separator: "/").last.map(String.init)
             )
+        }
+        guard !localPages.isEmpty else {
+            core.close()
+            throw IosReaderFailure(code: .comicArchiveCorrupt)
         }
         let container: IosArchiveComicContainer
         do {
@@ -124,6 +125,10 @@ struct IosCbzPublicationFactory {
             container.close()
             throw IosReaderFailure(code: .corruptFile)
         }
+        guard let fallbackMediaType = localPages.first.flatMap({ MediaType($0.mediaType) }) else {
+            container.close()
+            throw IosReaderFailure(code: .corruptFile)
+        }
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
@@ -139,7 +144,7 @@ struct IosCbzPublicationFactory {
             ),
             container: container,
             servicesBuilder: PublicationServicesBuilder(
-                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: MediaType("image/*")!)
+                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: fallbackMediaType)
             )
         )
         return IosOpenedReadiumPublication(publication: publication) {
@@ -264,7 +269,12 @@ struct IosRemoteComicPublicationFactory {
             guard let mediaType = MediaType(page.mediaType) else { return nil }
             return Link(href: page.resourceHref, mediaType: mediaType, title: String(page.pageIndex + 1))
         }
-        guard links.count == pages.count else { throw IosReaderFailure(code: .corruptFile) }
+        guard links.count == pages.count,
+              let fallbackMediaType = pages.first.flatMap({ MediaType($0.mediaType) })
+        else {
+            container.close()
+            throw IosReaderFailure(code: .corruptFile)
+        }
         let publication = Publication(
             manifest: Manifest(
                 metadata: Metadata(
@@ -280,7 +290,7 @@ struct IosRemoteComicPublicationFactory {
             ),
             container: container,
             servicesBuilder: PublicationServicesBuilder(
-                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: MediaType("image/*")!)
+                positions: PerResourcePositionsService.makeFactory(fallbackMediaType: fallbackMediaType)
             )
         )
         return IosOpenedReadiumPublication(publication: publication) { publication.close() }
@@ -288,6 +298,11 @@ struct IosRemoteComicPublicationFactory {
 }
 
 private func iosArchiveReaderFailure(_ failure: IosArchiveCoreFailure) -> IosReaderFailure {
+    if let safetyFailure = ErmaoShared.PublicKt.readerSafetyComicArchiveDetectorFailure(
+        stableCode: failure.stableCode
+    ) {
+        return IosReaderFailure.safety(safetyFailure, underlyingError: failure as NSError)
+    }
     let code = ErmaoShared.PublicKt.readerErrorCodeForFailure(failureCode: failure.stableCode, recoverable: false)
     return IosReaderFailure(code: IosReaderFailureCode(sharedCode: code), underlyingError: failure as NSError)
 }

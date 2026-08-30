@@ -4,6 +4,12 @@
 - Date: 2026-08-15
 - Scope: Authoritative Reader-opening eligibility and startup-conflict handling
 
+Supersession note (2026-08-31): ADR 0025 replaces the online reflowable delivery
+statements below with download-then-read. ADR 0026 establishes that the actual
+parser remains authoritative for readability, while the generated safety policy
+is authoritative for security findings and budgets. A parser/SDK limitation is
+an `ENGINE_*` or `PLATFORM_*` result, never a private safety rule or fallback.
+
 ## Context
 
 Reader bootstrap is the online authorization and content-access entry point. It

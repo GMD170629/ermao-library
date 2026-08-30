@@ -32,6 +32,10 @@ from app.contracts.http_errors import (
     BasicUnauthorizedError,
     ErrorResponses,
 )
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyRuleId,
+    reader_safety_rule,
+)
 from app.core.authorization import (
     authorization_context,
     can_access_asset,
@@ -46,6 +50,7 @@ from app.modules.media.application.cover_proxy import (
     configured_cover_origins,
     validate_cover_url,
 )
+from app.modules.media.application.page_index import comic_manifest_policy_failure
 from app.modules.media.application.resource_preview import (
     ResourcePreviewAccessScope,
     ResourcePreviewNotFoundError,
@@ -429,6 +434,14 @@ def list_resource_pages(
     projection = media_page_index.load_read_only(db, resource_id)
     db.close()
     index = media_page_index.resolve_read_only(projection)
+    policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
+    if policy_failure is not None:
+        return fail(
+            "Comic manifest exceeds the safety policy.",
+            status_code=422,
+            code=policy_failure.error_code,
+            params={"ruleId": policy_failure.rule_id},
+        )
     pages = [
         ResourcePage(
             id=unit.id,
@@ -448,9 +461,25 @@ def list_resource_pages(
         )
         for unit in index.pages
     ]
-    return ResourcePagesResponse(
-        data=ResourcePagesPayload(pages=pages, total=len(pages))
+    result = ResourcePagesResponse(
+        data=ResourcePagesPayload(
+            pages=pages,
+            total=len(pages),
+            revision=index.revision,
+        )
     )
+    policy_failure = comic_manifest_policy_failure(
+        page_count=len(index.pages),
+        serialized_size_bytes=len(result.model_dump_json(by_alias=True).encode()),
+    )
+    if policy_failure is not None:
+        return fail(
+            "Comic manifest exceeds the safety policy.",
+            status_code=422,
+            code=policy_failure.error_code,
+            params={"ruleId": policy_failure.rule_id},
+        )
+    return result
 
 
 @router.get(
@@ -464,6 +493,7 @@ def get_resource_page(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
+    revision: str | None = None,
 ) -> Annotated[
     Response,
     ErrorResponses(BasicUnauthorizedError, BasicNotFoundError),
@@ -477,6 +507,14 @@ def get_resource_page(
     projection = media_page_index.load_read_only(db, resource_id)
     db.close()
     index = media_page_index.resolve_read_only(projection)
+    if revision != index.revision:
+        rule = reader_safety_rule(ReaderSafetyRuleId.COMIC_MANIFEST_REVISION)
+        return fail(
+            "Comic resource changed",
+            status_code=412,
+            code=rule.error_code.value if rule.error_code is not None else None,
+            params={"ruleId": rule.id.value},
+        )
     unit = index.page(page_index)
     if unit is None:
         return fail("页面不存在", status_code=404)
@@ -484,7 +522,7 @@ def get_resource_page(
     if source and source.role == "PRIMARY":
         metadata = _parse_json(unit.metadata_json, {})
         entry_name = metadata.get("zipEntryName") or unit.href
-        return media_streaming.send_comic_page_zip_entry(
+        response = media_streaming.send_comic_page_zip_entry(
             media_streaming.stored_path(
                 source.path, settings, (Path(source.source_root),)
             ),
@@ -496,16 +534,19 @@ def get_resource_page(
             route="resource-page-archive-entry",
             asset_id=unit.id or f"{resource_id}:{page_index}",
         )
-    return media_streaming.send_comic_page_file(
-        media_streaming.stored_path(
-            unit.href if source is not None else None,
+    else:
+        response = media_streaming.send_comic_page_file(
+            media_streaming.stored_path(
+                unit.href if source is not None else None,
+                settings,
+                (Path(source.source_root),) if source is not None else (),
+            ),
+            request,
+            actor_id,
             settings,
-            (Path(source.source_root),) if source is not None else (),
-        ),
-        request,
-        actor_id,
-        settings,
-        media_type=unit.media_type,
-        route="resource-page",
-        asset_id=unit.id or f"{resource_id}:{page_index}",
-    )
+            media_type=unit.media_type,
+            route="resource-page",
+            asset_id=unit.id or f"{resource_id}:{page_index}",
+        )
+    response.headers["X-Comic-Revision"] = index.revision
+    return response

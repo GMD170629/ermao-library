@@ -26,7 +26,7 @@ struct IosTxtPublicationFactory: Sendable {
         var resources: [String: Data] = [:]
         var readingOrder: [Link] = []
         for resource in normalized.resources {
-            resources[resource.href] = IosPublicationSecurityPolicy.generatedChapter(resource.xhtml)
+            resources[resource.href] = try IosPublicationSecurityPolicy.generatedChapter(resource.xhtml)
             readingOrder.append(
                 Link(href: resource.href, mediaType: .xhtml, title: resource.title)
             )

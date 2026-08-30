@@ -211,29 +211,37 @@ actor ManagedDownloadStore: CompletedDownloadProviding {
 
     private func verifiedPageSetBytes(at directory: URL, expectedResourceID: String) -> Int64? {
         var isDirectory: ObjCBool = false
+        let maximumPageCount = ErmaoShared.PublicKt.readerSafetyComicPageMaxCount()
+        let maximumPageBytes = ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes()
+        let maximumExpandedBytes = ErmaoShared.PublicKt.readerSafetyComicExpandedMaxBytes()
+        let allowedMimeTypes = Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes())
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue,
               let data = try? Data(contentsOf: directory.appendingPathComponent("bundle.json")),
-              data.count <= 2 * 1024 * 1024,
+              Int64(data.count) <= ErmaoShared.PublicKt.readerSafetyComicManifestMaxBytes(),
               let manifest = try? decoder.decode(SharedManagedPageSetManifest.self, from: data),
               manifest.contractVersion == 4,
               manifest.artifactKind == "OriginalPageSet",
               manifest.resourceId == expectedResourceID,
               !manifest.members.isEmpty,
-              manifest.members.count <= 20_000,
+              Int64(manifest.members.count) <= maximumPageCount,
+              manifest.totalBytes > 0,
+              manifest.totalBytes <= maximumExpandedBytes,
               manifest.members.map(\.sequenceIndex) == Array(manifest.members.indices),
-              Set(manifest.members.map(\.assetId)).count == manifest.members.count,
-              manifest.members.reduce(Int64(0), { $0 + $1.sizeBytes }) == manifest.totalBytes else { return nil }
+              Set(manifest.members.map(\.assetId)).count == manifest.members.count else { return nil }
+        var verifiedTotalBytes: Int64 = 0
         for member in manifest.members {
-            guard member.sizeBytes > 0, member.sizeBytes <= 64 * 1024 * 1024,
+            guard member.sizeBytes > 0, member.sizeBytes <= maximumPageBytes,
+                  member.sizeBytes <= maximumExpandedBytes - verifiedTotalBytes,
                   !member.fileName.isEmpty, !member.fileName.hasPrefix("."),
                   !member.fileName.contains("/"), !member.fileName.contains("\\"),
-                  ["image/jpeg", "image/png", "image/gif", "image/webp"].contains(member.mimeType) else { return nil }
+                  allowedMimeTypes.contains(member.mimeType) else { return nil }
             let file = directory.appendingPathComponent(member.fileName).standardizedFileURL
             guard file.deletingLastPathComponent() == directory.standardizedFileURL,
                   fileSize(at: file) == member.sizeBytes,
                   managedDownloadImageMime(at: file) == member.mimeType else { return nil }
+            verifiedTotalBytes += member.sizeBytes
         }
-        return manifest.totalBytes
+        return verifiedTotalBytes == manifest.totalBytes ? manifest.totalBytes : nil
     }
 
     private func stableFileName(_ value: String) -> String {
@@ -268,9 +276,19 @@ private func managedDownloadImageMime(at url: URL) -> String? {
     defer { try? handle.close() }
     guard let data = try? handle.read(upToCount: 16) else { return nil }
     let bytes = [UInt8](data)
-    if bytes.count >= 3, bytes[0...2].elementsEqual([0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
-    if bytes.count >= 8, bytes[0..<8].elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
-    if bytes.count >= 6, String(bytes: bytes[0..<6], encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true { return "image/gif" }
-    if bytes.count >= 12, String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF", String(bytes: bytes[8..<12], encoding: .ascii) == "WEBP" { return "image/webp" }
+    if bytes.count >= 3, bytes[0...2].elementsEqual([0xFF, 0xD8, 0xFF]) {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".jpg")
+    }
+    if bytes.count >= 8, bytes[0..<8].elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".png")
+    }
+    if bytes.count >= 6,
+       String(bytes: bytes[0..<6], encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".gif")
+    }
+    if bytes.count >= 12, String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF",
+       String(bytes: bytes[8..<12], encoding: .ascii) == "WEBP" {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".webp")
+    }
     return nil
 }

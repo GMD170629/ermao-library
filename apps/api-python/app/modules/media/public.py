@@ -11,6 +11,7 @@ from app.modules.media.application.page_index import (
     ResourcePageIndexProjection,
     ResourcePageSource,
     ResourcePageUnit,
+    comic_manifest_policy_failure,
 )
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
     "ResourcePageSource",
     "ResourcePageUnit",
     "UnsafeCoverUrl",
+    "comic_manifest_policy_failure",
     "configured_cover_origins",
     "validate_cover_url",
 ]

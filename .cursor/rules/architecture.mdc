@@ -46,7 +46,22 @@ composition root -> 各层（仅装配）
 2. 不把一次改动混入架构迁移、产品改版、依赖升级和无关格式化。
 3. 临时兼容代码必须有 owner 和明确退出条件。
 
-- 普通在线阅读只按需获取原章节/页/PDF Range；应用缓存总量 ≤64 MiB、文本章节 ≤8 MiB、PDF 请求 ≤1 MiB。原生 App 准入为 2 GiB（含边界），明确在线限制可经独立过渡页复用 Downloads 后本地打开；普通网络、鉴权、损坏、版本变化不分流。允许原生 SDK 常规缓存，不深改 SDK，不拆章、不转换、不新增索引。Web 保持原严格策略和依赖补丁；所有平台禁止在线后台补齐原文件。详见 AGENTS.md 和 ADR 0024。
-- Downloads 的共享应用用例是唯一显式下载入口。平台只适配存储、通知与生命周期；文件与多页下载复用传输机制。迁移全部调用后删除旧实现、别名、提示、测试预期及冲突规范。
+## Reader 安全策略契约
+
+- `packages/reader-contracts/reader-safety-policy.json` 是后端、Web、KMP、
+  Android 与 iOS 唯一的 Reader 安全语义来源。规则、阈值、格式/MIME、
+  DOCTYPE/实体、标签/URI 列表、动作与安全错误码必须先在契约中定义并生成。
+- 平台只能实现事实检测和动作适配，禁止维护第二份规则表、私有默认值或
+  安全失败回退解析器。iOS 通过 `ErmaoShared` 消费 KMP 生成契约，不写 Swift
+  规则目录。
+- 任一语义变化必须递增 `policyVersion`，同步 schema、版本化 fixtures 与规则
+  事件，重新生成 TypeScript/Kotlin/Python/native C，并通过 generator `--check` 和边界
+  检查。文档只引用稳定 `ruleId`，不得复制数值和名单。
+- 可恢复的危险正文仅在内存 Publication 中按 `SANITIZE` 处理；原始文件保持
+  字节不变，不持久化派生 EPUB/ZIP/解包目录。能力缺失使用 `ENGINE_*` 或
+  `PLATFORM_*`，不得伪装成内容安全拒绝。
+
+- EPUB/FB2/TXT/MOBI/AZW/AZW3/PRC 在 Web、Android、iOS 均先验证完整原文件，缺失时隐式下载，再由本地解析器打开；PDF 与漫画保持有界流式读取，有声书走独立播放器。原文件准入、Range 与解析预算只读取 Reader 安全策略契约，不在此处复制数值。详见 AGENTS.md、ADR 0025 与 ADR 0026。
+- Downloads 的共享应用用例是原生完整文件下载的唯一入口；Reader 只创建或观察同一任务。Web 使用账号隔离的浏览器 Publication Store。平台只适配存储、通知与生命周期，禁止另建下载器、在线正文回退或派生出版物。
 
 - iOS Reader 当前批准基线为官方 Readium Swift Toolkit **3.9.0**，覆盖旧 3.8.0 冻结说明；不得为消除编译或迁移错误回退 SDK。精确 revision、SwiftPM 锁和运行时版本须通过 `python3 apps/mobile/iosApp/verify_readium.py`。遵守 `docs/mobile-reader-architecture.md` 第 10 节，不改 SDK 源码、不用私有 API、不恢复排版校验或加载 UI；Android/Web 版本不变。

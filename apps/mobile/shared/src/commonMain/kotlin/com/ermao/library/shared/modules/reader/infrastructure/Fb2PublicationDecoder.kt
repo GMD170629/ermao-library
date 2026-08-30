@@ -1,5 +1,10 @@
 package com.ermao.library.shared.modules.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
+
 /** XML is read by the platform; this adapter owns the server's FB2 v1 virtual resource contract. */
 data class Fb2EmbeddedImage(val identifier: String, val mediaType: String, val encoded: String)
 data class Fb2ImageLink(val identifier: String, val href: String, val mediaType: String)
@@ -20,8 +25,11 @@ class Fb2XmlPolicy {
     @Throws(IllegalArgumentException::class)
     fun prepare(probe: String): String {
         require(probe.isNotEmpty()) { "FB2 source is empty" }
-        require(!Regex("<!DOCTYPE\\b|<!ENTITY\\b", RegexOption.IGNORE_CASE)
-            .containsMatchIn(probe.replace("\u0000", ""))) { "FB2 contains unsafe XML declarations" }
+        if (Regex("<!DOCTYPE\\b|<!ENTITY\\b", RegexOption.IGNORE_CASE)
+            .containsMatchIn(probe.replace("\u0000", ""))
+        ) {
+            ReaderSafetyFacade().reject(ReaderSafetyRuleId.REFLOWABLE_REJECT_XML_ENTITY)
+        }
         if (Regex("\\bxmlns:l\\s*=").containsMatchIn(probe) ||
             !Regex("\\bxmlns:xlink\\s*=\\s*(['\"])http://www\\.w3\\.org/1999/xlink\\1")
                 .containsMatchIn(probe)
@@ -35,12 +43,18 @@ class Fb2XmlPolicy {
 class Fb2PublicationDecoder {
     private val stack = mutableListOf<Fb2Element>()
     private var root: Fb2Element? = null
-    private var elementCount = 0
+    private var elementCount = 0L
     private var characterCount = 0L
+    private var textByteCount = 0L
 
     @Throws(IllegalArgumentException::class)
     fun startElement(name: String, attributes: Map<String, String>) {
-        require(stack.size < 128 && ++elementCount <= 200_000) { "FB2 XML shape exceeds the limit" }
+        val maxDepth = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_DEPTH)
+        val maxNodes = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)
+        if (stack.size.toLong() >= maxDepth || elementCount >= maxNodes) {
+            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+        }
+        elementCount += 1
         if (stack.isEmpty()) require(root == null && name == "FictionBook") { "FB2 root is invalid" }
         val element = Fb2Element(name, attributes.toMap())
         stack.lastOrNull()?.content?.add(element) ?: run { root = element }
@@ -49,8 +63,15 @@ class Fb2PublicationDecoder {
 
     @Throws(IllegalArgumentException::class)
     fun text(value: String) {
-        characterCount += value.length
-        require(characterCount <= 64L * 1024 * 1024) { "FB2 text exceeds the size limit" }
+        val characterLimit = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_TEXT_MAX_CHARACTERS)
+        val byteLimit = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_TEXT_MAX_BYTES)
+        val nextCharacters = value.length.toLong()
+        val nextBytes = value.encodeToByteArray().size.toLong()
+        if (nextCharacters > characterLimit - characterCount || nextBytes > byteLimit - textByteCount) {
+            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+        }
+        characterCount += nextCharacters
+        textByteCount += nextBytes
         val parent = stack.lastOrNull() ?: return
         val previous = parent.content.lastOrNull()
         if (previous is Fb2Text) previous.value.append(value) else parent.content += Fb2Text(StringBuilder(value))
@@ -68,10 +89,16 @@ class Fb2PublicationDecoder {
         return completedRoot().children("binary").mapNotNull { element ->
             val identifier = element.attribute("id").orEmpty().trim()
             val mediaType = element.attribute("content-type").orEmpty().trim().lowercase()
-            if (identifier.isEmpty() || mediaType !in IMAGE_TYPES) return@mapNotNull null
+            if (identifier.isEmpty() || ReaderSafetyPolicy.fb2EmbeddedImageExtension(mediaType) == null) {
+                return@mapNotNull null
+            }
             require(seen.add(identifier)) { "FB2 binary identifier is duplicated" }
             val encoded = element.plainText().filterNot(Char::isWhitespace)
-            require(encoded.length <= 28 * 1024 * 1024) { "FB2 image exceeds the size limit" }
+            if (encoded.length.toLong() >
+                ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_ENCODED_IMAGE_MAX_BYTES)
+            ) {
+                return@mapNotNull null
+            }
             Fb2EmbeddedImage(identifier, mediaType, encoded)
         }
     }
@@ -83,11 +110,18 @@ class Fb2PublicationDecoder {
         val title = titleInfo?.descendant("book-title")?.normalizedText()?.takeIf(String::isNotEmpty)
             ?: fallbackTitle
         val language = titleInfo?.descendant("lang")?.normalizedText()?.takeIf(String::isNotEmpty)
+        val embeddedImages = embeddedImages().associateBy(Fb2EmbeddedImage::identifier)
         val imageHrefs = images.associate { it.identifier to it.href }
-        require(imageHrefs.size == images.size && imageHrefs.keys == embeddedImages().map { it.identifier }.toSet()) {
+        require(imageHrefs.size == images.size && images.all { image ->
+            embeddedImages[image.identifier]?.mediaType == image.mediaType
+        }) {
             "FB2 images were not validated"
         }
-        require(images.all { Regex("fb2/images/[a-f0-9]{20}\\.(jpg|png|gif|webp)").matches(it.href) }) {
+        require(images.all { image ->
+            val extension = ReaderSafetyPolicy.fb2EmbeddedImageExtension(image.mediaType)
+                ?: return@all false
+            Regex("fb2/images/[a-f0-9]{20}${Regex.escape(extension)}").matches(image.href)
+        }) {
             "FB2 image path is invalid"
         }
         val renderer = Fb2Renderer(imageHrefs)
@@ -152,7 +186,9 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
     private var sectionCount = 0
 
     private fun anchor(element: Fb2Element, href: String): String = anchors.getOrPut(element) {
-        require(anchors.size < 200_000) { "FB2 has too many addressable nodes" }
+        if (anchors.size.toLong() >= ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)) {
+            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+        }
         val anchor = "fb2-node-${(anchors.size + 1).toString().padStart(6, '0')}"
         element.attribute("id")?.trim()?.takeIf(String::isNotEmpty)?.let { identifier ->
             require(identifier !in targets) { "FB2 identifier is duplicated" }
@@ -172,7 +208,10 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
     }
 
     private fun section(element: Fb2Element, href: String, fallback: String): Fb2Section {
-        require(++sectionCount <= 10_000) { "FB2 has too many sections" }
+        sectionCount += 1
+        if (sectionCount.toLong() > ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.FB2_MAX_NODES)) {
+            ReaderSafetyFacade().reject(ReaderSafetyRuleId.FB2_STRUCTURE_BUDGET)
+        }
         val anchor = anchor(element, href)
         val title = element.children("title").firstOrNull()?.normalizedText()?.takeIf(String::isNotEmpty) ?: fallback
         return Fb2Section(element, href, anchor, title, element.children("section").mapIndexed { index, child ->
@@ -215,7 +254,6 @@ private class Fb2Renderer(private val imageHrefs: Map<String, String>) {
 private fun String.fb2Escaped(): String = replace("&", "&amp;").replace("<", "&lt;")
     .replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
 
-private val IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
 private val ELEMENT_TAGS = mapOf(
     "p" to "p", "subtitle" to "h3", "emphasis" to "em", "strong" to "strong",
     "strikethrough" to "s", "sub" to "sub", "sup" to "sup", "code" to "code",

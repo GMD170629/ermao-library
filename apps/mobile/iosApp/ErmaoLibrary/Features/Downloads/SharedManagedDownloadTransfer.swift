@@ -218,7 +218,10 @@ private final class IosDownloadFileSink: NSObject, DownloadByteSink, DownloadBun
     func beginBundle(request: DownloadBundleSinkRequest) async throws -> DownloadBundleByteSinkSession {
         let record = try await catalog.record(taskID: request.taskId)
         guard record.effectiveArtifactKind == .originalPageSet, request.resourceId == record.resourceID,
-              request.artifactId == record.assetID, record.expectedBytes == request.expectedTotalBytes else {
+              request.artifactId == record.assetID, record.expectedBytes == request.expectedTotalBytes,
+              request.memberCount > 0,
+              Int64(request.memberCount) <= ErmaoShared.PublicKt.readerSafetyComicPageMaxCount(),
+              request.expectedTotalBytes <= ErmaoShared.PublicKt.readerSafetyComicExpandedMaxBytes() else {
             throw ManagedDownloadTransferError.invalidResponse
         }
         let destination = try await repository.destination(for: record)
@@ -304,7 +307,10 @@ private final class SharedPageSetSinkSession: NSObject, DownloadBundleByteSinkSe
         let index = Int(request.sequenceIndex)
         guard index >= 0, index < Int(self.request.memberCount),
               !request.assetId.isEmpty,
-              request.expectedBytes > 0 else { throw ManagedDownloadTransferError.invalidResponse }
+              request.expectedBytes > 0,
+              request.expectedBytes <= ErmaoShared.PublicKt.readerSafetyComicPageMaxBytes(),
+              Set(ErmaoShared.PublicKt.readerSafetyAllowedComicPageMimeTypes()).contains(request.mimeType)
+        else { throw ManagedDownloadTransferError.invalidResponse }
         let duplicate = lock.withLock { committedMembers[index] != nil || closed }
         guard !duplicate else { throw ManagedDownloadTransferError.invalidResponse }
         let fileName = String(format: "%06d-%@.%@", index, stableMemberName(request.assetId), try extensionForMime(request.mimeType))
@@ -353,7 +359,11 @@ private final class SharedPageSetSinkSession: NSObject, DownloadBundleByteSinkSe
                 totalBytes: request.expectedTotalBytes,
                 members: ordered
             )
-            try JSONEncoder().encode(manifest).write(
+            let encodedManifest = try JSONEncoder().encode(manifest)
+            guard Int64(encodedManifest.count) <= ErmaoShared.PublicKt.readerSafetyComicManifestMaxBytes() else {
+                throw ManagedDownloadTransferError.invalidResponse
+            }
+            try encodedManifest.write(
                 to: stagingDirectory.appendingPathComponent("bundle.json"),
                 options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
             )
@@ -380,13 +390,10 @@ private func stableMemberName(_ value: String) -> String {
 }
 
 private func extensionForMime(_ mimeType: String) throws -> String {
-    switch mimeType.lowercased() {
-    case "image/jpeg": "jpg"
-    case "image/png": "png"
-    case "image/gif": "gif"
-    case "image/webp": "webp"
-    default: throw ManagedDownloadTransferError.invalidResponse
+    guard let value = ErmaoShared.PublicKt.readerSafetyComicPageExtensionForMimeType(mediaType: mimeType) else {
+        throw ManagedDownloadTransferError.invalidResponse
     }
+    return value.hasPrefix(".") ? String(value.dropFirst()) : value
 }
 
 private func fileSize(_ url: URL) -> Int64? {
@@ -396,10 +403,20 @@ private func fileSize(_ url: URL) -> Int64? {
 private func detectImageMime(_ url: URL) -> String? {
     guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]), data.count >= 3 else { return nil }
     let bytes = [UInt8](data.prefix(16))
-    if bytes.count >= 3, bytes[0...2].elementsEqual([0xFF, 0xD8, 0xFF]) { return "image/jpeg" }
-    if bytes.count >= 8, bytes[0..<8].elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return "image/png" }
-    if bytes.count >= 6, String(bytes: bytes[0..<6], encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true { return "image/gif" }
-    if bytes.count >= 12, String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF", String(bytes: bytes[8..<12], encoding: .ascii) == "WEBP" { return "image/webp" }
+    if bytes.count >= 3, bytes[0...2].elementsEqual([0xFF, 0xD8, 0xFF]) {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".jpg")
+    }
+    if bytes.count >= 8, bytes[0..<8].elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".png")
+    }
+    if bytes.count >= 6,
+       String(bytes: bytes[0..<6], encoding: .ascii).map({ ["GIF87a", "GIF89a"].contains($0) }) == true {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".gif")
+    }
+    if bytes.count >= 12, String(bytes: bytes[0..<4], encoding: .ascii) == "RIFF",
+       String(bytes: bytes[8..<12], encoding: .ascii) == "WEBP" {
+        return ErmaoShared.PublicKt.readerSafetyComicPageMimeType(extension: ".webp")
+    }
     return nil
 }
 

@@ -433,7 +433,6 @@
     <string name="reader_error_pdf_range_invalid">The server returned an invalid PDF byte range. Try again.</string>
     <string name="reader_error_pdf_resource_changed">The PDF has changed. Open it again.</string>
     <string name="reader_error_pdf_cache">The PDF cache could not be read or written.</string>
-    <string name="reader_error_pdf_encrypted">Encrypted or password-protected PDFs are not supported.</string>
     <string name="reader_error_pdf_invalid">The PDF is corrupted or invalid.</string>
     <string name="reader_error_pdf_page_load">The PDF page could not be loaded.</string>
     <string name="reader_error_pdf_render">The PDF page could not be rendered.</string>

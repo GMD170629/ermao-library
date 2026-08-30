@@ -25,7 +25,7 @@ class EpubContentSecurityPolicyInstrumentedTest {
 
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
 
-        assertTrue(decorated.contains("data-shuku-security-profile=\"android-v3\""))
+        assertTrue(decorated.contains("data-shuku-safety-policy-version=\"1\""))
         assertTrue(decorated.contains("<p>Readable chapter</p>"))
     }
 }

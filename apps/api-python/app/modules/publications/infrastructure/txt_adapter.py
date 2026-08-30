@@ -8,9 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyBudgetName,
+    ReaderSafetyRuleId,
+    reader_safety_budget,
+)
 from app.modules.publications.application.ports import (
     PublicationAdapter,
     PublicationSource,
+)
+from app.modules.publications.application.safety_policy import (
+    publication_parser_limit,
 )
 from app.modules.publications.domain.model import (
     NormalizedPublication,
@@ -18,7 +26,6 @@ from app.modules.publications.domain.model import (
     PublicationReadError,
     PublicationResource,
     PublicationResourceNotFoundError,
-    PublicationResourceTooLargeError,
     PublicationRevision,
     PublicationTocEntry,
     PublicationTxtEmptyError,
@@ -35,7 +42,7 @@ from app.modules.publications.infrastructure.source_files import (
 
 TXT_PARSER_IDENTIFIER = "shuku-txt-parser-v1"
 TXT_NORMALIZATION_IDENTIFIER = "shuku-txt-publication-v2"
-MAX_TXT_SOURCE_BYTES = 64 * 1024 * 1024
+MAX_TXT_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.TXT_MEMORY_MAX_BYTES)
 _CHINESE_CHAPTER = re.compile(
     r"^\u7b2c[0-9\u3007\u96f6\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03"
     r"\u516b\u4e5d\u5341\u767e\u5343\u4e07\u4e24]+"
@@ -68,7 +75,10 @@ class _TxtSnapshot:
 
 def _decode_txt(content: bytes) -> str:
     if len(content) > MAX_TXT_SOURCE_BYTES:
-        raise PublicationResourceTooLargeError("TXT source exceeds the size limit")
+        raise publication_parser_limit(
+            ReaderSafetyRuleId.TXT_MEMORY_BUDGET,
+            "TXT source exceeds the size limit",
+        )
     candidates: tuple[tuple[str, bytes], ...]
     if content.startswith(b"\xef\xbb\xbf"):
         candidates = (("utf-8", content[3:]),)
@@ -288,7 +298,10 @@ class TxtPublicationAdapter(PublicationAdapter):
         )
         stat_result = source_path.stat()
         if stat_result.st_size > MAX_TXT_SOURCE_BYTES:
-            raise PublicationResourceTooLargeError("TXT source exceeds the size limit")
+            raise publication_parser_limit(
+                ReaderSafetyRuleId.TXT_MEMORY_BUDGET,
+                "TXT source exceeds the size limit",
+            )
         key = (
             str(source_path),
             stat_result.st_size,

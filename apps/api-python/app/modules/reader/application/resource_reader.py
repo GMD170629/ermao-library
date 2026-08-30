@@ -7,6 +7,10 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyFormat,
+    require_reader_safety_format_policy,
+)
 from app.modules.reader.application.dto import (
     ExactReaderLocationKind,
     ReaderAccessScope,
@@ -430,6 +434,11 @@ def _require_matching_locator_media_type(
     reader_type: ReaderType, media_type: str
 ) -> None:
     normalized = media_type.partition(";")[0].strip().lower()
+    pdf_media_type = require_reader_safety_format_policy(
+        ReaderSafetyFormat.PDF.value
+    ).canonical_mime_type
+    if pdf_media_type is None:  # Generated PDF policy is required to be exact.
+        raise RuntimeError("generated PDF MIME policy is incomplete")
     accepted_prefixes: dict[ReaderType, tuple[str, ...]] = {
         ReaderType.REFLOWABLE: (
             "application/xhtml+xml",
@@ -437,7 +446,7 @@ def _require_matching_locator_media_type(
             "text/plain",
         ),
         ReaderType.COMIC: ("image/",),
-        ReaderType.PDF: ("application/pdf",),
+        ReaderType.PDF: (pdf_media_type,),
         ReaderType.AUDIO: ("audio/",),
     }
     if any(normalized.startswith(prefix) for prefix in accepted_prefixes[reader_type]):

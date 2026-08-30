@@ -1,15 +1,26 @@
 import {
-  PDF_RANGE_CHUNK_BYTES,
-  PDF_RANGE_MAX_CONCURRENT_REQUESTS,
-  PDF_RANGE_MAX_REQUEST_BYTES,
-  PDF_RANGE_MEMORY_CACHE_BYTES,
-  type PdfReaderErrorCode
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_FORMATS,
+  READER_SAFETY_RULE_IDS,
+  READER_SAFETY_RULES,
+  readerSafetyAcceptsMimeType,
+  type PdfReaderErrorCode,
+  type ReaderSafetyRuleId
 } from '@shuku/reader-core';
 import type { PDFDataRangeTransport } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { readBoundedResponse } from '../../../../shared/api/bounded-response';
 import { readerResourceFailure, requestReaderResource } from '../../api/client';
+import {
+  readerSafetyFailure,
+  rejectReaderSafety
+} from '../security/reader-safety-policy';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+const PDF_RANGE_CHUNK_BYTES = READER_SAFETY_BUDGETS.pdfRangeChunkBytes;
+const PDF_RANGE_MAX_CONCURRENT_REQUESTS = READER_SAFETY_BUDGETS.pdfRangeMaxConcurrent;
+const PDF_RANGE_MAX_REQUEST_BYTES = READER_SAFETY_BUDGETS.pdfRangeRequestMaxBytes;
+const PDF_RANGE_MEMORY_CACHE_BYTES = READER_SAFETY_BUDGETS.pdfRangeMemoryCacheMaxBytes;
 
 export type PdfRangeAccess = Readonly<{
   url: string;
@@ -25,10 +36,32 @@ export type PdfRangeMetrics = Readonly<{
 }>;
 
 export class PdfRangeError extends Error {
-  constructor(readonly code: PdfReaderErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    readonly code: PdfReaderErrorCode,
+    message: string,
+    options?: ErrorOptions,
+    readonly ruleId: ReaderSafetyRuleId | null = null
+  ) {
     super(message, options);
     this.name = 'PdfRangeError';
   }
+}
+
+function pdfRangePolicyError(message: string, options?: ErrorOptions): PdfRangeError {
+  const failure = readerSafetyFailure(READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL);
+  const errorCode = READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL].errorCode;
+  if (failure.code !== errorCode) throw new Error('PLATFORM_POLICY_BINDING_INVALID');
+  return new PdfRangeError(
+    errorCode,
+    message,
+    options,
+    failure.ruleId
+  );
+}
+
+function identityEncoded(response: Response): boolean {
+  const value = response.headers.get('Content-Encoding')?.trim().toLowerCase();
+  return !value || value === 'identity';
 }
 
 class RequestScheduler {
@@ -64,6 +97,7 @@ export class PdfRangeByteSource {
   private firstByteAt: number | null = null;
   private activePage: number | null = null;
   private revision: string | null = null;
+  private revisionHeader: 'ETag' | 'X-Asset-Version' | null = null;
   private ifRange: string | null = null;
 
   constructor(
@@ -71,7 +105,10 @@ export class PdfRangeByteSource {
     private readonly fetcher: typeof globalThis.fetch = requestReaderResource
   ) {
     if (!Number.isSafeInteger(access.length) || access.length <= 0) {
-      throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF 文件大小无效');
+      throw pdfRangePolicyError('PDF 文件大小无效');
+    }
+    if (access.length > READER_SAFETY_BUDGETS.originalMaxBytes) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
     }
   }
 
@@ -88,7 +125,7 @@ export class PdfRangeByteSource {
   async read(begin: number, end: number, signal: AbortSignal = this.abortController.signal): Promise<Uint8Array> {
     if (!Number.isSafeInteger(begin) || !Number.isSafeInteger(end)
       || begin < 0 || end <= begin || end > this.access.length || end - begin > PDF_RANGE_MAX_REQUEST_BYTES) {
-      throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF 字节区间无效');
+      throw pdfRangePolicyError('PDF 字节区间无效');
     }
     this.assertNotAborted(signal);
     const firstChunk = Math.floor(begin / PDF_RANGE_CHUNK_BYTES);
@@ -111,7 +148,7 @@ export class PdfRangeByteSource {
       result.set(chunk.bytes.subarray(sliceBegin, sliceEnd), written);
       written += sliceEnd - sliceBegin;
     }
-    if (written !== result.byteLength) throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF Range 响应不完整');
+    if (written !== result.byteLength) throw pdfRangePolicyError('PDF Range 响应不完整');
     return result;
   }
 
@@ -152,14 +189,31 @@ export class PdfRangeByteSource {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
     }
     if (!response.ok) throw await readerResourceFailure(response, 'pdf');
-    if (!response.headers.get('Accept-Ranges')?.toLowerCase().split(',').map((value) => value.trim()).includes('bytes')) {
-      throw new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器不支持 PDF 字节 Range');
+    if (!readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, response.headers.get('Content-Type') ?? '')) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
     }
-    this.revision = response.headers.get('ETag');
-    this.ifRange = this.revision && !this.revision.startsWith('W/') ? this.revision : response.headers.get('Last-Modified');
+    if (!identityEncoded(response)) {
+      throw pdfRangePolicyError('PDF 响应的内容编码无效');
+    }
+    if (!response.headers.get('Accept-Ranges')?.toLowerCase().split(',').map((value) => value.trim()).includes('bytes')) {
+      throw pdfRangePolicyError('服务器不支持 PDF 字节 Range');
+    }
+    const etag = response.headers.get('ETag');
+    const explicitVersion = response.headers.get('X-Asset-Version');
+    if (etag && !etag.startsWith('W/')) {
+      this.revision = etag;
+      this.revisionHeader = 'ETag';
+      this.ifRange = etag;
+    } else if (explicitVersion?.trim()) {
+      this.revision = explicitVersion;
+      this.revisionHeader = 'X-Asset-Version';
+      this.ifRange = null;
+    } else {
+      throw pdfRangePolicyError('PDF 响应缺少强版本标识');
+    }
     const length = Number(response.headers.get('Content-Length'));
     if (!Number.isSafeInteger(length) || length !== this.access.length) {
-      throw new PdfRangeError('PDF_RESOURCE_CHANGED', 'PDF 文件大小已经变化');
+      throw pdfRangePolicyError('PDF 文件大小已经变化');
     }
   }
 
@@ -221,19 +275,27 @@ export class PdfRangeByteSource {
       throw new PdfRangeError('NETWORK_UNAVAILABLE', 'PDF 网络请求失败', { cause });
     }
     let rejection: PdfRangeError | null = null;
-    if (response.status === 200) rejection = new PdfRangeError('PDF_RANGE_UNSUPPORTED', '服务器未返回 PDF Range 响应');
-    else if (response.status === 416) rejection = new PdfRangeError('PDF_RANGE_INVALID', '服务器拒绝了 PDF 字节区间');
+    if (response.status === 200) rejection = pdfRangePolicyError('服务器未返回 PDF Range 响应');
+    else if (response.status === 416) rejection = pdfRangePolicyError('服务器拒绝了 PDF 字节区间');
     else if (response.status !== 206) throw await readerResourceFailure(response, 'pdf');
-    else if (response.headers.get('Content-Range') !== `bytes ${begin}-${end - 1}/${this.access.length}`) {
-      rejection = new PdfRangeError('PDF_RANGE_INVALID', 'PDF Content-Range 与请求不一致');
+    else if (!readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, response.headers.get('Content-Type') ?? '')) {
+      await response.body?.cancel();
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
     }
-    if (!rejection && this.revision && response.headers.get('ETag') !== this.revision) {
-      rejection = new PdfRangeError('PDF_RESOURCE_CHANGED', 'PDF 文件大小已经变化');
+    else if (!identityEncoded(response)) {
+      rejection = pdfRangePolicyError('PDF Range 的内容编码无效');
+    }
+    else if (response.headers.get('Content-Range') !== `bytes ${begin}-${end - 1}/${this.access.length}`) {
+      rejection = pdfRangePolicyError('PDF Content-Range 与请求不一致');
+    }
+    if (!rejection && this.revision && this.revisionHeader
+      && response.headers.get(this.revisionHeader) !== this.revision) {
+      rejection = pdfRangePolicyError('PDF 文件版本已经变化');
     }
     if (rejection) { await response.body?.cancel(rejection); throw rejection; }
     let payload: Uint8Array;
     try { payload = await readBoundedResponse(response, PDF_RANGE_MAX_REQUEST_BYTES, end - begin); }
-    catch (cause) { throw new PdfRangeError('PDF_RANGE_INVALID', 'PDF Range 长度与请求不一致', { cause }); }
+    catch (cause) { throw pdfRangePolicyError('PDF Range 长度与请求不一致', { cause }); }
     this.assertNotAborted(signal);
     this.transferredBytes += payload.byteLength;
     this.firstByteAt ??= Date.now();

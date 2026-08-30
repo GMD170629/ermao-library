@@ -88,6 +88,20 @@ class KtorDownloadsGatewayTest {
     }
 
     @Test
+    fun bootstrapRejectsAssetMimeThatDoesNotMatchItsExactSourceFormat() = runBlocking {
+        val gateway = gateway {
+            respond(
+                BOOTSTRAP.replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"fb2\""),
+                HttpStatusCode.OK,
+                headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        }
+
+        assertIs<DownloadBootstrapResult.Failure>(gateway.load(context, "resource"))
+        Unit
+    }
+
+    @Test
     fun genericBinaryMimeDoesNotBypassOriginalFormatOrSafePathChecks() = runBlocking {
         val unsupportedFormat = BOOTSTRAP
             .replace("\"format\":\"epub\"", "\"format\":\"exe\"")

@@ -28,6 +28,7 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadBundleMember
 import com.ermao.library.shared.modules.downloads.domain.DownloadIdentity
 import com.ermao.library.shared.modules.downloads.domain.DownloadReaderType
 import com.ermao.library.shared.modules.downloads.domain.DownloadSource
+import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
@@ -239,7 +240,10 @@ class KtorDownloadsGateway(
         val format = requireNotNull(primary.sourceFormat).lowercase()
         fun source(asset: com.ermao.library.shared.modules.library.domain.Asset): DownloadSource {
             val mime = requireNotNull(asset.mimeType).substringBefore(';').lowercase()
-            require(mime in allowedMimeTypes(readerType) || (format == "image_dir" && mime in IMAGE_MIME_TYPES)) { "DOWNLOAD_ASSET_MEDIA_TYPE_INVALID" }
+            val sourceFormat = requireNotNull(
+                ReaderSourceFormat.fromWireValue(requireNotNull(asset.sourceFormat)),
+            ) { "DOWNLOAD_ASSET_FORMAT_INVALID" }
+            require(sourceFormat.acceptsMimeType(mime)) { "DOWNLOAD_ASSET_MEDIA_TYPE_INVALID" }
             return DownloadSource(requireNotNull(asset.url), mime, asset.sizeBytes, asset.mtimeMillis)
         }
         val pages = if (format == "image_dir") assets.filter { it.role.equals("PAGE", true) }.mapIndexed { index, asset ->
@@ -273,38 +277,7 @@ class KtorDownloadsGateway(
     private companion object {
         const val TRANSFER_BUFFER_BYTES = 64 * 1024
         val CONTENT_RANGE = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
-        val IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
     }
-}
-
-private fun allowedMimeTypes(readerType: DownloadReaderType): Set<String> = when (readerType) {
-    DownloadReaderType.Reflowable -> setOf(
-        "application/epub+zip",
-        "application/x-mobipocket-ebook",
-        "application/vnd.amazon.ebook",
-        "application/x-fictionbook+xml",
-        "text/plain",
-    )
-    DownloadReaderType.Pdf -> setOf("application/pdf")
-    DownloadReaderType.Comic -> setOf(
-        "application/vnd.comicbook+zip",
-        "application/x-cbz",
-        "application/zip",
-        "application/vnd.comicbook-rar",
-        "application/x-cbr",
-        "application/vnd.rar",
-    )
-    DownloadReaderType.Audio -> setOf(
-        "audio/aac", "audio/ac3", "audio/aiff", "audio/amr", "audio/basic",
-        "audio/eac3", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg",
-        "audio/vnd.dts", "audio/vnd.rn-realaudio", "audio/wav", "audio/webm",
-        "audio/x-matroska", "audio/x-ms-wma", "audio/x-adx", "audio/x-ape", "audio/x-aptx",
-        "audio/x-aptxhd", "audio/x-caf", "audio/x-dff", "audio/x-dsf", "audio/x-g722",
-        "audio/x-g726", "audio/x-gsm", "audio/x-lbc", "audio/x-mlp",
-        "audio/x-mpc", "audio/x-oma", "audio/x-qcp", "audio/x-shn",
-        "audio/x-sph", "audio/x-tak", "audio/x-thd", "audio/x-tta",
-        "audio/x-voc", "audio/x-wv", "audio/x-xma",
-    )
 }
 
 fun parseDownloadReaderType(value: String): DownloadReaderType = when (value.trim().lowercase()) {

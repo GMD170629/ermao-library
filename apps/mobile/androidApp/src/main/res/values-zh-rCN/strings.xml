@@ -424,7 +424,6 @@
     <string name="reader_error_pdf_range_invalid">PDF 字节区间响应无效，请重试。</string>
     <string name="reader_error_pdf_resource_changed">PDF 文件已更新，请重新打开。</string>
     <string name="reader_error_pdf_cache">PDF 缓存读写失败。</string>
-    <string name="reader_error_pdf_encrypted">加密或密码保护的 PDF 暂不支持阅读。</string>
     <string name="reader_error_pdf_invalid">PDF 文件已损坏或格式无效。</string>
     <string name="reader_error_pdf_page_load">PDF 页面加载失败。</string>
     <string name="reader_error_pdf_render">PDF 页面渲染失败。</string>

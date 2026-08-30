@@ -52,6 +52,11 @@ android {
     }
 
     sourceSets.named("androidTest") {
+        kotlin.directories.add(
+            rootProject.layout.projectDirectory.dir(
+                "test-support/reader-safety-conformance/kotlin",
+            ).asFile.absolutePath,
+        )
         assets.directories.add(layout.buildDirectory.dir("generated/reader-test-assets").get().asFile.absolutePath)
     }
 
@@ -103,6 +108,13 @@ val syncReaderTestAssets by tasks.registering(Sync::class) {
     from(rootProject.layout.projectDirectory.dir("../../test-data/library/fb2")) {
         into("fb2")
     }
+    from(
+        rootProject.layout.projectDirectory.dir(
+            "../../packages/reader-contracts/fixtures/reader-safety-v1",
+        ),
+    ) {
+        into("reader-safety-conformance")
+    }
     into(layout.buildDirectory.dir("generated/reader-test-assets"))
 }
 
@@ -141,6 +153,7 @@ dependencies {
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.commons.compress)
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)

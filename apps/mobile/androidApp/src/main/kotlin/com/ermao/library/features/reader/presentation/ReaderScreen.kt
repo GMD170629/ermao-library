@@ -96,8 +96,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -202,7 +204,7 @@ internal fun ReaderScreen(
     val panelFocus = remember { ReaderPanel.entries.associateWith { FocusRequester() } }
     val morphology = controller?.morphology ?: ReaderMorphology.Reflowable
     val nativeUnavailable = controller?.unavailableControls(preferences).orEmpty()
-    val wideViewport = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp > 640
+    val wideViewport = readerViewportIsWide()
     var preferencesFailure by remember(controller) { mutableStateOf<ReaderCommandRejected?>(null) }
     val updatePreferences: (ReaderPreferences) -> Unit = { updated ->
         controller?.let { activeController ->
@@ -1134,6 +1136,14 @@ private fun readerPreferenceFailureMessage(failure: ReaderCommandRejected?): Str
 })
 
 @Composable
+private fun readerViewportIsWide(): Boolean {
+    val containerWidth = LocalWindowInfo.current.containerSize.width
+    return with(LocalDensity.current) {
+        containerWidth.toDp() > READER_WIDE_VIEWPORT_MIN_WIDTH
+    }
+}
+
+@Composable
 private fun ReaderCatalogSetting(
     setting: com.ermao.library.shared.modules.reader.ReaderSettingDefinition,
     preferences: ReaderPreferences,
@@ -1147,8 +1157,7 @@ private fun ReaderCatalogSetting(
     val available = setting.control?.let(enabled) ?: true
     val fixedSwipe = setting.id == "swipePageTurn" && !available
     val unavailableReason = when {
-        "wideViewport" in setting.availabilityRules &&
-            androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp <= 640 -> "narrowViewport"
+        "wideViewport" in setting.availabilityRules && !readerViewportIsWide() -> "narrowViewport"
         "paginatedReflowable" in setting.availabilityRules &&
             preferences.epub.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll -> "scrollingMode"
         "paginatedComic" in setting.availabilityRules &&
@@ -1730,7 +1739,6 @@ private fun KeepScreenAwake(enabled: Boolean) {
         ReaderErrorCode.PdfEngineLimit -> R.string.reader_error_pdf_engine_limit
         ReaderErrorCode.ResourceChanged -> R.string.reader_error_pdf_resource_changed
         ReaderErrorCode.CacheIo -> R.string.reader_error_pdf_cache
-        ReaderErrorCode.Encrypted -> R.string.reader_error_pdf_encrypted
         ReaderErrorCode.Invalid -> R.string.reader_error_pdf_invalid
         ReaderErrorCode.PageLoadFailed -> R.string.reader_error_pdf_page_load
         ReaderErrorCode.RenderFailed -> R.string.reader_error_pdf_render
@@ -1785,3 +1793,4 @@ internal const val READER_SHEET_TEST_TAG = "reader-sheet"
 private const val PROGRESS_SEEK_FEEDBACK_TIMEOUT_MILLIS = 4_000L
 internal const val RESTORE_WARNING_AUTO_DISMISS_MILLIS = 5_000L
 private const val SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE = 0.5f
+private val READER_WIDE_VIEWPORT_MIN_WIDTH = 640.dp

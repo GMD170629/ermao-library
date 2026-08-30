@@ -1,20 +1,16 @@
-import type { ReaderOriginalResource, ReflowableFormat } from '@shuku/reader-core';
+import {
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_RULE_IDS,
+  readerSafetyAcceptsMimeType,
+  readerSafetyFormatPolicy,
+  type ReaderOriginalResource
+} from '@shuku/reader-core';
 import { withBasePath } from '../../../../lib/base-path';
 import { privateCacheName, privateCacheNamespace } from '../../../../lib/pwa/private-cache-namespace';
+import { ReaderSafetyPolicyError, rejectReaderSafety } from '../security/reader-safety-policy';
 
 const STORE_VERSION = 'reader-original-v1';
-const MAX_ORIGINAL_BYTES = 2 * 1024 * 1024 * 1024;
 const CACHE_KEY_ROOT = '/__shuku_reader_originals__/';
-
-const MIME_BY_FORMAT: Readonly<Record<ReflowableFormat, readonly string[]>> = {
-  epub: ['application/epub+zip'],
-  mobi: ['application/x-mobipocket-ebook'],
-  azw: ['application/vnd.amazon.ebook'],
-  azw3: ['application/vnd.amazon.ebook'],
-  prc: ['application/x-mobipocket-ebook'],
-  fb2: ['application/x-fictionbook+xml'],
-  txt: ['text/plain']
-};
 
 export type OriginalDownloadProgress = Readonly<{
   loadedBytes: number;
@@ -52,15 +48,20 @@ function assertDescriptor(descriptor: OriginalPublicationDescriptor, origin: str
   if (descriptor.assetVersion !== `${descriptor.sizeBytes}:${descriptor.mtimeMs}`) {
     throw new OriginalPublicationStoreError('ORIGINAL_VERSION_INVALID');
   }
-  if (!Number.isSafeInteger(descriptor.sizeBytes) || descriptor.sizeBytes <= 0 || descriptor.sizeBytes > MAX_ORIGINAL_BYTES) {
-    throw new OriginalPublicationStoreError('ORIGINAL_SIZE_LIMIT');
+  if (!Number.isSafeInteger(descriptor.sizeBytes) || descriptor.sizeBytes < 0) {
+    throw new OriginalPublicationStoreError('ORIGINAL_DESCRIPTOR_INVALID');
+  }
+  if (descriptor.sizeBytes > READER_SAFETY_BUDGETS.originalMaxBytes) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES);
   }
   if (!Number.isSafeInteger(descriptor.mtimeMs) || descriptor.mtimeMs < 0) {
     throw new OriginalPublicationStoreError('ORIGINAL_VERSION_INVALID');
   }
-  const allowed = MIME_BY_FORMAT[descriptor.sourceFormat];
-  if (!allowed.includes(normalizedMime(descriptor.mimeType))) {
-    throw new OriginalPublicationStoreError('ORIGINAL_MIME_INVALID');
+  const formatPolicy = readerSafetyFormatPolicy(descriptor.sourceFormat);
+  if (!formatPolicy
+    || formatPolicy.morphology !== 'REFLOWABLE'
+    || !readerSafetyAcceptsMimeType(formatPolicy, descriptor.mimeType)) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
   }
   const url = new URL(descriptor.downloadUrl, origin);
   const apiPath = new URL(withBasePath('/api/'), origin).pathname;
@@ -172,7 +173,7 @@ export class BrowserPublicationStore {
         throw new OriginalPublicationStoreError('ORIGINAL_VERSION_CHANGED');
       }
       if (normalizedMime(response.headers.get('Content-Type') ?? '') !== normalizedMime(descriptor.mimeType)) {
-        throw new OriginalPublicationStoreError('ORIGINAL_MIME_INVALID');
+        rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
       }
       let loadedBytes = 0;
       const meter = new TransformStream<Uint8Array, Uint8Array>({
@@ -206,6 +207,7 @@ export class BrowserPublicationStore {
       await cache.delete(request).catch(() => false);
       if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
       if (cause instanceof OriginalPublicationStoreError) throw cause;
+      if (cause instanceof ReaderSafetyPolicyError) throw cause;
       throw new OriginalPublicationStoreError('ORIGINAL_CACHE_IO', { cause });
     }
   }

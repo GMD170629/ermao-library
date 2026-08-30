@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.api.tasks.testing.Test
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -39,6 +40,13 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.ktor.client.mock)
         }
+        val androidHostTest by getting {
+            kotlin.srcDir(
+                rootProject.layout.projectDirectory.dir(
+                    "test-support/reader-safety-conformance/kotlin",
+                ),
+            )
+        }
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
         }
@@ -46,4 +54,17 @@ kotlin {
             implementation(libs.ktor.client.darwin)
         }
     }
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty(
+        "readerSafetyFixtureRoot",
+        rootProject.layout.projectDirectory.dir(
+            "../../packages/reader-contracts/fixtures/reader-safety-v1",
+        ).asFile.absolutePath,
+    )
+    systemProperty(
+        "readerSafetyReportPath",
+        layout.buildDirectory.file("reports/reader-safety-conformance/kmp.json").get().asFile.absolutePath,
+    )
 }

@@ -5,6 +5,7 @@ import type {
   MobiWorkerRequest,
   MobiWorkerResponse
 } from './mobi-worker-protocol';
+import { isReaderSafetyRuleId, reviveReaderSafetyError } from '../security/reader-safety-policy';
 
 function property(value: unknown, key: PropertyKey): unknown {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
@@ -86,7 +87,10 @@ function response(value: unknown): MobiWorkerResponse | null {
   if (requestId === null || typeof ok !== 'boolean') return null;
   const code = property(value, 'code');
   if (ok === false && typeof code === 'string') {
-    return { requestId, ok: false, code };
+    const ruleId = property(value, 'ruleId');
+    return ruleId === undefined || isReaderSafetyRuleId(ruleId)
+      ? { requestId, ok: false, code, ...(ruleId ? { ruleId } : {}) }
+      : null;
   }
   if (ok !== true) return null;
   const type = property(value, 'type');
@@ -131,14 +135,14 @@ export class MobiWorkerClient {
 
   async open(blob: Blob, filename: string): Promise<MobiOpenResult> {
     const result = await this.send({ requestId: this.nextId(), type: 'open', blob, filename });
-    if (!result.ok) throw new Error(result.code);
+    if (!result.ok) throw reviveReaderSafetyError(result.code, result.ruleId);
     if (result.type !== 'open') throw new Error('MOBI_WORKER_PROTOCOL_INVALID');
     return result.result;
   }
 
   async read(resourceIndex: number): Promise<ArrayBuffer> {
     const result = await this.send({ requestId: this.nextId(), type: 'read', resourceIndex });
-    if (!result.ok) throw new Error(result.code);
+    if (!result.ok) throw reviveReaderSafetyError(result.code, result.ruleId);
     if (result.type !== 'read') throw new Error('MOBI_WORKER_PROTOCOL_INVALID');
     return result.bytes;
   }
@@ -146,7 +150,7 @@ export class MobiWorkerClient {
   async close(): Promise<void> {
     if (this.signal?.aborted) return;
     const result = await this.send({ requestId: this.nextId(), type: 'close' });
-    if (!result.ok) throw new Error(result.code);
+    if (!result.ok) throw reviveReaderSafetyError(result.code, result.ruleId);
     this.worker.terminate();
   }
 

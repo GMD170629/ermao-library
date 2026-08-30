@@ -5,6 +5,8 @@ import {
   OriginalPublicationStoreError,
   type OriginalPublicationDescriptor
 } from './browser-publication-store';
+import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
+import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 
 class MemoryCache {
   readonly entries = new Map<string, Response>();
@@ -118,7 +120,8 @@ test('eviction triggers a fresh full request and a wrong MIME never publishes', 
   ), 'https://reader.test');
   await assert.rejects(
     wrongMime.ensure(descriptor, { signal: new AbortController().signal }),
-    (error: unknown) => error instanceof OriginalPublicationStoreError && error.code === 'ORIGINAL_MIME_INVALID'
+    (error: unknown) => error instanceof ReaderSafetyPolicyError
+      && error.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
   );
   assert.equal(cache.entries.size, 0);
 });
@@ -152,5 +155,25 @@ test('a new asset version deletes the superseded complete entry before downloadi
   assert.equal(cache.entries.size, 1);
   await store.ensure(descriptor, { signal: new AbortController().signal });
   assert.equal(requestedVersion, descriptor.assetVersion);
+  assert.equal(cache.entries.size, 1);
+});
+
+test('zero-byte originals pass delivery admission and remain the parser responsibility', async () => {
+  const cache = new MemoryCache();
+  const emptyDescriptor: OriginalPublicationDescriptor = {
+    ...descriptor,
+    assetVersion: '0:1234',
+    sizeBytes: 0
+  };
+  const store = new BrowserPublicationStore({ open: async () => cache }, async () => new Response(
+    new Uint8Array(),
+    { headers: {
+      'Content-Type': emptyDescriptor.mimeType,
+      'Content-Length': '0',
+      'X-Asset-Version': emptyDescriptor.assetVersion
+    } }
+  ), 'https://reader.test');
+  const stored = await store.ensure(emptyDescriptor, { signal: new AbortController().signal });
+  assert.equal(stored.blob.size, 0);
   assert.equal(cache.entries.size, 1);
 });

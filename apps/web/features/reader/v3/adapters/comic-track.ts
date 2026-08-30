@@ -68,7 +68,7 @@ function spreadKey(spread: ComicTrackSpread | null, view: ComicTrackView, role: 
     anchor: spread.anchor,
     fit: view.imageFit,
     mode: view.mode,
-    pages: spread.pages.map((page) => [page.pageIndex, page.url]),
+    pages: spread.pages.map((page) => [page.pageIndex, page.url, page.safetyError?.ruleId]),
     zoom: view.zoom,
     pageWidth: view.pageWidth,
     pageGap: view.pageGap ?? 0
@@ -386,6 +386,15 @@ export class ComicSpreadTrackDriver implements PagedTrackDriver {
           position: 'absolute',
           inset: '0'
         });
+        if (page.safetyError) {
+          placeholder.dataset.readerSafetyRuleId = page.safetyError.ruleId;
+          placeholder.dataset.readerSafetyErrorCode = page.safetyError.code;
+          placeholder.setAttribute('role', 'alert');
+          placeholder.textContent = translateMessage(locale, '漫画页面因安全策略无法显示。');
+          pageSlot.append(placeholder);
+          frame.append(pageSlot);
+          return;
+        }
         image.alt = translateMessage(locale, '第 {value0} 页', { value0: page.pageIndex + 1 });
         image.decoding = 'async';
         image.draggable = false;

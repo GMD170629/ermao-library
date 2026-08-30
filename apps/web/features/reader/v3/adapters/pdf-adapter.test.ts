@@ -46,6 +46,7 @@ function pdfRangeFixture() {
       const headers = new Headers({
         'Accept-Ranges': 'bytes',
         'Content-Length': String(PDF_FIXTURE_BYTES.byteLength),
+        'Content-Type': 'application/pdf',
         ETag: PDF_FIXTURE_ETAG
       });
       if (init?.method === 'HEAD') return new Response(null, { status: 200, headers });

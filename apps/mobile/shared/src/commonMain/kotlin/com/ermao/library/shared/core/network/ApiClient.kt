@@ -436,13 +436,14 @@ class ApiClient internal constructor(
         requestHeaders: Map<String, String> = emptyMap(),
         expectedResponseHeaders: Map<String, String> = emptyMap(),
         errorCodeStatuses: Map<String, Set<Int>> = emptyMap(),
+        queryParameters: Map<String, List<String>> = emptyMap(),
     ): ApiResult<AuthenticatedBinary> {
         try {
             require(apiPath.startsWith("/api/")) { "Binary path must start with /api/" }
-            require(!apiPath.contains('#')) { "Binary path must not contain a fragment" }
+            require(!apiPath.contains('#') && !apiPath.contains('?')) { "Binary path must not contain a query or fragment" }
             require(maximumBytes > 0) { "Binary size limit must be positive" }
             require(allowedMimeTypes.isNotEmpty()) { "At least one binary MIME type is required" }
-            return client.prepareGet(profile.baseUrl.resolveApiPath(apiPath)) {
+            return client.prepareGet(buildRequestUrl(apiPath, queryParameters)) {
                 requestHeaders.forEach { (key, value) -> headers.append(key, value) }
             }.execute { response ->
             if (response.status.value in REDIRECT_STATUS_CODES) {

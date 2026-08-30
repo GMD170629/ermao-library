@@ -4,6 +4,7 @@ import type {
   TextPublicationResult,
   TextWorkerResponse
 } from './text-worker-protocol';
+import { isReaderSafetyRuleId, reviveReaderSafetyError } from '../security/reader-safety-policy';
 
 function property(value: unknown, key: PropertyKey): unknown {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return undefined;
@@ -35,7 +36,12 @@ function parseResponse(value: unknown): TextWorkerResponse | null {
   const ok = property(value, 'ok');
   if (requestId === null || typeof ok !== 'boolean') return null;
   const code = property(value, 'code');
-  if (!ok) return typeof code === 'string' ? { requestId, ok: false, code } : null;
+  if (!ok) {
+    const ruleId = property(value, 'ruleId');
+    return typeof code === 'string' && (ruleId === undefined || isReaderSafetyRuleId(ruleId))
+      ? { requestId, ok: false, code, ...(ruleId ? { ruleId } : {}) }
+      : null;
+  }
   const result = property(value, 'result');
   const title = property(result, 'title');
   const language = property(result, 'language');
@@ -88,7 +94,7 @@ export function parseTextPublication(
       if (!incoming || incoming.requestId !== 1) {
         reject(new Error('PUBLICATION_WORKER_PROTOCOL_INVALID'));
       } else if (!incoming.ok) {
-        reject(new Error(incoming.code));
+        reject(reviveReaderSafetyError(incoming.code, incoming.ruleId));
       } else {
         resolve(incoming.result);
       }

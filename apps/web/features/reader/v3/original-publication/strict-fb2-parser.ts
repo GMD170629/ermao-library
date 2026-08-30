@@ -1,3 +1,11 @@
+import {
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_PROFILES,
+  READER_SAFETY_RULE_IDS,
+  type ReaderSafetyRuleId
+} from '@shuku/reader-core';
+import { rejectReaderSafety } from '../security/reader-safety-policy';
+
 export type StrictFb2ChapterSource = Readonly<{
   title: string | null;
   paragraphs: readonly string[];
@@ -8,6 +16,10 @@ export type StrictFb2Document = Readonly<{
   title: string | null;
   language: string | null;
   chapters: readonly StrictFb2ChapterSource[];
+  blockedResources: readonly Readonly<{
+    id: string | null;
+    ruleId: ReaderSafetyRuleId;
+  }>[];
 }>;
 
 type ParserLimits = Readonly<{
@@ -16,10 +28,22 @@ type ParserLimits = Readonly<{
   maxTextChars: number;
 }>;
 
+type ImageLimits = Readonly<{
+  maxEncodedBytes: number;
+  maxDecodedBytes: number;
+  maxDecodedTotalBytes: number;
+}>;
+
 const DEFAULT_LIMITS: ParserLimits = {
-  maxDepth: 128,
-  maxNodes: 500_000,
-  maxTextChars: 64 * 1024 * 1024
+  maxDepth: READER_SAFETY_BUDGETS.fb2MaxDepth,
+  maxNodes: READER_SAFETY_BUDGETS.fb2MaxNodes,
+  maxTextChars: READER_SAFETY_BUDGETS.fb2TextMaxCharacters
+};
+
+const DEFAULT_IMAGE_LIMITS: ImageLimits = {
+  maxEncodedBytes: READER_SAFETY_BUDGETS.fb2EncodedImageMaxBytes,
+  maxDecodedBytes: READER_SAFETY_BUDGETS.fb2DecodedImageMaxBytes,
+  maxDecodedTotalBytes: READER_SAFETY_BUDGETS.fb2DecodedImagesTotalMaxBytes
 };
 
 type SectionAccumulator = {
@@ -43,6 +67,13 @@ type Capture = {
 
 type ParsedAttribute = Readonly<{ qName: string; value: string }>;
 type QualifiedName = Readonly<{ prefix: string | null; local: string }>;
+
+type BinaryAccumulator = {
+  depth: number;
+  id: string | null;
+  mediaType: string | null;
+  encodedParts: string[];
+};
 
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS_NAMESPACE = 'http://www.w3.org/2000/xmlns/';
@@ -198,13 +229,25 @@ function materialize(accumulator: SectionAccumulator): StrictFb2ChapterSource | 
   return { title, paragraphs: accumulator.paragraphs, text };
 }
 
+function decodedBase64Length(value: string): number | null {
+  const compact = value.replace(/[\t\n\r ]+/g, '');
+  if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(compact)) {
+    return null;
+  }
+  const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0;
+  return (compact.length / 4) * 3 - padding;
+}
+
 export function parseStrictFb2(
   source: string,
-  limits: ParserLimits = DEFAULT_LIMITS
+  limits: ParserLimits = DEFAULT_LIMITS,
+  imageLimits: ImageLimits = DEFAULT_IMAGE_LIMITS
 ): StrictFb2Document {
-  if (/<!DOCTYPE|<!ENTITY/i.test(source)) throw new Error('PUBLICATION_SECURITY_REJECTED');
+  if (/<!DOCTYPE|<!ENTITY/i.test(source)) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY);
+  }
   if (limits.maxDepth < 1 || limits.maxNodes < 1 || limits.maxTextChars < 1) {
-    throw new Error('PUBLICATION_PARSER_LIMIT');
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
   }
 
   const stack: Array<Readonly<{
@@ -221,10 +264,20 @@ export function parseStrictFb2(
   let rootClosed = false;
   let nodeCount = 0;
   let textChars = 0;
+  let decodedImagesTotalBytes = 0;
+  let currentBinary: BinaryAccumulator | null = null;
+  const blockedResources: Array<Readonly<{
+    id: string | null;
+    ruleId: ReaderSafetyRuleId;
+  }>> = [];
   let offset = 0;
 
   const addText = (raw: string, cdata = false) => {
     if (!raw) return;
+    if (currentBinary) {
+      currentBinary.encodedParts.push(raw);
+      return;
+    }
     const value = cdata ? raw : decodeXmlEntities(raw);
     if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value)) {
       throw new Error('PUBLICATION_MARKUP_INVALID');
@@ -234,7 +287,9 @@ export function parseStrictFb2(
       return;
     }
     textChars += value.length;
-    if (textChars > limits.maxTextChars) throw new Error('PUBLICATION_PARSER_MEMORY');
+    if (textChars > limits.maxTextChars) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
+    }
     for (const capture of captures) capture.parts.push(value);
     const target = currentBody?.currentSection ?? currentBody?.loose;
     target?.textParts.push(value);
@@ -261,11 +316,27 @@ export function parseStrictFb2(
       rootSeen = true;
     }
     nodeCount += 1;
-    if (nodeCount > limits.maxNodes) throw new Error('PUBLICATION_PARSER_LIMIT');
+    if (nodeCount > limits.maxNodes) rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     const namespaces = namespacesForElement(stack.at(-1)?.namespaces, qName, attributes);
     stack.push({ qName, local, namespaces });
-    if (stack.length > limits.maxDepth) throw new Error('PUBLICATION_PARSER_LIMIT');
+    if (stack.length > limits.maxDepth) rejectReaderSafety(READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET);
     const depth = stack.length;
+
+    if (currentBinary && local !== 'binary') {
+      throw new Error('PUBLICATION_MARKUP_INVALID');
+    }
+    if (local === 'binary') {
+      if (currentBinary) throw new Error('PUBLICATION_MARKUP_INVALID');
+      const attributeValue = (name: string): string | null => attributes.find(
+        (attribute) => localName(attribute.qName).toLowerCase() === name
+      )?.value.trim() || null;
+      currentBinary = {
+        depth,
+        id: attributeValue('id'),
+        mediaType: attributeValue('content-type')?.toLowerCase() ?? null,
+        encodedParts: []
+      };
+    }
 
     if (local === 'body') {
       if (currentBody) throw new Error('PUBLICATION_MARKUP_INVALID');
@@ -303,7 +374,32 @@ export function parseStrictFb2(
     const current = stack.at(-1);
     if (!current || current.qName !== qName) throw new Error('PUBLICATION_MARKUP_INVALID');
     finishCaptures(stack.length);
-    if (current.local === 'section' && currentBody) {
+    if (current.local === 'binary') {
+      if (!currentBinary || currentBinary.depth !== stack.length) {
+        throw new Error('PUBLICATION_MARKUP_INVALID');
+      }
+      const encoded = currentBinary.encodedParts.join('');
+      const decodedBytes = decodedBase64Length(encoded);
+      const supportedMediaType = currentBinary.mediaType !== null
+        && Object.prototype.hasOwnProperty.call(
+          READER_SAFETY_PROFILES.reflowable.embeddedImageExtensionsByMimeType,
+          currentBinary.mediaType
+        );
+      const exceedsBudget = encoded.length > imageLimits.maxEncodedBytes
+        || decodedBytes === null
+        || decodedBytes > imageLimits.maxDecodedBytes
+        || decodedImagesTotalBytes + decodedBytes > imageLimits.maxDecodedTotalBytes
+        || !supportedMediaType;
+      if (exceedsBudget) {
+        blockedResources.push({
+          id: currentBinary.id,
+          ruleId: READER_SAFETY_RULE_IDS.FB2_IMAGE_BUDGET
+        });
+      } else {
+        decodedImagesTotalBytes += decodedBytes;
+      }
+      currentBinary = null;
+    } else if (current.local === 'section' && currentBody) {
       if (currentBody.sectionDepth <= 0) throw new Error('PUBLICATION_MARKUP_INVALID');
       currentBody.sectionDepth -= 1;
       if (currentBody.sectionDepth === 0) {
@@ -345,12 +441,14 @@ export function parseStrictFb2(
     if (source.startsWith('<?', opening)) {
       const end = source.indexOf('?>', opening + 2);
       if (end < 0 || rootSeen || !/^<\?xml(?:\s|\?)/i.test(source.slice(opening, end + 2))) {
-        throw new Error('PUBLICATION_SECURITY_REJECTED');
+        throw new Error('PUBLICATION_MARKUP_INVALID');
       }
       offset = end + 2;
       continue;
     }
-    if (source.startsWith('<!', opening)) throw new Error('PUBLICATION_SECURITY_REJECTED');
+    if (source.startsWith('<!', opening)) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY);
+    }
     const end = source.indexOf('>', opening + 1);
     if (end < 0) throw new Error('PUBLICATION_MARKUP_INVALID');
     const raw = source.slice(opening + 1, end);
@@ -374,5 +472,5 @@ export function parseStrictFb2(
     return loose ? [loose, ...sections] : sections;
   });
   if (chapters.length === 0) throw new Error('PUBLICATION_STRUCTURE_INVALID');
-  return { title: bookTitle, language, chapters };
+  return { title: bookTitle, language, chapters, blockedResources };
 }

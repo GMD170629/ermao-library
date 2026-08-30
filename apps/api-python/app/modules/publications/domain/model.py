@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
+from app.contracts.reader_safety_policy_generated import ReaderSafetyErrorCode
+
 
 class PublicationNotFoundError(Exception):
     """The actor cannot open the requested publication."""
@@ -21,7 +23,7 @@ class PublicationUnsupportedError(Exception):
 class PublicationCorruptError(Exception):
     """The source cannot safely produce a normalized publication."""
 
-    code: str = "PUBLICATION_CORRUPT"
+    code: str = ReaderSafetyErrorCode.PUBLICATION_CORRUPT.value
 
 
 class PublicationTxtEncodingError(PublicationCorruptError):
@@ -39,7 +41,11 @@ class PublicationTxtEmptyError(PublicationCorruptError):
 class PublicationSecurityError(PublicationCorruptError):
     """The source contains an active construct which must not be rendered."""
 
-    code = "PUBLICATION_SECURITY_REJECTED"
+    code: str = ReaderSafetyErrorCode.PUBLICATION_SECURITY_REJECTED.value
+
+    def __init__(self, message: str, *, rule_id: str) -> None:
+        super().__init__(message)
+        self.rule_id = rule_id
 
 
 class PublicationMarkupError(PublicationCorruptError):
@@ -63,24 +69,49 @@ class PublicationReadError(PublicationCorruptError):
 class PublicationParserLimitError(PublicationCorruptError):
     """An explicit parser resource budget was exceeded."""
 
-    code: str = "PUBLICATION_PARSER_LIMIT"
+    code: str = ReaderSafetyErrorCode.PUBLICATION_PARSER_LIMIT.value
+
+    def __init__(self, message: str, *, rule_id: str | None = None) -> None:
+        super().__init__(message)
+        self.rule_id = rule_id
 
 
 class PublicationParserError(PublicationCorruptError):
     """An actual native parser operation failed; no raw path enters the wire error."""
 
-    def __init__(self, *, code: str, parser: str, operation: str, reason: str) -> None:
+    def __init__(
+        self,
+        *,
+        code: str,
+        parser: str,
+        operation: str,
+        reason: str,
+        rule_id: str | None = None,
+    ) -> None:
         super().__init__(f"{parser} {operation}: {reason}")
         self.code = code
         self.parser = parser
         self.operation = operation
         self.reason = reason
+        self.rule_id = rule_id
 
 
 class PublicationResourceTooLargeError(Exception):
     """The original or one requested resource exceeds a parser safety limit."""
 
     code = "PUBLICATION_RESOURCE_TOO_LARGE"
+
+    def __init__(
+        self,
+        message: str = "Publication resource exceeds the size limit",
+        *,
+        code: str | None = None,
+        rule_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+        self.rule_id = rule_id
 
 
 class PublicationChangedError(Exception):

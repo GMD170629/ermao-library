@@ -1,6 +1,13 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.shared.modules.reader.MobiMarkupEnvelope
+import com.ermao.library.shared.modules.reader.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.ReaderSafetyMarkupAccepted
+import com.ermao.library.shared.modules.reader.ReaderSafetyMarkupRejected
+import com.ermao.library.shared.modules.reader.ReaderSanitizedMarkup
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.readerSafetySanitizedElementSelectors
 import java.io.StringReader
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -18,8 +25,6 @@ import org.w3c.dom.Element
 import org.w3c.dom.Node
 
 internal object EpubContentSecurityPolicy {
-    private const val MAXIMUM_MARKUP_BYTES = 64 * 1024 * 1024
-    private const val PROFILE = "android-v3"
     private const val CONTENT_SECURITY_POLICY =
         "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; " +
             "frame-src 'none'; child-src 'none'; object-src 'none'; " +
@@ -31,18 +36,24 @@ internal object EpubContentSecurityPolicy {
             "media-src 'self' blob: data:"
     private const val DEVICE_VIEWPORT =
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/>"
-    private const val SECURITY_STYLE =
-        "iframe,frame,object,embed,applet{display:none!important;}" +
-            "input,button,select,textarea{pointer-events:none!important;}"
-
     private fun securityHead(viewport: String): String =
         "<meta http-equiv=\"Content-Security-Policy\" content=\"$CONTENT_SECURITY_POLICY\" " +
-            "data-shuku-security-profile=\"$PROFILE\"/>" + viewport +
-            "<style data-shuku-security-profile=\"$PROFILE\">$SECURITY_STYLE</style>"
+            "data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\"/>" + viewport +
+            safetyStyle()
+
+    private fun safetyStyle(): String {
+        val selectors = readerSafetySanitizedElementSelectors().joinToString(",")
+        if (selectors.isEmpty()) return ""
+        return "<style data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\">" +
+            "$selectors{display:none!important;}</style>"
+    }
 
     /** Only accepts output from the owned TXT/FB2 templates, never original chapters. */
-    fun generatedChapter(markup: String): ByteArray =
-        markup.replaceFirst("<head>", "<head>" + securityHead(DEVICE_VIEWPORT)).toByteArray(Charsets.UTF_8)
+    fun generatedChapter(markup: String): ByteArray {
+        val safeMarkup = requireSafeMarkup(markup).markup
+        return safeMarkup.replaceFirst("<head>", "<head>" + securityHead(DEVICE_VIEWPORT))
+            .toByteArray(Charsets.UTF_8)
+    }
 
     fun apply(container: Container<Resource>, onFailure: ((Exception) -> Unit)? = null): Container<Resource> =
         transformMarkup(container, ::decorateHtml, onFailure)
@@ -77,17 +88,14 @@ internal object EpubContentSecurityPolicy {
     internal fun decorateHtml(bytes: ByteArray): ByteArray {
         val validated = decodeAndValidate(bytes)
         val markup = validated.markup
-        val lexicalMarkup = maskNonMarkup(markup)
+        val lexicalMarkup = markup
         val open = HEAD_OPEN.find(lexicalMarkup)
             ?: throw IllegalArgumentException("Publication XHTML head is missing")
         val close = HEAD_CLOSE.find(lexicalMarkup, open.range.last + 1)
             ?: throw IllegalArgumentException("Publication XHTML head is not closed")
         val headStart = open.range.last + 1
         val originalHead = markup.substring(headStart, close.range.first)
-        val safeHead = META_TAG.replace(BASE_TAG.replace(originalHead, "")) { match ->
-            val value = HTTP_EQUIV.find(match.value)?.groups?.get("value")?.value?.trim()?.lowercase()
-            if (value == "content-security-policy" || value == "refresh") "" else match.value
-        }
+        val safeHead = originalHead
         val viewport = if (META_TAG.findAll(safeHead).any { match ->
                 NAME.find(match.value)?.groups?.get("value")?.value?.trim()?.lowercase() == "viewport"
             }
@@ -134,9 +142,7 @@ internal object EpubContentSecurityPolicy {
     )
 
     private fun decodeAndValidate(bytes: ByteArray): ValidatedMarkup {
-        require(bytes.isNotEmpty() && bytes.size <= MAXIMUM_MARKUP_BYTES) {
-            "Publication markup exceeds the size limit"
-        }
+        require(bytes.isNotEmpty()) { "Publication markup is empty" }
         val markup = when {
             bytes.startsWith(UTF_8_BOM) -> strictDecode(bytes, Charsets.UTF_8, UTF_8_BOM.size)
             bytes.startsWith(UTF_16_LE_BOM) -> strictDecode(bytes, Charsets.UTF_16LE, UTF_16_LE_BOM.size)
@@ -153,8 +159,8 @@ internal object EpubContentSecurityPolicy {
                 strictDecode(bytes, Charsets.UTF_8, 0)
             }
         }
-        validateDeclarations(markup)
-        val parserMarkup = replaceStandardEntitiesForParsing(markup)
+        val sanitized = requireSafeMarkup(markup, bytes.size.toLong())
+        val parserMarkup = sanitized.parserMarkup
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
             isExpandEntityReferences = false
@@ -185,8 +191,14 @@ internal object EpubContentSecurityPolicy {
             .map(children::item)
             .filterIsInstance<Element>()
             .single { localName(it) == "body" }
-        return ValidatedMarkup(markup, projectElement(body, "/body[1]"))
+        return ValidatedMarkup(sanitized.markup, projectElement(body, "/body[1]"))
     }
+
+    private fun requireSafeMarkup(markup: String, sourceByteCount: Long? = null): ReaderSanitizedMarkup =
+        when (val result = ReaderSafetyFacade().sanitizeMarkup(markup, sourceByteCount ?: -1L)) {
+            is ReaderSafetyMarkupAccepted -> result.value
+            is ReaderSafetyMarkupRejected -> throw ReaderSafetyException(result.failure)
+        }
 
     private fun disableXIncludeWhenSupported(factory: DocumentBuilderFactory) {
         try {
@@ -205,32 +217,6 @@ internal object EpubContentSecurityPolicy {
             // empty EntityResolver below still prevent external entity or DTD expansion.
             return
         }
-    }
-
-    private fun validateDeclarations(markup: String) {
-        val lexicalMarkup = maskNonMarkup(markup)
-        require(!ENTITY_OPEN.containsMatchIn(lexicalMarkup)) {
-            "Publication markup contains unsafe declarations"
-        }
-        val opens = DOCTYPE_OPEN.findAll(lexicalMarkup).toList()
-        if (opens.isEmpty()) return
-        val declarations = DOCTYPE_DECLARATION.findAll(lexicalMarkup).toList()
-        require(
-            opens.size == 1 &&
-                declarations.size == 1 &&
-                opens.single().range.first == declarations.single().range.first &&
-                SAFE_EPUB_DOCTYPE.matches(declarations.single().value) &&
-                lexicalMarkup.substring(0, declarations.single().range.first).isBlank(),
-        ) { "Publication markup contains unsafe declarations" }
-    }
-
-    private fun replaceStandardEntitiesForParsing(markup: String): String {
-        val lexicalMarkup = maskNonMarkup(markup)
-        val result = StringBuilder(markup)
-        STANDARD_ENTITY_REFERENCE.findAll(lexicalMarkup).toList().asReversed().forEach { match ->
-            result.replace(match.range.first, match.range.last + 1, "&#xA0;")
-        }
-        return result.toString()
     }
 
     private fun projectElement(element: Element, path: String): List<LocatorElementProjection> {
@@ -278,14 +264,6 @@ internal object EpubContentSecurityPolicy {
     private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
         size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
 
-    private fun maskNonMarkup(markup: String): String {
-        val masked = markup.toCharArray()
-        NON_MARKUP.findAll(markup).forEach { match ->
-            for (index in match.range) masked[index] = ' '
-        }
-        return masked.concatToString()
-    }
-
     private val HTML_EXTENSIONS = setOf("html", "xhtml", "htm")
     private val LOCATOR_BLOCKS = setOf(
         "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre", "blockquote",
@@ -302,32 +280,9 @@ internal object EpubContentSecurityPolicy {
     )
     private val HEAD_OPEN = Regex("<(?:[A-Za-z_][\\w.-]*:)?head\\b[^>]*>", RegexOption.IGNORE_CASE)
     private val HEAD_CLOSE = Regex("</(?:[A-Za-z_][\\w.-]*:)?head\\s*>", RegexOption.IGNORE_CASE)
-    private val BASE_TAG = Regex("<(?:[A-Za-z_][\\w.-]*:)?base\\b[^>]*(?:/\\s*)?>", RegexOption.IGNORE_CASE)
     private val META_TAG = Regex("<(?:[A-Za-z_][\\w.-]*:)?meta\\b[^>]*(?:/\\s*)?>", RegexOption.IGNORE_CASE)
-    private val HTTP_EQUIV = Regex(
-        "\\bhttp-equiv\\s*=\\s*['\"](?<value>[^'\"]+)['\"]",
-        RegexOption.IGNORE_CASE,
-    )
     private val NAME = Regex(
         "\\bname\\s*=\\s*['\"](?<value>[^'\"]+)['\"]",
         RegexOption.IGNORE_CASE,
     )
-    private val NON_MARKUP = Regex(
-        "<!--.*?-->|<!\\[CDATA\\[.*?]]>|<\\?.*?\\?>",
-        setOf(RegexOption.DOT_MATCHES_ALL),
-    )
-    private val DOCTYPE_OPEN = Regex("<!DOCTYPE\\b", RegexOption.IGNORE_CASE)
-    private val DOCTYPE_DECLARATION = Regex(
-        "<!DOCTYPE\\b[^>]*>",
-        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-    )
-    private val ENTITY_OPEN = Regex("<!ENTITY\\b", RegexOption.IGNORE_CASE)
-    private val SAFE_EPUB_DOCTYPE = Regex(
-        """<!DOCTYPE\s+html\s*(?:PUBLIC\s+[\"']-//W3C//DTD\s+XHTML\s+""" +
-            """(?:1\.1|1\.0\s+(?:Strict|Transitional|Frameset))//EN[\"']\s+""" +
-            """[\"']https?://www\.w3\.org/TR/(?:xhtml11/DTD/xhtml11\.dtd|""" +
-            """xhtml1/DTD/xhtml1-(?:strict|transitional|frameset)\.dtd)[\"'])?\s*>""",
-        RegexOption.IGNORE_CASE,
-    )
-    private val STANDARD_ENTITY_REFERENCE = Regex("&nbsp;")
 }

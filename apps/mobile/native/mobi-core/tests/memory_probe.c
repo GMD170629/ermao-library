@@ -78,9 +78,12 @@ static int probe_upstream(const char *path) {
 
 static int probe_abi(const char *path) {
     ErmaoMobiBook *book = NULL;
+    ErmaoMobiOpenOptions options;
+    ermao_mobi_default_options(&options);
+    options.max_file_bytes = UINT64_MAX;
     struct timeval started;
     gettimeofday(&started, NULL);
-    const ErmaoMobiStatus open_result = ermao_mobi_open(path, NULL, &book);
+    const ErmaoMobiStatus open_result = ermao_mobi_open(path, &options, &book);
     print_stage("ermao_open_and_index", elapsed_milliseconds(&started));
     if (open_result != ERMAO_MOBI_OK) {
         return 1;

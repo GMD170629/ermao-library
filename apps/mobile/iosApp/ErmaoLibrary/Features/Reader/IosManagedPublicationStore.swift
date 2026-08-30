@@ -15,7 +15,7 @@ struct IosManagedPublication: Sendable, Equatable {
 
 actor IosManagedPublicationStore {
     static let parserVersion = "epub-package:1"
-    static let normalizationVersion = "shuku-epub-locator-dom-v2"
+    static let normalizationVersion = "shuku-epub-locator-dom-v3"
     static let maximumPublicationBytes = ErmaoShared.ReaderAdmission.shared.maximumPublicationBytes
 
     private var completedPublication: IosManagedPublication?
@@ -120,7 +120,9 @@ actor IosManagedPublicationStore {
             throw IosReaderFailure(code: .corruptFile)
         }
         if Int64(sourceValues.fileSize ?? 0) > Self.maximumPublicationBytes {
-            throw IosReaderFailure(code: .publicationTooLarge)
+            throw IosReaderFailure.safety(
+                ErmaoShared.PublicKt.readerSafetyOriginalMaxBytesFailure()
+            )
         }
 
         let key = opaqueKey(resourceID)
@@ -148,7 +150,9 @@ actor IosManagedPublicationStore {
         while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
             byteCount += Int64(chunk.count)
             guard byteCount <= Self.maximumPublicationBytes else {
-                throw IosReaderFailure(code: .publicationTooLarge)
+                throw IosReaderFailure.safety(
+                    ErmaoShared.PublicKt.readerSafetyOriginalMaxBytesFailure()
+                )
             }
             try output.write(contentsOf: chunk)
         }
@@ -274,13 +278,16 @@ actor IosManagedPublicationStore {
             ).totalBytes
         } else {
             let values = try publicationURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
-            guard values.isRegularFile == true, values.isSymbolicLink != true,
-                  Int64(values.fileSize ?? -1) >= 0,
-                  Int64(values.fileSize ?? -1) <= Self.maximumPublicationBytes
-            else {
+            let fileSize = Int64(values.fileSize ?? -1)
+            guard values.isRegularFile == true, values.isSymbolicLink != true, fileSize >= 0 else {
                 throw IosReaderFailure(code: .corruptFile)
             }
-            byteCount = Int64(values.fileSize ?? 0)
+            guard fileSize <= Self.maximumPublicationBytes else {
+                throw IosReaderFailure.safety(
+                    ErmaoShared.PublicKt.readerSafetyOriginalMaxBytesFailure()
+                )
+            }
+            byteCount = fileSize
         }
         return IosManagedPublication(
             resourceID: metadata.resourceID,

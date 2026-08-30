@@ -1,6 +1,9 @@
 package com.ermao.library.shared.modules.downloads.domain
 
-private val DOWNLOAD_IMAGE_MIME_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+import com.ermao.library.shared.modules.reader.readerSafetyAllowedComicPageMimeTypes
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
 
 data class DownloadNamespace(
     val serverIdentity: String,
@@ -96,9 +99,16 @@ data class DownloadDescriptor(
             DownloadArtifactKind.OriginalPageSet -> {
                 require(readerType == DownloadReaderType.Comic && format.equals("image_dir", ignoreCase = true))
                 require(members.isNotEmpty())
+                require(members.size.toLong() <= readerSafetyComicPageMaxCount())
                 require(members.map(DownloadBundleMember::sequenceIndex) == members.indices.toList())
                 require(members.map(DownloadBundleMember::assetId).distinct().size == members.size)
-                require(members.all { it.source.mimeType in DOWNLOAD_IMAGE_MIME_TYPES })
+                var expandedBytes = 0L
+                members.forEach { member ->
+                    require(member.source.mimeType in readerSafetyAllowedComicPageMimeTypes())
+                    require(member.source.totalBytes <= readerSafetyComicPageMaxBytes())
+                    require(member.source.totalBytes <= readerSafetyComicExpandedMaxBytes() - expandedBytes)
+                    expandedBytes += member.source.totalBytes
+                }
             }
         }
     }

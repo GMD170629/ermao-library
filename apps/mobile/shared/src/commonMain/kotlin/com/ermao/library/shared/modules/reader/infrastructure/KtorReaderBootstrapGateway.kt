@@ -19,6 +19,7 @@ import com.ermao.library.shared.modules.reader.application.ReaderBootstrapResour
 import com.ermao.library.shared.modules.reader.domain.ReaderFormat
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderSourceFormat
+import com.ermao.library.shared.modules.reader.domain.isValidComicRevision
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -193,10 +194,16 @@ class KtorReaderBootstrapGateway internal constructor(
             return ReaderBootstrapResult.Failure("READER_BOOTSTRAP_INVALID", false)
         }
         val comicAccess = validatedComicAccess?.let { access ->
+            val manifest = comicManifest
+                ?: return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
+            if (!isValidComicRevision(manifest.revision)) {
+                return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
+            }
             ReaderComicAccess(
                 manifestApiPath = requireNotNull(access.manifestUrl),
                 pageApiPathTemplate = requireNotNull(access.pageUrlTemplate),
                 imageVariants = access.imageVariants.toSet(),
+                revision = manifest.revision,
             )
         }
         val comicPages = if (exactSourceFormat.isComic) {
@@ -204,9 +211,10 @@ class KtorReaderBootstrapGateway internal constructor(
                 ?: return ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", false)
             try {
                 require(
-                    manifest.schemaVersion == 1 && manifest.kind == "comic" &&
+                    manifest.schemaVersion == 2 && manifest.kind == "comic" &&
                         manifest.resourceId == resource.id &&
                         manifest.sourceFormat == exactSourceFormat.wireValue &&
+                        isValidComicRevision(manifest.revision) &&
                         manifest.pageCount == manifest.readingOrder.size && manifest.pageCount > 0
                 )
                 manifest.readingOrder.mapIndexed { index, page ->
@@ -417,6 +425,7 @@ private data class ReaderPublicationAccessWire(
 @Serializable
 private data class ReaderComicManifestWire(
     val schemaVersion: Int,
+    val revision: String,
     val kind: String,
     val resourceId: String,
     val sourceFormat: String,

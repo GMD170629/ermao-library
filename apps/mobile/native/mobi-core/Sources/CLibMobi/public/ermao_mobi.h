@@ -16,7 +16,6 @@ extern "C" {
 
 #define ERMAO_MOBI_ABI_VERSION 1u
 /* The embedding application supplies its admission policy through open options. */
-#define ERMAO_MOBI_MAX_FILE_BYTES UINT64_MAX
 #define ERMAO_MOBI_MAX_READ_BYTES (UINT32_C(256) * UINT32_C(1024))
 #define ERMAO_MOBI_INDEX_NONE UINT32_MAX
 

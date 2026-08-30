@@ -1,6 +1,12 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  READER_SAFETY_RULE_IDS,
+  ReaderSafetyPolicyError,
+  readerSafetyFailure,
+  type ReaderSafetyFailure
+} from '@shuku/reader-core';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
 import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime } from '../../lib/reader';
 import { withBasePath } from '../../lib/base-path';
@@ -65,7 +71,8 @@ const initialState: AudioPlaybackState = {
   volume: 1,
   sleepTimerEndsAt: null,
   sleepTimerMode: null,
-  error: null
+  error: null,
+  safetyError: null
 };
 
 const AudioPlaybackContext = createContext<AudioPlaybackContextValue | null>(null);
@@ -77,19 +84,28 @@ function tabId() {
   return `audio_${suffix}`;
 }
 
-function mediaErrorMessage(audio: HTMLAudioElement, track: AudioTrack | null) {
+function mediaErrorMessage(
+  audio: HTMLAudioElement,
+  track: AudioTrack | null
+): Readonly<{ message: string; safetyError: ReaderSafetyFailure | null }> {
   const format = track ? audioFormatLabel(track) : '未知格式';
   switch (audio.error?.code) {
     case MediaError.MEDIA_ERR_ABORTED:
-      return '音频加载已取消，可以重试播放';
+      return { message: '音频加载已取消，可以重试播放', safetyError: null };
     case MediaError.MEDIA_ERR_NETWORK:
-      return '音频传输中断，请检查网络或文件服务后重试';
+      return { message: '音频传输中断，请检查网络或文件服务后重试', safetyError: null };
     case MediaError.MEDIA_ERR_DECODE:
-      return `浏览器无法解码这个音频（${format}），文件可能损坏或编码不受支持`;
+      return {
+        message: `浏览器无法解码这个音频（${format}），文件可能损坏或编码不受支持`,
+        safetyError: readerSafetyFailure(READER_SAFETY_RULE_IDS.AUDIO_ENGINE_CODEC)
+      };
     case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
-      return `当前浏览器不支持这个音频来源或编码（${format}）`;
+      return {
+        message: `当前浏览器不支持这个音频来源或编码（${format}）`,
+        safetyError: readerSafetyFailure(READER_SAFETY_RULE_IDS.AUDIO_ENGINE_CODEC)
+      };
     default:
-      return '音频暂时无法播放，请稍后重试';
+      return { message: '音频暂时无法播放，请稍后重试', safetyError: null };
   }
 }
 
@@ -172,12 +188,13 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     claimPlayback();
     try {
       await audio.play();
-      updateState({ lifecycle: 'playing', error: null });
+      updateState({ lifecycle: 'playing', error: null, safetyError: null });
     } catch (reason) {
       const blocked = reason instanceof DOMException && reason.name === 'NotAllowedError';
       updateState({
         lifecycle: 'paused',
-        error: blocked ? '浏览器阻止了自动播放，请点按播放按钮继续' : (reason instanceof Error ? reason.message : '无法开始播放')
+        error: blocked ? '浏览器阻止了自动播放，请点按播放按钮继续' : (reason instanceof Error ? reason.message : '无法开始播放'),
+        safetyError: null
       });
     }
   }, [claimPlayback, updateState]);
@@ -209,6 +226,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const nextPosition = clamp(positionMs, 0, Math.max(0, track.durationMs));
     const unsupportedMime = unsupportedAudioMimeType(track.mimeType, track.codec, (mime) => audio.canPlayType(mime));
     if (unsupportedMime) {
+      const safetyError = readerSafetyFailure(READER_SAFETY_RULE_IDS.AUDIO_ENGINE_CODEC);
       if (!audio.paused) suppressedPauseEventsRef.current += 1;
       audio.pause();
       audio.removeAttribute('src');
@@ -225,7 +243,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         positionMs: nextPosition,
         durationMs: track.durationMs,
         absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
-        error: `当前浏览器不支持这个音频格式（${audioFormatLabel(track)}）`
+        error: `当前浏览器不支持这个音频格式（${audioFormatLabel(track)}）`,
+        safetyError
       });
       return;
     }
@@ -247,7 +266,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       positionMs: nextPosition,
       durationMs: track.durationMs,
       absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, index, nextPosition),
-      error: null
+      error: null,
+      safetyError: null
     });
     if (autoplay) {
       // Calling play() in the same stack as a chapter/track click preserves
@@ -401,7 +421,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           volume,
           sleepTimerEndsAt: null,
           sleepTimerMode: null,
-          error: null
+          error: null,
+          safetyError: null
         });
         sleepTargetChapterRef.current = null;
         configureTrack(resume.trackIndex, resume.positionMs, request.autoplay);
@@ -417,7 +438,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           assetId: request.assetId,
           summary: request.summary
         };
-        updateState(failAudioResourceSwitch(previousState, normalizedResourceId, message, request.summary));
+        updateState(failAudioResourceSwitch(
+          previousState,
+          normalizedResourceId,
+          message,
+          request.summary,
+          reason instanceof ReaderSafetyPolicyError
+            ? { code: reason.code, ruleId: reason.ruleId, action: reason.action }
+            : null
+        ));
       }
     })();
     request.promise = operation.finally(() => {
@@ -655,7 +684,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         positionMs,
         chapter,
         absolutePositionMs: absolutePositionForTrack(bootstrap.tracks, trackIndexRef.current, positionMs),
-        error: null
+        error: null,
+        safetyError: null
       });
       if (pendingAutoplayRef.current) {
         pendingAutoplayRef.current = false;
@@ -670,7 +700,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
 
     const handlePlay = () => {
       claimPlayback();
-      updateState({ lifecycle: 'playing', error: null });
+      updateState({ lifecycle: 'playing', error: null, safetyError: null });
       if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
     };
 
@@ -736,7 +766,8 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const handleVolumeChange = () => updateState({ volume: audio.volume });
     const handleError = () => {
       if (!bootstrapRef.current) return;
-      updateState({ lifecycle: 'error', error: mediaErrorMessage(audio, stateRef.current.track) });
+      const failure = mediaErrorMessage(audio, stateRef.current.track);
+      updateState({ lifecycle: 'error', error: failure.message, safetyError: failure.safetyError });
     };
     const handleEnded = () => {
       const bootstrap = bootstrapRef.current;

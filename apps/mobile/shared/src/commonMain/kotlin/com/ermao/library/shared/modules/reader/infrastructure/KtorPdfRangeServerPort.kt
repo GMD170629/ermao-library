@@ -8,6 +8,11 @@ import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.domain.PdfByteRange
 import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFormat
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.prepareHead
@@ -24,7 +29,7 @@ class KtorPdfRangeServerPort internal constructor(
     private val createClient: (ServerProfile) -> ApiClient,
 ) : PdfRangeServerPort {
     constructor(profile: ServerProfile, clients: ApiClientFactory) : this(profile, clients::create)
-    private data class Revision(val source: RemoteByteRangeReaderSource, val etag: String, val ifRange: String?)
+    private data class Revision(val source: RemoteByteRangeReaderSource, val etag: String)
     private val revision = MutableStateFlow<Revision?>(null)
 
     override suspend fun probe(source: RemoteByteRangeReaderSource): PdfRangeProbeResult = withClient { client ->
@@ -37,15 +42,25 @@ class KtorPdfRangeServerPort internal constructor(
                 )
                 response.headers[HttpHeaders.AcceptRanges]?.split(',')
                     ?.map(String::trim)?.any { it.equals("bytes", ignoreCase = true) } != true ->
-                    PdfRangeProbeResult.Failure(PdfReaderErrorCode.RangeUnsupported, recoverable = false)
+                    probePolicyFailure(PdfReaderErrorCode.RangeUnsupported)
+                !acceptsPdfMimeType(response.headers[HttpHeaders.ContentType]) ->
+                    probePolicyFailure(
+                        PdfReaderErrorCode.RangeInvalid,
+                        ReaderSafetyRuleId.COMMON_EXACT_FORMAT_MIME,
+                    )
+                !hasIdentityContentEncoding(response.headers[HttpHeaders.ContentEncoding]) ->
+                    probePolicyFailure(PdfReaderErrorCode.RangeInvalid)
                 response.headers[HttpHeaders.ContentLength]?.toLongOrNull() != source.expectedSizeBytes ->
-                    PdfRangeProbeResult.Failure(PdfReaderErrorCode.ResourceChanged, recoverable = false)
+                    probePolicyFailure(PdfReaderErrorCode.ResourceChanged)
                 else -> {
-                    revision.value = response.headers[HttpHeaders.ETag]?.let { etag ->
-                        Revision(source, etag, etag.takeUnless { it.startsWith("W/") }
-                            ?: response.headers[HttpHeaders.LastModified])
+                    val etag = response.headers[HttpHeaders.ETag]
+                    if (etag.isNullOrBlank() || !isStrongEtag(etag)) {
+                        revision.value = null
+                        probePolicyFailure(PdfReaderErrorCode.RangeInvalid)
+                    } else {
+                        revision.value = Revision(source, etag)
+                        PdfRangeProbeResult.Available
                     }
-                    PdfRangeProbeResult.Available
                 }
             }
             response.bodyAsChannel().cancel(null)
@@ -64,26 +79,27 @@ class KtorPdfRangeServerPort internal constructor(
         source: RemoteByteRangeReaderSource,
         range: PdfByteRange,
     ): PdfRangeReadResult = withClient { client ->
+        val expectedRevision = revision.value?.takeIf { it.source == source }
+        if (expectedRevision == null || !isStrongEtag(expectedRevision.etag)) {
+            return@withClient readPolicyFailure(PdfReaderErrorCode.RangeInvalid)
+        }
         try {
             require(range.endExclusive <= source.expectedSizeBytes)
-            require(range.endExclusive - range.begin <= 1024L * 1024)
+            require(range.endExclusive - range.begin <= rangeRequestMaxBytes())
             client.authenticatedHttpClient().prepareGet(client.resolveAuthenticatedApiPath(source.apiPath)) {
                 headers {
                     append(HttpHeaders.Range, "bytes=${range.begin}-${range.endExclusive - 1}")
-                    revision.value?.takeIf { it.source == source }?.ifRange?.let { append(HttpHeaders.IfRange, it) }
+                    append(HttpHeaders.IfRange, expectedRevision.etag)
                 }
             }.execute { response ->
             when (response.status.value) {
                 200 -> {
                     response.bodyAsChannel().cancel(null)
-                    PdfRangeReadResult.Failure(
-                        PdfReaderErrorCode.RangeUnsupported,
-                        recoverable = false,
-                    )
+                    readPolicyFailure(PdfReaderErrorCode.RangeUnsupported)
                 }
                 416 -> {
                     response.bodyAsChannel().cancel(null)
-                    PdfRangeReadResult.Failure(PdfReaderErrorCode.RangeInvalid, recoverable = false)
+                    readPolicyFailure(PdfReaderErrorCode.RangeInvalid)
                 }
                 206 -> validatePartialResponse(source, range, response)
                 else -> {
@@ -107,20 +123,30 @@ class KtorPdfRangeServerPort internal constructor(
         response: io.ktor.client.statement.HttpResponse,
     ): PdfRangeReadResult {
         val expected = revision.value?.takeIf { it.source == source }
-        if (expected != null && response.headers[HttpHeaders.ETag] != expected.etag) {
+        val responseEtag = response.headers[HttpHeaders.ETag]
+        if (expected == null || responseEtag.isNullOrBlank() || !isStrongEtag(responseEtag)) {
             response.bodyAsChannel().cancel(null)
-            return PdfRangeReadResult.Failure(PdfReaderErrorCode.ResourceChanged, false)
+            return readPolicyFailure(PdfReaderErrorCode.RangeInvalid)
+        }
+        if (responseEtag != expected.etag) {
+            response.bodyAsChannel().cancel(null)
+            return readPolicyFailure(PdfReaderErrorCode.ResourceChanged)
         }
         val expectedLength = (range.endExclusive - range.begin).toInt()
         val expectedContentRange = "bytes ${range.begin}-${range.endExclusive - 1}/${source.expectedSizeBytes}"
-        if (response.headers[HttpHeaders.ContentRange] != expectedContentRange ||
+        if (!acceptsPdfMimeType(response.headers[HttpHeaders.ContentType])) {
+            response.bodyAsChannel().cancel(null)
+            return readPolicyFailure(
+                PdfReaderErrorCode.RangeInvalid,
+                ReaderSafetyRuleId.COMMON_EXACT_FORMAT_MIME,
+            )
+        }
+        if (!hasIdentityContentEncoding(response.headers[HttpHeaders.ContentEncoding]) ||
+            response.headers[HttpHeaders.ContentRange] != expectedContentRange ||
             response.headers[HttpHeaders.ContentLength]?.toIntOrNull() != expectedLength
         ) {
             response.bodyAsChannel().cancel(null)
-            return PdfRangeReadResult.Failure(
-                PdfReaderErrorCode.RangeInvalid,
-                recoverable = false,
-            )
+            return readPolicyFailure(PdfReaderErrorCode.RangeInvalid)
         }
         val channel = response.bodyAsChannel()
         val bytes = ByteArray(expectedLength)
@@ -132,7 +158,7 @@ class KtorPdfRangeServerPort internal constructor(
         }
         if (offset != bytes.size || channel.readAvailable(ByteArray(1), 0, 1) >= 0) {
             channel.cancel(null)
-            return PdfRangeReadResult.Failure(PdfReaderErrorCode.RangeInvalid, recoverable = false)
+            return readPolicyFailure(PdfReaderErrorCode.RangeInvalid)
         }
         return PdfRangeReadResult.Content(range, bytes)
     }
@@ -145,4 +171,36 @@ class KtorPdfRangeServerPort internal constructor(
             client.close()
         }
     }
+
+    private fun rangeRequestMaxBytes(): Long =
+        ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RANGE_REQUEST_MAX_BYTES)
+
+    private fun probePolicyFailure(
+        code: PdfReaderErrorCode,
+        ruleId: ReaderSafetyRuleId = ReaderSafetyRuleId.PDF_RANGE_PROTOCOL,
+    ): PdfRangeProbeResult.Failure = PdfRangeProbeResult.Failure(
+        code = code,
+        recoverable = false,
+        safetyFailure = ReaderSafetyFacade().failureFor(ruleId),
+    )
+
+    private fun readPolicyFailure(
+        code: PdfReaderErrorCode,
+        ruleId: ReaderSafetyRuleId = ReaderSafetyRuleId.PDF_RANGE_PROTOCOL,
+    ): PdfRangeReadResult.Failure = PdfRangeReadResult.Failure(
+        code = code,
+        recoverable = false,
+        safetyFailure = ReaderSafetyFacade().failureFor(ruleId),
+    )
+
+    private fun acceptsPdfMimeType(value: String?): Boolean {
+        val normalized = value?.trim()?.lowercase()?.substringBefore(';') ?: return false
+        return normalized in ReaderSafetyPolicy.formats.getValue(ReaderSafetyFormat.PDF).acceptedMimeTypes
+    }
+
+    private fun hasIdentityContentEncoding(value: String?): Boolean =
+        value.isNullOrBlank() || value.trim().equals("identity", ignoreCase = true)
+
+    private fun isStrongEtag(etag: String): Boolean =
+        etag.isNotBlank() && !etag.trimStart().startsWith("W/", ignoreCase = true)
 }

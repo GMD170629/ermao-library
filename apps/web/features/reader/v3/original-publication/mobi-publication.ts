@@ -1,6 +1,17 @@
-import type { ReflowableFormat } from '@shuku/reader-core';
+import {
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_RULE_IDS,
+  type ReflowableFormat
+} from '@shuku/reader-core';
 import { createLocalPublication, type ReadiumPublication } from './local-publication';
 import { MobiWorkerClient } from './mobi-worker-client';
+import {
+  preflightReflowableXml,
+  rejectReaderSafety,
+  rewriteAuthoredDocumentReferences,
+  sanitizeAuthoredCss,
+  sanitizeAuthoredMarkup
+} from '../security/reader-safety-policy';
 
 const MOBI_FORMATS: readonly ReflowableFormat[] = ['mobi', 'azw', 'azw3', 'prc'];
 
@@ -13,8 +24,13 @@ async function sanitizeMarkup(
   title: string,
   resolveAssetUrl: (sourceName: string) => Promise<string | null>
 ): Promise<Uint8Array> {
-  const source = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  if (/<!ENTITY/i.test(source)) throw new Error('PUBLICATION_SECURITY_REJECTED');
+  if (bytes.byteLength > READER_SAFETY_BUDGETS.reflowableMarkupMaxBytes) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES);
+  }
+  const source = preflightReflowableXml(
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+    READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY
+  );
   // MOBI6 and PalmDOC commonly contain valid HTML which is not XHTML.
   // Parse with the HTML algorithm, then serialize the sanitized DOM as the
   // XHTML bytes expected by the local Readium Publication.
@@ -32,39 +48,12 @@ async function sanitizeMarkup(
     replacement.append(...legacy.childNodes);
     legacy.replaceWith(replacement);
   }
-  for (const element of document.querySelectorAll('script, iframe, object, embed, form, base')) element.remove();
-  for (const element of document.querySelectorAll('*')) {
-    for (const attribute of [...element.attributes]) {
-      if (attribute.name.toLowerCase().startsWith('on')) element.removeAttribute(attribute.name);
-    }
-  }
-  for (const element of document.querySelectorAll('[src], image[href], link[href]')) {
-    const attribute = element.hasAttribute('src') ? 'src' : 'href';
-    const value = element.getAttribute(attribute)?.trim() ?? '';
-    if (/^(?:javascript|file|data|blob):/i.test(value)) throw new Error('PUBLICATION_SECURITY_REJECTED');
-    if (/^https?:/i.test(value) || value.startsWith('//')) {
-      element.removeAttribute(attribute);
-      continue;
-    }
-    if (/^[a-z][a-z0-9+.-]*:/i.test(value)) throw new Error('PUBLICATION_SECURITY_REJECTED');
+  sanitizeAuthoredMarkup(document);
+  await rewriteAuthoredDocumentReferences(document, async (value) => {
     const raw = value.split('#', 1)[0] ?? '';
     const key = raw.replace(/^\.\//, '');
-    const replacement = await resolveAssetUrl(key);
-    if (replacement) element.setAttribute(attribute, replacement); else element.removeAttribute(attribute);
-  }
-  for (const element of document.querySelectorAll('a[href], area[href]')) {
-    const href = element.getAttribute('href')?.trim() ?? '';
-    if (/^(?:javascript|file|data|blob):/i.test(href)) throw new Error('PUBLICATION_SECURITY_REJECTED');
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^https?:/i.test(href)) {
-      throw new Error('PUBLICATION_SECURITY_REJECTED');
-    }
-  }
-  for (const element of document.querySelectorAll('style')) {
-    element.textContent = await rewriteCssUrls(element.textContent ?? '', resolveAssetUrl, new Set());
-  }
-  for (const element of document.querySelectorAll('[style]')) {
-    element.setAttribute('style', await rewriteCssUrls(element.getAttribute('style') ?? '', resolveAssetUrl, new Set()));
-  }
+    return resolveAssetUrl(key);
+  });
   let head = document.querySelector('head');
   if (!head) {
     head = document.createElementNS('http://www.w3.org/1999/xhtml', 'head');
@@ -83,21 +72,7 @@ async function rewriteCssUrls(
   resolveAssetUrl: (sourceName: string, ancestors?: ReadonlySet<number>) => Promise<string | null>,
   ancestors: ReadonlySet<number>
 ): Promise<string> {
-  if (/@import\b|expression\s*\(|-moz-binding|behavior\s*:/i.test(source)) {
-    throw new Error('PUBLICATION_SECURITY_REJECTED');
-  }
-  const expression = /url\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi;
-  let rewritten = '';
-  let offset = 0;
-  for (const match of source.matchAll(expression)) {
-    const index = match.index;
-    if (index === undefined) continue;
-    rewritten += source.slice(offset, index);
-    const replacement = await resolveAssetUrl(match[2] ?? '', ancestors);
-    rewritten += replacement ? `url("${replacement}")` : 'url("")';
-    offset = index + match[0].length;
-  }
-  return rewritten + source.slice(offset);
+  return sanitizeAuthoredCss(source, (raw) => resolveAssetUrl(raw, ancestors));
 }
 
 /** Opens MOBI/AZW/AZW3/PRC through the same mobi-core C ABI used by native apps. */

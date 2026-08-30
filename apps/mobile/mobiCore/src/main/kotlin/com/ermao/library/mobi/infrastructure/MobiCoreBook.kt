@@ -204,7 +204,7 @@ internal class MobiCoreBook private constructor(
         val normalizationIdentifier: String
             get() = MobiCoreNative.normalizationIdentifier()
 
-        fun open(file: File, maximumFileBytes: Long = Long.MAX_VALUE): MobiCoreBook {
+        fun open(file: File, maximumFileBytes: Long): MobiCoreBook {
             val canonicalFile = file.canonicalFile
             return MobiCoreBook(MobiCoreNative.open(canonicalFile.path.encodeToByteArray(), maximumFileBytes))
         }

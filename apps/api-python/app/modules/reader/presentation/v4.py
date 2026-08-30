@@ -15,11 +15,18 @@ from app.api.typed_route import TypedContractRoute
 from app.bootstrap.media import media_page_index, media_streaming
 from app.bootstrap.reader import reader_resource_service
 from app.contracts.http_errors import ErrorResponses
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_FORMATS,
+    ReaderSafetyMorphology,
+    ReaderSafetyRuleId,
+    reader_safety_rule,
+)
 from app.core.auth import get_current_user
 from app.core.authorization import authorization_context, can_access_resource
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
+from app.modules.media.public import comic_manifest_policy_failure
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderAudioExactLocationDto,
@@ -95,6 +102,7 @@ from app.modules.reader.presentation.v4_schemas import (
     ReadiumLocatorPayload,
     ReflowableExactLocation,
 )
+from app.schemas.responses import fail
 
 router = APIRouter(
     prefix="/reader/v4",
@@ -106,7 +114,11 @@ _LOCATION_ADAPTER: TypeAdapter[ReaderLocation] = TypeAdapter(ReaderLocation)
 _METADATA_ADAPTER = TypeAdapter(dict[str, ReaderJsonValue])
 DatabaseSession = Annotated[Session, Depends(get_db)]
 ApplicationSettings = Annotated[Settings, Depends(get_settings)]
-_COMIC_SOURCE_FORMATS = frozenset({"cbz", "zip", "cbr", "rar", "image_dir"})
+_COMIC_SOURCE_FORMATS = frozenset(
+    policy.id.value.lower()
+    for policy in READER_SAFETY_FORMATS.values()
+    if policy.morphology is ReaderSafetyMorphology.COMIC
+)
 _COMIC_IMAGE_VARIANTS: list[Literal["original", "data-saver"]] = [
     "original",
     "data-saver",
@@ -569,7 +581,16 @@ def get_comic_manifest_v4(
     index = media_page_index.resolve_read_only(
         media_page_index.load_read_only(db, resource_id)
     )
-    etag = f'W/"comic-manifest-{resource_id}-{len(index.pages)}"'
+    policy_failure = comic_manifest_policy_failure(page_count=len(index.pages))
+    if policy_failure is not None:
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="漫画清单超过安全策略限制",
+                code=policy_failure.error_code,
+                details={"ruleId": policy_failure.rule_id},
+            )
+        )
+    etag = f'"comic-manifest-{index.revision.removeprefix("sha256:")}"'
     cache_headers = {
         "Cache-Control": "private, no-cache",
         "ETag": etag,
@@ -600,11 +621,12 @@ def get_comic_manifest_v4(
         for canonical_index, page in enumerate(index.pages)
     ]
     response.headers.update(cache_headers)
-    return ReaderComicManifestResponse(
+    result = ReaderComicManifestResponse(
         data=ReaderComicManifestData(
-            schemaVersion=1,
+            schemaVersion=2,
             kind="comic",
             resourceId=resource_id,
+            revision=index.revision,
             sourceFormat=cast(
                 Literal["cbz", "zip", "cbr", "rar", "image_dir"],
                 source_format,
@@ -613,6 +635,19 @@ def get_comic_manifest_v4(
             readingOrder=pages,
         )
     )
+    policy_failure = comic_manifest_policy_failure(
+        page_count=len(index.pages),
+        serialized_size_bytes=len(result.model_dump_json(by_alias=True).encode()),
+    )
+    if policy_failure is not None:
+        raise ReaderValidationError(
+            ReaderErrorBody(
+                message="漫画清单超过安全策略限制",
+                code=policy_failure.error_code,
+                details={"ruleId": policy_failure.rule_id},
+            )
+        )
+    return result
 
 
 @router.get(
@@ -629,11 +664,20 @@ def get_comic_page_v4(
         Literal["original", "data-saver"],
         Query(alias="imageVariant"),
     ] = "original",
+    revision: str | None = None,
 ) -> Response:
     user, _scope, _bootstrap = _authorized_bootstrap(db, request, settings, resource_id)
     index = media_page_index.resolve_read_only(
         media_page_index.load_read_only(db, resource_id)
     )
+    if revision != index.revision:
+        rule = reader_safety_rule(ReaderSafetyRuleId.COMIC_MANIFEST_REVISION)
+        return fail(
+            "Comic resource changed",
+            status_code=412,
+            code=rule.error_code.value if rule.error_code is not None else None,
+            params={"ruleId": rule.id.value},
+        )
     if page_index < 0 or page_index >= len(index.pages):
         raise ReaderNotFoundError(
             ReaderErrorBody(
@@ -674,6 +718,7 @@ def get_comic_page_v4(
     page_response.headers["Cache-Control"] = "private, no-store"
     page_response.headers["X-Comic-Page-Index"] = str(page_index)
     page_response.headers["X-Comic-Resource-Href"] = f"pages/{page_index}"
+    page_response.headers["X-Comic-Revision"] = index.revision
     return page_response
 
 

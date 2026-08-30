@@ -203,12 +203,17 @@ def test_missing_comic_page_index_does_not_fallback_while_writer_is_held(
                 started_at = monotonic()
                 listed = client.get(f"/api/resources/{resource_id}/pages")
                 list_elapsed = monotonic() - started_at
+                revision = listed.json()["data"]["revision"]
                 started_at = monotonic()
-                page = client.get(f"/api/resources/{resource_id}/pages/2")
+                page = client.get(
+                    f"/api/resources/{resource_id}/pages/2",
+                    params={"revision": revision},
+                )
                 page_elapsed = monotonic() - started_at
 
             assert listed.status_code == 200
             assert listed.json()["data"]["pages"] == []
+            assert revision.startswith("sha256:")
             assert page.status_code == 404
             assert list_elapsed < 0.75
             assert page_elapsed < 0.75

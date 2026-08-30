@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
 Status: Reader v4 download-then-read contract implementation in progress; physical-device conformance pending
-Last updated: 2026-08-29
+Last updated: 2026-08-31
 
 This document is the single authoritative architecture contract for the native Reader and its Reader v4 cross-platform progress integration. If a Mobile phase document or historical acceptance artifact describes a different progress state machine, this document wins and the conflicting material must be removed rather than implemented as compatibility behavior. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -59,9 +59,10 @@ Reader bootstrap, download, cache and recovery never create a derived EPUB, ZIP 
 unpacked publication directory. Every first-party reflowable Reader validates and
 opens a complete original through its local parser. MOBI-family and TXT parsers expose
 bounded virtual Publication resources in memory; EPUB reads its original ZIP through
-a bounded local fetcher. Delivery may
-set CSP and apply the documented head-only security policy but does not rewrite the
-author body.
+a bounded local fetcher. `packages/reader-contracts/reader-safety-policy.json`
+owns all safety decisions. Delivery applies generated decisions and platform
+defenses; `SANITIZE` may remove dangerous authored content from the in-memory
+Publication but never changes the stored original or persists a derivative.
 
 The exact local progress record identity is:
 
@@ -260,13 +261,20 @@ server RWPM or chapter endpoint.
 The shared `ReaderDeliveryMode` has three values. `DOWNLOAD_ORIGINAL` covers EPUB,
 FB2, TXT, MOBI, AZW, AZW3 and PRC; `STREAM` covers PDF and comics; unsupported
 formats do not enter Reader. The former online-readability gate and online-limit
-fallback are removed. PDF requests remain at most 1 MiB and reject an ignored Range
-before body consumption; comic page delivery and native SDK ordinary caches remain.
+fallback are removed. PDF delivery follows `PDF.RANGE_PROTOCOL` and rejects an
+ignored Range before body consumption; comic page delivery and native SDK ordinary
+caches remain.
+
+Android and iOS use the repository-owned PDFium adapter for both local and streamed
+PDF opening. The former local Readium/PDFKit versus remote PDFium split is removed.
+Web continues using pdf.js. These engines expose normalized findings to the same
+generated PDF policy; SDK defaults may not silently enable actions forbidden by
+`PDF.DISABLE_ACTIVE_CONTENT`.
 
 Native Reader uses `ReaderLaunchCoordinator` for verified-local, required-download,
-stream and unavailable decisions. The default application admission limit is
-`ReaderAdmission.maximumPublicationBytes`: 2 GiB inclusive, including IMAGE_DIR
-member totals. This is not a guarantee that every admitted file can open. Whole-array
+stream and unavailable decisions. Admission uses
+`COMMON.ORIGINAL_MAX_BYTES`; IMAGE_DIR member totals use the applicable comic
+budget rules. This is not a guarantee that every admitted file can open. Whole-array
 platform limits, XML/decompression/image safety limits and engine failures remain
 independent. No synthetic chapter splitting, format conversion, persisted unpacked
 publication, new indexing or incremental parser is introduced.
@@ -281,7 +289,7 @@ pauses only its owned transfer; late completion cannot open a closed or differen
 reader. A missing/stale artifact is rebuilt through Downloads, while local parse failure
 never loops or redownloads. PDF and comic errors never select this transition.
 
-The original chapter target, or the latest persisted Reader progress, is restored after download using the existing progress owner. All file lengths, offsets and totals use 64-bit arithmetic. Product admission policy is passed to C through explicit open options; no duplicated 64/512 MiB file gate remains in native Reader. TXT/FB2 full materialization and MOBI parser memory behavior remain existing engine constraints; OS memory termination cannot be reliably recovered.
+The original chapter target, or the latest persisted Reader progress, is restored after download using the existing progress owner. All file lengths, offsets and totals use 64-bit arithmetic. Product admission policy is passed to C through explicit open options; no duplicated native file gate remains in Reader. TXT/FB2 full materialization and MOBI parser memory behavior remain existing engine constraints; OS memory termination cannot be reliably recovered.
 
 Reader v4 bootstrap for a reflowable resource is metadata/progress only. It neither
 opens a Publication nor materializes navigation and it exposes no manifest, positions
@@ -325,10 +333,11 @@ and is never inferred from a filename or accepted as an online/offline format.
 Pinned libmobi's legacy MOBI6 HTML can omit the XHTML default namespace and the
 `mbp` prefix declaration. Native adapters bind these on the root element before
 the security decorator, otherwise WebKit can render an XML error document.
-`MobiMarkupEnvelope` changes only the XML envelope in memory; original bytes,
-resource hrefs, body markup and locator projection stay unchanged. Existing
-namespace declarations are preserved. This is not a conversion artifact or a
-change to the parser/locator identity.
+`MobiMarkupEnvelope` changes only the XML envelope in memory. Existing namespace
+declarations are preserved. The safety adapter may subsequently sanitize the
+in-memory body under ADR 0026; original bytes and resource hrefs remain unchanged,
+and any semantic projection change requires a new normalization identifier. This
+is not a conversion artifact.
 
 Native original downloads use Downloads' public DownloadResourceRuntime only.
 Its descriptor comes from Library Resource/Asset metadata, independently of Reader
@@ -381,7 +390,7 @@ Automated contracts must cover:
 - native required-download deduplication, resume, cancellation, storage failure,
   original target/progress restoration and no late opening after cancellation/account change;
 - PDF/comic online retries and audio playback creating no implicit reflowable download task;
-- 2 GiB minus one / exactly 2 GiB / plus one admission, 64-bit totals and known allocation guards;
+- below / exactly at / above `COMMON.ORIGINAL_MAX_BYTES`, 64-bit totals and known allocation guards;
 - local parse failure without automatic redownload or online/local loops;
 - actual novel EPUB plus independent TXT measurements: original transfer, local parse,
   first readable view, transferred bytes and parser memory. Results must identify
@@ -392,6 +401,15 @@ Android acceptance includes building and deploying the debug APK to an explicitl
 ## 12. Security and observability
 
 Reader routes preserve resource authorization and anti-enumeration behavior. External location JSON is bounded and validated before mapping. Logs may contain stable user/resource/correlation identifiers and outcome codes, but never book text, cookies, tokens, full locator payloads, or private filesystem paths.
+
+The versioned Reader safety contract in `packages/reader-contracts` is the sole
+owner of formats/MIME, limits, algorithms, `ruleId`, filtering actions and error
+codes across backend, Web, Android and iOS. KMP exposes generated policy data to
+iOS through `ErmaoShared`. Native/Web code implements only fact detectors,
+generated decisions and declared platform defenses; it never carries a private
+allowlist, threshold or fallback parser. Unavailable enforcement is an explicit
+`ENGINE_*` or `PLATFORM_*` conformance failure. The contract is bundled and its
+canonical digest is checked by CI; Reader bootstrap does not negotiate it.
 
 The Reader shell remains native and owns lifecycle, accessibility, back/close,
 navigation controls, table of contents, and preferences. Readium internals are
@@ -544,20 +562,22 @@ Original bytes, in-memory TXT/FB2/MOBI Publications, existing chapter boundaries
 and native preference submission are preserved. Reflowable reading requires the
 verified complete original, but no conversion artifact, persisted unpacked publication,
 synthetic chapter or typography validation is permitted.
-Authentication, path safety, XXE/script/network isolation, transport/revision
-contracts and explicit budgets remain application responsibilities, with actual
-failure codes. The Reader error boundary retains stage, source and stable code;
+Authentication and root/path ownership remain their existing capability
+responsibilities. XXE/script/network isolation, transport/revision decisions and
+Reader budgets come from the generated Reader safety policy and are enforced by
+platform adapters with actual rule IDs and failure codes. The Reader error boundary retains stage, source and stable code;
 original causes stay internal and never enter user-visible diagnostics. A generic
 parser failure does not delete progress/downloads or select Download Center.
 
-The status/code contract is owned by
+HTTP status/code compatibility remains owned by
 `packages/reader-contracts/reader-http-error-statuses.json`, consumed by Web and
-generated into KMP. Older NUL errors are receive-only compatibility, not rules.
+generated into KMP. Content security semantics are owned by
+`reader-safety-policy.json`. Older NUL errors are receive-only compatibility, not rules.
 
-This is a target policy, not a claim of complete migration. Original chapter
-security decorators still require initial XML/head/body checks until fixed SDK
-public interfaces can safely replace their isolation. Generated TXT/FB2 chapters
-reuse the CSP template without the extra whole-chapter XML pass. The fixed iOS
-comic decoder does not report UIImage decode failures, and remains unaccepted.
-The implementation/evidence matrix is authoritative for current coverage:
-`docs/testing/reader-parser-implementation-2026-08-28.md`.
+All chapter security decorators must now consume the generated policy and report
+their conformance fixtures. CSP, XML parser flags, scheme handlers, PDFium and
+WebView/WKWebView isolation remain implementation mechanisms, not semantic rule
+owners. A fixed iOS decoder or SDK limitation remains unaccepted until physical-
+device conformance demonstrates the required generated action. Historical
+implementation evidence remains useful but is superseded where it describes a
+platform-owned policy.

@@ -29,30 +29,21 @@ class EpubContentSecurityPolicyTest {
     }
 
     @Test
-    fun locatorProjectionMatchesV2GoldenSemantics() {
-        val markup = """<?xml version="1.0" encoding="utf-8"?>
-            <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Projection</title></head>
-            <body><h1 id="chapter-title">&#22825;&#22320;&#29572;&#40644;</h1><form>
-            <p id="target">Cafe&#769;   &#23431;&#23449;&#27946;&#33618;</p>
-            <p>duplicate text</p><p>duplicate text</p></form><iframe src="remote"></iframe></body></html>
-        """.trimIndent()
+    fun locatorProjectionMatchesV3GoldenSemantics() {
+        val markup = checkNotNull(javaClass.getResource("/normalization-v3/chapter.xhtml"))
+            .readText()
 
         assertEquals(
             listOf(
                 mapOf("path" to "/body[1]", "localName" to "body"),
                 mapOf("path" to "/body[1]/h1[1]", "localName" to "h1", "id" to "chapter-title", "text" to "天地玄黄"),
-                mapOf("path" to "/body[1]/form[1]", "localName" to "form"),
-                mapOf("path" to "/body[1]/form[1]/p[1]", "localName" to "p", "id" to "target", "text" to "Café 宇宙洪荒"),
-                mapOf("path" to "/body[1]/form[1]/p[2]", "localName" to "p", "text" to "duplicate text"),
-                mapOf("path" to "/body[1]/form[1]/p[3]", "localName" to "p", "text" to "duplicate text"),
-                mapOf("path" to "/body[1]/iframe[1]", "localName" to "iframe"),
             ),
             EpubContentSecurityPolicy.locatorBodyProjection(markup.encodeToByteArray()),
         )
     }
 
     @Test
-    fun decoratesOnlyHeadAndPreservesAuthorBody() {
+    fun sanitizesAuthorMarkupBeforeDecoratingHead() {
         val input = """
             <html><head>
               <meta http-equiv="refresh" content="0;https://attacker.invalid" />
@@ -67,16 +58,14 @@ class EpubContentSecurityPolicyTest {
             </body></html>
         """.trimIndent()
 
-        val body = input.substringAfter("<body").substringBefore("</body>")
         val output = EpubContentSecurityPolicy.decorateHtml(input.toByteArray()).toString(Charsets.UTF_8)
 
-        assertEquals(body, output.substringAfter("<body").substringBefore("</body>"))
-        assertTrue(output.contains("<script"))
-        assertTrue(output.contains("<iframe"))
-        assertTrue(output.contains("onload="))
-        assertTrue(output.contains("javascript:"))
+        assertTrue(!output.contains("<script"))
+        assertTrue(!output.contains("<iframe"))
+        assertTrue(!output.contains("onload="))
+        assertTrue(!output.contains("javascript:"))
         assertTrue(output.contains("href=\"https://example.com\""))
-        assertTrue(output.contains("data-shuku-security-profile=\"android-v3\""))
+        assertTrue(output.contains("data-shuku-safety-policy-version=\"1\""))
         assertTrue(output.contains("script-src https://*/readium/scripts/readium-reflowable.js"))
         assertTrue(!output.contains("http-equiv=\"refresh\""))
     }
@@ -126,10 +115,10 @@ class EpubContentSecurityPolicyTest {
         """.trimIndent()
 
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
-        val profileIndex = decorated.indexOf("data-shuku-security-profile=\"android-v3\"")
+        val profileIndex = decorated.indexOf("data-shuku-safety-policy-version=\"1\"")
 
         assertTrue(profileIndex > decorated.indexOf("<!-- <head>"))
         assertTrue(profileIndex < decorated.indexOf("<title>Real</title>"))
-        assertTrue(decorated.contains("<![CDATA[\"<head>fake</head>\"]]>"))
+        assertTrue(!decorated.contains("<![CDATA[\"<head>fake</head>\"]]>"))
     }
 }

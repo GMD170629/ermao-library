@@ -306,6 +306,42 @@ Hidden commits, fire-and-forget promises, and untracked background tasks are pro
 - Filesystem paths must be resolved against configured roots and checked for traversal and symlink escape.
 - Secrets never appear in source, logs, fixtures, snapshots, generated artifacts, or error responses.
 
+#### Reader safety policy contract
+
+`packages/reader-contracts/reader-safety-policy.json` is the sole semantic owner
+for Reader content filtering, format/MIME admission, resource budgets, bounded
+PDF/comic delivery, audio metadata safety, rule actions and safety error codes.
+This applies to the backend, Web, KMP, Android and iOS. Its generated TypeScript,
+Kotlin, Python and native C bindings are build artifacts and must never be edited by hand;
+iOS consumes the KMP binding through `ErmaoShared` and must not maintain a Swift
+policy catalog.
+
+- Add or change a safety rule in the machine contract first. Update its schema,
+  versioned conformance fixtures and expected rule events in the same change,
+  increment `policyVersion` for every semantic change, regenerate all bindings,
+  and run both generator `--check` and the Reader safety boundary checker.
+- Platform and parser code may only detect normalized facts, invoke a generated
+  algorithm/rule ID and apply its generated `ALLOW`, `SANITIZE`,
+  `BLOCK_RESOURCE` or `REJECT_PUBLICATION` decision. It must not define private
+  rule IDs, thresholds, MIME/format maps, DOCTYPE/entity decisions, tag or URI
+  allow/deny lists, platform-only safety errors, or defaults that bypass the
+  generated contract.
+- Parser, SDK, CSP, WebView/WKWebView and PDFium differences are platform-defense
+  adapters, not permission to change policy semantics. An unavailable required
+  defense fails explicitly with an `ENGINE_*` or `PLATFORM_*` outcome and is a
+  conformance defect; it must not be reported as a content security rejection.
+- A security failure must never fall back to another parser, legacy filter or
+  online body path. Recoverable authored active content is sanitized only in the
+  in-memory Publication. The verified original remains byte-identical and no
+  derived EPUB, ZIP or unpacked publication may be persisted.
+- The policy is bundled at build time. Do not add remote policy mutation or a
+  runtime bootstrap version handshake. Release CI coordinates consumers by the
+  canonical JSON SHA-256 digest and rejects generated or fixture drift.
+- Documentation and tests reference stable generated `ruleId` values instead of
+  copying numeric limits or policy lists. Structured safety logs may include the
+  policy version/digest, rule ID, action, format and stage, but never publication
+  content or private paths.
+
 #### Internationalization
 
 - User-visible text is never used as a programmatic identifier.

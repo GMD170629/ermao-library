@@ -48,10 +48,23 @@ class ArchiveCore private constructor(
     companion object {
         val version: String get() = ArchiveCoreNative.version()
 
-        fun open(file: File): ArchiveCore {
+        fun open(
+            file: File,
+            maximumEntries: Int,
+            maximumPageBytes: Long,
+            maximumExpandedBytes: Long,
+        ): ArchiveCore {
             val canonical = file.canonicalFile
             require(canonical.isFile) { "Archive file is missing" }
-            return ArchiveCore(ArchiveCoreNative.open(canonical.path.encodeToByteArray()))
+            require(maximumEntries > 0 && maximumPageBytes > 0 && maximumExpandedBytes > 0)
+            return ArchiveCore(
+                ArchiveCoreNative.open(
+                    canonical.path.encodeToByteArray(),
+                    maximumEntries,
+                    maximumPageBytes,
+                    maximumExpandedBytes,
+                ),
+            )
         }
     }
 }
@@ -60,7 +73,12 @@ private object ArchiveCoreNative {
     init { System.loadLibrary("ermao_archive_jni") }
 
     external fun version(): String
-    external fun open(pathUtf8: ByteArray): Long
+    external fun open(
+        pathUtf8: ByteArray,
+        maximumEntries: Int,
+        maximumPageBytes: Long,
+        maximumExpandedBytes: Long,
+    ): Long
     external fun close(handle: Long)
     external fun pageCount(handle: Long): Int
     external fun pagePath(handle: Long, index: Int): String

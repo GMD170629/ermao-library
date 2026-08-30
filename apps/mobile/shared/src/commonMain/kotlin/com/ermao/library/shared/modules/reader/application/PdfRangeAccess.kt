@@ -2,11 +2,16 @@ package com.ermao.library.shared.modules.reader.application
 
 import com.ermao.library.shared.modules.reader.domain.PdfByteRange
 import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFailure
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 
 sealed interface PdfRangeProbeResult {
     data object Available : PdfRangeProbeResult
-    data class Failure(val code: PdfReaderErrorCode, val recoverable: Boolean) : PdfRangeProbeResult
+    data class Failure(
+        val code: PdfReaderErrorCode,
+        val recoverable: Boolean,
+        val safetyFailure: ReaderSafetyFailure? = null,
+    ) : PdfRangeProbeResult
 }
 
 sealed interface PdfRangeReadResult {
@@ -16,7 +21,11 @@ sealed interface PdfRangeReadResult {
         }
     }
 
-    data class Failure(val code: PdfReaderErrorCode, val recoverable: Boolean) : PdfRangeReadResult
+    data class Failure(
+        val code: PdfReaderErrorCode,
+        val recoverable: Boolean,
+        val safetyFailure: ReaderSafetyFailure? = null,
+    ) : PdfRangeReadResult
 }
 
 interface PdfRangeServerPort {

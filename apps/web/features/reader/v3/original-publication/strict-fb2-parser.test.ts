@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
+import { ReaderSafetyPolicyError } from '../security/reader-safety-policy';
 import { parseStrictFb2 } from './strict-fb2-parser';
 
 test('strict FB2 parsing preserves metadata, sections and text', () => {
@@ -8,6 +10,22 @@ test('strict FB2 parsing preserves metadata, sections and text', () => {
   assert.equal(parsed.language, 'en');
   assert.deepEqual(parsed.chapters.map((chapter) => chapter.title), ['One', 'Two']);
   assert.match(parsed.chapters[0]?.text ?? '', /Hello & world/);
+  assert.deepEqual(parsed.blockedResources, []);
+});
+
+test('strict FB2 parsing blocks only an embedded image that exceeds generated budgets', () => {
+  const parsed = parseStrictFb2(
+    '<FictionBook><body><section><p>Readable text</p></section></body>'
+      + '<binary id="large-cover" content-type="image/jpeg">QUJDRA==</binary></FictionBook>',
+    { maxDepth: 20, maxNodes: 100, maxTextChars: 100 },
+    { maxEncodedBytes: 4, maxDecodedBytes: 20, maxDecodedTotalBytes: 20 }
+  );
+
+  assert.equal(parsed.chapters[0]?.text, 'Readable text');
+  assert.deepEqual(parsed.blockedResources, [{
+    id: 'large-cover',
+    ruleId: READER_SAFETY_RULE_IDS.FB2_IMAGE_BUDGET
+  }]);
 });
 
 test('strict FB2 parsing fails closed for malformed, entity and parser-budget inputs', () => {
@@ -26,6 +44,8 @@ test('strict FB2 parsing fails closed for malformed, entity and parser-budget in
   );
   assert.throws(
     () => parseStrictFb2('<FictionBook><body><p>excess</p></body></FictionBook>', { maxDepth: 20, maxNodes: 100, maxTextChars: 3 }),
-    /PUBLICATION_PARSER_MEMORY/
+    (reason: unknown) => reason instanceof ReaderSafetyPolicyError
+      && reason.code === 'PUBLICATION_PARSER_LIMIT'
+      && reason.ruleId === READER_SAFETY_RULE_IDS.FB2_STRUCTURE_BUDGET
   );
 });

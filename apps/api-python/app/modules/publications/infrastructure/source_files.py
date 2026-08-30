@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.modules.publications.domain.model import (
+    PublicationCorruptError,
     PublicationNotFoundError,
     PublicationReadError,
-    PublicationSecurityError,
 )
 
 
@@ -41,7 +41,7 @@ def resolve_publication_source(raw_path: str, source_root: Path) -> Path:
     try:
         resolved.relative_to(resolved_root)
     except ValueError as error:
-        raise PublicationSecurityError(
+        raise PublicationCorruptError(
             "publication source escapes its library"
         ) from error
     if not resolved.is_file():

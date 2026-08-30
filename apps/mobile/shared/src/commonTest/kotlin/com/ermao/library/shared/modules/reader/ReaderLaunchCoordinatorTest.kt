@@ -21,6 +21,8 @@ import com.ermao.library.shared.modules.downloads.InMemoryDownloadCatalogReposit
 import com.ermao.library.shared.modules.downloads.createDownloadRequestContext
 import com.ermao.library.shared.modules.downloads.DownloadBundleMember
 import com.ermao.library.shared.modules.downloads.DownloadArtifactKind
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,10 +60,16 @@ class ReaderLaunchCoordinatorTest {
         assertTrue(ReaderAdmission.accepts(limit - 1))
         assertTrue(ReaderAdmission.accepts(limit))
         assertFalse(ReaderAdmission.accepts(limit + 1))
+        assertEquals(null, ReaderAdmission.localSafetyFailure("epub", limit))
+        assertEquals(
+            readerSafetyOriginalMaxBytesFailure(),
+            ReaderAdmission.localSafetyFailure("epub", limit + 1),
+        )
         assertTrue(ReaderAdmission.accepts(0))
         assertEquals(null, ReaderAdmission.localFailure("txt", 0))
         assertEquals(null, ReaderAdmission.localFailure("epub", limit))
         assertNotNull(ReaderAdmission.localFailure("txt", limit))
+        assertEquals(null, ReaderAdmission.localFailure("fb2", limit))
         assertEquals(0.5, ReaderAdmission.progress(limit / 2, limit))
         assertEquals(1.0, ReaderAdmission.progress(limit, limit))
         val request = DownloadSinkRequest(namespace, "task", "resource", "asset", limit, limit - 1)
@@ -76,7 +84,12 @@ class ReaderLaunchCoordinatorTest {
             val catalog = InMemoryDownloadCatalogRepository()
             val metadata = Metadata(descriptor(size))
             val decision = ReaderLaunchCoordinator(catalog, metadata).prepare(context, "resource")
-            if (size <= limit) assertIs<ReaderLaunchDownload>(decision) else assertIs<ReaderLaunchUnavailable>(decision)
+            if (size <= limit) {
+                assertIs<ReaderLaunchDownload>(decision)
+            } else {
+                val unavailable = assertIs<ReaderLaunchUnavailable>(decision)
+                assertEquals(readerSafetyOriginalMaxBytesFailure(), unavailable.safetyFailure)
+            }
             assertEquals(1, metadata.calls)
             assertTrue(catalog.listTasks(namespace).isEmpty())
             assertTrue(catalog.listArtifacts(namespace).isEmpty())
@@ -209,8 +222,12 @@ class ReaderLaunchCoordinatorTest {
     @Test fun knownLocalEngineLimitsDoNotStartPointlessDownloads() = runBlocking {
         val largeText = descriptor(limit, "txt")
         val coordinator = ReaderLaunchCoordinator(InMemoryDownloadCatalogRepository(), Metadata(largeText))
-        assertEquals(ReaderErrorCode.OutOfMemoryRisk,
-            assertIs<ReaderLaunchUnavailable>(coordinator.prepare(context, "resource")).code)
+        val unavailable = assertIs<ReaderLaunchUnavailable>(coordinator.prepare(context, "resource"))
+        assertEquals(ReaderErrorCode.OutOfMemoryRisk, unavailable.code)
+        assertEquals(
+            ReaderSafetyFacade().failureFor(ReaderSafetyRuleId.TXT_MEMORY_BUDGET),
+            unavailable.safetyFailure,
+        )
     }
 
     @Test fun observingAnIndependentDownloadCannotOpenADifferentRevision() = runBlocking {
@@ -225,14 +242,25 @@ class ReaderLaunchCoordinatorTest {
         assertEquals(artifact, assertIs<ReaderLaunchLocal>(coordinator.complete(changed)).artifact)
     }
 
-    @Test fun directoryAdmissionUsesAllMemberBytesAndCannotOverflow() {
-        fun bundle(first: Long, second: Long) = descriptor().copy(format = "image_dir", readerType = DownloadReaderType.Comic,
-            artifactKind = DownloadArtifactKind.OriginalPageSet, members = listOf(
-                DownloadBundleMember("a", 0, DownloadSource("/api/assets/a", "image/jpeg", first)),
-                DownloadBundleMember("b", 1, DownloadSource("/api/assets/b", "image/jpeg", second)),
-            ))
-        assertTrue(ReaderAdmission.accepts(bundle(limit / 2, limit / 2).totalBytes))
-        assertFalse(ReaderAdmission.accepts(bundle(limit / 2, limit / 2 + 1).totalBytes))
-        assertFailsWith<IllegalArgumentException> { bundle(Long.MAX_VALUE, 1).totalBytes }
+    @Test fun directoryAdmissionUsesGeneratedPageAndExpandedBudgets() {
+        fun bundle(sizes: List<Long>) = descriptor().copy(
+            format = "image_dir",
+            readerType = DownloadReaderType.Comic,
+            artifactKind = DownloadArtifactKind.OriginalPageSet,
+            members = sizes.mapIndexed { index, size ->
+                DownloadBundleMember(
+                    "asset-$index",
+                    index,
+                    DownloadSource("/api/assets/$index", "image/jpeg", size),
+                )
+            },
+        )
+        val pageBytes = readerSafetyComicPageMaxBytes()
+        val fullPages = (limit / pageBytes).toInt()
+        val remainder = limit % pageBytes
+        val exactLimit = List(fullPages) { pageBytes } + listOfNotNull(remainder.takeIf { it > 0L })
+
+        assertTrue(ReaderAdmission.accepts(bundle(exactLimit).totalBytes))
+        assertFailsWith<IllegalArgumentException> { bundle(exactLimit + 1L) }
     }
 }

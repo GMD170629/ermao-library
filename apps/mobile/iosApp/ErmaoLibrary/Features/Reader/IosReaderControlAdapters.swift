@@ -65,7 +65,7 @@ extension IosComicReaderSession: IosReaderControlSession {
 
 extension IosPdfReaderSession: IosReaderControlSession {
     var controlMorphology: ErmaoShared.ReaderMorphology { .pdf }
-    var controlReady: Bool { (navigator != nil || pdfiumNavigator != nil) && (phase == .reading || phase == .background) }
+    var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
     func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool {

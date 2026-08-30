@@ -170,8 +170,6 @@ final class IosMobiLazyContainer: Container, @unchecked Sendable {
 final class IosMobiLazyResource: Resource, @unchecked Sendable {
     let sourceURL: AbsoluteURL? = nil
 
-    private static let maximumDecoratedResourceBytes = 64 * 1024 * 1024
-
     private let descriptor: IosMobiResourceDescriptor
     private let lifetime: IosMobiPublicationLifetime
     private let securityAdapter: IosPublicationSecurityAdapter
@@ -214,12 +212,6 @@ final class IosMobiLazyResource: Resource, @unchecked Sendable {
     }
 
     private func decoratedData() async -> ReadResult<Data> {
-        guard descriptor.decodedLength <= UInt64(Self.maximumDecoratedResourceBytes) else {
-            return .failure(
-                .decoding("MOBI markup resource exceeds the safe transformation limit")
-            )
-        }
-
         var raw = Data()
         let streamed = await streamRaw(range: nil) { raw.append($0) }
         return streamed.flatMap { _ -> ReadResult<Data> in

@@ -15,6 +15,10 @@ import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.domain.mergeReaderBookmarks
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.ReaderSafetyImplementationException
+import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
+import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
 import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderNavigationTarget
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid
@@ -209,13 +213,16 @@ internal class ReadiumEpubSession(
         return if (source.sourceFormat == ReaderSourceFormat.Fb2) {
             try {
                 Fb2ReadiumPublicationFactory().open(file, source.displayTitle)
+            } catch (error: ReaderSafetyException) {
+                throw readerOpenFailure(error)
             } catch (error: IllegalArgumentException) {
                 throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ParseFailed), cause = error)
             }
         } else if (source.format == ReaderFormat.Mobi) {
             val opened = try {
-                MobiReadiumPublicationFactory().open(file, EpubContentSecurityPolicy::applyMobi,
-                    com.ermao.library.shared.modules.reader.ReaderAdmission.maximumPublicationBytes)
+                MobiReadiumPublicationFactory().open(file, EpubContentSecurityPolicy::applyMobi)
+            } catch (error: ReaderSafetyException) {
+                throw readerOpenFailure(error)
             } catch (error: MobiPublicationOpenException) {
                 throw ReaderOpenFailure(ReaderError(error.kind.toReaderErrorCode()), cause = error)
             }
@@ -224,6 +231,8 @@ internal class ReadiumEpubSession(
         } else if (source.format == ReaderFormat.Text) {
             try {
                 TxtReadiumPublicationFactory().open(file, source.displayTitle)
+            } catch (error: ReaderSafetyException) {
+                throw readerOpenFailure(error)
             } catch (error: com.ermao.library.shared.modules.reader.TxtPublicationEmptyException) {
                 throw ReaderOpenFailure(ReaderError(ReaderErrorCode.TxtEmpty), cause = error)
             } catch (error: IllegalArgumentException) {
@@ -233,6 +242,13 @@ internal class ReadiumEpubSession(
                 throw ReaderOpenFailure(ReaderError(code), cause = error)
             }
         } else {
+            try {
+                AndroidEpubArchiveSafetyPreflight.verify(file)
+            } catch (error: ReaderSafetyException) {
+                throw readerOpenFailure(error)
+            } catch (error: ReaderSafetyImplementationException) {
+                throw readerOpenFailure(error)
+            }
             val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
                 throw ReaderOpenFailure(
                     ReaderError(ReaderErrorCode.CorruptFile),
@@ -254,13 +270,37 @@ internal class ReadiumEpubSession(
         }
     }
 
+    private fun readerOpenFailure(error: ReaderSafetyException): ReaderOpenFailure = ReaderOpenFailure(
+        ReaderError(
+            readerErrorCodeForFailure(error.failure.errorCode, recoverable = false),
+            safeContext = mapOf(
+                "ruleId" to error.failure.ruleId,
+                "errorCode" to error.failure.errorCode,
+            ),
+            cause = error,
+        ),
+        cause = error,
+    )
+
+    private fun readerOpenFailure(error: ReaderSafetyImplementationException): ReaderOpenFailure = ReaderOpenFailure(
+        ReaderError(
+            readerErrorCodeForFailure(error.failure.errorCode, recoverable = false),
+            safeContext = mapOf(
+                "ruleId" to error.failure.ruleId,
+                "errorCode" to error.failure.errorCode,
+            ),
+            cause = error,
+        ),
+        cause = error,
+    )
+
     override suspend fun prepare(classLoader: ClassLoader): EpubNavigatorFragment {
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
         val openedPublication = openLocalPublication()
         if (openedPublication.isRestricted) {
             openedPublication.close()
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.DrmProtected))
+            throw readerOpenFailure(ReaderSafetyException(readerSafetyDrmFailure()))
         }
         if (!openedPublication.conformsTo(Publication.Profile.EPUB)) {
             openedPublication.close()
@@ -976,7 +1016,6 @@ internal fun continuousScrollViewportScript(direction: Int, animated: Boolean): 
 }
 
 private fun MobiPublicationErrorKind.toReaderErrorCode(): ReaderErrorCode = when (this) {
-    MobiPublicationErrorKind.DrmProtected -> ReaderErrorCode.DrmProtected
     MobiPublicationErrorKind.Unsupported -> ReaderErrorCode.UnsupportedFormat
     MobiPublicationErrorKind.Corrupt -> ReaderErrorCode.CorruptFile
     MobiPublicationErrorKind.LimitExceeded, MobiPublicationErrorKind.OutOfMemory -> ReaderErrorCode.OutOfMemoryRisk

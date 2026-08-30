@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'packages/reader-contracts/**'
+      - 'packages/reader-core/**'
       - 'docs/mobile-reader-architecture.md'
       - 'AGENTS.md'
       - '.cursor/rules/architecture.mdc'
@@ -33,6 +35,8 @@ on:
       - prod
     paths:
       - 'apps/mobile/**'
+      - 'packages/reader-contracts/**'
+      - 'packages/reader-core/**'
       - 'docs/mobile-reader-architecture.md'
       - 'AGENTS.md'
       - '.cursor/rules/architecture.mdc'
@@ -135,11 +139,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          lfs: true
 
       - name: Check approved iOS Readium baseline
         run: |
           python3 iosApp/verify_readium.py
           python3 -m unittest discover -s iosApp -p 'test_verify_readium.py'
+
+      - name: Check generated Reader safety contract
+        run: |
+          python3 ../../packages/reader-contracts/generate-reader-safety-policy.py --check
+          python3 ../../packages/reader-contracts/check-reader-safety-boundaries.py
+          python3 -m unittest discover \
+            -s ../../packages/reader-contracts/tests -p 'test_*.py'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -155,6 +168,9 @@ jobs:
 
       - name: Install Android API 36
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Verify accepted Android PDFium artifact
+        run: python3 native/pdfium/scripts/verify-lock.py --platform android
 
       - name: Check source boundaries
         shell: bash
@@ -186,6 +202,12 @@ jobs:
             :androidApp:lintDebug \
             :androidApp:assembleDebug
 
+      - name: Verify executable KMP Reader safety report
+        run: |
+          python3 ../../packages/reader-contracts/verify-reader-safety-conformance.py \
+            --require-consumer KMP \
+            shared/build/reports/reader-safety-conformance/kmp.json
+
       - name: Upload Android build and test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -196,10 +218,11 @@ jobs:
             apps/mobile/androidApp/build/reports/lint-results-debug.html
             apps/mobile/androidApp/build/test-results/testDebugUnitTest/*.xml
             apps/mobile/shared/build/test-results/*/*.xml
+            apps/mobile/shared/build/reports/reader-safety-conformance/*.json
           if-no-files-found: warn
 
   android-emulator:
-    name: Android emulator smoke
+    name: Android emulator smoke and safety conformance
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -210,6 +233,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - name: Verify accepted Android PDFium artifact
+        run: python3 native/pdfium/scripts/verify-lock.py --platform android
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -237,16 +265,36 @@ jobs:
           working-directory: apps/mobile
           script: |
             set -euo pipefail
+            ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
+            adb install -r -t androidApp/build/outputs/apk/debug/androidApp-debug.apk
+            adb install -r -t androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
+            instrumentation_args=()
             if [ "$RUN_FULL_ANDROID_REGRESSION" = "true" ]; then
-              ./gradlew :androidApp:connectedDebugAndroidTest :androidApp:assembleDebug
+              echo 'Running complete Android instrumented regression.'
             else
-              ./gradlew \
-                :androidApp:connectedDebugAndroidTest \
-                -Pandroid.testInstrumentationRunnerArguments.class=com.ermao.library.AndroidShellSmokeTest \
-                :androidApp:assembleDebug
+              instrumentation_args=(
+                -e class
+                'com.ermao.library.AndroidShellSmokeTest,com.ermao.library.features.reader.infrastructure.ReaderSafetyConformanceInstrumentedTest'
+              )
             fi
+            mkdir -p androidApp/build/reports/androidTests/manual
+            adb shell am instrument -w -r \
+              "${instrumentation_args[@]}" \
+              com.ermao.library.test/androidx.test.runner.AndroidJUnitRunner \
+              | tee androidApp/build/reports/androidTests/manual/instrumentation.txt
+            grep -q 'OK (' androidApp/build/reports/androidTests/manual/instrumentation.txt
+            if grep -q 'FAILURES!!!' androidApp/build/reports/androidTests/manual/instrumentation.txt; then
+              exit 1
+            fi
+            mkdir -p androidApp/build/reports/reader-safety-conformance
+            adb exec-out run-as com.ermao.library \
+              cat files/reader-safety-conformance/android.json \
+              > androidApp/build/reports/reader-safety-conformance/android.json
+            test -s androidApp/build/reports/reader-safety-conformance/android.json
+            python3 ../../packages/reader-contracts/verify-reader-safety-conformance.py \
+              --require-consumer ANDROID \
+              androidApp/build/reports/reader-safety-conformance/android.json
             adb logcat -c
-            adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
             adb shell am force-stop com.ermao.library
             adb shell monkey -p com.ermao.library -c android.intent.category.LAUNCHER 1
             for attempt in $(seq 1 20); do
@@ -278,5 +326,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ermao-library-android-instrumented-results
-          path: apps/mobile/androidApp/build/outputs/androidTest-results/connected/**/*.xml
+          path: |
+            apps/mobile/androidApp/build/reports/androidTests/manual/instrumentation.txt
+            apps/mobile/androidApp/build/reports/reader-safety-conformance/android.json
           if-no-files-found: warn

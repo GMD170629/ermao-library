@@ -12,6 +12,14 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+from app.contracts.reader_safety_policy_generated import (
+    ReaderSafetyAction,
+    ReaderSafetyBudgetName,
+    ReaderSafetyRule,
+    ReaderSafetyRuleId,
+    reader_safety_budget,
+    reader_safety_rule,
+)
 from app.core.natural_sort import natural_sort_key
 from app.modules.imports.application.audio_types import (
     LEGACY_AUDIO_EXTS,
@@ -30,8 +38,13 @@ from app.modules.imports.application.errors import (
 from app.modules.imports.domain.volume_index import parse_structured_volume_index
 
 AAC_RFC6381_OBJECT_TYPES = {2, 5, 29}
-MAX_EMBEDDED_COVER_BYTES = 20 * 1024 * 1024
-MAX_FFPROBE_STDOUT_BYTES = 16 * 1024 * 1024
+MAX_EMBEDDED_COVER_BYTES = reader_safety_budget(
+    ReaderSafetyBudgetName.AUDIO_ARTWORK_MAX_BYTES
+)
+MAX_FFPROBE_STDOUT_BYTES = reader_safety_budget(
+    ReaderSafetyBudgetName.AUDIO_METADATA_MAX_BYTES
+)
+MAX_AUDIO_SOURCE_BYTES = reader_safety_budget(ReaderSafetyBudgetName.ORIGINAL_MAX_BYTES)
 MAX_FFPROBE_STDERR_BYTES = 256 * 1024
 _FFPROBE_RAW_INPUT_OPTIONS: dict[str, tuple[str, ...]] = {
     ".g726": ("-f", "g726", "-code_size", "4", "-ar", "8000"),
@@ -51,6 +64,31 @@ MUTAGEN_TEXT_ENCODINGS = {
 }
 
 
+def _audio_policy_failure_rule(rule_id: ReaderSafetyRuleId) -> ReaderSafetyRule:
+    rule = reader_safety_rule(rule_id)
+    if (
+        rule.action is not ReaderSafetyAction.REJECT_PUBLICATION
+        or rule.error_code is None
+    ):
+        raise RuntimeError(f"generated audio rule {rule_id.value} is not a rejection")
+    return rule
+
+
+def _audio_policy_error(
+    rule_id: ReaderSafetyRuleId,
+    message: str,
+) -> AudioInspectionError:
+    rule = _audio_policy_failure_rule(rule_id)
+    error_code = rule.error_code
+    if error_code is None:  # Guarded by _audio_policy_failure_rule.
+        raise RuntimeError(f"generated audio rule {rule_id.value} has no error code")
+    return AudioInspectionError(
+        error_code.value,
+        message,
+        rule_id=rule.id.value,
+    )
+
+
 class _AudioTrackCounter:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -59,10 +97,18 @@ class _AudioTrackCounter:
     def add(self, path: Path) -> Path:
         self.count += 1
         if self.count > MAX_AUDIO_BUNDLE_TRACKS:
+            rule = _audio_policy_failure_rule(
+                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS
+            )
+            error_code = rule.error_code
+            if error_code is None:  # Guarded by _audio_policy_failure_rule.
+                raise RuntimeError("generated audio track rule has no error code")
             raise AudioTrackLimitExceededError(
                 path=str(self.root),
                 limit=MAX_AUDIO_BUNDLE_TRACKS,
                 observed_count=self.count,
+                code=error_code.value,
+                rule_id=rule.id.value,
             )
         return path.resolve()
 
@@ -176,6 +222,11 @@ def parse_audio_metadata(
     source = Path(path).expanduser().resolve()
     if not source.is_file() or not is_supported_audio_file(source):
         raise ValueError("音频文件不存在或格式不受支持")
+    if source.stat().st_size > MAX_AUDIO_SOURCE_BYTES:
+        raise _audio_policy_error(
+            ReaderSafetyRuleId.AUDIO_ORIGINAL_MAX_BYTES,
+            "音频文件超过安全大小限制",
+        )
 
     parser_errors: list[str] = []
     try:
@@ -216,8 +267,8 @@ def parse_audio_metadata(
         )
     duration_ms = _positive_int(merged.get("duration_ms"))
     if duration_ms is None:
-        raise AudioInspectionError(
-            "AUDIO_METADATA_INVALID",
+        raise _audio_policy_error(
+            ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
             "无法读取音频时长，文件可能损坏或编码不受支持",
         )
 
@@ -227,19 +278,32 @@ def parse_audio_metadata(
         if isinstance(raw_chapters, list)
         else []
     )
-    chapters = tuple(
-        AudioChapterMetadata(
-            title=str(item.get("title") or f"第 {index + 1} 章"),
-            start_ms=max(0, int(item.get("start_ms") or 0)),
-            end_ms=max(0, int(item.get("end_ms") or 0)),
-        )
-        for index, item in enumerate(chapter_items)
-        if int(item.get("end_ms") or 0) > int(item.get("start_ms") or 0)
-    )
-    if len(chapters) > MAX_AUDIO_CHAPTERS:
-        raise AudioInspectionError(
-            "AUDIO_METADATA_INVALID",
+    if len(chapter_items) > MAX_AUDIO_CHAPTERS:
+        raise _audio_policy_error(
+            ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
             f"音频章节超过 {MAX_AUDIO_CHAPTERS} 个，文件可能损坏或标签异常",
+        )
+    chapters: list[AudioChapterMetadata] = []
+    for index, item in enumerate(chapter_items):
+        try:
+            start_ms = int(item.get("start_ms") or 0)
+            end_ms = int(item.get("end_ms") or 0)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise _audio_policy_error(
+                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
+                "音频章节时间范围无效",
+            ) from error
+        if start_ms < 0 or end_ms <= start_ms or end_ms > duration_ms:
+            raise _audio_policy_error(
+                ReaderSafetyRuleId.AUDIO_TRACK_AND_CHAPTER_BOUNDS,
+                "音频章节时间范围超出音轨时长",
+            )
+        chapters.append(
+            AudioChapterMetadata(
+                title=str(item.get("title") or f"第 {index + 1} 章"),
+                start_ms=start_ms,
+                end_ms=end_ms,
+            )
         )
     raw_tags = merged.get("raw_tags")
     return AudioFileMetadata(
@@ -257,7 +321,7 @@ def parse_audio_metadata(
         track_number=_tag_number(merged.get("track_number")),
         series_name=_clean_text(merged.get("series_name")),
         volume_index=parse_structured_volume_index(merged.get("volume_index")),
-        chapters=chapters,
+        chapters=tuple(chapters),
         raw_tags=raw_tags if isinstance(raw_tags, dict) else {},
         cover_data=merged.get("cover_data")
         if isinstance(merged.get("cover_data"), bytes)
@@ -343,14 +407,13 @@ def _read_with_ffprobe(path: Path, *, timeout_seconds: int) -> dict[str, Any]:
         )
         start_ms = _seconds_to_ms(chapter.get("start_time"))
         end_ms = _seconds_to_ms(chapter.get("end_time"))
-        if end_ms > start_ms:
-            chapters.append(
-                {
-                    "title": chapter_tags.get("title") or f"第 {index + 1} 章",
-                    "start_ms": start_ms,
-                    "end_ms": end_ms,
-                }
-            )
+        chapters.append(
+            {
+                "title": chapter_tags.get("title") or f"第 {index + 1} 章",
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+            }
+        )
     duration_ms = _seconds_to_ms(duration)
     if duration_ms <= 0:
         duration_ms = _raw_audio_duration_ms(

@@ -8,6 +8,14 @@ import android.graphics.Bitmap
 import androidx.core.graphics.createBitmap
 import com.ermao.library.pdfium.ShukuPdfiumNative
 import com.ermao.library.shared.modules.reader.domain.PdfReaderErrorCode
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFacade
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyFailure
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
+import com.ermao.library.shared.modules.reader.domain.readerErrorCodeForFailure
+import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
+import com.ermao.library.shared.modules.reader.readerSafetyPdfRangeProtocolFailure
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -24,7 +32,14 @@ import org.readium.r2.shared.util.pdf.PdfDocument
 import org.readium.r2.shared.util.pdf.PdfDocumentFactory
 import org.readium.r2.shared.util.resource.Resource
 
-internal class ShukuPdfiumFailure(val code: PdfReaderErrorCode) : Exception(code.wireValue)
+internal class ShukuPdfiumFailure(
+    val code: PdfReaderErrorCode,
+    safetyFailure: ReaderSafetyFailure? = null,
+) : Exception(code.wireValue) {
+    val safeContext: Map<String, String> = safetyFailure?.let { failure ->
+        mapOf("ruleId" to failure.ruleId, "errorCode" to failure.errorCode)
+    }.orEmpty()
+}
 
 internal interface AndroidPdfiumDataSource : ShukuPdfiumNative.ByteSource {
     val length: Long
@@ -108,22 +123,23 @@ internal class ShukuPdfiumDocument private constructor(
         mutex.withLock {
             requireOpen()
             ensurePageAvailable(pageIndex)
-            nativeDocument.pageSize(pageIndex) ?: throw ShukuPdfiumFailure(PdfReaderErrorCode.PageLoadFailed)
+            val size = nativeDocument.pageSize(pageIndex)
+                ?: throw ShukuPdfiumFailure(PdfReaderErrorCode.PageLoadFailed)
+            AndroidPdfSafetyValidator.requireFinitePageGeometry(size.widthPoints, size.heightPoints)
+            size
         }
     }
 
     suspend fun renderPage(pageIndex: Int, width: Int, height: Int): Bitmap = withContext(Dispatchers.IO) {
         mutex.withLock {
             requireOpen()
-            require(width > 0 && height > 0 && width <= Int.MAX_VALUE / 4)
             ensurePageAvailable(pageIndex)
+            val pixelLimit = AndroidPdfSafetyValidator.requireRenderBudget(width, height)
+            val pixelCount = width.toLong() * height.toLong()
             val stride = width * 4
-            val byteCount = stride.toLong() * height
-            if (byteCount > MAX_RENDER_BYTES || byteCount > Int.MAX_VALUE) {
-                throw ShukuPdfiumFailure(PdfReaderErrorCode.OutOfMemoryRisk)
-            }
+            val byteCount = pixelCount * 4L
             val pixels = ByteBuffer.allocateDirect(byteCount.toInt())
-            nativeDocument.renderPage(pageIndex, width, height, stride, MAX_RENDER_PIXELS, pixels)
+            nativeDocument.renderPage(pageIndex, width, height, stride, pixelLimit, pixels)
                 .throwOnFailure()
             pixels.rewind()
             createBitmap(width, height).also {
@@ -158,7 +174,7 @@ internal class ShukuPdfiumDocument private constructor(
             when (val status = nativeDocument.stepPage(pageIndex)) {
                 ShukuPdfiumNative.Status.OK -> return
                 ShukuPdfiumNative.Status.NEED_DATA -> if (!dataSource.acquireRequested()) {
-                    throw ShukuPdfiumFailure(PdfReaderErrorCode.RangeInvalid)
+                    throw pdfRangeFailure()
                 }
                 else -> status.throwOnFailure()
             }
@@ -170,8 +186,6 @@ internal class ShukuPdfiumDocument private constructor(
 
     companion object {
         private const val MAX_AVAILABILITY_STEPS = 256
-        private const val MAX_RENDER_PIXELS = 12_000_000L
-        private const val MAX_RENDER_BYTES = MAX_RENDER_PIXELS * 4
 
         suspend fun open(dataSource: AndroidPdfiumDataSource, identifier: String): ShukuPdfiumDocument =
             withContext(Dispatchers.IO) {
@@ -183,10 +197,11 @@ internal class ShukuPdfiumDocument private constructor(
                             ShukuPdfiumNative.Status.OK -> {
                                 val pageCount = native.pageCount()
                                 if (pageCount <= 0) throw ShukuPdfiumFailure(PdfReaderErrorCode.Invalid)
+                                AndroidPdfSafetyValidator.requirePageCount(pageCount)
                                 return@withContext ShukuPdfiumDocument(native, dataSource, identifier, pageCount)
                             }
                             ShukuPdfiumNative.Status.NEED_DATA -> if (!dataSource.acquireRequested()) {
-                                throw ShukuPdfiumFailure(PdfReaderErrorCode.RangeInvalid)
+                                throw pdfRangeFailure()
                             }
                             else -> status.throwOnFailure()
                         }
@@ -201,6 +216,43 @@ internal class ShukuPdfiumDocument private constructor(
     }
 }
 
+/** The Android PDFium adapter's generated-policy checks, shared by the live path and device conformance probe. */
+internal object AndroidPdfSafetyValidator {
+    fun requirePageCount(pageCount: Int) {
+        if (pageCount.toLong() > ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_PAGE_MAX_COUNT)) {
+            throw pdfSafetyFailure(ReaderSafetyRuleId.PDF_PAGE_GEOMETRY)
+        }
+    }
+
+    fun requireFinitePageGeometry(widthPoints: Float, heightPoints: Float) {
+        if (!widthPoints.isFinite() || !heightPoints.isFinite() || widthPoints <= 0f || heightPoints <= 0f) {
+            throw pdfSafetyFailure(ReaderSafetyRuleId.PDF_PAGE_GEOMETRY)
+        }
+    }
+
+    /** Returns the generated maximum pixel count passed to the native renderer. */
+    fun requireRenderBudget(width: Int, height: Int): Long {
+        val canvasLimit = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_CANVAS_MAX_DIMENSION)
+        val pixelLimit = ReaderSafetyPolicy.budget(ReaderSafetyBudgetName.PDF_RENDER_MAX_PIXELS)
+        if (width <= 0 || height <= 0 || width.toLong() > canvasLimit || height.toLong() > canvasLimit) {
+            throw pdfSafetyFailure(ReaderSafetyRuleId.PDF_RENDER_BUDGET)
+        }
+        val pixelCount = width.toLong() * height.toLong()
+        if (pixelCount > pixelLimit) {
+            throw pdfSafetyFailure(ReaderSafetyRuleId.PDF_RENDER_BUDGET)
+        }
+        return pixelLimit
+    }
+}
+
+private fun pdfSafetyFailure(ruleId: ReaderSafetyRuleId): ShukuPdfiumFailure {
+    val failure = ReaderSafetyFacade().failureFor(ruleId)
+    return ShukuPdfiumFailure(
+        code = readerErrorCodeForFailure(failure.errorCode, recoverable = false),
+        safetyFailure = failure,
+    )
+}
+
 internal class ShukuPdfiumDocumentFactory(
     private val dataSourceFactory: () -> AndroidPdfiumDataSource,
     private val identifier: String,
@@ -209,7 +261,7 @@ internal class ShukuPdfiumDocumentFactory(
 
     override suspend fun open(resource: Resource, password: String?): ReadTry<ShukuPdfiumDocument> {
         if (password != null) {
-            return Try.failure(ReadError.Decoding(ShukuPdfiumFailure(PdfReaderErrorCode.Encrypted)))
+            return Try.failure(ReadError.Decoding(pdfDrmFailure()))
         }
         return try {
             Try.success(ShukuPdfiumDocument.open(dataSourceFactory(), identifier))
@@ -224,16 +276,34 @@ internal class ShukuPdfiumDocumentFactory(
 }
 
 private fun ShukuPdfiumNative.Status.throwOnFailure() {
+    if (this == ShukuPdfiumNative.Status.ENCRYPTED) throw pdfDrmFailure()
+    if (this == ShukuPdfiumNative.Status.NEED_DATA) throw pdfRangeFailure()
     val code = when (this) {
         ShukuPdfiumNative.Status.OK -> return
-        ShukuPdfiumNative.Status.NEED_DATA -> PdfReaderErrorCode.RangeInvalid
+        ShukuPdfiumNative.Status.NEED_DATA -> error("Handled above")
         ShukuPdfiumNative.Status.INVALID_ARGUMENT,
         ShukuPdfiumNative.Status.INVALID_DOCUMENT,
         -> PdfReaderErrorCode.Invalid
-        ShukuPdfiumNative.Status.ENCRYPTED -> PdfReaderErrorCode.Encrypted
+        ShukuPdfiumNative.Status.ENCRYPTED -> error("Handled above")
         ShukuPdfiumNative.Status.PAGE_LOAD_FAILED -> PdfReaderErrorCode.PageLoadFailed
         ShukuPdfiumNative.Status.RENDER_FAILED -> PdfReaderErrorCode.RenderFailed
         ShukuPdfiumNative.Status.OUT_OF_MEMORY_RISK -> PdfReaderErrorCode.OutOfMemoryRisk
     }
     throw ShukuPdfiumFailure(code)
+}
+
+private fun pdfDrmFailure(): ShukuPdfiumFailure {
+    val failure = readerSafetyDrmFailure()
+    return ShukuPdfiumFailure(
+        code = readerErrorCodeForFailure(failure.errorCode, recoverable = false),
+        safetyFailure = failure,
+    )
+}
+
+private fun pdfRangeFailure(): ShukuPdfiumFailure {
+    val failure = readerSafetyPdfRangeProtocolFailure()
+    return ShukuPdfiumFailure(
+        code = readerErrorCodeForFailure(failure.errorCode, recoverable = false),
+        safetyFailure = failure,
+    )
 }

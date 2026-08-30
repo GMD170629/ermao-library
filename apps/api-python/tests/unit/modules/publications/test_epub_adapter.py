@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app.contracts.reader_safety_policy_generated import ReaderSafetyRuleId
 from app.modules.publications.application.ports import PublicationSource
 from app.modules.publications.domain.model import (
     PublicationSecurityError,
@@ -189,6 +190,29 @@ def test_invalid_zip_is_a_structure_error_not_a_security_rejection(
 
     with pytest.raises(PublicationStructureError):
         EpubPublicationAdapter(tmp_path).open(_source(path))
+
+
+def test_unused_entry_with_invalid_crc_is_security_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "invalid-unused-crc.epub"
+    _write_epub(
+        path,
+        package="""<package><metadata><title>CRC</title></metadata><manifest>
+        <item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/>
+        </manifest><spine><itemref idref="one"/></spine></package>""",
+        navigation={},
+    )
+    payload = b"unused-entry-crc-payload"
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.writestr("OPS/Images/unused.bin", payload)
+    archive_bytes = bytearray(path.read_bytes())
+    payload_offset = archive_bytes.index(payload)
+    archive_bytes[payload_offset] ^= 0x01
+    path.write_bytes(archive_bytes)
+
+    with pytest.raises(PublicationSecurityError) as raised:
+        EpubPublicationAdapter(tmp_path).open(_source(path))
+
+    assert raised.value.rule_id == ReaderSafetyRuleId.EPUB_ARCHIVE_STRUCTURE.value
 
 
 def test_active_entity_declaration_is_security_rejected(tmp_path: Path) -> None:

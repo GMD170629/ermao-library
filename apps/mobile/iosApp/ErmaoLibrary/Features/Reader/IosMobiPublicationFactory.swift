@@ -15,7 +15,7 @@ enum IosMobiPublicationError: Error, Equatable, Sendable {
 }
 
 enum IosMobiPublicationIdentity {
-    static let normalizationIdentifier = "ermao-mobi-core-v1+shuku-locator-dom-v2"
+    static let normalizationIdentifier = "ermao-mobi-core-v1+shuku-locator-dom-v3"
 }
 
 struct IosMobiPublicationResult {

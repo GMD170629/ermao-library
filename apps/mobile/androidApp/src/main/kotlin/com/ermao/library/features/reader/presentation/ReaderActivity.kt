@@ -490,7 +490,7 @@ class ReaderActivity : AppCompatActivity() {
                 return
             }
             is com.ermao.library.shared.modules.reader.ReaderLaunchUnavailable -> {
-                showOpenError(launch.code)
+                showOpenError(launch.code, launch.safetyFailure)
                 return
             }
             is com.ermao.library.shared.modules.reader.ReaderLaunchStream -> Unit
@@ -658,7 +658,13 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
         com.ermao.library.shared.modules.reader.ReaderAdmission.localFailure(request.sourceFormat, artifact.verifiedBytes)?.let {
-            showOpenError(it)
+            showOpenError(
+                it,
+                com.ermao.library.shared.modules.reader.ReaderAdmission.localSafetyFailure(
+                    request.sourceFormat,
+                    artifact.verifiedBytes,
+                ),
+            )
             return
         }
         val readerNamespace = activeSession.identity.namespace
@@ -866,7 +872,17 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private fun showOpenError(code: ReaderErrorCode) = showOpenError(ReaderError(code))
+    private fun showOpenError(
+        code: ReaderErrorCode,
+        safetyFailure: com.ermao.library.shared.modules.reader.ReaderSafetyFailure? = null,
+    ) = showOpenError(
+        ReaderError(
+            code = code,
+            safeContext = safetyFailure?.let { failure ->
+                mapOf("ruleId" to failure.ruleId, "errorCode" to failure.errorCode)
+            }.orEmpty(),
+        ),
+    )
 
     private fun showOpenError(error: ReaderError) {
         opening = false
@@ -963,7 +979,6 @@ class ReaderActivity : AppCompatActivity() {
                 publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication),
                 progressStore = progressStore,
                 deviceIdentity = AndroidReaderDeviceIdentity(applicationContext),
-                readium = AndroidReadiumRuntime(applicationContext),
                 remotePdfium = remotePdfium,
                 remoteSnapshot = remoteSnapshot,
                 initialTarget = initialTarget,

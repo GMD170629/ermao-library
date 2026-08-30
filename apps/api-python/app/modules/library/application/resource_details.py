@@ -6,11 +6,16 @@ import json
 from dataclasses import dataclass, replace
 from typing import Protocol
 
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_FORMATS,
+    ReaderSafetyFormat,
+)
 from app.core.natural_sort import natural_sort_key
 
 REFLOWABLE_FORMATS = frozenset({"EPUB", "MOBI", "AZW", "AZW3", "PRC", "FB2", "TXT"})
 COMIC_FORMATS = frozenset({"CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"})
 AUDIO_FORMATS = frozenset({"AUDIO", "AUDIOBOOK", "AUDIOBOOK_DIR", "M4B", "M4A", "MP3"})
+PDF_MEDIA_TYPE = READER_SAFETY_FORMATS[ReaderSafetyFormat.PDF].canonical_mime_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,7 +258,7 @@ class ListResourceDetails:
                     title="",
                     sort_order=index,
                     page_number=index + 1,
-                    media_type="application/pdf",
+                    media_type=PDF_MEDIA_TYPE,
                     preview_url=f"/api/resources/{resource_id}/previews/{index}",
                 )
                 for index in range(offset, end)

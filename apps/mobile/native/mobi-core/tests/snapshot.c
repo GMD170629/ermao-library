@@ -290,7 +290,10 @@ int main(int argc, char **argv) {
         return 2;
     }
     ErmaoMobiBook *book = NULL;
-    const ErmaoMobiStatus status = ermao_mobi_open(argv[1], NULL, &book);
+    ErmaoMobiOpenOptions options;
+    ermao_mobi_default_options(&options);
+    options.max_file_bytes = UINT64_MAX;
+    const ErmaoMobiStatus status = ermao_mobi_open(argv[1], &options, &book);
     if (status != ERMAO_MOBI_OK) {
         fprintf(stderr, "open failed: %s\n", ermao_mobi_status_name(status));
         return 1;

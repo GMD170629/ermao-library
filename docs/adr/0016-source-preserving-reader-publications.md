@@ -4,6 +4,11 @@
 - Date: 2026-08-16
 - Supersedes: ADR 0013
 
+Safety note (2026-08-31): ADR 0026 supersedes the head-only/no-body-rewrite
+clause below. Original bytes and the ban on persisted derivatives remain
+accepted. The generated safety contract may remove dangerous authored content
+from the in-memory Publication before rendering.
+
 ## Context
 
 MOBI-family and TXT publications are not EPUB files. Readium can nevertheless

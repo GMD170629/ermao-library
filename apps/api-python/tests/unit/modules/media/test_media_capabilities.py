@@ -7,6 +7,11 @@ from app.contracts.media_capabilities import (
     capability_for_format,
     resolve_asset_mime_type,
 )
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_FORMATS,
+    ReaderSafetyDeliveryMode,
+    ReaderSafetyFormat,
+)
 
 
 @pytest.mark.parametrize(
@@ -65,6 +70,35 @@ def test_mobi_family_actual_format_uses_canonical_mime(
 def test_generic_kindle_format_is_unsupported() -> None:
     assert capability_for_format("KINDLE") is None
     assert canonical_publication_mime_type("KINDLE") is None
+    assert all(policy.id.value != "KINDLE" for policy in READER_SAFETY_FORMATS.values())
+
+
+def test_generated_delivery_contract_distinguishes_reader_morphologies() -> None:
+    for source_format in (
+        ReaderSafetyFormat.EPUB,
+        ReaderSafetyFormat.FB2,
+        ReaderSafetyFormat.TXT,
+        ReaderSafetyFormat.MOBI,
+        ReaderSafetyFormat.AZW,
+        ReaderSafetyFormat.AZW3,
+        ReaderSafetyFormat.PRC,
+    ):
+        assert (
+            READER_SAFETY_FORMATS[source_format].delivery_mode
+            is ReaderSafetyDeliveryMode.DOWNLOAD_ORIGINAL
+        )
+    for source_format in (
+        ReaderSafetyFormat.PDF,
+        ReaderSafetyFormat.CBZ,
+        ReaderSafetyFormat.ZIP,
+        ReaderSafetyFormat.CBR,
+        ReaderSafetyFormat.RAR,
+        ReaderSafetyFormat.IMAGE_DIR,
+    ):
+        assert (
+            READER_SAFETY_FORMATS[source_format].delivery_mode
+            is ReaderSafetyDeliveryMode.STREAM
+        )
 
 
 @pytest.mark.parametrize("stored", [None, "", "application/octet-stream"])
@@ -108,4 +142,16 @@ def test_image_directory_page_mime_comes_from_original_page(
             stored_mime_type=None,
         )
         == expected
+    )
+
+
+def test_comic_page_rejects_mime_outside_generated_allowlist() -> None:
+    assert (
+        resolve_asset_mime_type(
+            resource_format="IMAGE_DIR",
+            asset_role="PAGE",
+            filename="page.avif",
+            stored_mime_type="image/avif",
+        )
+        == "application/octet-stream"
     )

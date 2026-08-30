@@ -3,6 +3,10 @@ package com.ermao.library.features.reader.infrastructure
 import com.ermao.library.archive.infrastructure.ArchiveCore
 import com.ermao.library.archive.infrastructure.ArchiveCorePage
 import com.ermao.library.shared.modules.reader.ReaderComicPage
+import com.ermao.library.shared.modules.reader.readerSafetyComicExpandedMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxBytes
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMaxCount
+import com.ermao.library.shared.modules.reader.readerSafetyComicPageMimeType
 import java.io.File
 import java.util.Locale
 import org.readium.r2.shared.publication.Layout
@@ -24,10 +28,10 @@ import org.readium.r2.shared.util.resource.Resource
 /** Opens original ZIP/RAR/RAR5 comics through the bounded native archive core. */
 internal class CbzReadiumPublicationFactory {
     fun indexPages(file: File, pageHints: List<ReaderComicPage> = emptyList()): List<ReaderComicPage> =
-        ArchiveCore.open(file).use { archive -> indexPages(archive, pageHints) }
+        openArchive(file).use { archive -> indexPages(archive, pageHints) }
 
     fun open(file: File, title: String, pageHints: List<ReaderComicPage>): Publication {
-        val archive = ArchiveCore.open(file)
+        val archive = openArchive(file)
         try {
             val localPages = indexPages(archive, pageHints)
             val resources = archive.pages.associate { page ->
@@ -70,14 +74,13 @@ internal class CbzReadiumPublicationFactory {
     private fun indexPages(
         archive: ArchiveCore,
         pageHints: List<ReaderComicPage>,
-    ): List<ReaderComicPage> = archive.pages.map { page ->
-        val mediaType = when (page.path.substringAfterLast('.').lowercase(Locale.ROOT)) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "webp" -> "image/webp"
-            else -> "image/*"
-        }
+    ): List<ReaderComicPage> = archive.pages.mapNotNull { page ->
+        val extension = page.path.substringAfterLast('.', missingDelimiterValue = "")
+            .lowercase(Locale.ROOT)
+            .takeIf(String::isNotEmpty)
+            ?.let { ".$it" }
+        val mediaType = extension?.let(::readerSafetyComicPageMimeType)
+            ?: return@mapNotNull null
         ReaderComicPage(
             pageIndex = page.index,
             resourceHref = "pages/${page.index}",
@@ -85,6 +88,13 @@ internal class CbzReadiumPublicationFactory {
             title = pageHints.getOrNull(page.index)?.title ?: page.path.substringAfterLast('/'),
         )
     }
+
+    private fun openArchive(file: File): ArchiveCore = ArchiveCore.open(
+        file = file,
+        maximumEntries = readerSafetyComicPageMaxCount().toInt(),
+        maximumPageBytes = readerSafetyComicPageMaxBytes(),
+        maximumExpandedBytes = readerSafetyComicExpandedMaxBytes(),
+    )
 
 }
 

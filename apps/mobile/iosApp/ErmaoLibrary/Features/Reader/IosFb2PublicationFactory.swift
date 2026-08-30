@@ -16,7 +16,7 @@ struct IosFb2PublicationFactory: Sendable {
         let document = parsed.document
         var resources = parsed.images
         for resource in document.resources {
-            resources[resource.href] = IosPublicationSecurityPolicy.generatedChapter(resource.xhtml)
+            resources[resource.href] = try IosPublicationSecurityPolicy.generatedChapter(resource.xhtml)
         }
         resources[document.stylesheetHref] = Data(document.stylesheet.utf8)
         return Publication(
@@ -49,43 +49,78 @@ struct IosFb2PublicationFactory: Sendable {
     }
 
     static func read(fileURL: URL, fallbackTitle: String) throws -> IosParsedFb2Source {
-        let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        if let failure = ErmaoShared.ReaderAdmission.shared.localFailure(format: "fb2", bytes: Int64(size)) {
-            throw IosReaderFailure(code: IosReaderFailureCode(sharedCode: failure))
-        }
-        let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
-        guard let probe = String(data: data, encoding: .isoLatin1),
-              let prepared = try ErmaoShared.Fb2XmlPolicy().prepare(probe: probe).data(using: .isoLatin1)
-        else { throw IosFb2PublicationError.invalidXML }
-        let decoder = ErmaoShared.Fb2PublicationDecoder()
-        let delegate = IosFb2Parser(decoder: decoder)
-        let parser = XMLParser(data: prepared)
-        parser.shouldProcessNamespaces = true
-        parser.shouldReportNamespacePrefixes = true
-        parser.shouldResolveExternalEntities = false
-        parser.externalEntityResolvingPolicy = .never
-        parser.delegate = delegate
-        guard parser.parse(), delegate.failure == nil else {
-            throw delegate.failure ?? IosFb2PublicationError.invalidXML
-        }
-        var images: [String: Data] = [:]
-        var links: [ErmaoShared.Fb2ImageLink] = []
-        var totalSize = 0
-        for image in try decoder.embeddedImages() {
-            guard let content = Data(base64Encoded: image.encoded)
+        do {
+            guard let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+                throw IosReaderFailure.fileRead(
+                    NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError)
+                )
+            }
+            let sourceByteCount = Int64(size)
+            if let failure = ErmaoShared.ReaderAdmission.shared.localSafetyFailure(
+                format: "fb2",
+                bytes: sourceByteCount
+            ) {
+                throw IosReaderFailure.safety(failure)
+            }
+            if let failure = ErmaoShared.PublicKt.readerSafetyFb2TextBudgetFailure(
+                sourceByteCount: sourceByteCount
+            ) {
+                throw IosReaderFailure.safety(failure)
+            }
+            let data = try Data(contentsOf: fileURL, options: [.mappedIfSafe])
+            if let failure = ErmaoShared.PublicKt.readerSafetyFb2TextBudgetFailure(
+                sourceByteCount: Int64(data.count)
+            ) {
+                throw IosReaderFailure.safety(failure)
+            }
+            guard let probe = String(data: data, encoding: .isoLatin1),
+                  let prepared = try ErmaoShared.Fb2XmlPolicy().prepare(probe: probe).data(using: .isoLatin1)
             else { throw IosFb2PublicationError.invalidXML }
-            guard content.count <= 20 * 1_024 * 1_024 else { throw IosFb2PublicationError.limitExceeded }
-            totalSize += content.count
-            guard totalSize <= 128 * 1_024 * 1_024 else { throw IosFb2PublicationError.limitExceeded }
-            let digest = SHA256.hash(data: Data(image.identifier.utf8)).prefix(10)
-                .map { String(format: "%02x", $0) }.joined()
-            let extensions = ["image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"]
-            guard let fileExtension = extensions[image.mediaType] else { throw IosFb2PublicationError.invalidXML }
-            let href = "fb2/images/\(digest).\(fileExtension)"
-            images[href] = content
-            links.append(ErmaoShared.Fb2ImageLink(identifier: image.identifier, href: href, mediaType: image.mediaType))
+            let decoder = ErmaoShared.Fb2PublicationDecoder()
+            let delegate = IosFb2Parser(decoder: decoder)
+            let parser = XMLParser(data: prepared)
+            parser.shouldProcessNamespaces = true
+            parser.shouldReportNamespacePrefixes = true
+            parser.shouldResolveExternalEntities = false
+            parser.externalEntityResolvingPolicy = .never
+            parser.delegate = delegate
+            guard parser.parse(), delegate.failure == nil else {
+                throw delegate.failure ?? IosFb2PublicationError.invalidXML
+            }
+            var images: [String: Data] = [:]
+            var links: [ErmaoShared.Fb2ImageLink] = []
+            var totalSize: Int64 = 0
+            let maximumImageBytes = ErmaoShared.PublicKt.readerSafetyFb2DecodedImageMaxBytes()
+            let maximumTotalImageBytes = ErmaoShared.PublicKt.readerSafetyFb2DecodedImagesTotalMaxBytes()
+            for image in try decoder.embeddedImages() {
+                guard let content = Data(base64Encoded: image.encoded),
+                      Int64(content.count) <= maximumImageBytes,
+                      Int64(content.count) <= maximumTotalImageBytes - totalSize,
+                      let fileExtension = ErmaoShared.PublicKt.readerSafetyFb2EmbeddedImageExtension(
+                          mediaType: image.mediaType
+                      )
+                else {
+                    // FB2.IMAGE_BUDGET is BLOCK_RESOURCE: one bad image must not reject the book.
+                    continue
+                }
+                totalSize += Int64(content.count)
+                let digest = SHA256.hash(data: Data(image.identifier.utf8)).prefix(10)
+                    .map { String(format: "%02x", $0) }.joined()
+                let href = "fb2/images/\(digest)\(fileExtension)"
+                images[href] = content
+                links.append(ErmaoShared.Fb2ImageLink(
+                    identifier: image.identifier,
+                    href: href,
+                    mediaType: image.mediaType
+                ))
+            }
+            return IosParsedFb2Source(
+                document: try decoder.finish(fallbackTitle: fallbackTitle, images: links),
+                images: images
+            )
+        } catch let failure as ErmaoShared.ReaderSafetyException {
+            throw IosReaderFailure.safety(failure.failure, underlyingError: failure as NSError)
         }
-        return IosParsedFb2Source(document: try decoder.finish(fallbackTitle: fallbackTitle, images: links), images: images)
     }
 
     private static func navigationLink(_ entry: ErmaoShared.Fb2NavigationEntry) -> Link {

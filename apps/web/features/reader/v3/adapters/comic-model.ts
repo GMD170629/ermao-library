@@ -1,4 +1,5 @@
 import { comicVisualSpreadPages } from '../../../../lib/comic-reading-order';
+import type { ReaderSafetyFailure } from '../security/reader-safety-policy';
 
 export type ComicPageMeta = {
   pageIndex: number;
@@ -8,6 +9,7 @@ export type ComicPageMeta = {
   width?: number | null;
   height?: number | null;
   size?: number | null;
+  safetyError?: ReaderSafetyFailure;
 };
 
 export type ComicImageFit = 'width' | 'height' | 'contain' | 'original';

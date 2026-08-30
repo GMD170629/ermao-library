@@ -220,6 +220,8 @@ def test_audio_format_catalog_admits_every_declared_extension() -> None:
     assert audio_mime_type("book.opus") == "audio/ogg"
     assert audio_mime_type("book.wav") == "audio/wav"
     assert audio_mime_type("book.ape") == "audio/x-ape"
+    with pytest.raises(ValueError, match="unsupported admitted audio extension"):
+        audio_mime_type("book.bin")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows pipe regression")

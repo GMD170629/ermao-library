@@ -1,4 +1,5 @@
 #include "archive_core.h"
+#include "reader_safety_policy.generated.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -14,7 +15,11 @@ static int supported_image(const unsigned char *bytes, size_t count) {
 }
 
 static int verify_archive(const char *path) {
-    ermao_archive_limits limits = {10000U, 256LL * 1024LL * 1024LL, 4LL * 1024LL * 1024LL * 1024LL};
+    ermao_archive_limits limits = {
+        (size_t)ERMAO_READER_SAFETY_COMIC_PAGE_MAX_COUNT,
+        ERMAO_READER_SAFETY_COMIC_PAGE_MAX_BYTES,
+        ERMAO_READER_SAFETY_COMIC_EXPANDED_MAX_BYTES
+    };
     ermao_archive_error error = {{0}, {0}};
     ermao_archive *archive = NULL;
     size_t page_count;

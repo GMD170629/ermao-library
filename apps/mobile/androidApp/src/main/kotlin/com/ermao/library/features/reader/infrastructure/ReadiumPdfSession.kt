@@ -33,6 +33,8 @@ import com.ermao.library.shared.modules.reader.PdfPublicationLocation
 import com.ermao.library.shared.modules.reader.ReaderRestoreExactLocalLocation
 import com.ermao.library.shared.modules.reader.ReaderRestorePdfPage
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
+import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
+import com.ermao.library.shared.modules.reader.readerSafetyDrmFailure
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
@@ -49,17 +51,12 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
-import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFactory
-import org.readium.adapter.pdfium.navigator.PdfiumPreferences
-import org.readium.adapter.pdfium.navigator.PdfiumSettings
 import org.readium.r2.navigator.pdf.PdfNavigatorFragment
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.services.isRestricted
 import org.readium.r2.shared.publication.services.positions
-import org.readium.r2.shared.util.getOrElse
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumPdfSession(
@@ -69,7 +66,6 @@ internal class ReadiumPdfSession(
     private val publicationStore: AndroidReaderPublicationStore,
     private val progressStore: ReaderProgressStore,
     private val deviceIdentity: AndroidReaderDeviceIdentity,
-    private val readium: AndroidReadiumRuntime,
     private val remotePdfium: AndroidRemotePdfiumSessionConfiguration? = null,
     private val remoteSnapshot: ReaderProgressSnapshotV4? = null,
     private val initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
@@ -95,7 +91,7 @@ internal class ReadiumPdfSession(
         supportsSwipeToggle = false, supportsPageTurnAnimation = false,
         supportsSmartOptimization = false, supportsKeyboardPageTurn = true,
         supportsVolumeKeyPageTurn = true,
-        supportsPdfFit = source is LocalReaderSource,
+        supportsPdfFit = false,
     )
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
@@ -118,7 +114,6 @@ internal class ReadiumPdfSession(
         _restoreWarning.value = null
     }
     private var navigator: PdfNavigatorFragment<*, *>? = null
-    private var submitNavigatorPreferences: ((ReaderPreferences) -> Unit)? = null
     private var nativeDocument: ShukuPdfiumDocument? = null
     private var positions: List<Locator> = emptyList()
     private var pageCount: Int = 0
@@ -137,7 +132,16 @@ internal class ReadiumPdfSession(
         val opened = openPublication()
         if (opened.isRestricted) {
             closeOpeningResources(opened)
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.DrmProtected))
+            val failure = readerSafetyDrmFailure()
+            throw ReaderOpenFailure(
+                ReaderError(
+                    code = readerErrorCodeForFailure(failure.errorCode, recoverable = false),
+                    safeContext = mapOf(
+                        "ruleId" to failure.ruleId,
+                        "errorCode" to failure.errorCode,
+                    ),
+                ),
+            )
         }
         if (!opened.conformsTo(Publication.Profile.PDF)) {
             closeOpeningResources(opened)
@@ -195,13 +199,6 @@ internal class ReadiumPdfSession(
         @Suppress("UNCHECKED_CAST")
         val created = factory.instantiate(classLoader, PdfNavigatorFragment::class.java.name)
             as PdfNavigatorFragment<*, *>
-        if (nativeDocument == null) {
-            @Suppress("UNCHECKED_CAST")
-            val configurable = created as PdfNavigatorFragment<PdfiumSettings, PdfiumPreferences>
-            submitNavigatorPreferences = { preferences ->
-                configurable.submitPreferences(preferences.pdf.toReadiumPdfium())
-            }
-        }
         navigator = created
         return created
     }
@@ -220,18 +217,11 @@ internal class ReadiumPdfSession(
         } catch (error: FileNotFoundException) {
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing), cause = error)
         }
-        val asset = readium.assetRetriever.retrieve(file).getOrElse { error ->
-            throw ReaderOpenFailure(
-                ReaderError(ReaderErrorCode.CorruptFile),
-                ReadiumOpeningDiagnostic.AssetRetrieval(error),
-            )
-        }
-        return readium.publicationOpener.open(asset, allowUserInteraction = false).getOrElse { error ->
-            throw ReaderOpenFailure(
-                ReaderError(ReaderErrorCode.ParseFailed),
-                ReadiumOpeningDiagnostic.PublicationOpening(error),
-            )
-        }
+        return openPdfiumPublication(
+            dataSource = AndroidLocalPdfiumDataSource(file),
+            identifier = localSource.resourceId,
+            title = localSource.displayTitle,
+        )
     }
 
     private suspend fun openRemotePublication(remoteSource: RemoteByteRangeReaderSource): Publication {
@@ -247,48 +237,51 @@ internal class ReadiumPdfSession(
             cache = configuration.cache,
             server = configuration.server,
         )
-        return try {
-            val document = ShukuPdfiumDocument.open(
-                AndroidRemotePdfiumDataSource(remoteSource.expectedSizeBytes, loader),
-                remoteSource.resourceId,
-            )
-            nativeDocument = document
-            createShukuPdfPublication(
-                identifier = remoteSource.resourceId,
-                title = remoteSource.displayTitle,
-                pages = pageHints(document.pageCount),
-            )
-        } catch (failure: ReaderOpenFailure) {
-            closeNativeDocument()
-            throw failure
-        } catch (failure: PdfRangeFailure) {
-            closeNativeDocument()
-            throw ReaderOpenFailure(ReaderError(failure.code), cause = failure)
-        } catch (failure: ShukuPdfiumFailure) {
-            closeNativeDocument()
-            throw ReaderOpenFailure(ReaderError(failure.code), cause = failure)
-        } catch (failure: OutOfMemoryError) {
-            closeNativeDocument()
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.OutOfMemoryRisk), cause = failure)
-        } catch (failure: RuntimeException) {
-            closeNativeDocument()
-            throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError), cause = failure)
-        }
+        return openPdfiumPublication(
+            dataSource = AndroidRemotePdfiumDataSource(remoteSource.expectedSizeBytes, loader),
+            identifier = remoteSource.resourceId,
+            title = remoteSource.displayTitle,
+        )
+    }
+
+    private suspend fun openPdfiumPublication(
+        dataSource: AndroidPdfiumDataSource,
+        identifier: String,
+        title: String,
+    ): Publication = try {
+        val document = ShukuPdfiumDocument.open(dataSource, identifier)
+        nativeDocument = document
+        createShukuPdfPublication(
+            identifier = identifier,
+            title = title,
+            pages = pageHints(document.pageCount),
+        )
+    } catch (failure: ReaderOpenFailure) {
+        closeNativeDocument()
+        throw failure
+    } catch (failure: PdfRangeFailure) {
+        closeNativeDocument()
+        val safeContext = failure.safetyFailure?.let { safety ->
+            mapOf("ruleId" to safety.ruleId, "errorCode" to safety.errorCode)
+        }.orEmpty()
+        throw ReaderOpenFailure(ReaderError(failure.code, safeContext), cause = failure)
+    } catch (failure: ShukuPdfiumFailure) {
+        closeNativeDocument()
+        throw ReaderOpenFailure(ReaderError(failure.code, failure.safeContext), cause = failure)
+    } catch (failure: OutOfMemoryError) {
+        closeNativeDocument()
+        throw ReaderOpenFailure(ReaderError(ReaderErrorCode.OutOfMemoryRisk), cause = failure)
+    } catch (failure: RuntimeException) {
+        closeNativeDocument()
+        throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError), cause = failure)
     }
 
     private fun navigatorFactory(opened: Publication, initialLocator: Locator?): FragmentFactory {
-        val document = nativeDocument
-        return if (document == null) {
-            PdfiumNavigatorFactory(opened, PdfiumEngineProvider()).createFragmentFactory(
-                initialLocator = initialLocator,
-                initialPreferences = _preferences.value.pdf.toReadiumPdfium(),
-            )
-        } else {
-            org.readium.r2.navigator.pdf.PdfNavigatorFactory(
-                opened,
-                ShukuPdfiumEngineProvider(document),
-            ).createFragmentFactory(initialLocator = initialLocator)
-        }
+        val document = checkNotNull(nativeDocument) { "PDFium document is not open" }
+        return org.readium.r2.navigator.pdf.PdfNavigatorFactory(
+            opened,
+            ShukuPdfiumEngineProvider(document),
+        ).createFragmentFactory(initialLocator = initialLocator)
     }
 
     override fun bind(scope: CoroutineScope) {
@@ -385,7 +378,6 @@ internal class ReadiumPdfSession(
         if (_preferences.value == supported) return
         persistPreferences(supported)
         _preferences.value = supported
-        submitNavigatorPreferences?.invoke(supported)
     }
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
     override fun removeBookmark(id: String) = Unit
@@ -402,7 +394,6 @@ internal class ReadiumPdfSession(
         locationJob?.cancel()
         locationJob = null
         navigator = null
-        submitNavigatorPreferences = null
         positions = emptyList()
         publication?.close()
         publication = null

@@ -1,6 +1,10 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.ReaderSafetyException
+import com.ermao.library.shared.modules.reader.readerSafetyFb2StructureFailure
+import com.ermao.library.shared.modules.reader.readerSafetyFb2TextMaxBytes
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.charset.Charset
 import java.nio.file.Files
 import kotlin.test.assertContentEquals
@@ -66,7 +70,6 @@ class Fb2ReadiumPublicationFactoryTest {
             "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><FictionBook><body><p>&x;</p></body></FictionBook>",
             "<FictionBook><body><section id='x'/><section id='x'/></body></FictionBook>",
             "<FictionBook><body><p l:href='#x'>unbound</p></body></FictionBook>",
-            "<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>!!!!</binary></FictionBook>",
         )
         examples.forEach { xml ->
             withSource(xml.toByteArray()) { file ->
@@ -79,9 +82,40 @@ class Fb2ReadiumPublicationFactoryTest {
     }
 
     @Test
+    fun malformedEmbeddedImageIsBlockedWithoutRejectingReadableText() {
+        val xml = "<FictionBook><body><p>text</p></body>" +
+            "<binary id='image' content-type='image/png'>!!!!</binary></FictionBook>"
+        withSource(xml.toByteArray()) { file ->
+            val parsed = Fb2SourceParser.read(file, "Fallback")
+            assertTrue(parsed.document.resources.single().xhtml.contains("<p>text</p>"))
+            assertTrue(parsed.images.isEmpty())
+            assertTrue(parsed.document.images.isEmpty())
+        }
+    }
+
+    @Test
     fun passesEmbeddedBytesToTheImageDecoderWithoutSignatureValidation() {
         withSource("<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>SGVsbG8=</binary></FictionBook>".toByteArray()) { file ->
             assertContentEquals("Hello".toByteArray(), Fb2SourceParser.read(file, "Book").images.values.single())
+        }
+    }
+
+    @Test
+    fun rejectsOversizedSourceBeforeMaterializingTheWholeFileWithGeneratedFailure() {
+        val directory = Files.createTempDirectory("fb2-budget-test").toFile()
+        val file = File(directory, "oversized.fb2")
+        val sourceByteCount = readerSafetyFb2TextMaxBytes() + 1L
+        try {
+            RandomAccessFile(file, "rw").use { it.setLength(sourceByteCount) }
+
+            val failure = assertFailsWith<ReaderSafetyException> {
+                Fb2SourceParser.read(file, "Fallback")
+            }
+
+            assertEquals(readerSafetyFb2StructureFailure(), failure.failure)
+            assertEquals(sourceByteCount, file.length())
+        } finally {
+            directory.deleteRecursively()
         }
     }
 

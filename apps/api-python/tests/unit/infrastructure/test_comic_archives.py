@@ -72,6 +72,9 @@ class _FakeRarFile:
     def open(self, name: str, _mode: str = "r") -> BytesIO:
         return BytesIO(self._entries[name]._content)
 
+    def testrar(self) -> None:
+        return None
+
     def close(self) -> None:
         return None
 

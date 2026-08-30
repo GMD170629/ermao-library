@@ -490,7 +490,7 @@ final class ReaderSecurityTests: XCTestCase {
             decodedText: "a\0b\0<script>alert(1)</script>", publicationTitle: "Book"
         )
         let resource = try XCTUnwrap(publication.resources.first)
-        let decorated = String(decoding: IosPublicationSecurityPolicy.generatedChapter(resource.xhtml), as: UTF8.self)
+        let decorated = String(decoding: try IosPublicationSecurityPolicy.generatedChapter(resource.xhtml), as: UTF8.self)
         XCTAssertTrue(decorated.contains("a\0b\0&lt;script&gt;"))
         XCTAssertTrue(decorated.contains("script-src 'none'"))
         XCTAssertFalse(decorated.contains("<script>"))
@@ -505,7 +505,6 @@ final class ReaderSecurityTests: XCTestCase {
             "<FictionBook><body><p>broken</body></FictionBook>",
             "<!DOCTYPE FictionBook [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><FictionBook><body><p>&x;</p></body></FictionBook>",
             "<FictionBook><body><section id='x'/><section id='x'/></body></FictionBook>",
-            "<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>!!!!</binary></FictionBook>",
         ]
         for (index, example) in examples.enumerated() {
             let bytes = Data(example.utf8)
@@ -514,6 +513,58 @@ final class ReaderSecurityTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: file), bytes)
         }
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["original.fb2"])
+    }
+
+    func testFb2BlocksOneInvalidEmbeddedImageWithoutRejectingPublication() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let source = Data(
+            "<FictionBook><body><p>text</p></body><binary id='image' content-type='image/png'>!!!!</binary></FictionBook>".utf8
+        )
+        try source.write(to: file)
+
+        let parsed = try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Fallback")
+
+        XCTAssertTrue(parsed.images.isEmpty)
+        XCTAssertTrue(parsed.document.images.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: file), source)
+    }
+
+    func testFb2RejectsOversizedSourceBeforeWholeFileAllocationWithGeneratedFailure() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).fb2")
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: file.path, contents: nil))
+        let sourceByteCount = UInt64(ErmaoShared.PublicKt.readerSafetyFb2TextMaxBytes()) + 1
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: sourceByteCount)
+        try handle.close()
+        let generated = ErmaoShared.PublicKt.readerSafetyFb2StructureFailure()
+
+        XCTAssertThrowsError(
+            try IosFb2PublicationFactory.read(fileURL: file, fallbackTitle: "Fallback")
+        ) { error in
+            guard let failure = error as? IosReaderFailure else {
+                return XCTFail("Expected IosReaderFailure, got \(error)")
+            }
+            XCTAssertEqual(failure.safeContext["ruleId"], generated.ruleId)
+            XCTAssertEqual(failure.safeContext["errorCode"], generated.errorCode)
+        }
+        XCTAssertEqual(
+            try XCTUnwrap(file.resourceValues(forKeys: [.fileSizeKey]).fileSize),
+            Int(sourceByteCount)
+        )
+    }
+
+    func testGeneratedSafetyFailureKeepsRuleAndErrorContextOnIos() {
+        for generated in [
+            ErmaoShared.PublicKt.readerSafetyFb2StructureFailure(),
+            ErmaoShared.PublicKt.readerSafetyPdfPageGeometryFailure(),
+            ErmaoShared.PublicKt.readerSafetyPdfRenderBudgetFailure(),
+        ] {
+            let failure = IosReaderFailure.safety(generated)
+            XCTAssertEqual(failure.safeContext["ruleId"], generated.ruleId)
+            XCTAssertEqual(failure.safeContext["errorCode"], generated.errorCode)
+        }
     }
 
     func testFb2Utf16AndUnsectionedBody() throws {
@@ -525,25 +576,18 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(parsed.document.resources.first).xhtml.contains("<p>中文正文</p>"))
     }
 
-    func testLocatorProjectionMatchesV2GoldenSemantics() throws {
-        let markup = #"""
-        <?xml version="1.0" encoding="utf-8"?>
-        <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Projection</title></head>
-        <body><h1 id="chapter-title">&#22825;&#22320;&#29572;&#40644;</h1><form>
-        <p id="target">Cafe&#769;   &#23431;&#23449;&#27946;&#33618;</p>
-        <p>duplicate text</p><p>duplicate text</p></form><iframe src="remote"></iframe></body></html>
-        """#
+    func testLocatorProjectionMatchesV3GoldenSemantics() throws {
+        let fixture = try XCTUnwrap(Bundle(for: Self.self).url(
+            forResource: "reader-normalization-v3",
+            withExtension: "xhtml"
+        ))
+        let markup = try String(contentsOf: fixture, encoding: .utf8)
 
         XCTAssertEqual(
             try IosPublicationSecurityPolicy.locatorBodyProjection(data: Data(markup.utf8)),
             [
                 ["path": "/body[1]", "localName": "body"],
                 ["path": "/body[1]/h1[1]", "localName": "h1", "id": "chapter-title", "text": "天地玄黄"],
-                ["path": "/body[1]/form[1]", "localName": "form"],
-                ["path": "/body[1]/form[1]/p[1]", "localName": "p", "id": "target", "text": "Café 宇宙洪荒"],
-                ["path": "/body[1]/form[1]/p[2]", "localName": "p", "text": "duplicate text"],
-                ["path": "/body[1]/form[1]/p[3]", "localName": "p", "text": "duplicate text"],
-                ["path": "/body[1]/iframe[1]", "localName": "iframe"],
             ]
         )
     }
@@ -558,7 +602,7 @@ final class ReaderSecurityTests: XCTestCase {
         let delegate = ReaderSecurityNavigationDelegate(loaded: loaded)
         webView.navigationDelegate = delegate
         let hostile = #"<html><head></head><body><p>Readable text</p><script>window.inlineRan=true</script><script src="reader-test://publication/script.js"></script><button id="event" onclick="window.eventRan=true">Click</button><img src="reader-test://external/image.png" onerror="window.eventRan=true"/><iframe src="reader-test://publication/frame"></iframe><object data="reader-test://publication/object"></object><embed src="reader-test://publication/embed"/></body></html>"#
-        let secured = IosPublicationSecurityPolicy.generatedChapter(hostile)
+        let secured = try IosPublicationSecurityPolicy.generatedChapter(hostile)
         webView.load(secured, mimeType: "text/html", characterEncodingName: "utf-8", baseURL: try XCTUnwrap(URL(string: "reader-test://publication/chapter")))
         await fulfillment(of: [loaded], timeout: 10)
         let blocked = try await webView.callAsyncJavaScript(#"document.getElementById('event').click();let connectionBlocked=false;try{await fetch('reader-test://external/data')}catch{connectionBlocked=true}return !window.inlineRan&&!window.eventRan&&connectionBlocked&&getComputedStyle(document.querySelector('iframe')).display==='none'"#, arguments: [:], in: nil, contentWorld: .page)
@@ -591,7 +635,7 @@ final class ReaderSecurityTests: XCTestCase {
         }
     }
 
-    func testSecurityPolicyDecoratesOnlyHeadAndPreservesAuthorBody() throws {
+    func testSecurityPolicySanitizesAuthorMarkupBeforeDecoratingHead() throws {
         let secured = try IosPublicationSecurityPolicy.decorate(data: Data("<html><head></head><body><p>Text</p></body></html>".utf8))
         let policy = String(decoding: secured, as: UTF8.self)
         XCTAssertTrue(policy.contains("style-src 'self' readium://assets"))
@@ -601,18 +645,14 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertFalse(policy.contains("readium:;"))
 
         let unsafe = #"<html><head><meta http-equiv="refresh" content="0;https://bad.example"/><style>body{background:url('https://bad.example/a.png')}</style></head><body onload="steal()"><script>steal()</script><iframe src="chapter.xhtml"></iframe><img src="https://bad.example/cover.jpg"/><a href="https://example.com/help">Help</a><a href="javascript:steal()">Bad</a><img src="images/local.jpg"/></body></html>"#
-        let originalBody = try XCTUnwrap(unsafe.range(of: #"(?s)<body.*</body>"#, options: .regularExpression))
-
         let decorated = try IosPublicationSecurityAdapter().decorateMarkup(unsafe)
 
-        let decoratedBody = try XCTUnwrap(decorated.range(of: #"(?s)<body.*</body>"#, options: .regularExpression))
-        XCTAssertEqual(String(unsafe[originalBody]), String(decorated[decoratedBody]))
-        XCTAssertTrue(decorated.contains("<script>steal()</script>"))
-        XCTAssertTrue(decorated.contains("<iframe"))
-        XCTAssertTrue(decorated.contains("onload=\"steal()\""))
-        XCTAssertTrue(decorated.contains("javascript:steal()"))
+        XCTAssertFalse(decorated.contains("<script>steal()</script>"))
+        XCTAssertFalse(decorated.contains("<iframe"))
+        XCTAssertFalse(decorated.contains("onload=\"steal()\""))
+        XCTAssertFalse(decorated.contains("javascript:steal()"))
         XCTAssertFalse(decorated.lowercased().contains("http-equiv=\"refresh\""))
-        XCTAssertTrue(decorated.contains("data-shuku-security-profile=\"ios-v2\""))
+        XCTAssertTrue(decorated.contains("<a href=\"https://example.com/help\">Help</a>"))
         XCTAssertTrue(decorated.contains("script-src 'none'"))
     }
 
@@ -663,13 +703,113 @@ final class ReaderSecurityTests: XCTestCase {
         """#
 
         let decorated = try IosPublicationSecurityAdapter().decorateMarkup(markup)
-        let profile = try XCTUnwrap(decorated.range(of: "data-shuku-security-profile=\"ios-v2\""))
+        let profile = try XCTUnwrap(decorated.range(of: "Content-Security-Policy"))
         let comment = try XCTUnwrap(decorated.range(of: "<!-- <head>"))
         let title = try XCTUnwrap(decorated.range(of: "<title>Real</title>"))
 
         XCTAssertGreaterThan(profile.lowerBound, comment.lowerBound)
         XCTAssertLessThan(profile.lowerBound, title.lowerBound)
-        XCTAssertTrue(decorated.contains(#"<![CDATA["<head>fake</head>"]]>"#))
+        XCTAssertFalse(decorated.contains(#"<![CDATA["<head>fake</head>"]]>"#))
+    }
+
+    func testEpubArchivePreflightUsesGeneratedStructureAndBudgetFailures() throws {
+        let structure = ErmaoShared.PublicKt.readerSafetyEpubArchiveStructureFailure()
+        let safe = IosEpubArchiveSafetyPreflight.EntryFacts(
+            path: "OPS/chapter.xhtml",
+            isDirectory: false,
+            isSymbolicLink: false,
+            isEncrypted: false,
+            uncompressedSize: 16,
+            compressedSize: 16,
+            crc32: 0,
+            localHeaderOffset: 0,
+            dataOffset: 30,
+            physicalEndOffset: 46
+        )
+        XCTAssertNoThrow(
+            try IosEpubArchiveSafetyPreflight.verifyMetadata([safe], archiveLength: 1_024)
+        )
+
+        let structuralCases = [
+            [IosEpubArchiveSafetyPreflight.EntryFacts(
+                path: "../chapter.xhtml", isDirectory: false, isSymbolicLink: false,
+                isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+                localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
+            )],
+            [IosEpubArchiveSafetyPreflight.EntryFacts(
+                path: "OPS/link", isDirectory: false, isSymbolicLink: true,
+                isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+                localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
+            )],
+            [IosEpubArchiveSafetyPreflight.EntryFacts(
+                path: "OPS/secret", isDirectory: false, isSymbolicLink: false,
+                isEncrypted: true, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+                localHeaderOffset: 0, dataOffset: 30, physicalEndOffset: 46
+            )],
+            [
+                safe,
+                IosEpubArchiveSafetyPreflight.EntryFacts(
+                    path: "OPS/next.xhtml", isDirectory: false, isSymbolicLink: false,
+                    isEncrypted: false, uncompressedSize: 16, compressedSize: 16, crc32: 0,
+                    localHeaderOffset: 40, dataOffset: 70, physicalEndOffset: 86
+                ),
+            ],
+        ]
+        for entries in structuralCases {
+            assertEpubSafetyFailure(structure) {
+                try IosEpubArchiveSafetyPreflight.verifyMetadata(entries, archiveLength: 1_024)
+            }
+        }
+
+        let countLimit = ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxCount()
+        assertEpubSafetyFailure(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryCountFailure()) {
+            let entries = (0 ... countLimit).map { index in
+                IosEpubArchiveSafetyPreflight.EntryFacts(
+                    path: "OPS/\(index)", isDirectory: false, isSymbolicLink: false,
+                    isEncrypted: false, uncompressedSize: 0, compressedSize: 0, crc32: 0,
+                    localHeaderOffset: UInt64(index * 2), dataOffset: UInt64(index * 2),
+                    physicalEndOffset: UInt64(index * 2)
+                )
+            }
+            try IosEpubArchiveSafetyPreflight.verifyMetadata(entries, archiveLength: UInt64.max)
+        }
+
+        assertEpubSafetyFailure(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryBytesFailure()) {
+            let oversized = IosEpubArchiveSafetyPreflight.EntryFacts(
+                path: safe.path, isDirectory: false, isSymbolicLink: false, isEncrypted: false,
+                uncompressedSize: UInt64(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxBytes() + 1),
+                compressedSize: 1, crc32: 0, localHeaderOffset: 0, dataOffset: 30,
+                physicalEndOffset: 31
+            )
+            try IosEpubArchiveSafetyPreflight.verifyMetadata([oversized], archiveLength: UInt64.max)
+        }
+
+        assertEpubSafetyFailure(ErmaoShared.PublicKt.readerSafetyEpubArchiveCompressionRatioFailure()) {
+            let ratio = IosEpubArchiveSafetyPreflight.EntryFacts(
+                path: safe.path, isDirectory: false, isSymbolicLink: false, isEncrypted: false,
+                uncompressedSize: UInt64(
+                    ErmaoShared.PublicKt.readerSafetyEpubArchiveCompressionRatioMax() + 1
+                ),
+                compressedSize: 1, crc32: 0, localHeaderOffset: 0, dataOffset: 30,
+                physicalEndOffset: 31
+            )
+            try IosEpubArchiveSafetyPreflight.verifyMetadata([ratio], archiveLength: UInt64.max)
+        }
+    }
+
+    private func assertEpubSafetyFailure(
+        _ expected: ErmaoShared.ReaderSafetyFailure,
+        action: () throws -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(try action(), file: file, line: line) { error in
+            guard let failure = error as? IosReaderFailure else {
+                return XCTFail("Expected IosReaderFailure, got \(error)", file: file, line: line)
+            }
+            XCTAssertEqual(failure.safeContext["ruleId"], expected.ruleId, file: file, line: line)
+            XCTAssertEqual(failure.safeContext["errorCode"], expected.errorCode, file: file, line: line)
+        }
     }
 }
 

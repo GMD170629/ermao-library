@@ -9,3 +9,5 @@ export * from './publication-navigation';
 export * from './session';
 export * from './types';
 export * from './setting-catalog.generated';
+export * from './reader-safety-policy.generated';
+export * from './reader-safety-runtime';

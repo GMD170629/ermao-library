@@ -149,13 +149,28 @@ export class ComicContinuousController {
   }
 
   private renderSlot(slot: ComicPageSlot, page: ComicTrackPage, view: ComicContinuousView) {
-    const contentKey = page.url ? `ready:${page.url}` : page.error ? `failed:${page.error}` : 'placeholder';
+    const contentKey = page.safetyError
+      ? `blocked:${page.safetyError.ruleId}`
+      : page.url
+        ? `ready:${page.url}`
+        : page.error
+          ? `failed:${page.error}`
+          : 'placeholder';
     if (slot.contentKey !== contentKey) {
       if (slot.image) this.preloadObserver?.unobserve(slot.image);
       slot.contentKey = contentKey;
       slot.image = null;
       slot.loaded = false;
-      if (page.url) {
+      if (page.safetyError) {
+        this.renderFailure(
+          slot,
+          page.pageIndex,
+          translateMessage(normalizeLocale(this.document.documentElement.lang), '漫画页面因安全策略无法显示。'),
+          false
+        );
+        slot.element.dataset.readerSafetyRuleId = page.safetyError.ruleId;
+        slot.element.dataset.readerSafetyErrorCode = page.safetyError.code;
+      } else if (page.url) {
         const image = this.document.createElement('img');
         image.alt = String(page.pageIndex);
         image.decoding = 'async';
@@ -199,16 +214,19 @@ export class ComicContinuousController {
     }
   }
 
-  private renderFailure(slot: ComicPageSlot, page: number, messageText: string) {
+  private renderFailure(slot: ComicPageSlot, page: number, messageText: string, retryable = true) {
     const failure = this.document.createElement('div');
     failure.setAttribute('role', 'alert');
     const message = this.document.createElement('p');
     message.textContent = messageText;
-    const retry = this.document.createElement('button');
-    retry.type = 'button';
-    retry.textContent = translateMessage(normalizeLocale(this.document.documentElement.lang), '重试本页');
-    retry.addEventListener('click', () => this.onRetryPage(page));
-    failure.append(message, retry);
+    failure.append(message);
+    if (retryable) {
+      const retry = this.document.createElement('button');
+      retry.type = 'button';
+      retry.textContent = translateMessage(normalizeLocale(this.document.documentElement.lang), '重试本页');
+      retry.addEventListener('click', () => this.onRetryPage(page));
+      failure.append(retry);
+    }
     slot.element.replaceChildren(failure);
   }
 

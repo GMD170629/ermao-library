@@ -1,6 +1,15 @@
 'use client';
 
-import type { ReaderAdapter, ReaderCommand, ReaderPreferences } from '@shuku/reader-core';
+import {
+  READER_SAFETY_FORMATS,
+  READER_SAFETY_IMPLEMENTATION_FAILURE_CODES,
+  READER_SAFETY_RULES,
+  READER_SAFETY_RULE_IDS,
+  readerSafetyAcceptsMimeType,
+  type ReaderAdapter,
+  type ReaderCommand,
+  type ReaderPreferences
+} from '@shuku/reader-core';
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type ReaderShellEvents, type ReaderResourceNavigation } from '../reader-shell';
@@ -42,6 +51,17 @@ type ReaderEngineRuntimeProps = {
 
 type PasswordCapableAdapter = ReaderAdapter & { providePassword: (password: string | null) => boolean };
 
+const SAFETY_ERROR = {
+  corrupt: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_REQUIRED_READING_ORDER_MARKUP].errorCode,
+  securityRejected: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_REJECT_XML_ENTITY].errorCode,
+  parserLimit: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.REFLOWABLE_MARKUP_MAX_BYTES].errorCode,
+  originalTooLarge: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_ORIGINAL_MAX_BYTES].errorCode,
+  mimeMismatch: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME].errorCode,
+  drmUnsupported: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_DRM_REJECTED].errorCode,
+  resourceBlocked: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_BINARY_RESOURCE_MAX_BYTES].errorCode,
+  pdfRangeInvalid: READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.PDF_RANGE_PROTOCOL].errorCode
+} as const;
+
 function canProvidePassword(adapter: ReaderAdapter | null): adapter is PasswordCapableAdapter {
   return Boolean(adapter && 'providePassword' in adapter && typeof (adapter as PasswordCapableAdapter).providePassword === 'function');
 }
@@ -78,12 +98,19 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'PUBLICATION_TXT_NUL_CHARACTER') return translate('服务器的 TXT 解析实现拒绝了 NUL 字符。');
   if (code === 'PUBLICATION_TXT_ENCODING_UNSUPPORTED') return translate('TXT 解码器无法解码此文件。');
   if (code === 'PUBLICATION_TXT_EMPTY') return translate('TXT 解析器未找到可读文本。');
-  if (code === 'PUBLICATION_CORRUPT' || code === 'PUBLICATION_PARSE_FAILED' || code === 'PUBLICATION_MARKUP_INVALID') return translate('格式解析器解析失败。');
+  if (code === SAFETY_ERROR.corrupt || code === 'PUBLICATION_PARSE_FAILED' || code === 'PUBLICATION_MARKUP_INVALID') return translate('格式解析器解析失败。');
   if (code === 'PUBLICATION_STRUCTURE_INVALID') return translate('格式解析器无法生成阅读顺序。');
-  if (code === 'PUBLICATION_SECURITY_REJECTED') return translate('阅读内容无法通过当前安全隔离边界。');
+  if (code === SAFETY_ERROR.securityRejected) return translate('阅读内容无法通过当前安全隔离边界。');
   if (code === 'PUBLICATION_DRM_PROTECTED') return translate('解析器报告此出版物受 DRM 保护。');
-  if (code === 'PUBLICATION_PARSER_LIMIT' || code === 'PUBLICATION_PARSER_MEMORY') return translate('解析器达到资源限制，无法继续读取。');
+  if (code === SAFETY_ERROR.parserLimit || code === 'PUBLICATION_PARSER_MEMORY') return translate('解析器达到资源限制，无法继续读取。');
   if (code === 'PUBLICATION_READ_FAILED') return translate('解析器读取原文件失败。');
+  if (code === SAFETY_ERROR.originalTooLarge) return translate('原文件超过阅读器的安全大小限制。');
+  if (code === SAFETY_ERROR.mimeMismatch) return translate('原文件格式与媒体类型不匹配。');
+  if (code === SAFETY_ERROR.drmUnsupported) return translate('解析器报告此出版物受 DRM 保护。');
+  if (code === SAFETY_ERROR.resourceBlocked) return translate('出版物中的单个资源已被安全策略阻止。');
+  if ((READER_SAFETY_IMPLEMENTATION_FAILURE_CODES as readonly string[]).includes(code ?? '')) {
+    return translate('阅读引擎未实现当前安全策略要求。');
+  }
   if (code === 'ORIGINAL_DESCRIPTOR_INVALID') return translate('原文件下载信息无效。');
   if (code === 'ORIGINAL_DESCRIPTOR_FORMAT_MISMATCH') return translate('原文件格式与媒体类型不匹配。');
   if (code === 'ORIGINAL_VERSION_INVALID' || code === 'ORIGINAL_VERSION_CHANGED') return translate('原文件已更新，请重新打开。');
@@ -105,10 +132,10 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'NOVEL_SECURITY_REJECTED') return translate('文件包含不安全的内容，已停止打开。');
   if (code === 'RESOURCE_FORMAT_UNSUPPORTED') return translate('当前文件格式尚未开放阅读支持。');
   if (code === 'READER_FORMAT_MORPHOLOGY_MISMATCH') return translate('文件格式与阅读器类型不匹配。');
-  if (code === 'PDF_ENCRYPTED' || code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
+  if (code === 'PDF_PASSWORD_CANCELLED') return translate('加密或密码保护的 PDF 暂不支持阅读。');
   if (code === 'PDF_INVALID') return translate('PDF 引擎无法解析文档。');
   if (code === 'PDF_RANGE_UNSUPPORTED') return translate('服务器不支持 PDF 按需读取，无法在线打开。');
-  if (code === 'PDF_RANGE_INVALID') return translate('PDF 字节区间响应无效，请重试。');
+  if (code === SAFETY_ERROR.pdfRangeInvalid) return translate('PDF 字节区间响应无效，请重试。');
   if (code === 'PDF_RESOURCE_CHANGED') return translate('PDF 文件已更新，请重新打开。');
   if (code === 'NETWORK_UNAVAILABLE') return translate('网络请求失败，无法读取阅读资源。');
   if (code === 'PDF_CACHE_IO') return translate('PDF 缓存读写失败。');
@@ -224,9 +251,11 @@ export function ReaderEngineRuntime({
           onEndOfResource: openNextResource
         });
       } else if (bootstrap.readerType === 'comic') {
+        if (!bootstrap.comicRevision) throw new Error('READER_COMIC_MANIFEST_INVALID');
         const adapterModule = await import('./adapters/comic-adapter');
         created = adapterModule.createComicAdapter({
           container,
+          revision: bootstrap.comicRevision,
           onInputIntent: handleAdapterInputIntent,
           onEndOfResource: openNextResource,
           initialPages: bootstrap.pages.map((page) => ({
@@ -236,12 +265,15 @@ export function ReaderEngineRuntime({
             mimeType: page.mimeType ?? undefined,
             width: page.width ?? undefined,
             height: page.height ?? undefined,
-            size: page.size ?? undefined
+            size: page.size ?? undefined,
+            safetyError: page.safetyError
           }))
         });
       } else {
         const adapterModule = await import('./adapters/pdf-adapter');
-        const pdfAsset = bootstrap.assets.find((asset) => asset.mimeType.toLowerCase() === 'application/pdf') ?? bootstrap.assets[0];
+        const pdfAsset = bootstrap.assets.find((asset) => (
+          readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, asset.mimeType)
+        ));
         if (!pdfAsset || pdfAsset.sizeBytes <= 0) throw new Error('PDF_INVALID');
         created = adapterModule.createPdfAdapter({
           container,
@@ -270,7 +302,7 @@ export function ReaderEngineRuntime({
       if (created) void created.dispose();
       container.replaceChildren();
     };
-  }, [bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.pages, bootstrap.readerType, bootstrap.source, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onOriginalProgress, onStorageWarning]);
+  }, [bootstrap.availableResources, bootstrap.book.title, bootstrap.assets, bootstrap.comicRevision, bootstrap.pages, bootstrap.readerType, bootstrap.source, bootstrap.units, bootstrap.userId, bootstrap.resource.id, container, i18nAttribute, onOriginalProgress, onStorageWarning]);
 
   const session = useReaderSession({
     adapter,

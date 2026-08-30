@@ -1,3 +1,5 @@
+import type { ReaderSafetyRuleId } from '@shuku/reader-core';
+
 export type TextPublicationFormat = 'txt' | 'fb2';
 
 export type TextPublicationChapter = Readonly<{
@@ -24,4 +26,4 @@ export type TextWorkerRequest = Readonly<{
 
 export type TextWorkerResponse =
   | Readonly<{ requestId: number; ok: true; result: TextPublicationResult }>
-  | Readonly<{ requestId: number; ok: false; code: string }>;
+  | Readonly<{ requestId: number; ok: false; code: string; ruleId?: ReaderSafetyRuleId }>;

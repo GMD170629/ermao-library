@@ -1,6 +1,8 @@
 import { ReaderResourceError } from '../../api/client';
 import {
-  PDF_RANGE_CHUNK_BYTES,
+  READER_SAFETY_BUDGETS,
+  READER_SAFETY_RULES,
+  READER_SAFETY_RULE_IDS,
   quantizePageProgression,
   type PdfLocation,
   type PdfReaderErrorCode,
@@ -39,8 +41,19 @@ import {
   createPdfJsRangeTransport,
   type PdfRangeAccess
 } from './pdf-range-transport';
+import {
+  ReaderSafetyPolicyError,
+  readerSafetyFailure,
+  rejectReaderSafety
+} from '../security/reader-safety-policy';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+
+const PDF_RANGE_CHUNK_BYTES = READER_SAFETY_BUDGETS.pdfRangeChunkBytes;
+const PDF_PAGE_POLICY_ERROR_CODE =
+  READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY].errorCode;
+const PDF_DRM_POLICY_ERROR_CODE =
+  READER_SAFETY_RULES[READER_SAFETY_RULE_IDS.COMMON_DRM_REJECTED].errorCode;
 
 class PdfAdapterFailure extends Error {
   constructor(readonly code: PdfReaderErrorCode, message: string, options?: ErrorOptions) {
@@ -262,6 +275,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.loadingTask = loadingTask;
       loadingTask.onPassword = () => {
         if (!this.isActive(generation, context.signal)) return;
+        const failure = readerSafetyFailure(READER_SAFETY_RULE_IDS.COMMON_DRM_REJECTED);
         this.passwordCallback = null;
         this.passwordReason = undefined;
         this.status = 'error';
@@ -269,7 +283,12 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         this.emitView();
         this.emit({
           type: 'error',
-          error: { code: 'PDF_ENCRYPTED', message: this.error, recoverable: false }
+          error: {
+            code: failure.code,
+            message: this.error,
+            recoverable: false,
+            safeContext: { ruleId: failure.ruleId, action: failure.action }
+          }
         }, context.operation);
         void loadingTask.destroy();
       };
@@ -278,7 +297,12 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.document = document;
       this.passwordCallback = null;
       this.passwordReason = undefined;
-      this.pageCount = Math.max(1, document.numPages);
+      if (!Number.isSafeInteger(document.numPages)
+        || document.numPages <= 0
+        || document.numPages > READER_SAFETY_BUDGETS.pdfPageMaxCount) {
+        rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+      }
+      this.pageCount = document.numPages;
       this.pageNumber = clampPage(this.pageNumber, this.pageCount);
       this.emit({ type: 'metadata-changed', totalPages: this.pageCount }, context.operation);
       this.installResizeObserver(generation);
@@ -298,7 +322,14 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.emitView();
       this.emit({
         type: 'error',
-        error: { code: this.pdfErrorCode(effectiveReason), message: this.error, recoverable: true }
+        error: {
+          code: this.pdfErrorCode(effectiveReason),
+          message: this.error,
+          recoverable: true,
+          ...(effectiveReason instanceof ReaderSafetyPolicyError
+            ? { safeContext: { ruleId: effectiveReason.ruleId, action: effectiveReason.action } }
+            : {})
+        }
       }, context.operation);
       throw effectiveReason;
     }
@@ -664,6 +695,10 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     this.assertRenderActive(generation, epoch, signal);
     const rotation = resolvedPdfPageRotation(page.rotate, preferences.pdf.rotation);
     const baseViewport = page.getViewport({ scale: 1, rotation });
+    if (!Number.isFinite(baseViewport.width) || !Number.isFinite(baseViewport.height)
+      || baseViewport.width <= 0 || baseViewport.height <= 0) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+    }
     const visibleContainerWidth = Math.max(1, this.container.clientWidth || window.innerWidth || baseViewport.width);
     const containerWidth = effectiveReaderPageWidth(preferences.pdf.pageWidth, visibleContainerWidth);
     const containerHeight = Math.max(1, this.container.clientHeight || window.innerHeight || baseViewport.height);
@@ -676,6 +711,10 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       zoom: preferences.pdf.zoom
     });
     const viewport = page.getViewport({ scale, rotation });
+    if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)
+      || viewport.width <= 0 || viewport.height <= 0) {
+      rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
+    }
     const cropBox = preferences.pdf.cropMargins === 'auto'
       ? await this.resolveCropBox(pageNumber, page, generation, epoch, signal)
       : null;
@@ -905,11 +944,14 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private pdfErrorCode(reason: unknown) {
+    if (reason instanceof ReaderSafetyPolicyError) return reason.code;
     if (reason instanceof PdfRangeError || reason instanceof ReaderResourceError) return reason.code;
     if (reason instanceof PdfAdapterFailure) return reason.code;
     const pdfjs = this.pdfjs;
     if (pdfjs && reason instanceof pdfjs.InvalidPDFException) return 'PDF_INVALID';
-    if (pdfjs && reason instanceof pdfjs.PasswordException) return 'PDF_ENCRYPTED';
+    if (pdfjs && reason instanceof pdfjs.PasswordException) {
+      return readerSafetyFailure(READER_SAFETY_RULE_IDS.COMMON_DRM_REJECTED).code;
+    }
     if (pdfjs && reason instanceof pdfjs.ResponseException) return 'PUBLICATION_RESPONSE_INVALID';
     return 'READER_ENGINE_ERROR';
   }
@@ -917,7 +959,8 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   private pdfErrorMessage(reason: unknown) {
     const code = this.pdfErrorCode(reason);
     if (code === 'PDF_INVALID') return 'PDF 文件已损坏或格式无效';
-    if (code === 'PDF_ENCRYPTED') return '加密或密码保护的 PDF 暂不支持阅读';
+    if (code === PDF_PAGE_POLICY_ERROR_CODE) return 'PDF 页数或页面尺寸超过安全策略限制';
+    if (code === PDF_DRM_POLICY_ERROR_CODE) return '加密或密码保护的 PDF 暂不支持阅读';
     if (code === 'NETWORK_UNAVAILABLE') return 'PDF 网络请求失败';
     if (code === 'PDF_PAGE_LOAD_FAILED') return 'PDF 页面加载失败';
     if (code === 'PDF_RENDER_FAILED') return 'PDF 页面渲染失败';

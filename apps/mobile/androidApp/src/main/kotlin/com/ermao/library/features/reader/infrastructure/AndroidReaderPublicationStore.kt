@@ -5,6 +5,8 @@ import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.modules.reader.readerErrorCodeForFailure
+import com.ermao.library.shared.modules.reader.readerSafetyOriginalMaxBytesFailure
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -93,9 +95,7 @@ internal class AndroidReaderPublicationStore(
                     val count = input.read(buffer)
                     if (count < 0) break
                     written += count
-                    if (written > MAX_PUBLICATION_BYTES) throw ReaderOpenFailure(
-                        com.ermao.library.shared.modules.reader.ReaderError(com.ermao.library.shared.modules.reader.ReaderErrorCode.PublicationTooLarge),
-                    )
+                    if (written > MAX_PUBLICATION_BYTES) throw publicationTooLargeFailure()
                     output.write(buffer, 0, count)
                 }
                 output.fd.sync()
@@ -128,7 +128,7 @@ internal class AndroidReaderPublicationStore(
         require(targetPath.startsWith(rootPath)) { "Reader publication escaped the managed root" }
         if (!target.exists()) throw java.io.FileNotFoundException("Reader publication is missing")
         require(target.isFile && !Files.isSymbolicLink(targetPath)) { "Reader publication path is unsafe" }
-        require(target.length() in 0..MAX_PUBLICATION_BYTES) { "Reader publication size is invalid" }
+        if (target.length() > MAX_PUBLICATION_BYTES) throw publicationTooLargeFailure()
         return target
     }
 
@@ -157,12 +157,13 @@ internal class AndroidReaderPublicationStore(
 
     companion object {
         const val EPUB_PARSER_VERSION = "epub-package:1"
-        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v2"
+        const val EPUB_NORMALIZATION_VERSION = "shuku-epub-locator-dom-v3"
         private const val PUBLICATION_DIRECTORY = "reader-publications-v3"
         private const val COPY_BUFFER_BYTES = 64 * 1024
         private const val MAX_RESOURCE_ID_LENGTH = 256
         private const val MAX_TITLE_LENGTH = 512
-        private const val MAX_PUBLICATION_BYTES = com.ermao.library.shared.modules.reader.ReaderAdmission.maximumPublicationBytes
+        private val MAX_PUBLICATION_BYTES =
+            com.ermao.library.shared.modules.reader.ReaderAdmission.maximumPublicationBytes
         private val SUPPORTED_LOCAL_FORMATS = setOf(
             ReaderFormat.Epub,
             ReaderFormat.Mobi,
@@ -179,6 +180,19 @@ internal class AndroidReaderPublicationStore(
             if (directory.exists()) check(directory.deleteRecursively()) { "Unable to clear Reader publications" }
         }
     }
+}
+
+private fun publicationTooLargeFailure(): ReaderOpenFailure {
+    val failure = readerSafetyOriginalMaxBytesFailure()
+    return ReaderOpenFailure(
+        com.ermao.library.shared.modules.reader.ReaderError(
+            code = readerErrorCodeForFailure(failure.errorCode, recoverable = false),
+            safeContext = mapOf(
+                "ruleId" to failure.ruleId,
+                "errorCode" to failure.errorCode,
+            ),
+        ),
+    )
 }
 
 internal fun removeLegacyHashedPublicationArtifacts(publicationRoot: File) {

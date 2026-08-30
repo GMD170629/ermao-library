@@ -10,79 +10,57 @@ enum class ReaderFormat(val wireValue: String) {
     Audio("audio"),
 }
 
-/** Concrete resource format. The server may expose a codec-specific audio format. */
-private val READER_AUDIO_MIME_TYPES = setOf(
-    "audio/aac",
-    "audio/ac3",
-    "audio/aiff",
-    "audio/amr",
-    "audio/basic",
-    "audio/eac3",
-    "audio/flac",
-    "audio/mp4",
-    "audio/mpeg",
-    "audio/ogg",
-    "audio/vnd.dts",
-    "audio/vnd.rn-realaudio",
-    "audio/wav",
-    "audio/webm",
-    "audio/x-matroska",
-    "audio/x-ms-wma",
-    "audio/x-adx",
-    "audio/x-ape",
-    "audio/x-aptx",
-    "audio/x-aptxhd",
-    "audio/x-caf",
-    "audio/x-dff",
-    "audio/x-dsf",
-    "audio/x-g722",
-    "audio/x-g726",
-    "audio/x-gsm",
-    "audio/x-lbc",
-    "audio/x-mlp",
-    "audio/x-mpc",
-    "audio/x-oma",
-    "audio/x-qcp",
-    "audio/x-shn",
-    "audio/x-sph",
-    "audio/x-tak",
-    "audio/x-thd",
-    "audio/x-tta",
-    "audio/x-voc",
-    "audio/x-wv",
-    "audio/x-xma",
-)
-
 enum class ReaderSourceFormat(
     val wireValue: String,
     val readerFormat: ReaderFormat,
-    val fileKind: String,
-    val allowedMimeTypes: Set<String>,
+    private val policyFormat: ReaderSafetyFormat,
+    private val codecExtension: String? = null,
 ) {
-    Epub("epub", ReaderFormat.Epub, "EPUB", setOf("application/epub+zip")),
-    Mobi("mobi", ReaderFormat.Mobi, "MOBI", setOf("application/x-mobipocket-ebook")),
-    Azw("azw", ReaderFormat.Mobi, "AZW", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook")),
-    Azw3("azw3", ReaderFormat.Mobi, "AZW3", setOf("application/vnd.amazon.ebook", "application/x-mobipocket-ebook")),
-    Prc("prc", ReaderFormat.Mobi, "PRC", setOf("application/x-mobipocket-ebook")),
-    Txt("txt", ReaderFormat.Text, "TXT", setOf("text/plain")),
-    Fb2("fb2", ReaderFormat.Epub, "FB2", setOf("application/x-fictionbook+xml")),
-    Cbz("cbz", ReaderFormat.Comic, "CBZ", setOf("application/vnd.comicbook+zip", "application/x-cbz", "application/zip")),
-    Zip("zip", ReaderFormat.Comic, "ZIP", setOf("application/zip")),
-    Cbr("cbr", ReaderFormat.Comic, "CBR", setOf("application/vnd.comicbook-rar", "application/x-cbr", "application/vnd.rar")),
-    Rar("rar", ReaderFormat.Comic, "RAR", setOf("application/vnd.rar", "application/vnd.comicbook-rar")),
-    ImageDir("image_dir", ReaderFormat.Comic, "IMAGE_DIR", setOf("image/jpeg", "image/png", "image/gif", "image/webp")),
-    Pdf("pdf", ReaderFormat.Pdf, "PDF", setOf("application/pdf")),
-    Audio("audio", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Audiobook("audiobook", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    AudiobookDir("audiobook_dir", ReaderFormat.Audio, "AUDIOBOOK_DIR", READER_AUDIO_MIME_TYPES),
-    M4b("m4b", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    M4a("m4a", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Mp3("mp3", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Flac("flac", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Ogg("ogg", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Opus("opus", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
-    Wav("wav", ReaderFormat.Audio, "AUDIO", READER_AUDIO_MIME_TYPES),
+    Epub("epub", ReaderFormat.Epub, ReaderSafetyFormat.EPUB),
+    Mobi("mobi", ReaderFormat.Mobi, ReaderSafetyFormat.MOBI),
+    Azw("azw", ReaderFormat.Mobi, ReaderSafetyFormat.AZW),
+    Azw3("azw3", ReaderFormat.Mobi, ReaderSafetyFormat.AZW3),
+    Prc("prc", ReaderFormat.Mobi, ReaderSafetyFormat.PRC),
+    Txt("txt", ReaderFormat.Text, ReaderSafetyFormat.TXT),
+    Fb2("fb2", ReaderFormat.Epub, ReaderSafetyFormat.FB2),
+    Cbz("cbz", ReaderFormat.Comic, ReaderSafetyFormat.CBZ),
+    Zip("zip", ReaderFormat.Comic, ReaderSafetyFormat.ZIP),
+    Cbr("cbr", ReaderFormat.Comic, ReaderSafetyFormat.CBR),
+    Rar("rar", ReaderFormat.Comic, ReaderSafetyFormat.RAR),
+    ImageDir("image_dir", ReaderFormat.Comic, ReaderSafetyFormat.IMAGE_DIR),
+    Pdf("pdf", ReaderFormat.Pdf, ReaderSafetyFormat.PDF),
+    Audio("audio", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO),
+    Audiobook("audiobook", ReaderFormat.Audio, ReaderSafetyFormat.AUDIOBOOK),
+    AudiobookDir("audiobook_dir", ReaderFormat.Audio, ReaderSafetyFormat.AUDIOBOOK_DIR),
+    M4b("m4b", ReaderFormat.Audio, ReaderSafetyFormat.M4B),
+    M4a("m4a", ReaderFormat.Audio, ReaderSafetyFormat.M4A),
+    Mp3("mp3", ReaderFormat.Audio, ReaderSafetyFormat.MP3),
+    Flac("flac", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".flac"),
+    Ogg("ogg", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".ogg"),
+    Opus("opus", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".opus"),
+    Wav("wav", ReaderFormat.Audio, ReaderSafetyFormat.AUDIO, ".wav"),
     ;
+
+    val fileKind: String
+        get() = policyFormat.name
+
+    private val allowedMimeTypes: Set<String>
+        get() {
+            if (policyFormat == ReaderSafetyFormat.IMAGE_DIR) {
+                return ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes.toSet()
+            }
+            val formatPolicy = ReaderSafetyPolicy.formats.getValue(policyFormat)
+            if (formatPolicy.acceptedMimeTypes.isNotEmpty()) {
+                return formatPolicy.acceptedMimeTypes.toSet()
+            }
+            if (readerFormat != ReaderFormat.Audio) return emptySet()
+            val exactExtension = codecExtension ?: formatPolicy.extension
+            return if (exactExtension == null) {
+                ReaderSafetyPolicy.audioProfile.containerMimeTypes.values.toSet()
+            } else {
+                setOfNotNull(ReaderSafetyPolicy.audioProfile.containerMimeTypes[exactExtension])
+            }
+        }
 
     fun acceptsMimeType(value: String): Boolean {
         val normalized = value.trim().lowercase().substringBefore(';')
@@ -90,13 +68,12 @@ enum class ReaderSourceFormat(
     }
 
     val isComic: Boolean
-        get() = readerFormat == ReaderFormat.Comic
+        get() = ReaderSafetyPolicy.formats.getValue(policyFormat).morphology ==
+            ReaderSafetyMorphology.COMIC
 
     val isReflowable: Boolean
-        get() = when (this) {
-            Epub, Fb2, Txt, Mobi, Azw, Azw3, Prc -> true
-            else -> false
-        }
+        get() = ReaderSafetyPolicy.formats.getValue(policyFormat).morphology ==
+            ReaderSafetyMorphology.REFLOWABLE
 
     companion object {
         /**
@@ -120,31 +97,32 @@ enum class ReaderDeliveryMode {
 /** Native entry support has one authoritative format and delivery inventory. */
 object ReaderFormatSupport {
     fun canReadOriginal(readerType: String, format: String): Boolean {
-        val source = ReaderSourceFormat.fromWireValue(format) ?: return false
-        val expected = when {
-            source.isReflowable -> "reflowable"
-            source.readerFormat == ReaderFormat.Comic -> "comic"
-            source.readerFormat == ReaderFormat.Pdf -> "pdf"
-            source.readerFormat == ReaderFormat.Audio -> return false
-            else -> return false
-        }
-        return readerType.trim().equals(expected, ignoreCase = true)
+        val policy = ReaderSafetyPolicy.formatPolicy(format) ?: return false
+        if (policy.morphology == ReaderSafetyMorphology.AUDIO) return false
+        return readerType.trim().equals(policy.morphology.readerTypeWire, ignoreCase = true)
     }
 
     fun deliveryMode(readerType: String, format: String): ReaderDeliveryMode {
-        val source = ReaderSourceFormat.fromWireValue(format) ?: return ReaderDeliveryMode.Unsupported
-        val normalizedReaderType = readerType.trim().lowercase()
-        return when {
-            normalizedReaderType == "reflowable" && source.isReflowable ->
-                ReaderDeliveryMode.DownloadOriginal
-            normalizedReaderType == "pdf" && source == ReaderSourceFormat.Pdf ->
-                ReaderDeliveryMode.Stream
-            normalizedReaderType == "comic" && source.isComic ->
-                ReaderDeliveryMode.Stream
-            else -> ReaderDeliveryMode.Unsupported
+        val policy = ReaderSafetyPolicy.formatPolicy(format)
+            ?: return ReaderDeliveryMode.Unsupported
+        if (!readerType.trim().equals(policy.morphology.readerTypeWire, ignoreCase = true)) {
+            return ReaderDeliveryMode.Unsupported
+        }
+        return when (policy.deliveryMode) {
+            ReaderSafetyDeliveryMode.DOWNLOAD_ORIGINAL -> ReaderDeliveryMode.DownloadOriginal
+            ReaderSafetyDeliveryMode.STREAM -> ReaderDeliveryMode.Stream
+            ReaderSafetyDeliveryMode.PLAYER -> ReaderDeliveryMode.Unsupported
         }
     }
 }
+
+private val ReaderSafetyMorphology.readerTypeWire: String
+    get() = when (this) {
+        ReaderSafetyMorphology.REFLOWABLE -> "reflowable"
+        ReaderSafetyMorphology.PDF -> "pdf"
+        ReaderSafetyMorphology.COMIC -> "comic"
+        ReaderSafetyMorphology.AUDIO -> "audio"
+    }
 
 sealed interface ReaderSource {
     /** Resource identity; this is the Reader/progress owner and never a file identity. */
@@ -210,7 +188,7 @@ data class RemoteComicPage(
     init {
         require(pageIndex >= 0)
         require(resourceHref == "pages/$pageIndex")
-        require(mediaType.startsWith("image/"))
+        require(mediaType in ReaderSafetyPolicy.comicProfile.allowedPageMimeTypes)
         require(width == null || width > 0)
         require(height == null || height > 0)
     }
@@ -226,6 +204,8 @@ data class RemoteComicReaderSource(
     override val sourceFormat: ReaderSourceFormat,
     val manifestApiPath: String,
     val pageApiPathTemplate: String,
+    /** Strong server revision advertised by the v4 comic manifest. */
+    val revision: String,
     val pages: List<RemoteComicPage>,
 ) : ReaderSource {
     override val format: ReaderFormat = ReaderFormat.Comic
@@ -238,7 +218,12 @@ data class RemoteComicReaderSource(
         require(sourceFormat != ReaderSourceFormat.ImageDir || assetId == null)
         require(manifestApiPath.startsWith("/api/") && '#' !in manifestApiPath)
         require(pageApiPathTemplate.startsWith("/api/") && "{pageIndex}" in pageApiPathTemplate)
+        require(isValidComicRevision(revision)) { "Remote comic revision is invalid" }
         require(pages.isNotEmpty())
         require(pages.map(RemoteComicPage::pageIndex) == pages.indices.toList())
     }
 }
+
+/** The server revision is an opaque hash with a deliberately narrow wire shape. */
+fun isValidComicRevision(value: String): Boolean =
+    value.matches(Regex("^sha256:[0-9a-f]{64}$"))

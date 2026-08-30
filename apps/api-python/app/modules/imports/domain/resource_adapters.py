@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from app.contracts.reader_safety_policy_generated import (
+    READER_SAFETY_COMIC_PROFILE,
+    READER_SAFETY_FORMATS,
+    ReaderSafetyFormat,
+    ReaderSafetyMorphology,
+)
 from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.library.public import AssetRole
 
@@ -35,12 +41,49 @@ class ResourceAdapterSpec:
     format_by_extension: tuple[tuple[str, str], ...] = ()
 
 
+def _format_mapping(
+    *formats: ReaderSafetyFormat,
+) -> tuple[tuple[str, str], ...]:
+    mappings: list[tuple[str, str]] = []
+    for source_format in formats:
+        extension = READER_SAFETY_FORMATS[source_format].extension
+        if extension is None:
+            raise RuntimeError(
+                f"generated Reader safety format {source_format.value} has no extension"
+            )
+        mappings.append((extension, source_format.value))
+    return tuple(mappings)
+
+
+def _format_extensions(
+    mappings: tuple[tuple[str, str], ...],
+) -> frozenset[str]:
+    return frozenset(extension for extension, _source_format in mappings)
+
+
+_EPUB_FORMATS = _format_mapping(ReaderSafetyFormat.EPUB)
+_PDF_FORMATS = _format_mapping(ReaderSafetyFormat.PDF)
+_TEXT_FORMATS = _format_mapping(ReaderSafetyFormat.TXT, ReaderSafetyFormat.FB2)
+_MOBI_FAMILY_FORMATS = _format_mapping(
+    ReaderSafetyFormat.MOBI,
+    ReaderSafetyFormat.AZW,
+    ReaderSafetyFormat.AZW3,
+    ReaderSafetyFormat.PRC,
+)
+_COMIC_ARCHIVE_FORMATS = _format_mapping(
+    ReaderSafetyFormat.CBZ,
+    ReaderSafetyFormat.CBR,
+    ReaderSafetyFormat.ZIP,
+    ReaderSafetyFormat.RAR,
+)
+
+
 ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.EPUB,
         adapter_version="1",
-        format_label="EPUB",
-        file_extensions=frozenset({".epub"}),
+        format_label=ReaderSafetyFormat.EPUB.value,
+        file_extensions=_format_extensions(_EPUB_FORMATS),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
@@ -48,8 +91,8 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.PDF,
         adapter_version="1",
-        format_label="PDF",
-        file_extensions=frozenset({".pdf"}),
+        format_label=ReaderSafetyFormat.PDF.value,
+        file_extensions=_format_extensions(_PDF_FORMATS),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
@@ -57,50 +100,37 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.TXT,
         adapter_version="2",
-        format_label="TXT",
-        file_extensions=frozenset({".txt", ".fb2"}),
+        format_label=ReaderSafetyFormat.TXT.value,
+        file_extensions=_format_extensions(_TEXT_FORMATS),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
-        format_by_extension=(
-            (".txt", "TXT"),
-            (".fb2", "FB2"),
-        ),
+        format_by_extension=_TEXT_FORMATS,
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.MOBI_FAMILY,
         adapter_version="2",
-        format_label="MOBI",
-        file_extensions=frozenset({".mobi", ".azw", ".azw3", ".prc"}),
+        format_label=ReaderSafetyFormat.MOBI.value,
+        file_extensions=_format_extensions(_MOBI_FAMILY_FORMATS),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
-        format_by_extension=(
-            (".mobi", "MOBI"),
-            (".azw", "AZW"),
-            (".azw3", "AZW3"),
-            (".prc", "PRC"),
-        ),
+        format_by_extension=_MOBI_FAMILY_FORMATS,
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.COMIC_ARCHIVE,
         adapter_version="1",
-        format_label="COMIC",
-        file_extensions=frozenset({".cbz", ".cbr", ".zip", ".rar"}),
+        format_label=ReaderSafetyMorphology.COMIC.value.upper(),
+        file_extensions=_format_extensions(_COMIC_ARCHIVE_FORMATS),
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
         minimum_ready_assets=1,
-        format_by_extension=(
-            (".cbz", "CBZ"),
-            (".cbr", "CBR"),
-            (".zip", "ZIP"),
-            (".rar", "RAR"),
-        ),
+        format_by_extension=_COMIC_ARCHIVE_FORMATS,
     ),
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.AUDIO_FILE,
         adapter_version="1",
-        format_label="AUDIO",
+        format_label=ReaderSafetyFormat.AUDIO.value,
         file_extensions=SUPPORTED_AUDIO_EXTS,
         is_directory_adapter=False,
         asset_role=AssetRole.PRIMARY,
@@ -109,7 +139,7 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.AUDIOBOOK_DIRECTORY,
         adapter_version="1",
-        format_label="AUDIOBOOK_DIR",
+        format_label=ReaderSafetyFormat.AUDIOBOOK_DIR.value,
         file_extensions=SUPPORTED_AUDIO_EXTS,
         is_directory_adapter=True,
         asset_role=AssetRole.TRACK,
@@ -118,8 +148,10 @@ ADAPTER_SPECS: tuple[ResourceAdapterSpec, ...] = (
     ResourceAdapterSpec(
         adapter_id=ResourceAdapterId.IMAGE_DIRECTORY,
         adapter_version="1",
-        format_label="IMAGE_DIR",
-        file_extensions=frozenset({".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}),
+        format_label=ReaderSafetyFormat.IMAGE_DIR.value,
+        file_extensions=frozenset(
+            READER_SAFETY_COMIC_PROFILE.page_mime_types_by_extension
+        ),
         is_directory_adapter=True,
         asset_role=AssetRole.PAGE,
         minimum_ready_assets=1,
