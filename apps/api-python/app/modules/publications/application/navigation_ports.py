@@ -10,21 +10,13 @@ from app.modules.publications.application.ports import (
     PublicationSourceRepository,
 )
 from app.modules.publications.domain.navigation import (
-    PublicationNavigationCacheIdentity,
-    PublicationNavigationCacheState,
     PublicationNavigationEntry,
-    PublicationParserProfile,
+    PublicationNavigationMarkerState,
 )
 
 
-class PublicationNavigationCacheReader(Protocol):
-    def find(self, *, resource_id: str) -> PublicationNavigationCacheState | None: ...
-
-    def has_materialized_projection(self, *, resource_id: str) -> bool: ...
-
-
-class PublicationParserProfileResolver(Protocol):
-    def resolve(self, *, source_format: str) -> PublicationParserProfile | None: ...
+class PublicationNavigationMarkerReader(Protocol):
+    def find(self, *, asset_id: str) -> PublicationNavigationMarkerState | None: ...
 
 
 class PublicationNavigationWriteRepository(Protocol):
@@ -34,7 +26,6 @@ class PublicationNavigationWriteRepository(Protocol):
         self,
         *,
         source: PublicationSource,
-        identity: PublicationNavigationCacheIdentity,
         entries: tuple[PublicationNavigationEntry, ...],
     ) -> None: ...
 
@@ -60,7 +51,7 @@ class PublicationNavigationUnitOfWorkFactory(Protocol):
 
 class PublicationNavigationLookupUnitOfWork(Protocol):
     sources: PublicationSourceRepository
-    cache: PublicationNavigationCacheReader
+    markers: PublicationNavigationMarkerReader
 
     def __enter__(self) -> Self: ...
 
@@ -77,11 +68,10 @@ class PublicationNavigationLookupUnitOfWorkFactory(Protocol):
 
 
 __all__ = [
-    "PublicationNavigationCacheReader",
     "PublicationNavigationLookupUnitOfWork",
     "PublicationNavigationLookupUnitOfWorkFactory",
+    "PublicationNavigationMarkerReader",
     "PublicationNavigationUnitOfWork",
     "PublicationNavigationUnitOfWorkFactory",
     "PublicationNavigationWriteRepository",
-    "PublicationParserProfileResolver",
 ]

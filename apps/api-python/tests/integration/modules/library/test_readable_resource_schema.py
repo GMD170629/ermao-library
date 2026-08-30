@@ -138,7 +138,7 @@ def test_fresh_schema_includes_target_tables(tmp_path: Path) -> None:
             "ReaderProgressMutation",
             "ReaderBookmark",
             "ReadableResourceNavigationUnit",
-            "PublicationNavigationCache",
+            "LibraryResourceAssetNavigation",
         } <= names
         assert LEGACY_TABLES.isdisjoint(names)
     finally:

@@ -563,6 +563,16 @@ class CompositePublicationAdapter(PublicationAdapter):
     ) -> PublicationResource:
         return self._adapter(source).read_resource(source, href)
 
+    def close(self) -> None:
+        closed: set[int] = set()
+        for adapter in self._adapters.values():
+            if id(adapter) in closed:
+                continue
+            closed.add(id(adapter))
+            close = getattr(adapter, "close", None)
+            if callable(close):
+                close()
+
     def _adapter(self, source: PublicationSource) -> PublicationAdapter:
         adapter = self._adapters.get(source.source_format)
         if adapter is None:

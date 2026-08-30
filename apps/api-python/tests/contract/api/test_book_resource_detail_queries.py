@@ -21,6 +21,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
+    LibraryResourceAssetNavigation,
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
     ReadableResourceNavigationUnit,
@@ -139,6 +140,12 @@ def _add_book(
             LibraryResourceAssetMetadata(
                 asset_id=f"{resource_id}-asset",
                 mime_type="application/epub+zip",
+            )
+        )
+        db_session.add(
+            LibraryResourceAssetNavigation(
+                asset_id=f"{resource_id}-asset",
+                chapter_count=index + 2,
             )
         )
         db_session.flush()
@@ -512,6 +519,7 @@ def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> No
             ReadableResourceNavigationUnit(
                 id="unit-one",
                 resource_id="detail-resource-01",
+                asset_id="detail-resource-01-asset",
                 unit_type="chapter",
                 title="Chapter 1",
                 href="chapter-1.xhtml",
@@ -522,6 +530,7 @@ def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> No
             ReadableResourceNavigationUnit(
                 id="unit-two",
                 resource_id="detail-resource-02",
+                asset_id="detail-resource-02-asset",
                 unit_type="chapter",
                 title="Other chapter",
                 href="other.xhtml",
@@ -547,7 +556,7 @@ def test_reading_units_are_scoped_to_one_book_resource(client, db_session) -> No
         "title": "Chapter 1",
         "href": "chapter-1.xhtml",
         "sortOrder": 0,
-        "assetId": None,
+        "assetId": "detail-resource-01-asset",
         "pageNumber": None,
         "mediaType": "application/xhtml+xml",
         "previewUrl": None,
@@ -570,6 +579,7 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
             ReadableResourceNavigationUnit(
                 id=f"chapter-state-{index}",
                 resource_id="detail-resource-01",
+                asset_id="detail-resource-01-asset",
                 unit_type="chapter",
                 title=f"Chapter {index + 1}",
                 href=f"OEBPS/Text/chapter-{index + 1}.xhtml",
@@ -645,6 +655,7 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
         ReadableResourceNavigationUnit(
             id="chapter-state-ambiguous",
             resource_id="detail-resource-01",
+            asset_id="detail-resource-01-asset",
             unit_type="chapter",
             title="Ambiguous anchor",
             href="OEBPS/Text/split-resource.xhtml#anchor",

@@ -62,6 +62,7 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
+    LibraryResourceAssetNavigation,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
 )
@@ -513,6 +514,18 @@ def test_changed_file_observation_invalidates_and_requeues_only_once(
                     metadata_json="{}",
                 )
             )
+            resource_metadata = db.get(
+                LibraryReadableResourceMetadata,
+                resource.id,
+            )
+            assert resource_metadata is not None
+            resource_metadata.chapter_count = 1
+            db.add(
+                LibraryResourceAssetNavigation(
+                    asset_id=asset.id,
+                    chapter_count=1,
+                )
+            )
             db.commit()
             original_task_id = task.id
             replacement_mtime_ns = source.stat().st_mtime_ns + 1_000_000_000
@@ -543,6 +556,13 @@ def test_changed_file_observation_invalidates_and_requeues_only_once(
                 )
                 == 0
             )
+            assert db.get(LibraryResourceAssetNavigation, asset.id) is None
+            refreshed_metadata = db.get(
+                LibraryReadableResourceMetadata,
+                resource.id,
+            )
+            assert refreshed_metadata is not None
+            assert refreshed_metadata.chapter_count is None
             assert requeued is not None
             assert requeued.state == "QUEUED"
 

@@ -24,13 +24,20 @@ class FakeQueries:
     units: tuple[ResourceDetailItem, ...] = ()
     assets: tuple[ResourceAssetDetail, ...] = ()
     resolved_page_count: int | None = None
+    requested_asset_id: str | None = None
 
     def get_resource(self, **_kwargs: object) -> ResourceDetailResource:
         return self.resource
 
     def list_navigation_units(
-        self, *, limit: int, offset: int, **_kwargs: object
+        self,
+        *,
+        asset_id: str | None,
+        limit: int,
+        offset: int,
+        **_kwargs: object,
     ) -> tuple[tuple[ResourceDetailItem, ...], int]:
+        self.requested_asset_id = asset_id
         return self.units[offset : offset + limit], len(self.units)
 
     def list_assets(self, **_kwargs: object) -> tuple[ResourceAssetDetail, ...]:
@@ -43,6 +50,23 @@ class FakeQueries:
         self, **_kwargs: object
     ) -> ResourceCurrentChapter | None:
         return None
+
+
+@dataclass
+class FakeNavigation:
+    asset_id: str = "asset-1"
+    calls: int = 0
+
+    def ensure(self, **_kwargs: object) -> str:
+        self.calls += 1
+        return self.asset_id
+
+
+def details(
+    queries: FakeQueries,
+    navigation: FakeNavigation | None = None,
+) -> ListResourceDetails:
+    return ListResourceDetails(queries, navigation or FakeNavigation())
 
 
 def resource(
@@ -92,7 +116,9 @@ def test_reflowable_details_keep_toc_level_and_apply_pagination() -> None:
         )
         for index in range(55)
     )
-    query = ListResourceDetails(FakeQueries(resource("EPUB"), units=units))
+    queries = FakeQueries(resource("EPUB"), units=units)
+    navigation = FakeNavigation()
+    query = details(queries, navigation)
 
     result = query.execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=2, page_size=50
@@ -103,31 +129,35 @@ def test_reflowable_details_keep_toc_level_and_apply_pagination() -> None:
         f"chapter-{index}" for index in range(50, 55)
     ]
     assert all(unit.level == 2 for unit in result.units)
+    assert navigation.calls == 1
+    assert queries.requested_asset_id == "asset-1"
 
 
-def test_reflowable_details_do_not_prepare_missing_server_navigation() -> None:
-    result = ListResourceDetails(FakeQueries(resource("MOBI"))).execute(
+def test_reflowable_details_prepare_missing_server_navigation() -> None:
+    navigation = FakeNavigation()
+    result = details(FakeQueries(resource("MOBI")), navigation).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50
     )
 
     assert result.units == ()
     assert result.total == 0
+    assert navigation.calls == 1
 
 
 def test_pdf_details_are_synthesized_without_page_rows() -> None:
-    result = ListResourceDetails(FakeQueries(resource("PDF", page_count=26))).execute(
+    navigation = FakeNavigation()
+    result = details(FakeQueries(resource("PDF", page_count=26)), navigation).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=2, page_size=24
     )
 
     assert result.total == 26
     assert [unit.page_number for unit in result.units] == [25, 26]
     assert result.units[0].preview_url == "/api/resources/resource-1/previews/24"
+    assert navigation.calls == 0
 
 
 def test_pdf_details_resolve_page_count_when_legacy_metadata_is_missing() -> None:
-    result = ListResourceDetails(
-        FakeQueries(resource("PDF"), resolved_page_count=3)
-    ).execute(
+    result = details(FakeQueries(resource("PDF"), resolved_page_count=3)).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=24
     )
 
@@ -141,7 +171,7 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
         asset("page-2", "page2.jpg", role="PAGE"),
         asset("page-1", "page1.jpg", role="PAGE"),
     )
-    image_result = ListResourceDetails(
+    image_result = details(
         FakeQueries(resource("IMAGE_DIR"), assets=image_assets)
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=24
@@ -157,7 +187,7 @@ def test_directory_pages_and_audio_tracks_use_natural_stable_order() -> None:
         asset("track-10", "Track 10.mp3", role="TRACK", track=1),
         asset("track-2", "Track 2.mp3", role="TRACK", track=99),
     )
-    audio_result = ListResourceDetails(
+    audio_result = details(
         FakeQueries(resource("AUDIOBOOK_DIR"), assets=audio_assets)
     ).execute(
         context=SCOPE, book_id="book-1", resource_id="resource-1", page=1, page_size=50

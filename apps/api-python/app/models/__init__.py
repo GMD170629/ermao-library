@@ -60,11 +60,11 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
+    LibraryResourceAssetNavigation,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
     LibrarySourceNodeMetadata,
 )
-from app.modules.publications.infrastructure.models import PublicationNavigationCache
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
@@ -84,6 +84,7 @@ __all__ = [
     "LibraryReadableResourceMetadata",
     "LibraryResourceAsset",
     "LibraryResourceAssetMetadata",
+    "LibraryResourceAssetNavigation",
     "LibrarySourceNode",
     "LibrarySourceNodeInterpretation",
     "LibrarySourceNodeMetadata",
@@ -98,7 +99,6 @@ __all__ = [
     "OrganizePolicy",
     "OrganizeRun",
     "PasswordResetToken",
-    "PublicationNavigationCache",
     "QueueRuntimeState",
     "ReadableResourceNavigationUnit",
     "ReaderBookPreference",

@@ -29,9 +29,9 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
+    LibraryResourceAssetNavigation,
     LibrarySourceNode,
 )
-from app.modules.publications.infrastructure.models import PublicationNavigationCache
 
 
 def _path_key(path: str) -> str:
@@ -1052,7 +1052,7 @@ def test_reader_v4_bootstrap_does_not_generate_reflowable_navigation(
     tmp_path: Path,
 ) -> None:
     _login(client, db_session)
-    resource, _asset = _ebook_resource(db_session)
+    resource, asset = _ebook_resource(db_session)
     epub = tmp_path / "without-units.epub"
     epub.write_bytes(b"not-an-epub: bootstrap must not parse this body")
     source_node = db_session.get(LibrarySourceNode, f"{resource.id}-node")
@@ -1110,7 +1110,7 @@ def test_reader_v4_bootstrap_does_not_generate_reflowable_navigation(
     assert writes == []
     assert db_session.query(ReadableResourceNavigationUnit).count() == 0
     db_session.expire_all()
-    navigation_cache = db_session.get(PublicationNavigationCache, resource.id)
+    navigation_cache = db_session.get(LibraryResourceAssetNavigation, asset.id)
     assert navigation_cache is None
 
 
@@ -1187,6 +1187,14 @@ def test_reader_v4_bootstrap_does_not_return_existing_reflowable_navigation(
         params={"page": 1, "pageSize": 120},
     )
     assert detail_units_response.status_code == 200
+    detail_units = detail_units_response.json()["data"]["units"]
+    assert [unit["title"] for unit in detail_units] == ["第一章", "第二章"]
+    assert [unit["assetId"] for unit in detail_units] == [asset.id, asset.id]
+    assert all(not unit["id"].startswith("legacy-") for unit in detail_units)
+    db_session.expire_all()
+    marker = db_session.get(LibraryResourceAssetNavigation, asset.id)
+    assert marker is not None
+    assert marker.chapter_count == 2
 
 
 def test_reader_v2_and_edition_file_routes_are_gone(client: TestClient) -> None:

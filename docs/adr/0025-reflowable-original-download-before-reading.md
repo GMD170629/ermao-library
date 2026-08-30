@@ -42,7 +42,9 @@ Reader v4 的可重排 bootstrap 只提供授权、元数据、进度和书签�
 reading order、目录和 positions 为客户端正文权威来源。服务端保存进度时只
 校验有界、相对且与资源形态匹配的 Locator 合同，不为 href 校验重新打开或
 解析可重排原文件。服务端解析基础设施只保留给导入和元数据等仍有消费者的
-能力；Library 详情也只投影导入阶段已有导航，不在请求期补建。
+能力。Library 的卷册 `reading-units` 接口属于详情元数据能力，按 ADR 0012
+在首次访问时同步解析缺失目录并按当前 `assetId` 缓存；它不向 Reader 提供正文、
+manifest、positions 或章节资源，也不改变下载后阅读契约。
 
 共享启动策略公开 `DOWNLOAD_ORIGINAL | STREAM | UNSUPPORTED`，替代
 `canOpenOnline`。七种可重排格式映射到 `DOWNLOAD_ORIGINAL`，PDF／漫画映射到

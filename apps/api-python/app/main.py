@@ -17,6 +17,9 @@ from app.api.router import api_router
 from app.bootstrap.auth import build_password_authentication_runtime
 from app.bootstrap.opds import build_opds_router
 from app.bootstrap.prestart import verify_current_schema
+from app.bootstrap.publication_navigation import (
+    build_publication_navigation_runtime,
+)
 from app.contracts.http_errors import HttpContractError
 from app.core.auth import get_current_user
 from app.core.authorization import can_manage_system
@@ -122,6 +125,11 @@ def create_app(
         heartbeat_runtime_factory = runtime_factory
         background_runtime_factory = runtime_factory
 
+    publication_navigation_runtime = build_publication_navigation_runtime(
+        runtime_factory,
+        settings,
+    )
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if session_factory is None:
@@ -166,6 +174,7 @@ def create_app(
             if kindle_send_queue_worker is not None:
                 kindle_send_queue_worker.stop()
             log_maintenance_worker.stop()
+            publication_navigation_runtime.close()
 
     app = FastAPI(
         title=settings.app_name, version=settings.app_version, lifespan=lifespan
@@ -195,6 +204,7 @@ def create_app(
         app.dependency_overrides[get_short_write_db] = get_runtime_db
     password_authentication_runtime = build_password_authentication_runtime(settings)
     app.state.password_authentication_runtime = password_authentication_runtime
+    app.state.publication_navigation_runtime = publication_navigation_runtime
 
     @app.middleware("http")
     async def enforce_system_manager_boundary(request, call_next):

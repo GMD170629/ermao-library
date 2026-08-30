@@ -191,7 +191,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "ReaderProgressMutation",
             "ReaderBookmark",
             "ReadableResourceNavigationUnit",
-            "PublicationNavigationCache",
+            "LibraryResourceAssetNavigation",
         } <= table_names
         assert LEGACY_TABLES.isdisjoint(table_names)
 
@@ -330,19 +330,21 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 4
-    assert script.get_heads() == ["0004_remove_media_kind"]
-    assert head_revision() == "0004_remove_media_kind"
+    assert len(revisions) == 5
+    assert script.get_heads() == ["0005_asset_navigation_marker"]
+    assert head_revision() == "0005_asset_navigation_marker"
     assert [revision.revision for revision in revisions] == [
+        "0005_asset_navigation_marker",
         "0004_remove_media_kind",
         "0003_audio_asset_title",
         "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0003_audio_asset_title"
-    assert revisions[1].down_revision == "0002_library_scan_queue_uniqueness"
-    assert revisions[2].down_revision == "0001_library_topology_baseline"
-    assert revisions[3].down_revision is None
+    assert revisions[0].down_revision == "0004_remove_media_kind"
+    assert revisions[1].down_revision == "0003_audio_asset_title"
+    assert revisions[2].down_revision == "0002_library_scan_queue_uniqueness"
+    assert revisions[3].down_revision == "0001_library_topology_baseline"
+    assert revisions[4].down_revision is None
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -351,7 +353,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0004_remove_media_kind"
+        assert _current_revision(engine) == "0005_asset_navigation_marker"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -871,9 +873,9 @@ def test_final_identity_foreign_keys_point_to_target_entities(tmp_path) -> None:
                 ("resourceId",),
                 "LibraryReadableResource",
             ),
-            "PublicationNavigationCache": (
-                ("resourceId",),
-                "LibraryReadableResource",
+            "LibraryResourceAssetNavigation": (
+                ("assetId",),
+                "LibraryResourceAsset",
             ),
             "KindleSendTask": (("bookId",), "LibraryBook"),
             "OrganizeJob": (("bookId",), "LibraryBook"),
@@ -886,7 +888,7 @@ def test_final_identity_foreign_keys_point_to_target_entities(tmp_path) -> None:
 
         for table_name in (
             "ReadableResourceNavigationUnit",
-            "PublicationNavigationCache",
+            "LibraryResourceAssetNavigation",
             "KindleSendTask",
             "OrganizeJob",
             "MetadataLookupTask",

@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import (
     Library,
@@ -172,15 +173,18 @@ class SqlAlchemyResourceDetailQueries:
         self,
         *,
         resource_id: str,
+        asset_id: str | None,
         unit_type: str,
         limit: int,
         offset: int,
     ) -> tuple[tuple[ResourceDetailItem, ...], int]:
-        predicate = (
+        predicate: list[ColumnElement[bool]] = [
             ReadableResourceNavigationUnit.resource_id == resource_id,
             func.lower(ReadableResourceNavigationUnit.unit_type)
             == unit_type.casefold(),
-        )
+        ]
+        if asset_id is not None:
+            predicate.append(ReadableResourceNavigationUnit.asset_id == asset_id)
         rows = self._db.scalars(
             select(ReadableResourceNavigationUnit)
             .where(*predicate)
@@ -325,11 +329,13 @@ class SqlAlchemyResourceDetailQueries:
         self,
         *,
         resource_id: str,
+        asset_id: str,
         current_href: str | None,
         current_position: int | None,
     ) -> ResourceCurrentChapter | None:
         base_predicate = (
             ReadableResourceNavigationUnit.resource_id == resource_id,
+            ReadableResourceNavigationUnit.asset_id == asset_id,
             func.lower(ReadableResourceNavigationUnit.unit_type) == "chapter",
         )
         row: ReadableResourceNavigationUnit | None = None

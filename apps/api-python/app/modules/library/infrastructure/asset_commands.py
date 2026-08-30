@@ -10,6 +10,9 @@ from app.modules.library.application.asset_commands import (
     ResourceAssetDeletion,
     ResourceAssetMutationPort,
 )
+from app.modules.library.infrastructure.publication_navigation import (
+    SqlAlchemyLibraryNavigationProjection,
+)
 
 
 class SqlAlchemyResourceAssetMutation(ResourceAssetMutationPort):
@@ -23,6 +26,10 @@ class SqlAlchemyResourceAssetMutation(ResourceAssetMutationPort):
         if asset is None:
             return None
         resource_id = asset.resource_id
+        SqlAlchemyLibraryNavigationProjection(self._db).invalidate_asset(
+            resource_id=resource_id,
+            asset_id=asset.id,
+        )
         self._db.delete(asset)
         self._db.flush()
         ready_asset_count = int(

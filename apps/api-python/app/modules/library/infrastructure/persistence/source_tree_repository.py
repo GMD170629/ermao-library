@@ -57,6 +57,9 @@ from app.modules.library.domain.source_nodes import (
     evaluate_path_key_occupancy,
     validate_source_node_direct_parent,
 )
+from app.modules.library.infrastructure.publication_navigation import (
+    SqlAlchemyLibraryNavigationProjection,
+)
 from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryBook,
     LibraryBookMetadata,
@@ -539,14 +542,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         if asset is None:
             return False
 
+        SqlAlchemyLibraryNavigationProjection(self._session).invalidate_asset(
+            resource_id=resource_id,
+            asset_id=asset.id,
+        )
         asset.import_state = AssetImportState.PENDING.value
         asset.failure_reason = None
-        self._session.execute(
-            delete(ReadableResourceNavigationUnit).where(
-                ReadableResourceNavigationUnit.resource_id == resource_id,
-                ReadableResourceNavigationUnit.asset_id == asset.id,
-            )
-        )
         resource = self._session.get(LibraryReadableResource, resource_id)
         if resource is None:
             raise LookupError(resource_id)
@@ -1016,6 +1017,12 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
             )
         ).all()
         resource_ids = tuple({row.resource_id for row in rows})
+        navigation = SqlAlchemyLibraryNavigationProjection(self._session)
+        for row in rows:
+            navigation.invalidate_asset(
+                resource_id=row.resource_id,
+                asset_id=row.id,
+            )
         self._session.execute(
             delete(LibraryResourceAsset).where(
                 LibraryResourceAsset.source_node_id.in_(tuple(source_node_ids))

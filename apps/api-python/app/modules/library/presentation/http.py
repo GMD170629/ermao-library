@@ -210,6 +210,13 @@ from app.modules.library.presentation.views import (
     management_book_list_view,
     resource_view,
 )
+from app.modules.publications.public import (
+    PublicationCorruptError,
+    PublicationNotFoundError,
+    PublicationReadError,
+    PublicationResourceTooLargeError,
+    PublicationUnsupportedError,
+)
 from app.schemas.responses import fail, ok
 
 router = APIRouter(tags=["library"], route_class=TypedContractRoute)
@@ -313,6 +320,33 @@ def _deleted_response(value: object) -> ResourceDeletedResponse:
 
 def _reading_units_response(value: object) -> ReadingUnitsResponse:
     return cast(ReadingUnitsResponse, value)
+
+
+def _publication_navigation_error(error: Exception):
+    if isinstance(error, PublicationNotFoundError):
+        return fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
+    if isinstance(error, PublicationUnsupportedError):
+        return fail(
+            "当前图书格式暂不支持目录解析",
+            status_code=422,
+            code="PUBLICATION_UNSUPPORTED",
+        )
+    if isinstance(error, PublicationResourceTooLargeError):
+        return fail(
+            "图书文件超过可解析大小限制",
+            status_code=413,
+            code="PUBLICATION_RESOURCE_TOO_LARGE",
+        )
+    if isinstance(error, PublicationReadError):
+        return fail(
+            "图书文件暂时无法读取",
+            status_code=503,
+            code="PUBLICATION_READ_FAILED",
+        )
+    if isinstance(error, PublicationCorruptError):
+        code = getattr(error, "code", "PUBLICATION_CORRUPT")
+        return fail("图书文件无法解析", status_code=422, code=code)
+    return fail("图书目录解析失败", status_code=422, code="PUBLICATION_PARSE_FAILED")
 
 
 def _asset_deleted_response(value: object) -> AssetDeletedResponse:
@@ -1808,6 +1842,7 @@ def list_library_reading_units(
         result = resource_details(
             db,
             user_id=user.id,
+            navigation=request.app.state.publication_navigation_runtime,
         ).execute(
             context=context,
             book_id=book_id,
@@ -1819,6 +1854,13 @@ def list_library_reading_units(
         return _reading_units_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
+    except (
+        PublicationCorruptError,
+        PublicationNotFoundError,
+        PublicationResourceTooLargeError,
+        PublicationUnsupportedError,
+    ) as error:
+        return _reading_units_response(_publication_navigation_error(error))
     return _reading_units_response(
         ok(
             {

@@ -489,6 +489,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0002_library_scan_queue_uniqueness.py",
         "0003_audio_asset_title.py",
         "0004_remove_media_kind.py",
+        "0005_asset_navigation_marker.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
@@ -576,7 +577,7 @@ def test_readable_resource_orm_check_constraints_use_typed_expressions() -> None
                 f"{path.name}: CheckConstraint must use typed SQLAlchemy "
                 f"expressions, not string SQL (line {node.lineno})"
             )
-    assert check_count == 16
+    assert check_count == 17
 
 
 def test_readable_resource_baseline_overlay_check_constraints_use_typed_expressions() -> (

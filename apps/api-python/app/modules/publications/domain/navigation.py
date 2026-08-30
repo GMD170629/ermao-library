@@ -11,30 +11,11 @@ from app.modules.publications.domain.model import (
     PublicationTocEntry,
 )
 
-CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION = 3
-
 
 @dataclass(frozen=True, slots=True)
-class PublicationParserProfile:
-    parser: str
-    normalization: str
-
-
-@dataclass(frozen=True, slots=True)
-class PublicationNavigationCacheIdentity:
-    resource_id: str
+class PublicationNavigationMarkerState:
     asset_id: str
-    source_size_bytes: int
-    source_mtime_ms: int
-    parser: str
-    normalization: str
-
-
-@dataclass(frozen=True, slots=True)
-class PublicationNavigationCacheState:
-    identity: PublicationNavigationCacheIdentity
     chapter_count: int
-    projection_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,24 +29,6 @@ class PublicationNavigationEntry:
     level: int
     path: tuple[int, ...]
     reading_order_position: int | None
-
-
-def publication_cache_identity(
-    *,
-    resource_id: str,
-    asset_id: str,
-    source_size_bytes: int,
-    source_mtime_ms: int,
-    profile: PublicationParserProfile,
-) -> PublicationNavigationCacheIdentity:
-    return PublicationNavigationCacheIdentity(
-        resource_id=resource_id,
-        asset_id=asset_id,
-        source_size_bytes=source_size_bytes,
-        source_mtime_ms=source_mtime_ms,
-        parser=profile.parser,
-        normalization=profile.normalization,
-    )
 
 
 def _href_without_fragment(href: str) -> str:
@@ -125,11 +88,7 @@ def flatten_publication_navigation(
 
 
 __all__ = [
-    "CURRENT_PUBLICATION_NAVIGATION_PROJECTION_VERSION",
-    "PublicationNavigationCacheIdentity",
-    "PublicationNavigationCacheState",
     "PublicationNavigationEntry",
-    "PublicationParserProfile",
+    "PublicationNavigationMarkerState",
     "flatten_publication_navigation",
-    "publication_cache_identity",
 ]

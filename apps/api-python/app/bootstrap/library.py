@@ -44,6 +44,7 @@ from app.modules.library.application.recognized_metadata import (
 )
 from app.modules.library.application.resource_details import (
     ListResourceDetails,
+    ResourceNavigationEnsurer,
 )
 from app.modules.library.application.source_node_commands import (
     UpdateSourceNodeMetadata,
@@ -245,8 +246,12 @@ def resource_details(
     db: Session,
     *,
     user_id: str,
+    navigation: ResourceNavigationEnsurer,
 ) -> ListResourceDetails:
-    return ListResourceDetails(SqlAlchemyResourceDetailQueries(db, user_id))
+    return ListResourceDetails(
+        SqlAlchemyResourceDetailQueries(db, user_id),
+        navigation,
+    )
 
 
 def update_source_node_metadata(db: Session) -> UpdateSourceNodeMetadata:

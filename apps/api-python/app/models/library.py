@@ -247,7 +247,7 @@ class ReadableResourceNavigationUnit(Base):
     asset_id: Mapped[str | None] = mapped_column(
         "assetId",
         String(191),
-        ForeignKey("LibraryResourceAsset.id", ondelete="SET NULL", onupdate="CASCADE"),
+        ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
         nullable=True,
     )
     unit_type: Mapped[str] = mapped_column("unitType", String(191), nullable=False)

@@ -712,6 +712,40 @@ class LibraryResourceAsset(Base):
     )
 
 
+class LibraryResourceAssetNavigation(Base):
+    """Successful lazy navigation generation for one source asset."""
+
+    __tablename__ = "LibraryResourceAssetNavigation"
+    __table_args__ = (
+        CheckConstraint(
+            column("chapterCount") >= 0,
+            name="LibraryResourceAssetNavigation_chapterCount_check",
+        ),
+    )
+
+    asset_id: Mapped[str] = mapped_column(
+        "assetId",
+        String(191),
+        ForeignKey("LibraryResourceAsset.id", ondelete="CASCADE", onupdate="CASCADE"),
+        primary_key=True,
+    )
+    chapter_count: Mapped[int] = mapped_column("chapterCount", Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        server_default=timestamp_ms_server_default(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt",
+        TimestampMilliseconds(),
+        nullable=False,
+        default=db_timestamp,
+        onupdate=db_timestamp,
+    )
+
+
 class LibraryResourceAssetMetadata(Base):
     __tablename__ = "LibraryResourceAssetMetadata"
 
@@ -763,6 +797,7 @@ __all__ = [
     "LibraryReadableResourceMetadata",
     "LibraryResourceAsset",
     "LibraryResourceAssetMetadata",
+    "LibraryResourceAssetNavigation",
     "LibrarySourceNode",
     "LibrarySourceNodeInterpretation",
     "LibrarySourceNodeMetadata",

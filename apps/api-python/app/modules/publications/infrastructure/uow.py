@@ -6,16 +6,16 @@ from collections.abc import Callable
 from types import TracebackType
 from typing import Self
 
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.contracts.library_navigation import LibraryNavigationProjection
 from app.modules.publications.application.navigation_ports import (
-    PublicationNavigationCacheReader,
+    PublicationNavigationMarkerReader,
     PublicationNavigationWriteRepository,
 )
 from app.modules.publications.application.ports import PublicationSourceRepository
 from app.modules.publications.infrastructure.navigation_cache import (
-    SqlAlchemyPublicationNavigationCacheReader,
+    SqlAlchemyPublicationNavigationMarkerReader,
     SqlAlchemyPublicationNavigationWriteRepository,
 )
 
@@ -28,7 +28,7 @@ class SqlAlchemyPublicationNavigationLookupUnitOfWork:
 
     def __init__(
         self,
-        session_factory: sessionmaker[Session],
+        session_factory: Callable[[], Session],
         source_factory: PublicationSourceFactory,
         library_navigation_factory: LibraryNavigationFactory,
     ) -> None:
@@ -37,12 +37,12 @@ class SqlAlchemyPublicationNavigationLookupUnitOfWork:
         self._library_navigation_factory = library_navigation_factory
         self._session: Session | None = None
         self.sources: PublicationSourceRepository
-        self.cache: PublicationNavigationCacheReader
+        self.markers: PublicationNavigationMarkerReader
 
     def __enter__(self) -> Self:
         self._session = self._session_factory()
         self.sources = self._source_factory(self._session)
-        self.cache = SqlAlchemyPublicationNavigationCacheReader(
+        self.markers = SqlAlchemyPublicationNavigationMarkerReader(
             self._session,
             self._library_navigation_factory(self._session),
         )
@@ -64,7 +64,7 @@ class SqlAlchemyPublicationNavigationLookupUnitOfWork:
 class SqlAlchemyPublicationNavigationUnitOfWork:
     def __init__(
         self,
-        session_factory: sessionmaker[Session],
+        session_factory: Callable[[], Session],
         library_navigation_factory: LibraryNavigationFactory,
     ) -> None:
         self._session_factory = session_factory

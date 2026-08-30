@@ -21,16 +21,25 @@ Publication directly and never creates a derived reading package.
 reflowable publications. Importers may inspect metadata and covers, but they do not
 persist chapter navigation or chapter counts.
 
-`LibraryReadingUnit` rows with `unitType = "chapter"` are a lazy projection of that
-TOC. A successful projection is identified by the volume, selected source file,
-original file hash, parser identifier and normalization identifier. A separate
-cache-state row records successful empty TOCs. A changed source or generator
-identity invalidates the projection.
+`ReadableResourceNavigationUnit` rows with `unitType = "chapter"` are a lazy
+projection of that TOC. The projection and its successful marker belong only to
+the selected immutable `assetId`; the marker stores only `assetId` and
+`chapterCount`, including `chapterCount = 0` for a successfully parsed empty TOC.
+It does not persist format, file size, modification time, parser identity,
+normalization identity, projection version or parse duration.
 
-The Work Detail navigation surface and the volume reading-units endpoint may each
-populate a missing server-side projection. Parsing happens outside the write
-transaction. Publication identity is rechecked before an atomic chapter-row
-replacement so an obsolete parse cannot overwrite a newer file.
+Only the Library volume `reading-units` request populates a missing server-side
+projection. The authorized application use case resolves the current asset,
+returns an existing marker immediately, or synchronously parses and atomically
+replaces the chapter rows before returning the response. This low-concurrency
+path deliberately has no task queue, polling contract, lock, singleflight or
+publish-time version recheck.
+
+Deleting an asset removes its marker and chapter rows through foreign-key
+cascades. Reimport and volume operations which detect changed source content must
+explicitly invalidate that asset's chapter rows and marker and reset
+`chapterCount`; the next `reading-units` request then parses the replacement
+asset. A different selected `assetId` can never hit the old marker.
 
 ADR 0025 removes this projection from the Reader delivery path. Reflowable Reader
 v4 bootstrap no longer populates or returns server navigation, and there is no
@@ -47,12 +56,13 @@ projections and remain eager format-specific indexes.
 
 ## Consequences
 
-- Existing reflowable chapter rows are cleared by migration and rebuilt on demand.
+- Existing reflowable markers are cleared by migration and rebuilt on demand;
+  chapter rows without a current-asset marker are not treated as valid.
 - `LibraryVolume.chapterCount` is `null` until a successful projection and is `0`
   for a successfully parsed Publication with no TOC entries.
-- A detail projection remains available when parsing fails, returns no chapters,
-  records a structured failure and retries on a later Library access. It does not
-  affect Reader startup or local parsing failures.
+- A parse failure publishes neither a marker nor replacement chapters. The HTTP
+  request returns the stable parser error and a later Library access may retry.
+  It does not affect Reader startup or local parsing failures.
 - EPUB Publication parsing must support both EPUB 3 Navigation Documents and EPUB 2
   NCX. FB2 receives a direct original-file Publication adapter; this decision does
   not add FB2 navigator support to Web, Android or iOS clients.

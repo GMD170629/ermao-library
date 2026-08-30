@@ -104,6 +104,7 @@ class ResourceDetailQueries(Protocol):
         self,
         *,
         resource_id: str,
+        asset_id: str | None,
         unit_type: str,
         limit: int,
         offset: int,
@@ -117,9 +118,19 @@ class ResourceDetailQueries(Protocol):
         self,
         *,
         resource_id: str,
+        asset_id: str,
         current_href: str | None,
         current_position: int | None,
     ) -> ResourceCurrentChapter | None: ...
+
+
+class ResourceNavigationEnsurer(Protocol):
+    def ensure(
+        self,
+        *,
+        resource_id: str,
+        context: ResourceDetailAccessScope,
+    ) -> str: ...
 
 
 def _navigation_level(metadata_json: str | None) -> int | None:
@@ -140,8 +151,13 @@ class ListResourceDetails:
 
     MAX_PAGE_SIZE = 100
 
-    def __init__(self, queries: ResourceDetailQueries) -> None:
+    def __init__(
+        self,
+        queries: ResourceDetailQueries,
+        navigation: ResourceNavigationEnsurer,
+    ) -> None:
         self._queries = queries
+        self._navigation = navigation
 
     def execute(
         self,
@@ -167,8 +183,13 @@ class ListResourceDetails:
         current_chapter: ResourceCurrentChapter | None = None
 
         if source_format in REFLOWABLE_FORMATS:
+            asset_id = self._navigation.ensure(
+                resource_id=resource_id,
+                context=context,
+            )
             units, total = self._queries.list_navigation_units(
                 resource_id=resource_id,
+                asset_id=asset_id,
                 unit_type="chapter",
                 limit=normalized_size,
                 offset=offset,
@@ -179,12 +200,14 @@ class ListResourceDetails:
             )
             current_chapter = self._queries.resolve_current_chapter(
                 resource_id=resource_id,
+                asset_id=asset_id,
                 current_href=resource.current_href,
                 current_position=resource.current_position,
             )
         elif source_format in {"CBZ", "ZIP", "CBR", "RAR"}:
             units, total = self._queries.list_navigation_units(
                 resource_id=resource_id,
+                asset_id=None,
                 unit_type="page",
                 limit=normalized_size,
                 offset=offset,
@@ -310,4 +333,5 @@ __all__ = [
     "ResourceDetailPage",
     "ResourceDetailQueries",
     "ResourceDetailResource",
+    "ResourceNavigationEnsurer",
 ]
