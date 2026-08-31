@@ -166,8 +166,8 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android API 36
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Install Android API 37
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
 
       - name: Verify accepted Android PDFium artifact
         run: python3 native/pdfium/scripts/verify-lock.py --platform android
@@ -263,62 +263,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           working-directory: apps/mobile
-          script: |
-            set -eu
-            ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
-            adb install -r -t androidApp/build/outputs/apk/debug/androidApp-debug.apk
-            adb install -r -t androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
-            set --
-            if [ "$RUN_FULL_ANDROID_REGRESSION" = "true" ]; then
-              echo 'Running complete Android instrumented regression.'
-            else
-              set -- \
-                -e class \
-                'com.ermao.library.AndroidShellSmokeTest,com.ermao.library.features.reader.infrastructure.ReaderSafetyConformanceInstrumentedTest'
-            fi
-            mkdir -p androidApp/build/reports/androidTests/manual
-            adb shell am instrument -w -r \
-              "$@" \
-              com.ermao.library.test/androidx.test.runner.AndroidJUnitRunner \
-              | tee androidApp/build/reports/androidTests/manual/instrumentation.txt
-            grep -q 'OK (' androidApp/build/reports/androidTests/manual/instrumentation.txt
-            if grep -q 'FAILURES!!!' androidApp/build/reports/androidTests/manual/instrumentation.txt; then
-              exit 1
-            fi
-            mkdir -p androidApp/build/reports/reader-safety-conformance
-            adb exec-out run-as com.ermao.library \
-              cat files/reader-safety-conformance/android.json \
-              > androidApp/build/reports/reader-safety-conformance/android.json
-            test -s androidApp/build/reports/reader-safety-conformance/android.json
-            python3 ../../packages/reader-contracts/verify-reader-safety-conformance.py \
-              --require-consumer ANDROID \
-              androidApp/build/reports/reader-safety-conformance/android.json
-            adb logcat -c
-            adb shell am force-stop com.ermao.library
-            adb shell monkey -p com.ermao.library -c android.intent.category.LAUNCHER 1
-            for attempt in $(seq 1 20); do
-              if adb shell pidof com.ermao.library | grep -q '[0-9]'; then
-                break
-              fi
-              sleep 1
-            done
-            adb shell pidof com.ermao.library | grep -q '[0-9]'
-            adb shell dumpsys package com.ermao.library | grep -q 'versionCode=1'
-            adb shell dumpsys package com.ermao.library | grep -q 'versionName=1.0.0'
-            app_ready=false
-            for attempt in $(seq 1 20); do
-              adb shell uiautomator dump /sdcard/mobile-stage-1.xml >/dev/null
-              if adb shell cat /sdcard/mobile-stage-1.xml | grep -q 'Connect your library'; then
-                app_ready=true
-                break
-              fi
-              sleep 1
-            done
-            test "$app_ready" = true
-            if adb logcat -d -b crash | grep -q 'FATAL EXCEPTION'; then
-              adb logcat -d -b crash
-              exit 1
-            fi
+          script: bash scripts/run-android-emulator-tests.sh
 
       - name: Upload Android instrumented test results
         if: always()

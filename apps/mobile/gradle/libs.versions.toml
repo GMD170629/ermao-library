@@ -1,5 +1,5 @@
 [versions]
-agp = "9.1.0"
+agp = "9.1.1"
 kotlin = "2.4.10"
 ktor = "3.5.1"
 kotlinx-coroutines = "1.11.0"
@@ -20,9 +20,9 @@ desugar-jdk-libs = "2.1.5"
 readium = "3.3.0"
 jsoup = "1.22.2"
 commons-compress = "1.27.1"
-android-compile-sdk = "36"
+android-compile-sdk = "37"
 android-min-sdk = "26"
-android-target-sdk = "36"
+android-target-sdk = "37"
 
 [libraries]
 androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", version = "1.4.2" }
