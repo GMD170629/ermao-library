@@ -24,6 +24,8 @@ import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.cancel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -551,7 +553,13 @@ class ApiClient internal constructor(
             val remainingWithOverflowProbe = maximumBytes.toLong() - totalBytes + 1L
             val requestedBytes = minOf(readBuffer.size.toLong(), remainingWithOverflowProbe).toInt()
             val count = readAvailable(readBuffer, 0, requestedBytes)
-            if (count < 0) break
+            if (count < 0) {
+                // Ktor uses EOF for both normal and exceptional channel closure.
+                // Never publish bytes from an aborted client call as a complete body.
+                closedCause?.let { throw it }
+                ensureBoundedReadActive()
+                break
+            }
             if (count == 0) continue
             totalBytes += count
             if (totalBytes > maximumBytes) return null
@@ -563,7 +571,13 @@ class ApiClient internal constructor(
             chunk.copyInto(result, destinationOffset = offset)
             offset += chunk.size
         }
+        ensureBoundedReadActive()
         return result
+    }
+
+    private suspend fun ensureBoundedReadActive() {
+        currentCoroutineContext().ensureActive()
+        client.coroutineContext.ensureActive()
     }
 
     private companion object {

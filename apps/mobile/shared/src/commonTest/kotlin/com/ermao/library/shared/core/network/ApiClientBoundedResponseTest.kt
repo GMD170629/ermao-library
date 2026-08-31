@@ -12,15 +12,20 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.ByteChannel
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class ApiClientBoundedResponseTest {
     @Test
@@ -146,8 +151,27 @@ class ApiClientBoundedResponseTest {
     }
 
     @Test
+    fun receivesCompleteBodyWithoutContentLength(): Unit = runBlocking {
+        val bytes = byteArrayOf(1, 2, 3)
+        val api = client(ByteReadChannel(bytes))
+        try {
+            assertContentEquals(bytes, assertIs<ApiResult.Success<AuthenticatedBinary>>(
+                api.loadAuthenticatedBinary(PATH, 10, MIMES)).value.bytes)
+        } finally { api.close() }
+    }
+
+    @Test
     fun incompleteResponseIsNeverAccepted(): Unit = runBlocking {
         val api = client(ByteReadChannel(byteArrayOf(1, 2)), length = "3")
+        try {
+            assertIs<ApiResult.Failure>(api.loadAuthenticatedBinary(PATH, 10, MIMES))
+        } finally { api.close() }
+    }
+
+    @Test
+    fun abnormallyClosedBodyIsNeverAcceptedWithoutContentLength(): Unit = runBlocking {
+        val body = ByteChannel().apply { cancel(IllegalStateException("truncated test response")) }
+        val api = client(body)
         try {
             assertIs<ApiResult.Failure>(api.loadAuthenticatedBinary(PATH, 10, MIMES))
         } finally { api.close() }
@@ -175,6 +199,23 @@ class ApiClientBoundedResponseTest {
                 assertIs<ApiResult.Failure>(request.await())
             }
         } finally { body.cancel(null); api.close() }
+    }
+
+    @Test
+    fun callerCancellationCannotPublishACompletedBody(): Unit = runBlocking {
+        lateinit var requestJob: Job
+        val observedResult = CompletableDeferred<ApiResult<AuthenticatedBinary>>()
+        val api = client(ByteReadChannel(byteArrayOf(1, 2, 3)), onRequest = { requestJob.cancel() })
+        val request = async(start = CoroutineStart.LAZY) {
+            requestJob = currentCoroutineContext()[Job] ?: error("request job is required")
+            observedResult.complete(api.loadAuthenticatedBinary(PATH, 10, MIMES))
+        }
+        try {
+            request.start()
+            withTimeout(1000) { request.join() }
+            assertTrue(request.isCancelled)
+            assertFalse(observedResult.isCompleted)
+        } finally { api.close() }
     }
 
     private fun client(body: ByteReadChannel, status: HttpStatusCode = HttpStatusCode.OK, length: String? = null,
