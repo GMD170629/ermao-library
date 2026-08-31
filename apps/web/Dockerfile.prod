@@ -8,6 +8,7 @@ RUN apt-get update \
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/reader-core/package.json packages/reader-core/package.json
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile --filter @shuku/web...
 
 FROM deps AS builder

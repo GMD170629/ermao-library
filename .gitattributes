@@ -1,4 +1,7 @@
 * text=auto eol=lf
+
+# Keep upstream formatting intact; libarchive's release sources contain intentional whitespace.
+apps/mobile/native/archive-core/vendor/libarchive-3.8.9/** -whitespace
 apps/mobile/native/pdfium/artifacts/**/*.aar filter=lfs diff=lfs merge=lfs -text
 apps/mobile/native/pdfium/artifacts/**/*.xcframework.zip filter=lfs diff=lfs merge=lfs -text
 apps/mobile/native/pdfium/artifacts/**/*.so filter=lfs diff=lfs merge=lfs -text

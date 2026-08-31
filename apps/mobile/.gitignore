@@ -1,6 +1,10 @@
 .gradle/
 .kotlin/
 **/build/
+
+# libarchive's pinned upstream release snapshot uses build/ for required source files.
+!native/archive-core/vendor/libarchive-3.8.9/build/
+!native/archive-core/vendor/libarchive-3.8.9/build/**
 **/.cxx/
 local.properties
 .idea/

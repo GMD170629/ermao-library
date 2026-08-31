@@ -264,22 +264,21 @@ jobs:
           disable-animations: true
           working-directory: apps/mobile
           script: |
-            set -euo pipefail
+            set -eu
             ./gradlew :androidApp:assembleDebug :androidApp:assembleDebugAndroidTest
             adb install -r -t androidApp/build/outputs/apk/debug/androidApp-debug.apk
             adb install -r -t androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk
-            instrumentation_args=()
+            set --
             if [ "$RUN_FULL_ANDROID_REGRESSION" = "true" ]; then
               echo 'Running complete Android instrumented regression.'
             else
-              instrumentation_args=(
-                -e class
+              set -- \
+                -e class \
                 'com.ermao.library.AndroidShellSmokeTest,com.ermao.library.features.reader.infrastructure.ReaderSafetyConformanceInstrumentedTest'
-              )
             fi
             mkdir -p androidApp/build/reports/androidTests/manual
             adb shell am instrument -w -r \
-              "${instrumentation_args[@]}" \
+              "$@" \
               com.ermao.library.test/androidx.test.runner.AndroidJUnitRunner \
               | tee androidApp/build/reports/androidTests/manual/instrumentation.txt
             grep -q 'OK (' androidApp/build/reports/androidTests/manual/instrumentation.txt
