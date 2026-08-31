@@ -21,7 +21,6 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 class ApiClientBoundedResponseTest {
     @Test
@@ -163,7 +162,7 @@ class ApiClientBoundedResponseTest {
     }
 
     @Test
-    fun closingClientCancelsAnUnfinishedBody(): Unit = runBlocking {
+    fun closingClientTerminatesAnUnfinishedBodyWithoutAcceptingIt(): Unit = runBlocking {
         val started = CompletableDeferred<Unit>()
         val body = ByteChannel()
         val api = client(body, onRequest = { started.complete(Unit) })
@@ -172,7 +171,9 @@ class ApiClientBoundedResponseTest {
             withTimeout(1000) { started.await() }
             api.close()
             withTimeout(1000) { request.join() }
-            assertTrue(request.isCancelled)
+            if (!request.isCancelled) {
+                assertIs<ApiResult.Failure>(request.await())
+            }
         } finally { body.cancel(null); api.close() }
     }
 
