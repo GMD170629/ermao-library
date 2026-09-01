@@ -21,9 +21,20 @@ class ReaderPreferencesTest {
     @Test
     fun controlsDistinguishUnsupportedInapplicableAndContextualLimits() {
         val preferences = ReaderPreferences()
-        val reflow = readerPlatformCapabilities(ReaderMorphology.Reflowable, volumeKeys = false, pdfFit = false)
+        val reflow = readerPlatformCapabilities(
+            ReaderMorphology.Reflowable,
+            volumeKeys = false,
+            pdfZoom = false,
+            pdfFit = false,
+        )
         fun state(control: ReaderControl, current: ReaderPreferences = preferences, ready: Boolean = true) =
-            resolveReaderControl(control, ReaderMorphology.Reflowable, reflow, current, ready)
+            ReaderSettingsCatalog.resolveReaderControl(
+                control,
+                ReaderMorphology.Reflowable,
+                reflow,
+                current,
+                ready,
+            )
         assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontFamily))
         assertEquals(ReaderControlAvailability.NotImplemented, state(ReaderControl.VolumeKeys))
         assertEquals(ReaderControlAvailability.NotImplemented, state(ReaderControl.NegativeLetterSpacing))
@@ -31,23 +42,104 @@ class ReaderPreferencesTest {
         assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.FontSize, ready = false))
         val scrolling = preferences.copy(epub = preferences.epub.copy(flow = ReaderReadingMode.ContinuousScroll))
         assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.Spread, scrolling))
-        val publisher = preferences.copy(epub = preferences.epub.copy(
-            typography = preferences.epub.typography.copy(preservePublisherStyles = true),
-        ))
-        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, state(ReaderControl.LineHeight, publisher))
-        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.PublisherStyles, publisher))
-        assertEquals(ReaderControlAvailability.Available, state(ReaderControl.FontSize, publisher))
-        val optimizationOff = preferences.copy(epub = preferences.epub.copy(
-            optimization = preferences.epub.optimization.copy(enabled = false),
-        ))
-        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
-            ReaderControl.DeduplicateIndent, ReaderMorphology.Reflowable,
-            reflow.copy(supportsSmartOptimization = true), optimizationOff, true,
-        ))
-        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, resolveReaderControl(
+        assertEquals(ReaderControlAvailability.TemporarilyUnavailable, ReaderSettingsCatalog.resolveReaderControl(
             ReaderControl.ParagraphIndent, ReaderMorphology.Reflowable, reflow, preferences, true,
             setOf(ReaderControl.ParagraphIndent),
         ))
+    }
+
+    @Test
+    fun settingStateOwnsAvailabilityReasonAndWebPrecedence() {
+        val preferences = ReaderPreferences()
+        val capabilities = readerPlatformCapabilities(
+            ReaderMorphology.Reflowable,
+            volumeKeys = false,
+            pdfZoom = false,
+            pdfFit = false,
+        )
+        val volumeKeys = ReaderSettingsCatalog.settings.first { it.id == "volumeKeyPageTurn" }
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "engineNotReady"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                volumeKeys,
+                ReaderMorphology.Reflowable,
+                capabilities,
+                preferences,
+                ready = false,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "publicationConstraint"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                volumeKeys,
+                ReaderMorphology.Reflowable,
+                capabilities,
+                preferences,
+                ready = true,
+                nativeUnavailable = setOf(ReaderControl.VolumeKeys),
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.NotImplemented, "notImplemented"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                volumeKeys,
+                ReaderMorphology.Reflowable,
+                capabilities,
+                preferences,
+                ready = true,
+            ),
+        )
+
+        val vertical = preferences.copy(epub = preferences.epub.copy(writingMode = ReaderWritingMode.Vertical))
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "verticalWritingMode"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                ReaderSettingsCatalog.settings.first { it.id == "textFlow" },
+                ReaderMorphology.Reflowable,
+                capabilities,
+                vertical,
+                ready = true,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "narrowViewport"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                ReaderSettingsCatalog.settings.first { it.id == "textPageWidth" },
+                ReaderMorphology.Reflowable,
+                capabilities,
+                preferences,
+                ready = true,
+                wideViewport = false,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.NotApplicable),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                ReaderSettingsCatalog.settings.first { it.id == "comicSpread" },
+                ReaderMorphology.Reflowable,
+                capabilities,
+                preferences,
+                ready = false,
+            ),
+        )
+
+        val pdfCapabilities = readerPlatformCapabilities(
+            ReaderMorphology.Pdf,
+            volumeKeys = false,
+            pdfZoom = true,
+            pdfFit = false,
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.NotImplemented, "zoomUnavailable"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                ReaderSettingsCatalog.settings.first { it.id == "pdfZoom" },
+                ReaderMorphology.Pdf,
+                pdfCapabilities,
+                preferences,
+                ready = true,
+                canZoom = false,
+            ),
+        )
     }
 
     @Test
@@ -59,10 +151,10 @@ class ReaderPreferencesTest {
         assertEquals(defaults, catalogReset.change(changed, ""))
     }
     @Test
-    fun defaultsMatchWebReaderV3() {
+    fun defaultsMatchReaderContract() {
         val preferences = ReaderPreferences()
 
-        assertEquals(5, preferences.schemaVersion)
+        assertEquals(6, preferences.schemaVersion)
         assertEquals(ReaderTheme.Warm, preferences.appearance.theme)
         assertEquals(ReaderThemeMode.Manual, preferences.appearance.themeMode)
         assertEquals(18, preferences.epub.fontSize)
@@ -70,6 +162,8 @@ class ReaderPreferencesTest {
         assertEquals(ReaderFontFamily.Pingfang, preferences.epub.fontFamily)
         assertEquals(ReaderSpreadMode.Single, preferences.epub.spreadMode)
         assertEquals(ReaderReadingMode.Paged, preferences.epub.flow)
+        assertEquals(ReaderReadingProgression.LeftToRight, preferences.epub.readingProgression)
+        assertEquals(ReaderWritingMode.Horizontal, preferences.epub.writingMode)
         assertEquals(ReaderComicDirection.LeftToRight, preferences.comic.direction)
         assertEquals(ReaderReadingMode.Paged, preferences.comic.flow)
         assertEquals(ReaderComicSpreadMode.Single, preferences.comic.spreadMode)
@@ -84,40 +178,13 @@ class ReaderPreferencesTest {
     }
 
     @Test
-    fun retiredSansAliasesMigrateToTheSingleVisibleSansChoice() {
-        val codec = ReaderPreferencesJson()
-        val heiti = codec.decode("""{"schemaVersion":5,"epub":{"fontFamily":"heiti"}}""")
-        val yahei = codec.decode("""{"schemaVersion":5,"epub":{"fontFamily":"yahei"}}""")
-
-        assertEquals(ReaderFontFamily.Pingfang, heiti.epub.fontFamily)
-        assertEquals(ReaderFontFamily.Pingfang, yahei.epub.fontFamily)
-        assertEquals(
-            listOf("pingfang", "songti", "kaiti"),
-            ReaderSettingsCatalog.settings.first { it.id == "fontFamily" }.options.map { it.value },
-        )
-    }
-
-    @Test
-    fun legacyPaperNightAndSystemValuesMigrate() {
-        val codec = ReaderPreferencesJson()
-
-        val paper = codec.decode("""{"theme":"paper","fontSize":1.2,"readingMode":"paged"}""")
-        val night = codec.decode("""{"theme":"night"}""")
-        val system = codec.decode("""{"theme":"system","readingMode":"continuous_scroll"}""")
-
-        assertEquals(ReaderTheme.Warm, paper.appearance.theme)
-        assertEquals(22, paper.epub.fontSize)
-        assertEquals(ReaderTheme.Night, night.appearance.theme)
-        assertEquals(ReaderThemeMode.System, system.appearance.themeMode)
-        assertEquals(ReaderReadingMode.ContinuousScroll, system.epub.flow)
-    }
-
-    @Test
     fun nativeEpubCapabilitiesDisableOnlyUnsupportedWebControls() {
         val ios = ReaderCapabilities.epub(supportsVolumeKeys = false)
         val android = ReaderCapabilities.epub(supportsVolumeKeys = true)
 
         assertTrue(ios.supportsReadingMode)
+        assertTrue(ios.supportsReadingProgression)
+        assertTrue(ios.supportsWritingMode)
         assertTrue(ios.supportsSpreadMode)
         assertTrue(ios.supportsParagraphLayout)
         assertFalse(ios.supportsNegativeLetterSpacing)
@@ -142,14 +209,33 @@ class ReaderPreferencesTest {
     }
 
     @Test
-    fun versionFourMigrationRetainsMasterAndIsIdempotent() {
-        val codec = ReaderPreferencesJson()
-        val original = ReaderPreferences(epub = ReaderEpubPreferences(lineHeight = 1.85, letterSpacing = 0.03, typography = ReaderTypographyPreferences(preservePublisherStyles = true)))
-        val legacy = codec.encode(original).replace("\"schemaVersion\":5", "\"schemaVersion\":4")
-        val migrated = codec.decode(legacy)
-        assertEquals(original, migrated)
-        assertEquals(migrated, codec.decode(codec.encode(migrated)))
+    fun codecAcceptsOnlyCurrentSchemaAndRejectsUnknownFields() {
+        val codec = ReaderPreferencesJson
+        assertEquals(ReaderPreferences(), codec.decode(codec.encode(ReaderPreferences())))
+        assertEquals(null, codec.canonicalizeOrNull("{}"))
         assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":99}"))
-        assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":5,\"epub\":{\"fontSize\":999}}"))
+        assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":6,\"unexpectedField\":true}"))
+        assertEquals(null, codec.canonicalizeOrNull("{\"schemaVersion\":6,\"epub\":{\"fontSize\":999}}"))
     }
+
+    @Test
+    fun textLayoutSerializesAndParticipatesInMergingAndChangedControls() {
+        val codec = ReaderPreferencesJson
+        val base = ReaderPreferences()
+        val changed = base.copy(epub = base.epub.copy(
+            readingProgression = ReaderReadingProgression.RightToLeft,
+            writingMode = ReaderWritingMode.Vertical,
+        ))
+        assertEquals(changed, codec.decode(codec.encode(changed)))
+        assertEquals(
+            setOf(ReaderControl.ReadingProgression, ReaderControl.WritingMode),
+            changedReaderControls(base, changed),
+        )
+        val concurrent = base.copy(epub = base.epub.copy(fontSize = 24))
+        val merged = mergeReaderPreferenceChanges(base, changed, concurrent)
+        assertEquals(ReaderReadingProgression.RightToLeft, merged.epub.readingProgression)
+        assertEquals(ReaderWritingMode.Vertical, merged.epub.writingMode)
+        assertEquals(24, merged.epub.fontSize)
+    }
+
 }

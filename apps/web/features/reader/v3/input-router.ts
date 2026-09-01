@@ -1,3 +1,5 @@
+import { readerPhysicalHorizontalPageTurn } from '@shuku/reader-core';
+
 export type ReaderDirection = 'ltr' | 'rtl';
 export type ReaderInputIntent = 'previous' | 'next' | 'first' | 'last' | 'escape' | 'toggle-controls';
 
@@ -23,8 +25,7 @@ export type ReaderInputPreferences = Readonly<{
 }>;
 
 function physicalSideIntent(side: 'left' | 'right', direction: ReaderDirection): 'previous' | 'next' {
-  if (direction === 'rtl') return side === 'left' ? 'next' : 'previous';
-  return side === 'left' ? 'previous' : 'next';
+  return readerPhysicalHorizontalPageTurn(side, direction);
 }
 
 export function isReaderControlTarget(target: EventTarget | null) {

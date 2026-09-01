@@ -13,6 +13,8 @@ export function preferencesToReaderSettings(preferences: ReaderPreferences): Rea
     keyboardPageTurn: preferences.interaction.keyboardPageTurn,
     volumeKeyPageTurn: preferences.interaction.volumeKeyPageTurn,
     keepScreenAwake: preferences.interaction.keepScreenAwake,
+    readingProgression: preferences.epub.readingProgression,
+    writingMode: preferences.epub.writingMode,
     fontSize: preferences.epub.fontSize,
     lineHeight: preferences.epub.lineHeight,
     pageWidth: preferences.epub.pageWidth,
@@ -62,6 +64,8 @@ export function readerSettingsToPreferences(settings: ReaderSettings): ReaderPre
       keepScreenAwake: settings.keepScreenAwake
     },
     epub: {
+      readingProgression: settings.readingProgression,
+      writingMode: settings.writingMode,
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       pageWidth: settings.pageWidth,

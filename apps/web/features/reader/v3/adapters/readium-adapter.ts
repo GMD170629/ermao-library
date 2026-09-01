@@ -1,9 +1,10 @@
 import { EpubNavigator, EpubPreferences, type EpubNavigatorListeners } from '@readium/navigator';
-import { Link, Locator } from '@readium/shared';
+import { Layout, Link, Locator, LocatorLocations } from '@readium/shared';
 import {
   compareExactReadiumLocators,
   hasExactReadiumAnchor,
   parseReadiumLocatorEnvelope,
+  readerAdjacentResourceProgression,
   type OperationToken,
   type ReadiumLocatorEnvelope,
   type ReaderAdapter,
@@ -50,12 +51,13 @@ import {
   resolveReadiumViewportPresentation
 } from './readium-presentation';
 import { resolveEpubFont, type EpubFontResolution } from './epub-font';
+import { advanceScrollViewport, positionScrollResourceEdge } from './scroll-page-turn';
 
 const READIUM_VERSION = 'readium-ts:2.8.2';
 const READIUM_SUPPORTED_CONTROLS = [
   'Theme', 'SystemTheme', 'FontSize', 'FontFamily', 'FontWeight', 'LineHeight',
   'LetterSpacing', 'NegativeLetterSpacing', 'PageMargins', 'PageWidth', 'ReadingMode',
-  'Spread', 'ParagraphIndent', 'ParagraphSpacing', 'TextAlignment', 'PublisherStyles',
+  'ReadingProgression', 'WritingMode', 'Spread', 'ParagraphIndent', 'ParagraphSpacing', 'TextAlignment', 'PublisherStyles',
   'SmartOptimization', 'DeduplicateIndent', 'IndentUnindented', 'ProgressStyle', 'Clock',
   'KeepAwake', 'TapZones', 'Keyboard'
 ] as const;
@@ -74,7 +76,8 @@ function callbackNavigation(run: (callback: (ok: boolean) => void) => void) {
 }
 
 function capabilities(navigator: EpubNavigator): ReaderCapabilities {
-  return { readingDirection: navigator.readingProgression === 'rtl' ? 'rtl' : 'ltr', canGoNext: navigator.canGoForward, canGoPrevious: navigator.canGoBackward, canJumpToProgress: true, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true, supportedControls: READIUM_SUPPORTED_CONTROLS };
+  const supportsTextLayout = navigator.publication.metadata.layout !== Layout.fixed;
+  return { readingDirection: navigator.readingProgression === 'rtl' ? 'rtl' : 'ltr', canGoNext: navigator.canGoForward, canGoPrevious: navigator.canGoBackward, canJumpToProgress: true, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true, supportedControls: supportsTextLayout ? READIUM_SUPPORTED_CONTROLS : READIUM_SUPPORTED_CONTROLS.filter((control) => control !== 'ReadingProgression' && control !== 'WritingMode') };
 }
 
 const DEFAULT_CAPABILITIES: ReaderCapabilities = {
@@ -143,6 +146,7 @@ function locatorAtStartup(target: Readonly<{ position: Locator; fragment: string
 export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements ReaderAdapter, ReaderInteractiveAdapter {
   private navigator: EpubNavigator | null = null;
   private preferences: ReaderPreferences | null = null;
+  private source: Extract<ReaderAdapterOpenContext['source'], { kind: 'reflowable' }> | null = null;
   private format: ReflowableLocation['format'] = 'epub';
   private latestExact: ReadiumLocatorEnvelope | null = null;
   private restoreTarget: ReadiumLocatorEnvelope | null = null;
@@ -172,6 +176,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     const generation = this.beginSession(context.sessionId, context.operation);
     this.locationOperation = context.operation;
     if (context.source.kind !== 'reflowable') throw new Error('READIUM_SOURCE_INVALID');
+    this.source = context.source;
     this.preferences = context.preferences; this.format = context.source.sourceFormat;
     this.emit({ type: 'phase-changed', phase: 'loading-font' }, context.operation);
     await this.resolveFont(context.preferences, context.signal);
@@ -180,6 +185,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       this.options.publicationBlob,
       context.source.sourceFormat,
       this.options.publicationTitle,
+      context.preferences.epub.readingProgression,
+      context.preferences.epub.writingMode,
       context.signal
     );
     this.closePublication = opened.close;
@@ -214,7 +221,13 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       requestedHref
     );
     this.startLocator = locatorAtStartup(startupTargets.start);
-    const startupLocator = locatorAtStartup(startupTargets.initial);
+    let startupLocator = locatorAtStartup(startupTargets.initial);
+    const resourceProgression = context.initialLocation?.kind === 'reflowable'
+      ? context.initialLocation.resourceProgression
+      : undefined;
+    if (!restoreLocator && startupLocator && typeof resourceProgression === 'number') {
+      startupLocator = startupLocator.copyWithLocations({ progression: resourceProgression });
+    }
     const initial = restoreLocator
       ? opened.positions.find((position) => samePublicationResource(position.href, restoreLocator.href)) ?? opened.positions[0]
       : startupLocator ?? opened.positions[0];
@@ -277,6 +290,28 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       ? 'resource-unreadable'
       : '';
     this.scheduleFrameCapture(window);
+  }
+
+  private isScrollMode() {
+    return this.preferences?.epub.writingMode === 'vertical' || this.preferences?.epub.flow === 'scrolled';
+  }
+
+  private currentContentDocument() {
+    const frames = Array.from(this.options.container.querySelectorAll('iframe'));
+    const visible = frames.find((frame) => {
+      if (!frame.contentDocument) return false;
+      const bounds = frame.getBoundingClientRect();
+      const viewport = this.options.container.getBoundingClientRect();
+      return bounds.right > viewport.left && bounds.left < viewport.right
+        && bounds.bottom > viewport.top && bounds.top < viewport.bottom;
+    });
+    return visible?.contentDocument ?? frames.find((frame) => frame.contentDocument)?.contentDocument ?? null;
+  }
+
+  private navigationAnimationEnabled() {
+    const ownerWindow = this.options.container.ownerDocument.defaultView ?? window;
+    return this.preferences?.epub.pageTurnAnimation === 'slide'
+      && !ownerWindow.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   }
 
   private hasUnreadablePage() {
@@ -521,16 +556,31 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     const navigator = this.navigator;
     if (!navigator) return this.failOperation(context, 'READIUM_NOT_READY');
     let accepted = false;
-    if (command.type === 'next') {
-      if (!navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
-      else {
-        accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goForward(false, cb));
-        if (!accepted && !navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
+    if (command.type === 'next' || command.type === 'previous') {
+      const direction = command.type;
+      if (this.isScrollMode()) {
+        const document = this.currentContentDocument();
+        if (!document || !this.preferences) return this.failOperation(context, 'READIUM_SCROLL_VIEWPORT_UNAVAILABLE');
+        const result = await advanceScrollViewport({
+          document,
+          direction,
+          writingMode: this.preferences.epub.writingMode,
+          readingProgression: this.preferences.epub.readingProgression,
+          animated: this.navigationAnimationEnabled()
+        });
+        accepted = result === 'moved'
+          ? true
+          : result === 'boundary' && await this.navigateAdjacentScrollResource(navigator, direction);
+      } else if (direction === 'next') {
+        if (!navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
+        else {
+          accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goForward(false, cb));
+          if (!accepted && !navigator.canGoForward) accepted = await Promise.resolve(this.options.onEndOfResource?.() ?? false);
+        }
+      } else {
+        accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goBackward(false, cb));
       }
-    } else if (command.type === 'previous') {
-      accepted = await this.navigateWithCallback(navigator, (cb) => navigator.goBackward(false, cb));
-    }
-    else if (command.type === 'first') accepted = await this.navigateToPosition(navigator, this.startLocator ?? this.positions[0] ?? null);
+    } else if (command.type === 'first') accepted = await this.navigateToPosition(navigator, this.startLocator ?? this.positions[0] ?? null);
     else if (command.type === 'last') {
       const last = this.positions.at(-1)?.copyWithLocations({ progression: 1, totalProgression: 1 }) ?? null;
       accepted = await this.navigateToPosition(navigator, last);
@@ -564,6 +614,38 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       accepted = await this.navigateToHref(navigator, command.href);
     }
     return this.ack(context.operation, accepted, this.latestExact ? { location: location(this.latestExact, this.format, this.navigator) } : {});
+  }
+
+  private async navigateAdjacentScrollResource(navigator: EpubNavigator, direction: 'previous' | 'next') {
+    const readingOrder = navigator.publication.readingOrder.items;
+    const currentIndex = readingOrder.findIndex((link) => (
+      samePublicationResource(link.href, navigator.currentLocator.href)
+    ));
+    if (currentIndex < 0) return false;
+    const target = readingOrder[currentIndex + (direction === 'next' ? 1 : -1)];
+    if (!target) {
+      return direction === 'next'
+        ? Promise.resolve(this.options.onEndOfResource?.() ?? false)
+        : false;
+    }
+    const accepted = await this.navigateToPosition(
+      navigator,
+      new Locator({
+        href: target.href,
+        type: target.type ?? navigator.currentLocator.type,
+        title: target.title,
+        locations: new LocatorLocations({ progression: readerAdjacentResourceProgression(direction) })
+      })
+    );
+    if (!accepted || !this.preferences) return false;
+    const document = this.currentContentDocument();
+    if (!document || !await positionScrollResourceEdge({
+      document,
+      direction,
+      writingMode: this.preferences.epub.writingMode,
+      readingProgression: this.preferences.epub.readingProgression
+    })) return false;
+    return true;
   }
 
   private async navigateToPosition(navigator: EpubNavigator, target: Locator | null) {
@@ -616,6 +698,11 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.beginOperation(context);
     const navigator = this.navigator;
     if (!navigator) return this.failOperation(context, 'READIUM_NOT_READY');
+    const textLayoutChanged = this.preferences?.epub.writingMode !== preferences.epub.writingMode
+      || this.preferences?.epub.readingProgression !== preferences.epub.readingProgression;
+    if (textLayoutChanged && navigator.publication.metadata.layout !== Layout.fixed) {
+      return this.rebuildForTextLayout(preferences, context);
+    }
     this.presentationOperation = context.operation;
     try {
       await this.resolveFont(preferences, context.signal);
@@ -634,6 +721,70 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       }
       throw reason;
     }
+  }
+
+  private async rebuildForTextLayout(preferences: ReaderPreferences, context: ReaderAdapterOperationContext) {
+    const previous = this.preferences;
+    const source = this.source;
+    const navigator = this.navigator;
+    if (!previous || !source || !navigator) return this.failOperation(context, 'READIUM_NOT_READY');
+    const current = navigator.currentLocator;
+    const initialLocation: ReflowableLocation = {
+      kind: 'reflowable',
+      format: this.format,
+      href: current.href,
+      resourceProgression: current.locations.progression,
+      ...(this.latestExact ? { exactLocator: this.latestExact } : {})
+    };
+    this.presentationOperation = context.operation;
+    await this.closeActiveNavigator();
+    try {
+      this.assertActive(this.currentGeneration(), context.signal);
+      await this.open({
+        sessionId: context.operation.sessionId,
+        operation: context.operation,
+        signal: context.signal,
+        source,
+        preferences,
+        initialLocation
+      });
+      return this.ack(context.operation, true);
+    } catch (reason) {
+      await this.closeActiveNavigator();
+      if (this.isActive(this.currentGeneration(), context.signal)) {
+        try {
+          await this.open({
+            sessionId: context.operation.sessionId,
+            operation: context.operation,
+            signal: context.signal,
+            source,
+            preferences: previous,
+            initialLocation
+          });
+          return this.failOperation(context, 'READER_PREFERENCES_ENGINE_FAILED');
+        } catch {
+          await this.closeActiveNavigator();
+        }
+      }
+      throw reason;
+    }
+  }
+
+  private async closeActiveNavigator() {
+    if (this.pendingFrameCapture) {
+      this.pendingFrameCapture.window.cancelAnimationFrame(this.pendingFrameCapture.requestId);
+      this.pendingFrameCapture = null;
+    }
+    this.frameControllers.forEach((controller) => controller.abort());
+    this.frameControllers.clear();
+    this.viewportObserver?.disconnect();
+    this.viewportObserver = null;
+    const navigator = this.navigator;
+    this.navigator = null;
+    this.closePublication?.();
+    this.closePublication = null;
+    this.options.container.replaceChildren();
+    if (navigator) await navigator.destroy();
   }
 
   private viewportWidth() {
@@ -716,14 +867,6 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
 
   async dispose() {
     if (!this.markDisposed()) return;
-    if (this.pendingFrameCapture) {
-      this.pendingFrameCapture.window.cancelAnimationFrame(this.pendingFrameCapture.requestId);
-      this.pendingFrameCapture = null;
-    }
-    this.frameControllers.forEach((controller) => controller.abort());
-    this.frameControllers.clear();
-    this.viewportObserver?.disconnect();
-    this.viewportObserver = null;
     this.resizeSequence += 1;
     this.resizePresentationInFlight = false;
     this.fontController?.abort();
@@ -732,13 +875,12 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     this.resolvedFont = null;
     this.resolvedFontFamily = null;
     this.keyboardNavigation.reset();
-    this.closePublication?.();
-    this.closePublication = null;
+    await this.closeActiveNavigator();
     this.positions = [];
     this.startLocator = null;
     this.locationOperation = null;
     this.presentationOperation = null;
-    const navigator = this.navigator; this.navigator = null; this.options.container.replaceChildren(); if (navigator) await navigator.destroy();
+    this.source = null;
   }
 }
 

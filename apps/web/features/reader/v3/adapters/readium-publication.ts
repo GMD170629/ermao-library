@@ -4,6 +4,8 @@ import {
   READER_SAFETY_FORMATS,
   READER_SAFETY_PROFILES,
   READER_SAFETY_RULE_IDS,
+  type ReaderReadingProgression,
+  type ReaderWritingMode,
   type ReflowableFormat
 } from '@shuku/reader-core';
 import { openMobiPublication } from '../original-publication/mobi-publication';
@@ -108,7 +110,13 @@ async function sanitizeEpubDocument(
   return utf8(new XMLSerializer().serializeToString(document));
 }
 
-async function openEpub(blob: Blob, fallbackTitle: string, signal?: AbortSignal): Promise<ReadiumPublication> {
+async function openEpub(
+  blob: Blob,
+  fallbackTitle: string,
+  readingProgression: ReaderReadingProgression,
+  writingMode: ReaderWritingMode,
+  signal?: AbortSignal
+): Promise<ReadiumPublication> {
   const reader = new ZipReader(new BlobReader(blob), { strictness: 'strict', checkOverlappingEntry: true });
   const objectUrls = new Set<string>();
   try {
@@ -283,9 +291,13 @@ async function openEpub(blob: Blob, fallbackTitle: string, signal?: AbortSignal)
       }));
     const title = opf.querySelector('metadata title, metadata dc\\:title')?.textContent?.trim() || fallbackTitle;
     const language = opf.querySelector('metadata language, metadata dc\\:language')?.textContent?.trim() || null;
+    const renditionLayout = opf.querySelector('metadata meta[property="rendition:layout"]')?.textContent?.trim();
     return createLocalPublication({
       title,
       language,
+      readingProgression,
+      writingMode,
+      layout: renditionLayout === 'pre-paginated' ? 'fixed' : 'reflowable',
       readingOrder,
       toc,
       extraResources,
@@ -302,9 +314,18 @@ async function openEpub(blob: Blob, fallbackTitle: string, signal?: AbortSignal)
 }
 
 /** Opens a complete original publication; no server manifest, positions or chapter URL is consulted. */
-export async function openReadiumPublication(blob: Blob, format: ReflowableFormat, title: string, signal?: AbortSignal): Promise<ReadiumPublication> {
+export async function openReadiumPublication(
+  blob: Blob,
+  format: ReflowableFormat,
+  title: string,
+  readingProgression: ReaderReadingProgression,
+  writingMode: ReaderWritingMode,
+  signal?: AbortSignal
+): Promise<ReadiumPublication> {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (format === 'epub') return openEpub(blob, title, signal);
-  if (format === 'txt' || format === 'fb2') return openTextPublication(blob, format, title, signal);
-  return openMobiPublication(blob, format, title, signal);
+  if (format === 'epub') return openEpub(blob, title, readingProgression, writingMode, signal);
+  if (format === 'txt' || format === 'fb2') {
+    return openTextPublication(blob, format, title, readingProgression, writingMode, signal);
+  }
+  return openMobiPublication(blob, format, title, readingProgression, writingMode, signal);
 }

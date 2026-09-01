@@ -118,8 +118,12 @@ struct IosFb2PublicationFactory: Sendable {
                 document: try decoder.finish(fallbackTitle: fallbackTitle, images: links),
                 images: images
             )
-        } catch let failure as ErmaoShared.ReaderSafetyException {
-            throw IosReaderFailure.safety(failure.failure, underlyingError: failure as NSError)
+        } catch {
+            let underlyingError = error as NSError
+            guard let failure = underlyingError.kotlinException as? ErmaoShared.ReaderSafetyException else {
+                throw error
+            }
+            throw IosReaderFailure.safety(failure.failure, underlyingError: underlyingError)
         }
     }
 

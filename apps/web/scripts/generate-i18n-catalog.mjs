@@ -218,7 +218,8 @@ function run() {
   const readerLabels = [
     ...readerCatalog.settings.map((setting) => setting.label),
     ...readerCatalog.sections.map((section) => section.label),
-    ...Object.values(readerCatalog.optionGroups).flat().map((option) => option.label)
+    ...Object.values(readerCatalog.optionGroups).flat().map((option) => option.label),
+    ...Object.values(readerCatalog.availabilityReasons)
   ];
   for (const label of readerLabels) if (cjkPattern.test(label['zh-CN'])) messages.add(label['zh-CN']);
   for (const message of collectPythonMessages()) messages.add(message);

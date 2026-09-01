@@ -52,8 +52,6 @@
 
 [Readium 官方修复 #781](https://github.com/readium/swift-toolkit/pull/781)明确说明同一缓存机制，并在偏好更新时清除 HTML 缓存条目。项目当前固定版本早于该修复，未包含此处理。本轮没有升级 SDK 或制作补丁。
 
-此前本仓库真机测试还记录过 `settings.scroll == true` 而 DOM 仍为 `readium-paged-on` 的结果，见 [此前阅读设置记录](ios-reader-preferences-2026-08-28.md#未通过的检查与范围)。旧记录只作独立旁证，不替代本次现场数据。
-
 ## 本机原始证据
 
 - `/tmp/reader-live-chapter-0.json`、`reader-live-chapter-1.json`、`reader-live-chapter-2.json`：第一次三个 WebView 采样。

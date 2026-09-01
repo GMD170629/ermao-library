@@ -44,25 +44,7 @@ typealias ReaderCapabilities = com.ermao.library.shared.modules.reader.domain.Re
 typealias ReaderPanel = com.ermao.library.shared.modules.reader.domain.ReaderPanel
 typealias ReaderControl = com.ermao.library.shared.modules.reader.domain.ReaderControl
 typealias ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.ReaderControlAvailability
-typealias ReaderControlState = com.ermao.library.shared.modules.reader.domain.ReaderControlState
-
-fun resolveReaderControlContext(
-    control: ReaderControl, morphology: ReaderMorphology, capabilities: ReaderCapabilities,
-    ready: Boolean, scrolling: Boolean, nativeUnavailable: Set<ReaderControl>,
-): ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.resolveReaderControlContext(
-    control, morphology, capabilities, ready, scrolling, nativeUnavailable,
-)
-
-fun resolveReaderControl(
-    control: ReaderControl,
-    morphology: ReaderMorphology,
-    capabilities: ReaderCapabilities,
-    preferences: ReaderPreferences,
-    ready: Boolean,
-    nativeUnavailable: Set<ReaderControl> = emptySet(),
-): ReaderControlAvailability = com.ermao.library.shared.modules.reader.domain.resolveReaderControl(
-    control, morphology, capabilities, preferences, ready, nativeUnavailable,
-)
+typealias ReaderSettingState = com.ermao.library.shared.modules.reader.domain.ReaderSettingState
 
 fun resetReaderPreferences(): ReaderPreferences =
     com.ermao.library.shared.modules.reader.domain.resetReaderPreferences()
@@ -70,6 +52,7 @@ fun resetReaderPreferences(): ReaderPreferences =
 fun readerPlatformCapabilities(
     morphology: ReaderMorphology,
     volumeKeys: Boolean,
+    pdfZoom: Boolean,
     pdfFit: Boolean,
 ): ReaderCapabilities {
     val reflowable = ReaderCapabilities.epub(supportsVolumeKeys = volumeKeys)
@@ -79,7 +62,9 @@ fun readerPlatformCapabilities(
         supportsFontWeight = false, supportsLineHeight = false, supportsPositiveLetterSpacing = false,
         supportsPageMargins = false, supportsPageWidth = true, supportsReadingMode = false, supportsSpreadMode = false,
         supportsParagraphLayout = false, supportsPublisherStyles = false,
-        supportsPageTurnAnimation = false, supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
+        supportsPageTurnAnimation = false, supportsReadingProgression = false, supportsWritingMode = false,
+        supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
+        supportsPdfZoomPreference = morphology == ReaderMorphology.Pdf && pdfZoom,
     )
 }
 typealias ReaderError = com.ermao.library.shared.modules.reader.domain.ReaderError
@@ -356,6 +341,11 @@ typealias ReaderAppearancePreferences = com.ermao.library.shared.modules.reader.
 typealias ReaderDisplayPreferences = com.ermao.library.shared.modules.reader.domain.ReaderDisplayPreferences
 typealias ReaderInteractionPreferences = com.ermao.library.shared.modules.reader.domain.ReaderInteractionPreferences
 typealias ReaderEpubPreferences = com.ermao.library.shared.modules.reader.domain.ReaderEpubPreferences
+typealias ReaderWritingMode = com.ermao.library.shared.modules.reader.domain.ReaderWritingMode
+typealias ReaderReadingProgression = com.ermao.library.shared.modules.reader.domain.ReaderReadingProgression
+typealias ReaderPageTurnDirection = com.ermao.library.shared.modules.reader.domain.ReaderPageTurnDirection
+typealias ReaderPhysicalHorizontalSide = com.ermao.library.shared.modules.reader.domain.ReaderPhysicalHorizontalSide
+typealias ReaderNavigationPolicy = com.ermao.library.shared.modules.reader.domain.ReaderNavigationPolicy
 typealias ReaderComicPreferences = com.ermao.library.shared.modules.reader.domain.ReaderComicPreferences
 typealias ReaderComicDirection = com.ermao.library.shared.modules.reader.domain.ReaderComicDirection
 typealias ReaderComicSpreadMode = com.ermao.library.shared.modules.reader.domain.ReaderComicSpreadMode
@@ -392,6 +382,7 @@ typealias ReaderSessionPhase = com.ermao.library.shared.modules.reader.domain.Re
 typealias ReaderSource = com.ermao.library.shared.modules.reader.domain.ReaderSource
 typealias ReaderTextAlignment = com.ermao.library.shared.modules.reader.domain.ReaderTextAlignment
 typealias ReaderTheme = com.ermao.library.shared.modules.reader.domain.ReaderTheme
+
 typealias ReflowReaderLocation = com.ermao.library.shared.modules.reader.domain.ReflowReaderLocation
 typealias TextQuote = com.ermao.library.shared.modules.reader.domain.TextQuote
 typealias ReaderClock = com.ermao.library.shared.modules.reader.application.ReaderClock
@@ -511,8 +502,6 @@ fun createReaderProgressSyncRuntime(
     target: ReaderProgressSyncTarget,
     server: ReaderProgressServerPort,
 ): ReaderProgressSyncRuntime = ReaderProgressSyncRuntime(stateStore, target, server)
-
-fun createReaderPreferencesJson(): ReaderPreferencesJson = ReaderPreferencesJson()
 
 fun createReaderSyncNamespace(
     serverIdentity: String,

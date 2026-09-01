@@ -1,12 +1,12 @@
 import {
   inheritReaderPreferences,
-  migrateWebReaderPreferences,
   normalizeReaderPreferences,
+  READER_PREFERENCES_VERSION,
   type ReaderPreferences
 } from '@shuku/reader-core';
 import { userDevicePreferenceKey } from './user-preferences';
 
-export const READER_DEVICE_PREFERENCES_KEY = 'shuku:reader:device-defaults:v1';
+export const READER_DEVICE_PREFERENCES_KEY = 'shuku:reader:device-defaults';
 
 export function readDeviceReaderPreferences(userId: string, fallback: unknown): ReaderPreferences {
   const inherited = inheritReaderPreferences(fallback);
@@ -15,7 +15,10 @@ export function readDeviceReaderPreferences(userId: string, fallback: unknown): 
     const key = userDevicePreferenceKey(READER_DEVICE_PREFERENCES_KEY, userId);
     const stored = window.localStorage.getItem(key);
     if (!stored) return inherited;
-    const preferences = migrateWebReaderPreferences(JSON.parse(stored), inherited);
+    const source: unknown = JSON.parse(stored);
+    if (source === null || typeof source !== 'object' || Array.isArray(source)
+      || !('schemaVersion' in source) || source.schemaVersion !== READER_PREFERENCES_VERSION) return inherited;
+    const preferences = normalizeReaderPreferences(source, inherited);
     const encoded = JSON.stringify(preferences);
     if (encoded !== stored) window.localStorage.setItem(key, encoded);
     return preferences;

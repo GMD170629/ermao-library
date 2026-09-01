@@ -34,17 +34,7 @@ export function projectReadiumEffectivePreferences(
     interaction: {
       ...preferences.interaction,
       swipePageTurn: true
-    },
-    epub: {
-      ...preferences.epub,
-      spreadMode: preferences.epub.spreadMode,
-      typography: { ...preferences.epub.typography },
-      optimization: { ...preferences.epub.optimization }
-    },
-    comic: { ...preferences.comic },
-    pdf: { ...preferences.pdf },
-    appearance: { ...preferences.appearance },
-    display: { ...preferences.display }
+    }
   };
 }
 
@@ -57,7 +47,9 @@ export function resolveReadiumViewportPresentation(
     : epubPageWidth(preferences);
   const pageWidth = epubPageWidth(preferences);
   const viewportLayout = resolveEpubViewportLayout(normalizedWidth);
-  const columnCount = preferences.epub.flow === 'paginated' && preferences.epub.spreadMode === 'double' ? 2 : 1;
+  const columnCount = preferences.epub.writingMode === 'horizontal'
+    && preferences.epub.flow === 'paginated'
+    && preferences.epub.spreadMode === 'double' ? 2 : 1;
 
   return {
     columnCount,
@@ -110,7 +102,7 @@ export function createReadiumEpubPreferences(
     minimalLineLength: null,
     columnCount: effective.epub.spreadMode === 'auto' ? null : layout.columnCount,
     constraint: layout.constraint,
-    scroll: effective.epub.flow === 'scrolled'
+    scroll: effective.epub.writingMode === 'vertical' || effective.epub.flow === 'scrolled'
   };
 }
 

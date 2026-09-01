@@ -68,6 +68,18 @@ enum class ReaderReadingMode(val wireValue: String) {
 }
 
 @Serializable
+enum class ReaderWritingMode(val wireValue: String) {
+    @SerialName("horizontal") Horizontal("horizontal"),
+    @SerialName("vertical") Vertical("vertical"),
+}
+
+@Serializable
+enum class ReaderReadingProgression(val wireValue: String) {
+    @SerialName("ltr") LeftToRight("ltr"),
+    @SerialName("rtl") RightToLeft("rtl"),
+}
+
+@Serializable
 enum class ReaderComicDirection(val wireValue: String) {
     @SerialName("ltr") LeftToRight("ltr"),
     @SerialName("rtl") RightToLeft("rtl"),
@@ -162,6 +174,8 @@ data class ReaderOptimizationPreferences(
 
 @Serializable
 data class ReaderEpubPreferences(
+    val readingProgression: ReaderReadingProgression = ReaderReadingProgression.LeftToRight,
+    val writingMode: ReaderWritingMode = ReaderWritingMode.Horizontal,
     val fontSize: Int = 18,
     val lineHeight: Double = 1.9,
     val pageWidth: Int = 1350,
@@ -235,7 +249,7 @@ data class ReaderPreferences(
     }
 
     companion object {
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
     }
 }
 
@@ -276,6 +290,8 @@ data class ReaderCapabilities(
     val supportsPdfRotation: Boolean = false,
     val supportsPdfCropMargins: Boolean = false,
     val supportsPublisherStyles: Boolean = false,
+    val supportsReadingProgression: Boolean = false,
+    val supportsWritingMode: Boolean = false,
 ) {
     companion object {
         fun epub(supportsVolumeKeys: Boolean, supportsCustomFonts: Boolean = true) = ReaderCapabilities(
@@ -295,6 +311,8 @@ data class ReaderCapabilities(
             supportsPageMargins = true,
             supportsPageWidth = true,
             supportsReadingMode = true,
+            supportsReadingProgression = true,
+            supportsWritingMode = true,
             supportsSpreadMode = true,
             supportsParagraphLayout = true,
             supportsProgressStyles = true,

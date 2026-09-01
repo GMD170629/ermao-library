@@ -9332,22 +9332,6 @@
         }
       }
     },
-    "reader.font.heiti": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Heiti"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "黑体"
-          }
-        }
-      }
-    },
     "reader.font.kaiti": {
       "localizations": {
         "en": {
@@ -9392,22 +9376,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "宋体"
-          }
-        }
-      }
-    },
-    "reader.font.yahei": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "YaHei"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "微软雅黑"
           }
         }
       }
@@ -12798,6 +12766,40 @@
         }
       }
     },
+    "reader.catalog.textReadingProgression": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading Direction"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阅读方向"
+          }
+        }
+      }
+    },
+    "reader.catalog.textWritingMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Writing Direction"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "排版方向"
+          }
+        }
+      }
+    },
     "reader.catalog.paragraphIndent": {
       "extractionState": "manual",
       "localizations": {
@@ -13049,6 +13051,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "智能优化"
+          }
+        }
+      }
+    },
+    "reader.catalog.section.textLayoutAdvanced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text Layout"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文字排版"
           }
         }
       }
@@ -13372,6 +13391,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "滚动"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_WRITING_MODE_OPTIONS.horizontal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Horizontal"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "横排"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_WRITING_MODE_OPTIONS.vertical": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vertical"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "竖排"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_READING_PROGRESSION_OPTIONS.ltr": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LTR"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LTR"
+          }
+        }
+      }
+    },
+    "reader.catalog.option.READER_READING_PROGRESSION_OPTIONS.rtl": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RTL"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RTL"
           }
         }
       }
@@ -14528,6 +14615,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "当前阅读器不支持可配置缩放"
+          }
+        }
+      }
+    },
+    "reader.catalog.reason.verticalWritingMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vertical text uses scrolling mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "竖排模式使用滚动阅读"
           }
         }
       }

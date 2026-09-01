@@ -24,9 +24,9 @@ const capabilities: ReaderCapabilities = {
   supportsSpreads: false
 };
 
-test('normalizes a partial V5 preference snapshot and invalid current values', () => {
+test('normalizes a partial V6 preference snapshot and invalid current values', () => {
   const preferences = normalizeReaderPreferences({
-    schemaVersion: 5,
+    schemaVersion: 6,
     appearance: { theme: 'warm' },
     epub: {
       fontSize: 80,
@@ -46,7 +46,7 @@ test('normalizes a partial V5 preference snapshot and invalid current values', (
   });
 
   assert.deepEqual(preferences, {
-    schemaVersion: 5,
+    schemaVersion: 6,
     appearance: { theme: 'warm', themeMode: 'manual' },
     display: { progressStyle: 'auto', showClock: false },
     interaction: {
@@ -57,6 +57,8 @@ test('normalizes a partial V5 preference snapshot and invalid current values', (
       keepScreenAwake: false
     },
     epub: {
+      readingProgression: 'ltr',
+      writingMode: 'horizontal',
       fontSize: 30,
       lineHeight: 1.87,
       pageWidth: 1350,
@@ -93,8 +95,6 @@ test('normalizes a partial V5 preference snapshot and invalid current values', (
     },
     pdf: { zoom: 1.63, pageWidth: 1350, fit: 'page', flow: 'paged', rotation: 0, cropMargins: 'off' }
   });
-  assert.equal(DEFAULT_READER_PREFERENCES.appearance.theme, 'warm');
-  assert.equal(DEFAULT_READER_PREFERENCES.pdf.fit, 'page');
 });
 
 test('preserves an explicitly saved PDF width fit preference', () => {
@@ -105,31 +105,25 @@ test('preserves an explicitly saved PDF width fit preference', () => {
   assert.equal(preferences.pdf.fit, 'width');
 });
 
-test('migrates retired sans font aliases to the single visible sans choice', () => {
-  assert.equal(normalizeReaderPreferences({ epub: { fontFamily: 'heiti' } }).epub.fontFamily, 'pingfang');
-  assert.equal(normalizeReaderPreferences({ epub: { fontFamily: 'yahei' } }).epub.fontFamily, 'pingfang');
+test('rejects an unsupported preference schema version', () => {
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 5 }), /schema version/);
 });
 
-test('rejects preference snapshots from retired schema versions', () => {
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 2 }), /schema version 5/);
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 3 }), /schema version 5/);
-});
-
-test('rejects retired preference fields and values', () => {
+test('rejects unsupported preference fields and values', () => {
   assert.throws(() => normalizeReaderPreferences({ theme: 'warm' }), /preference fields/);
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 5, comic: { mode: 'double' } }), /preference fields/);
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 5, epub: { pageTurnAnimation: 'kindle' } }), /page-turn animation/);
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 5, comic: { flow: 'vertical' } }), /comic reader flow/);
-  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 5, pdf: { flow: 'continuous' } }), /PDF reader flow/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 6, comic: { mode: 'double' } }), /preference fields/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 6, epub: { pageTurnAnimation: 'kindle' } }), /page-turn animation/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 6, comic: { flow: 'vertical' } }), /comic reader flow/);
+  assert.throws(() => normalizeReaderPreferences({ schemaVersion: 6, pdf: { flow: 'continuous' } }), /PDF reader flow/);
 });
 
-test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
+test('normalizes V6 display, theme, EPUB, comic, and PDF settings', () => {
   const preferences = normalizeReaderPreferences({
-    schemaVersion: 5,
+    schemaVersion: 6,
     appearance: { theme: 'green', themeMode: 'system' },
     display: { progressStyle: 'remaining', showClock: true },
     interaction: { keepScreenAwake: true },
-    epub: { fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' },
+    epub: { readingProgression: 'rtl', writingMode: 'vertical', fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' },
     comic: { flow: 'scrolled', coverSingle: true, pageGap: 16 },
     pdf: { flow: 'paged', rotation: 270, cropMargins: 'auto' }
   });
@@ -138,6 +132,8 @@ test('normalizes V4 display, theme, EPUB, comic, and PDF settings', () => {
   assert.equal(preferences.appearance.themeMode, 'system');
   assert.deepEqual(preferences.display, { progressStyle: 'remaining', showClock: true });
   assert.equal(preferences.interaction.keepScreenAwake, true);
+  assert.equal(preferences.epub.readingProgression, 'rtl');
+  assert.equal(preferences.epub.writingMode, 'vertical');
   assert.deepEqual(
     { fontWeight: preferences.epub.fontWeight, letterSpacing: preferences.epub.letterSpacing, pageMargin: preferences.epub.pageMargin, spreadMode: preferences.epub.spreadMode },
     { fontWeight: 700, letterSpacing: 0.08, pageMargin: 'wide', spreadMode: 'auto' }

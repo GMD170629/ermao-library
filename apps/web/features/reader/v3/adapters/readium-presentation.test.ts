@@ -135,19 +135,15 @@ test('page width constrains the navigator and auto spread is delegated to Readiu
   assert.equal(createReadiumEpubPreferences(wideMeasure, 1200).columnCount, null);
 });
 
-test('effective projection is immutable and preserves the supported scrolling setting', () => {
+test('effective projection fixes reflowable swipe on without mutating the saved preference', () => {
   const input = preferencesWith({ flow: 'scrolled', spreadMode: 'auto' });
   input.interaction.swipePageTurn = false;
   const projected = projectReadiumEffectivePreferences(input);
 
-  assert.equal(projected.epub.flow, 'scrolled');
-  assert.equal(projected.epub.spreadMode, 'auto');
   assert.equal(projected.interaction.swipePageTurn, true);
   assert.equal(input.epub.flow, 'scrolled');
   assert.equal(input.epub.spreadMode, 'auto');
   assert.equal(input.interaction.swipePageTurn, false);
-  assert.notEqual(projected.epub, input.epub);
-  assert.notEqual(projected.epub.typography, input.epub.typography);
 });
 
 test('effective projection preserves an explicit double-page choice', () => {
@@ -155,6 +151,18 @@ test('effective projection preserves an explicit double-page choice', () => {
 
   assert.equal(projected.epub.spreadMode, 'double');
   assert.equal(createReadiumEpubPreferences(projected, 1200).columnCount, 2);
+});
+
+test('vertical writing forces scrolling and one column without overwriting saved horizontal choices', () => {
+  const stored = preferencesWith({ writingMode: 'horizontal', flow: 'paginated', spreadMode: 'double' });
+  const vertical = preferencesWith({ ...stored.epub, writingMode: 'vertical' });
+
+  assert.equal(createReadiumEpubPreferences(vertical, 1200).scroll, true);
+  assert.equal(createReadiumEpubPreferences(vertical, 1200).columnCount, 1);
+  assert.equal(stored.epub.flow, 'paginated');
+  assert.equal(stored.epub.spreadMode, 'double');
+  assert.equal(createReadiumEpubPreferences(stored, 1200).scroll, false);
+  assert.equal(createReadiumEpubPreferences(stored, 1200).columnCount, 2);
 });
 
 test('residual style stays small and only overrides publisher-owned surfaces when required', () => {

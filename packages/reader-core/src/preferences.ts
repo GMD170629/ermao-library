@@ -1,4 +1,4 @@
-import { READER_PREFERENCES_VERSION, type ReaderFontFamily, type ReaderPreferences, type ReaderTheme } from './types';
+import { READER_PREFERENCES_VERSION, type ReaderPreferences, type ReaderTheme } from './types';
 
 export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.freeze({
   schemaVersion: READER_PREFERENCES_VERSION,
@@ -12,6 +12,8 @@ export const DEFAULT_READER_PREFERENCES: Readonly<ReaderPreferences> = Object.fr
     keepScreenAwake: false
   }),
   epub: Object.freeze({
+    readingProgression: 'ltr',
+    writingMode: 'horizontal',
     fontSize: 18,
     lineHeight: 1.9,
     pageWidth: 1350,
@@ -81,11 +83,6 @@ function boolean(value: unknown, fallback: boolean) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function readerFontFamily(value: unknown, fallback: ReaderFontFamily): ReaderFontFamily {
-  if (value === 'heiti' || value === 'yahei') return 'pingfang';
-  return choice<ReaderFontFamily>(value, ['pingfang', 'songti', 'kaiti'], fallback);
-}
-
 function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string[], section: string) {
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     throw new TypeError(`Unsupported reader preference fields in ${section}`);
@@ -125,11 +122,10 @@ function clonePreferences(value: Readonly<ReaderPreferences>): ReaderPreferences
   };
 }
 
-/** Normalizes a partial current V5 preference snapshot into a complete value. */
 export function normalizeReaderPreferences(value: unknown, base: Readonly<ReaderPreferences> = DEFAULT_READER_PREFERENCES): ReaderPreferences {
   const source = record(value);
   if (source.schemaVersion !== undefined && source.schemaVersion !== READER_PREFERENCES_VERSION) {
-    throw new TypeError('Reader preferences must use schema version 5');
+    throw new TypeError(`Reader preferences must use schema version ${READER_PREFERENCES_VERSION}`);
   }
   assertOnlyKeys(source, ['schemaVersion', 'appearance', 'display', 'interaction', 'epub', 'comic', 'pdf'], 'root');
   const appearance = record(source.appearance);
@@ -143,7 +139,7 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
   assertOnlyKeys(appearance, ['theme', 'themeMode'], 'appearance');
   assertOnlyKeys(display, ['progressStyle', 'showClock'], 'display');
   assertOnlyKeys(interaction, ['tapZones', 'swipePageTurn', 'keyboardPageTurn', 'volumeKeyPageTurn', 'keepScreenAwake'], 'interaction');
-  assertOnlyKeys(epub, ['fontSize', 'lineHeight', 'pageWidth', 'fontFamily', 'fontWeight', 'letterSpacing', 'pageMargin', 'spreadMode', 'pageTurnAnimation', 'flow', 'typography', 'optimization'], 'epub');
+  assertOnlyKeys(epub, ['readingProgression', 'writingMode', 'fontSize', 'lineHeight', 'pageWidth', 'fontFamily', 'fontWeight', 'letterSpacing', 'pageMargin', 'spreadMode', 'pageTurnAnimation', 'flow', 'typography', 'optimization'], 'epub');
   assertOnlyKeys(epubTypography, ['paragraphIndent', 'paragraphSpacing', 'textAlign', 'preservePublisherStyles'], 'epub.typography');
   assertOnlyKeys(epubOptimization, ['enabled', 'deduplicateIndent', 'indentUnindented'], 'epub.optimization');
   assertOnlyKeys(comic, ['direction', 'spreadMode', 'pageTurnAnimation', 'imageFit', 'imageVariant', 'zoom', 'pageWidth', 'flow', 'coverSingle', 'pageGap'], 'comic');
@@ -168,10 +164,12 @@ export function normalizeReaderPreferences(value: unknown, base: Readonly<Reader
       keepScreenAwake: boolean(interaction.keepScreenAwake, fallback.interaction.keepScreenAwake)
     },
     epub: {
+      readingProgression: choice(epub.readingProgression, ['ltr', 'rtl'], fallback.epub.readingProgression),
+      writingMode: choice(epub.writingMode, ['horizontal', 'vertical'], fallback.epub.writingMode),
       fontSize: clamp(epub.fontSize, 14, 30, fallback.epub.fontSize, 0),
       lineHeight: clamp(epub.lineHeight, 1.4, 2.4, fallback.epub.lineHeight),
       pageWidth: clamp(epub.pageWidth, 600, 1350, fallback.epub.pageWidth, 0),
-      fontFamily: readerFontFamily(epub.fontFamily, fallback.epub.fontFamily),
+      fontFamily: choice(epub.fontFamily, ['pingfang', 'songti', 'kaiti'], fallback.epub.fontFamily),
       fontWeight: choice(epub.fontWeight, [400, 500, 700] as const, fallback.epub.fontWeight),
       letterSpacing: clamp(epub.letterSpacing, -0.02, 0.08, fallback.epub.letterSpacing),
       pageMargin: choice(epub.pageMargin, ['narrow', 'standard', 'wide'], fallback.epub.pageMargin),

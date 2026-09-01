@@ -268,3 +268,31 @@ index 790787f2c6efece9cae61566505d27cc68869000..2b9ecf82fbcc86d774a6bed76e94ec2e
      update(pub: Publication, locator: Locator, modules: ModuleName[], _force?: boolean): Promise<void>;
      get currentFrames(): (FXLFrameManager | undefined)[];
      get currentBounds(): DOMRect;
+diff --git a/dist/helpers/scriptMode.js b/dist/helpers/scriptMode.js
+index b6dcd2f..a8137dd 100644
+--- a/dist/helpers/scriptMode.js
++++ b/dist/helpers/scriptMode.js
+@@ -1 +1 @@
+-import{ReadingProgression as s}from"@readium/shared";function e(r){const t=r.languages?.[0]?.toLowerCase(),i=r.readingProgression;if(t){if(t.startsWith("zh")||t.startsWith("ja")||t.startsWith("ko"))return i===s.rtl?"cjk-vertical":"cjk-horizontal";if(t.startsWith("mn-mong"))return"mongolian-vertical";if(t.startsWith("ar")||t.startsWith("fa")||t.startsWith("he"))return"rtl"}return"ltr"}export{e as getScriptMode};
++import{ReadingProgression as s}from"@readium/shared";function e(r){const t=r.languages?.[0]?.toLowerCase(),i=r.otherMetadata?.["shuku:writingMode"],n=r.readingProgression;if(i==="vertical")return"cjk-vertical";if(t){if(t.startsWith("zh")||t.startsWith("ja")||t.startsWith("ko")){if(i==="horizontal")return"cjk-horizontal";return n===s.rtl?"cjk-vertical":"cjk-horizontal"}if(t.startsWith("mn-mong"))return"mongolian-vertical";if(t.startsWith("ar")||t.startsWith("fa")||t.startsWith("he"))return"rtl"}return"ltr"}export{e as getScriptMode};
+diff --git a/src/helpers/scriptMode.ts b/src/helpers/scriptMode.ts
+index 4874b90..b832bed 100644
+--- a/src/helpers/scriptMode.ts
++++ b/src/helpers/scriptMode.ts
+@@ -21,5 +21,7 @@ export function getScriptMode(metadata: Metadata): ScriptMode {
+ export function getScriptMode(metadata: Metadata): ScriptMode {
+     const primaryLang = metadata.languages?.[0]?.toLowerCase();
++    const explicitWritingMode = metadata.otherMetadata?.['shuku:writingMode'];
++    if (explicitWritingMode === 'vertical') return 'cjk-vertical';
+     // Use explicit readingProgression only — effectiveReadingProgression
+     // auto-detects from language, which would create circular logic here.
+     const progression = metadata.readingProgression;
+@@ -28,7 +30,8 @@ export function getScriptMode(metadata: Metadata): ScriptMode {
+         const isCJK = primaryLang.startsWith('zh') ||
+                       primaryLang.startsWith('ja') ||
+                       primaryLang.startsWith('ko');
+         if (isCJK) {
++            if (explicitWritingMode === 'horizontal') return 'cjk-horizontal';
+             // Vertical requires explicit rtl progression. If progression
+             // conflicts (e.g. ltr) we fall back to horizontal.
+             return progression === ReadingProgression.rtl

@@ -36,6 +36,16 @@ internal data class ReaderBookmarkChange(
     val added: Boolean,
 )
 
+internal data class ReaderAdjacentChapters(
+    val previous: ReaderTocEntry? = null,
+    val next: ReaderTocEntry? = null,
+)
+
+internal data class ReaderTocNode(
+    val entry: ReaderTocEntry,
+    val depth: Int,
+)
+
 internal class ReaderPreferenceSaveFailure(cause: Throwable? = null) : RuntimeException("Reader preference persistence failed", cause)
 
 internal interface ReaderScreenController {
@@ -52,13 +62,6 @@ internal interface ReaderScreenController {
     val bookmarkSyncPending: StateFlow<Boolean>
     val tableOfContents: List<ReaderTocEntry>
 
-    /**
-     * Loads and caches the navigation tree for this reader session.
-     *
-     * Paged readers expose their lightweight page list immediately. Reflowable
-     * readers may defer expensive locator resolution until the user opens the
-     * contents panel.
-     */
     suspend fun loadTableOfContents(): List<ReaderTocEntry> = tableOfContents
 
     fun unavailableControls(preferences: ReaderPreferences): Set<com.ermao.library.shared.modules.reader.ReaderControl> = emptySet()
@@ -110,7 +113,7 @@ internal interface ReaderScreenController {
     fun canApplyPreferences(updated: ReaderPreferences): Boolean {
         if (updated == com.ermao.library.shared.modules.reader.resetReaderPreferences()) return true
         return com.ermao.library.shared.modules.reader.changedReaderControls(preferences.value, updated).all { control ->
-            com.ermao.library.shared.modules.reader.resolveReaderControl(
+            com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.resolveReaderControl(
                 control, morphology, capabilities, preferences.value, true, unavailableControls(preferences.value),
             ) == com.ermao.library.shared.modules.reader.ReaderControlAvailability.Available
         }
@@ -132,6 +135,42 @@ internal interface ReaderScreenController {
 }
 
 private const val NAVIGATION_VERIFICATION_TIMEOUT_MILLIS = 3_000L
+
+internal fun resolveAdjacentChapters(
+    entries: List<ReaderTocEntry>,
+    currentLocation: ReaderLocation?,
+): ReaderAdjacentChapters {
+    if (currentLocation == null) return ReaderAdjacentChapters()
+    val ordered = flattenTableOfContents(entries)
+    val currentIndex = ordered.indexOfLast { currentLocation.matches(it.entry.target) }
+        .takeIf { it >= 0 }
+        ?: resolveChapterIndexByProgression(ordered, currentLocation)
+        ?: return ReaderAdjacentChapters()
+    return ReaderAdjacentChapters(
+        previous = ordered.getOrNull(currentIndex - 1)?.entry,
+        next = ordered.getOrNull(currentIndex + 1)?.entry,
+    )
+}
+
+internal fun flattenTableOfContents(entries: List<ReaderTocEntry>, depth: Int = 0): List<ReaderTocNode> = buildList {
+    entries.forEach { entry ->
+        add(ReaderTocNode(entry, depth))
+        addAll(flattenTableOfContents(entry.children, depth + 1))
+    }
+}
+
+private fun resolveChapterIndexByProgression(
+    entries: List<ReaderTocNode>,
+    currentLocation: ReaderLocation,
+): Int? {
+    val current = (currentLocation as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)
+        ?.totalProgression ?: return null
+    return entries.indexOfLast { node ->
+        val start = (node.entry.location as? com.ermao.library.shared.modules.reader.ReflowReaderLocation)
+            ?.totalProgression
+        start != null && start <= current
+    }.takeIf { it >= 0 }
+}
 
 private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
     return when (target) {

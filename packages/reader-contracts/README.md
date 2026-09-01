@@ -124,17 +124,15 @@ fixtures and must not be committed as expected output.
 
 ## Reading preferences and setting catalog
 
-`reader-settings.json` (schema `schemas/reader-settings-v1.schema.json`) owns
-ordered panels/sections, stable setting/control IDs, bilingual labels, options,
-numeric constraints, availability rules and bilingual disabled reasons.
-`generate-reader-settings.py` generates literal Web
-constants and typed KMP access/edit metadata plus iOS native localization keys.
+`reader-settings.json` owns ordered panels/sections, stable setting/control IDs,
+bilingual labels, options, numeric constraints, availability rules, bilingual
+disabled reasons and the current preference version.
+`generate-reader-settings.py` generates the typed Web catalog, KMP access/edit
+metadata, shared navigation policy bindings and iOS native localization keys.
 Do not edit generated files or add platform-owned setting lists. Run the generator
 then `python3 packages/reader-contracts/generate-reader-settings.py --check`.
 The check also verifies that iOS maps every catalog field. Web pretest runs it.
 
-Preference storage version 5 is **not** a new Reader progress protocol. Progress
-remains v4. Web migration owns the legacy line-height flag → off conversion;
-KMP owns native migration (including iOS), preserving the native publisher
-master. Retired partial publisher fields exist only in storage migration and
-migration regression inputs, never in runtime rendering.
+Preference storage uses version 6; Reader progress remains v4. Web, Android and
+iOS do not migrate older preference schemas. The generator verifies that Web and
+KMP runtime versions match the catalog owner.

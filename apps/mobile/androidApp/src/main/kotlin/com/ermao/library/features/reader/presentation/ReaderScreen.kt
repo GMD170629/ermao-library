@@ -117,12 +117,18 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.R
 import com.ermao.library.features.reader.application.ReaderScreenController
+import com.ermao.library.features.reader.application.ReaderAdjacentChapters
+import com.ermao.library.features.reader.application.ReaderTocNode
+import com.ermao.library.features.reader.application.flattenTableOfContents
+import com.ermao.library.features.reader.application.resolveAdjacentChapters
 import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderPanel
 import com.ermao.library.shared.modules.reader.ReaderControl
 import com.ermao.library.shared.modules.reader.ReaderControlAvailability
-import com.ermao.library.shared.modules.reader.resolveReaderControl
+import com.ermao.library.shared.modules.reader.ReaderSettingDefinition
+import com.ermao.library.shared.modules.reader.ReaderSettingState
+import com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
 import com.ermao.library.shared.modules.reader.resetReaderPreferences
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmark
@@ -132,6 +138,7 @@ import com.ermao.library.shared.modules.reader.ReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderCommandRejected
 import com.ermao.library.shared.modules.reader.ReaderNavigationCompleted
 import com.ermao.library.shared.modules.reader.ReaderPreferences
+import com.ermao.library.shared.modules.reader.ReaderReadingProgression
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderProgressStyle
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
@@ -203,6 +210,21 @@ internal fun ReaderScreen(
     var panelTrigger by remember { mutableStateOf<ReaderPanel?>(null) }
     val panelFocus = remember { ReaderPanel.entries.associateWith { FocusRequester() } }
     val morphology = controller?.morphology ?: ReaderMorphology.Reflowable
+    var adjacentChapters by remember(controller) { mutableStateOf(ReaderAdjacentChapters()) }
+    LaunchedEffect(controller, currentLocation, controlsVisible) {
+        val activeController = controller
+        adjacentChapters = if (controlsVisible && activeController?.morphology == ReaderMorphology.Reflowable) {
+            try {
+                resolveAdjacentChapters(activeController.loadTableOfContents(), currentLocation)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                ReaderAdjacentChapters()
+            }
+        } else {
+            ReaderAdjacentChapters()
+        }
+    }
     val nativeUnavailable = controller?.unavailableControls(preferences).orEmpty()
     val wideViewport = readerViewportIsWide()
     var preferencesFailure by remember(controller) { mutableStateOf<ReaderCommandRejected?>(null) }
@@ -215,11 +237,25 @@ internal fun ReaderScreen(
             }
         }
     }
-    val controlEnabled: (ReaderControl) -> Boolean = { control ->
-        (control != ReaderControl.PageWidth || wideViewport) &&
-        resolveReaderControl(control, morphology, capabilities, preferences, controller != null, nativeUnavailable) ==
-            ReaderControlAvailability.Available
+    val settingState: (ReaderSettingDefinition) -> ReaderSettingState = { setting ->
+        ReaderSettingsCatalog.resolveReaderSetting(
+            setting,
+            morphology,
+            capabilities,
+            preferences,
+            controller != null,
+            nativeUnavailable,
+            wideViewport,
+        )
     }
+    val negativeLetterSpacingEnabled = ReaderSettingsCatalog.resolveReaderControl(
+        ReaderControl.NegativeLetterSpacing,
+        morphology,
+        capabilities,
+        preferences,
+        controller != null,
+        nativeUnavailable,
+    ) == ReaderControlAvailability.Available
     LaunchedEffect(panel) {
         onPanelVisibilityChange(panel != null)
         if (panel == null) panelTrigger?.let { panelFocus[it]?.requestFocus() }
@@ -233,7 +269,7 @@ internal fun ReaderScreen(
             if (controller?.morphology == ReaderMorphology.Reflowable) {
                 ReaderContentsLoadState.NotRequested
             } else {
-                ReaderContentsLoadState.Ready(flattenContents(initialEntries))
+                ReaderContentsLoadState.Ready(flattenTableOfContents(initialEntries))
             },
         )
     }
@@ -242,6 +278,7 @@ internal fun ReaderScreen(
     val bookmarkRemovedMessage = stringResource(R.string.reader_bookmark_removed)
     val undoLabel = stringResource(R.string.undo_action)
     val seekFailedMessage = stringResource(R.string.reader_progress_seek_failed)
+    val navigationFailedMessage = stringResource(R.string.reader_navigation_failed)
     val requestContents: () -> Unit = {
         val activeController = controller
         if (
@@ -253,7 +290,7 @@ internal fun ReaderScreen(
             coroutineScope.launch {
                 try {
                     val entries = activeController.loadTableOfContents()
-                    val flattened = withContext(Dispatchers.Default) { flattenContents(entries) }
+                    val flattened = withContext(Dispatchers.Default) { flattenTableOfContents(entries) }
                     contentsState = ReaderContentsLoadState.Ready(flattened)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -330,6 +367,7 @@ internal fun ReaderScreen(
                     controller = controller,
                     location = currentLocation,
                     preferences = preferences,
+                    adjacentChapters = adjacentChapters,
                     bookmarks = bookmarks,
                     onToggleBookmark = {
                         controller?.let { activeController ->
@@ -367,6 +405,21 @@ internal fun ReaderScreen(
                             }
                         }
                         moved
+                    },
+                    onNavigateChapter = { entry ->
+                        controller?.let { activeController ->
+                            coroutineScope.launch {
+                                navigationMutex.withLock {
+                                    if (activeController.navigateTo(entry) !is ReaderNavigationCompleted) {
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        snackbarHostState.showSnackbar(
+                                            navigationFailedMessage,
+                                            duration = SnackbarDuration.Short,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     },
                     onHide = { onControlsVisibleChange(false) },
                 )
@@ -491,7 +544,8 @@ internal fun ReaderScreen(
                 ReaderPanel.Appearance,
                 preferences,
                 controller?.morphology ?: ReaderMorphology.Reflowable,
-                enabled = controlEnabled,
+                settingState = settingState,
+                negativeLetterSpacingEnabled = negativeLetterSpacingEnabled,
                 failure = preferencesFailure,
                 onUpdate = updatePreferences,
                 onDismiss = { panel = null },
@@ -500,7 +554,8 @@ internal fun ReaderScreen(
                 ReaderPanel.Settings,
                 preferences,
                 controller?.morphology ?: ReaderMorphology.Reflowable,
-                enabled = controlEnabled,
+                settingState = settingState,
+                negativeLetterSpacingEnabled = negativeLetterSpacingEnabled,
                 failure = preferencesFailure,
                 onUpdate = updatePreferences,
                 onDismiss = { panel = null },
@@ -577,12 +632,14 @@ private fun ReaderControlOverlay(
     controller: ReaderScreenController?,
     location: ReaderLocation?,
     preferences: ReaderPreferences,
+    adjacentChapters: ReaderAdjacentChapters,
     bookmarks: List<ReaderBookmark>,
     onToggleBookmark: () -> Unit,
     panelFocus: Map<ReaderPanel, FocusRequester>,
     onClose: () -> Unit,
     onPanel: (ReaderPanel) -> Unit,
     onSeek: (Double) -> Boolean,
+    onNavigateChapter: (ReaderTocEntry) -> Unit,
     onHide: () -> Unit,
 ) {
     val colors = WarmPageThemeValues.colors
@@ -643,8 +700,10 @@ private fun ReaderControlOverlay(
             controller,
             location,
             preferences,
+            adjacentChapters,
             onPanel,
             onSeek,
+            onNavigateChapter,
             panelFocus,
             Modifier.align(Alignment.BottomCenter),
         )
@@ -657,8 +716,10 @@ private fun ReaderBottomConsole(
     controller: ReaderScreenController?,
     currentLocation: ReaderLocation?,
     preferences: ReaderPreferences,
+    adjacentChapters: ReaderAdjacentChapters,
     onPanel: (ReaderPanel) -> Unit,
     onSeek: (Double) -> Boolean,
+    onNavigateChapter: (ReaderTocEntry) -> Unit,
     panelFocus: Map<ReaderPanel, FocusRequester>,
     modifier: Modifier = Modifier,
 ) {
@@ -686,6 +747,30 @@ private fun ReaderBottomConsole(
     }
     val progressDescription = stringResource(R.string.reader_progress_slider)
     val seekEnabled = controller != null && currentLocation != null && totalProgression != null
+    val reflowableRtl = controller?.morphology == ReaderMorphology.Reflowable &&
+        controller.capabilities.supportsReadingProgression &&
+        preferences.epub.readingProgression == ReaderReadingProgression.RightToLeft
+    val reflowable = controller?.morphology == ReaderMorphology.Reflowable
+    val leftChapter = if (reflowableRtl) adjacentChapters.next else adjacentChapters.previous
+    val rightChapter = if (reflowableRtl) adjacentChapters.previous else adjacentChapters.next
+    val goLeft: () -> Unit = {
+        if (reflowable) leftChapter?.let(onNavigateChapter) else controller?.goPrevious()
+    }
+    val goRight: () -> Unit = {
+        if (reflowable) rightChapter?.let(onNavigateChapter) else controller?.goNext()
+    }
+    val leftDescription = when {
+        !reflowable -> R.string.reader_previous
+        reflowableRtl -> R.string.reader_next_chapter
+        else -> R.string.reader_previous_chapter
+    }
+    val rightDescription = when {
+        !reflowable -> R.string.reader_next
+        reflowableRtl -> R.string.reader_previous_chapter
+        else -> R.string.reader_next_chapter
+    }
+    val leftEnabled = controller != null && (!reflowable || leftChapter != null)
+    val rightEnabled = controller != null && (!reflowable || rightChapter != null)
 
     Box(
         modifier
@@ -705,8 +790,8 @@ private fun ReaderBottomConsole(
                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { controller?.goPrevious() }, enabled = controller != null) {
-                    Icon(Icons.Default.ChevronLeft, stringResource(R.string.reader_previous))
+                IconButton(onClick = goLeft, enabled = leftEnabled) {
+                    Icon(Icons.Default.ChevronLeft, stringResource(leftDescription))
                 }
                 ReaderSlider(
                     value = sliderProgress,
@@ -727,8 +812,8 @@ private fun ReaderBottomConsole(
                         .semantics { contentDescription = progressDescription }
                         .testTag(READER_PROGRESS_TEST_TAG),
                 )
-                IconButton(onClick = { controller?.goNext() }, enabled = controller != null) {
-                    Icon(Icons.Default.ChevronRight, stringResource(R.string.reader_next))
+                IconButton(onClick = goRight, enabled = rightEnabled) {
+                    Icon(Icons.Default.ChevronRight, stringResource(rightDescription))
                 }
             }
             HorizontalDivider(color = colors.divider)
@@ -986,7 +1071,8 @@ private fun ReaderPreferenceSheet(
     panel: ReaderPanel,
     preferences: ReaderPreferences,
     morphology: ReaderMorphology,
-    enabled: (ReaderControl) -> Boolean,
+    settingState: (ReaderSettingDefinition) -> ReaderSettingState,
+    negativeLetterSpacingEnabled: Boolean,
     failure: ReaderCommandRejected?,
     onUpdate: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
@@ -1022,7 +1108,15 @@ private fun ReaderPreferenceSheet(
             }
         }
         regularSections.forEach { (section, settings) ->
-            ReaderPreferenceSection(section, settings, preferences, enabled, chinese, onUpdate)
+            ReaderPreferenceSection(
+                section,
+                settings,
+                preferences,
+                settingState,
+                negativeLetterSpacingEnabled,
+                chinese,
+                onUpdate,
+            )
         }
         if (advancedSections.isNotEmpty()) {
             Surface(
@@ -1057,7 +1151,8 @@ private fun ReaderPreferenceSheet(
                                     section,
                                     settings,
                                     preferences,
-                                    enabled,
+                                    settingState,
+                                    negativeLetterSpacingEnabled,
                                     chinese,
                                     onUpdate,
                                     nested = true,
@@ -1069,7 +1164,15 @@ private fun ReaderPreferenceSheet(
             }
         }
         resetSections.forEach { (section, settings) ->
-            ReaderPreferenceSection(section, settings, preferences, enabled, chinese, onUpdate)
+            ReaderPreferenceSection(
+                section,
+                settings,
+                preferences,
+                settingState,
+                negativeLetterSpacingEnabled,
+                chinese,
+                onUpdate,
+            )
         }
     }
 }
@@ -1077,15 +1180,17 @@ private fun ReaderPreferenceSheet(
 @Composable
 private fun ReaderPreferenceSection(
     section: com.ermao.library.shared.modules.reader.ReaderSettingSection,
-    settings: List<com.ermao.library.shared.modules.reader.ReaderSettingDefinition>,
+    settings: List<ReaderSettingDefinition>,
     preferences: ReaderPreferences,
-    enabled: (ReaderControl) -> Boolean,
+    settingState: (ReaderSettingDefinition) -> ReaderSettingState,
+    negativeLetterSpacingEnabled: Boolean,
     chinese: Boolean,
     onUpdate: (ReaderPreferences) -> Unit,
     nested: Boolean = false,
 ) {
-    val allUnavailable = settings.all { setting ->
-        setting.control?.let { control -> !enabled(control) } == true
+    val settingsWithState = settings.map { it to settingState(it) }
+    val allUnavailable = settingsWithState.all { (_, state) ->
+        state.availability != ReaderControlAvailability.Available
     }
     val content: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1096,11 +1201,12 @@ private fun ReaderPreferenceSection(
                     color = WarmPageThemeValues.colors.textPrimary,
                 )
             }
-            settings.forEach { setting ->
+            settingsWithState.forEach { (setting, state) ->
                 ReaderCatalogSetting(
                     setting,
                     preferences,
-                    enabled,
+                    state,
+                    negativeLetterSpacingEnabled,
                     chinese,
                     onUpdate,
                     showUnavailableHint = !allUnavailable,
@@ -1145,31 +1251,21 @@ private fun readerViewportIsWide(): Boolean {
 
 @Composable
 private fun ReaderCatalogSetting(
-    setting: com.ermao.library.shared.modules.reader.ReaderSettingDefinition,
+    setting: ReaderSettingDefinition,
     preferences: ReaderPreferences,
-    enabled: (ReaderControl) -> Boolean,
+    state: ReaderSettingState,
+    negativeLetterSpacingEnabled: Boolean,
     chinese: Boolean,
     onUpdate: (ReaderPreferences) -> Unit,
     showUnavailableHint: Boolean,
 ) {
     val label = if (chinese) setting.chinese else setting.english
     val value = setting.value(preferences)
-    val available = setting.control?.let(enabled) ?: true
+    val available = state.availability == ReaderControlAvailability.Available
     val fixedSwipe = setting.id == "swipePageTurn" && !available
-    val unavailableReason = when {
-        "wideViewport" in setting.availabilityRules && !readerViewportIsWide() -> "narrowViewport"
-        "paginatedReflowable" in setting.availabilityRules &&
-            preferences.epub.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll -> "scrollingMode"
-        "paginatedComic" in setting.availabilityRules &&
-            preferences.comic.flow == com.ermao.library.shared.modules.reader.ReaderReadingMode.ContinuousScroll -> "scrollingMode"
-        "doubleComicSpread" in setting.availabilityRules &&
-            preferences.comic.spreadMode != com.ermao.library.shared.modules.reader.ReaderComicSpreadMode.Double -> "requiresDoubleSpread"
-        "optimizationEnabled" in setting.availabilityRules && !preferences.epub.optimization.enabled -> "optimizationDisabled"
-        "publisherStylesOff" in setting.availabilityRules && preferences.epub.typography.preservePublisherStyles -> "publisherStylesActive"
-        "wakeLock" in setting.availabilityRules -> "wakeLockUnavailable"
-        "zoom" in setting.availabilityRules -> "zoomUnavailable"
-        else -> "notImplemented"
-    }.let(com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get)
+    val unavailableReason = state.reasonId?.let(
+        com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get,
+    )
     fun change(value: String) {
         var updated = setting.change(preferences, value)
         if (setting.id == "theme") updated = updated.copy(appearance = updated.appearance.copy(themeMode = ReaderThemeMode.Manual))
@@ -1215,7 +1311,7 @@ private fun ReaderCatalogSetting(
                                 label = if (chinese) option.chinese else option.english,
                                 enabled = setting.id != "letterSpacing" ||
                                     option.value.toDouble() >= 0 ||
-                                    enabled(ReaderControl.NegativeLetterSpacing),
+                                    negativeLetterSpacingEnabled,
                             )
                         },
                         selected = value,
@@ -1241,7 +1337,7 @@ private fun ReaderCatalogSetting(
                 color = WarmPageThemeValues.colors.textSecondary,
             )
         }
-        if (setting.id == "letterSpacing" && !enabled(ReaderControl.NegativeLetterSpacing)) Text(stringResource(R.string.reader_negative_spacing_retained), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
+        if (setting.id == "letterSpacing" && !negativeLetterSpacingEnabled) Text(stringResource(R.string.reader_negative_spacing_retained), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
         if (setting.id == "fontFamily") Text(stringResource(R.string.reader_font_mapping), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
     }
 }
@@ -1585,7 +1681,7 @@ private sealed interface ReaderContentsLoadState {
     data object NotRequested : ReaderContentsLoadState
     data object Loading : ReaderContentsLoadState
     data object Failed : ReaderContentsLoadState
-    data class Ready(val entries: List<FlatTocEntry>) : ReaderContentsLoadState
+    data class Ready(val entries: List<ReaderTocNode>) : ReaderContentsLoadState
 }
 
 private fun readerContentsEntrySelected(current: ReaderLocation?, entry: ReaderLocation): Boolean = when {
@@ -1641,11 +1737,6 @@ private fun ReaderSheetHeader(title: Int, onDismiss: () -> Unit) {
         Text(stringResource(title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
         IconButton(onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.reader_done)) }
     }
-}
-
-private data class FlatTocEntry(val entry: ReaderTocEntry, val depth: Int)
-private fun flattenContents(entries: List<ReaderTocEntry>, depth: Int = 0): List<FlatTocEntry> = buildList {
-    entries.forEach { add(FlatTocEntry(it, depth)); addAll(flattenContents(it.children, depth + 1)) }
 }
 
 private fun currentBookmark(bookmarks: List<ReaderBookmark>, location: ReaderLocation?): Boolean {

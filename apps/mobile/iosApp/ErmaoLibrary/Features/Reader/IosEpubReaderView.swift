@@ -17,9 +17,10 @@ struct IosReflowableReaderView: View {
         GeometryReader { geometry in
             ZStack {
                 palette.background.ignoresSafeArea()
-                content
-                    .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pageWidth))
-                    .frame(maxHeight: .infinity)
+                IosReaderContentStatusLayout(session: session) {
+                    content
+                        .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pageWidth))
+                }
                 if session.phase == .reading || session.phase == .background {
                     IosReaderControls(session: session, onClose: close)
                 }

@@ -8,6 +8,7 @@ import {
   Resource,
   type Fetcher
 } from '@readium/shared';
+import type { ReaderReadingProgression, ReaderWritingMode } from '@shuku/reader-core';
 
 const POSITION_CHARS = 1_024;
 
@@ -91,6 +92,9 @@ function positionsFor(
 export function createLocalPublication(input: Readonly<{
   title: string;
   language?: string | null;
+  readingProgression: ReaderReadingProgression;
+  writingMode: ReaderWritingMode;
+  layout?: 'fixed' | 'reflowable';
   readingOrder: readonly Readonly<{
     href: string;
     type: string;
@@ -113,8 +117,17 @@ export function createLocalPublication(input: Readonly<{
     type: item.type,
     title: item.title
   }));
+  const reflowable = input.layout !== 'fixed';
   const manifest = Manifest.deserialize({
-    metadata: { title: input.title, ...(input.language ? { language: input.language } : {}) },
+    metadata: {
+      title: input.title,
+      ...(input.language ? { language: input.language } : {}),
+      ...(input.layout ? { layout: input.layout } : {}),
+      ...(reflowable ? {
+        readingProgression: input.readingProgression,
+        'shuku:writingMode': input.writingMode
+      } : {})
+    },
     readingOrder,
     resources: (input.extraResources ?? []).map((item) => ({ href: item.href, type: item.type })),
     toc: (input.toc ?? readingOrder).map((item) => ({

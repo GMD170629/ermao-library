@@ -571,7 +571,25 @@ final class ContentDiscoveryUITests: XCTestCase {
         let savedValue = progress.value as? String ?? ""
         XCTAssertFalse(savedValue.isEmpty, "\(format) precise location value")
         XCTAssertNotEqual(savedValue, startValue, "\(format) precise location must change")
+        XCTAssertFalse(
+            app.staticTexts["reader.navigation.failed"].exists,
+            "\(format) must not report a failed progress jump after Readium accepted it"
+        )
         attachScreenshot(named: "live-reader-\(format.lowercased())-progress-jump", app: app)
+
+        if expectsWebContent {
+            let center = readerScreen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            center.tap()
+            XCTAssertTrue(
+                closeReader.waitForNonExistence(timeout: 5),
+                "\(format) progress jump must restore body taps so the controls can hide"
+            )
+            center.tap()
+            XCTAssertTrue(
+                closeReader.waitForExistence(timeout: 5),
+                "\(format) progress jump must keep Readium body taps active"
+            )
+        }
 
         dismissReaderNotificationBanner()
         app.buttons["reader.close"].tap()

@@ -35,8 +35,7 @@
 | ReaderSecurityTests 17 项 | 全部通过，包含真实 WebKit CSP、NUL/编码、FB2、原文件保留、在线错误保真和文字阅读设置。 |
 | ReaderProgressContractTests 6 项 | 全部通过；3.8.0 精确 Locator 在 3.9.0 恢复，完整锚点不变，仅新序列化键排序可变。 |
 | MobiPublicationFactoryTests 8 项 | 全部通过；MOBI 家族实际解析、内存 Publication、懒读取和新 ContentSearchService 的结果位置/文本。 |
-| 偏好持久化重点测试 5 项 | 账户隔离、连续修改合并与保存失败、v5 迁移、全部格式重置、重排不计作用户导航全部通过。 |
-| 上述合计 | **36 项通过，0 失败**。`/tmp/readium390-reader-tests4.xcresult`、`/tmp/readium390-tests4.log`。 |
+| 上述合计 | **31 项通过，0 失败**。`/tmp/readium390-reader-tests4.xcresult`、`/tmp/readium390-tests4.log`。 |
 | 核心滚动/字体/切章复跑 | **连续两轮通过**，9.933s/9.690s。`/tmp/readium390-scroll-repeat.xcresult`、`/tmp/readium390-repeat.log`。 |
 | 版本防回退 | 正常基线通过；六种变异（工程/锁回退、旧诊断版本、旧规范、非官方仓库、分支代替准确 revision）全部被拒绝。`python3 -m unittest discover -s apps/mobile/iosApp -p test_verify_readium.py`。 |
 | Python 校验脚本 | Ruff format/check 通过。 |

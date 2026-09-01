@@ -1,6 +1,6 @@
 import {
+  normalizeReaderPreferences,
   READER_PREFERENCES_VERSION,
-  migrateWebReaderPreferences,
   type ReaderPreferences
 } from '@shuku/reader-core';
 import {
@@ -121,14 +121,16 @@ export class IndexedDbReaderStorage implements ReaderStorage {
   async getPreference(userId: string, bookId: string) {
     return withTransaction(PREFERENCES_STORE, 'readwrite', async (stores) => {
       const stored = record(await requestResult(stores(PREFERENCES_STORE).get(preferenceKey(userId, bookId))));
-      if (!stored.preferences) return null;
-      const migrated = {
+      const preferences = record(stored.preferences);
+      if (stored.schemaVersion !== READER_PREFERENCES_VERSION
+        || preferences.schemaVersion !== READER_PREFERENCES_VERSION) return null;
+      const normalized = {
         key: preferenceKey(userId, bookId), userId, bookId, schemaVersion: READER_PREFERENCES_VERSION,
-        preferences: migrateWebReaderPreferences(stored.preferences),
+        preferences: normalizeReaderPreferences(preferences),
         updatedAt: typeof stored.updatedAt === 'number' ? stored.updatedAt : Date.now()
       };
-      if (JSON.stringify(stored) !== JSON.stringify(migrated)) await requestResult(stores(PREFERENCES_STORE).put(migrated));
-      return migrated;
+      if (JSON.stringify(stored) !== JSON.stringify(normalized)) await requestResult(stores(PREFERENCES_STORE).put(normalized));
+      return normalized;
     });
   }
   async putPreference(userId: string, bookId: string, preferences: ReaderPreferences, updatedAt = Date.now()) {

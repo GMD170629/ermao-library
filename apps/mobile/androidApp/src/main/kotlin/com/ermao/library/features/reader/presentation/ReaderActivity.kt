@@ -34,7 +34,7 @@ import com.ermao.library.features.reader.infrastructure.AndroidReaderNavigatorSe
 import com.ermao.library.features.reader.infrastructure.AndroidReaderNavigationCache
 import com.ermao.library.features.reader.infrastructure.AndroidReadiumRuntime
 import com.ermao.library.features.reader.infrastructure.ReaderOpenFailure
-import com.ermao.library.features.reader.infrastructure.ReadiumReflowableSession
+import com.ermao.library.features.reader.infrastructure.ReadiumEpubSession
 import com.ermao.library.features.reader.infrastructure.ReadiumComicSession
 import com.ermao.library.features.reader.infrastructure.ReadiumPdfSession
 import com.ermao.library.features.reader.infrastructure.AndroidPdfiumFeatureFlags
@@ -73,6 +73,11 @@ import com.ermao.library.shared.modules.reader.decidePendingVsServerStartup
 import com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderTapZones
+import com.ermao.library.shared.modules.reader.ReaderMorphology
+import com.ermao.library.shared.modules.reader.ReaderReadingProgression
+import com.ermao.library.shared.modules.reader.ReaderPhysicalHorizontalSide
+import com.ermao.library.shared.modules.reader.ReaderPageTurnDirection
+import com.ermao.library.shared.modules.reader.ReaderNavigationPolicy
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapContent
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapFailure
 import com.ermao.library.ErmaoLibraryApplication
@@ -275,7 +280,7 @@ class ReaderActivity : AppCompatActivity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         // Reflowable content uses Readium's unhandled-tap API, after links and selection.
-        if (controller?.morphology == com.ermao.library.shared.modules.reader.ReaderMorphology.Reflowable || readerPanelVisible) {
+        if (controller?.morphology == ReaderMorphology.Reflowable || readerPanelVisible) {
             return super.dispatchTouchEvent(event)
         }
         when (event.actionMasked) {
@@ -309,10 +314,12 @@ class ReaderActivity : AppCompatActivity() {
                 if (!controlsVisible) controlsVisible = true
                 true
             }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_PAGE_UP ->
-                interaction.keyboardPageTurn && reader.goPrevious()
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_SPACE ->
-                interaction.keyboardPageTurn && reader.goNext()
+            KeyEvent.KEYCODE_DPAD_LEFT -> interaction.keyboardPageTurn &&
+                routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Left)
+            KeyEvent.KEYCODE_DPAD_RIGHT -> interaction.keyboardPageTurn &&
+                routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Right)
+            KeyEvent.KEYCODE_PAGE_UP -> interaction.keyboardPageTurn && reader.goPrevious()
+            KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_SPACE -> interaction.keyboardPageTurn && reader.goNext()
             KeyEvent.KEYCODE_VOLUME_UP -> interaction.volumeKeyPageTurn && reader.goPrevious()
             KeyEvent.KEYCODE_VOLUME_DOWN -> interaction.volumeKeyPageTurn && reader.goNext()
             else -> false
@@ -326,15 +333,38 @@ class ReaderActivity : AppCompatActivity() {
         when (reader.preferences.value.interaction.tapZones) {
             ReaderTapZones.Disabled -> controlsVisible = true
             ReaderTapZones.Standard -> when {
-                horizontalFraction < 0.33f -> reader.goPrevious()
-                horizontalFraction > 0.67f -> reader.goNext()
+                horizontalFraction < 0.33f -> routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Left)
+                horizontalFraction > 0.67f -> routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Right)
                 else -> controlsVisible = true
             }
             ReaderTapZones.Reversed -> when {
-                horizontalFraction < 0.33f -> reader.goNext()
-                horizontalFraction > 0.67f -> reader.goPrevious()
+                horizontalFraction < 0.33f -> routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Left, reversed = true)
+                horizontalFraction > 0.67f -> routePhysicalHorizontalTurn(reader, ReaderPhysicalHorizontalSide.Right, reversed = true)
                 else -> controlsVisible = true
             }
+        }
+    }
+
+    private fun routePhysicalHorizontalTurn(
+        reader: ReaderScreenController,
+        side: ReaderPhysicalHorizontalSide,
+        reversed: Boolean = false,
+    ): Boolean {
+        val progression = if (
+            reader.morphology == ReaderMorphology.Reflowable &&
+            reader.capabilities.supportsReadingProgression
+        ) {
+            reader.preferences.value.epub.readingProgression
+        } else {
+            ReaderReadingProgression.LeftToRight
+        }
+        val effectiveSide = if (!reversed) side else when (side) {
+            ReaderPhysicalHorizontalSide.Left -> ReaderPhysicalHorizontalSide.Right
+            ReaderPhysicalHorizontalSide.Right -> ReaderPhysicalHorizontalSide.Left
+        }
+        return when (ReaderNavigationPolicy.physicalHorizontalPageTurn(effectiveSide, progression)) {
+            ReaderPageTurnDirection.Previous -> reader.goPrevious()
+            ReaderPageTurnDirection.Next -> reader.goNext()
         }
     }
 
@@ -993,7 +1023,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         val localSource = source as? LocalReaderSource
             ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
-        return ReadiumReflowableSession(
+        return ReadiumEpubSession(
             source = localSource,
             publicationStore = AndroidReaderPublicationStore(applicationContext, namespace, completedPublication),
             progressStore = progressStore,

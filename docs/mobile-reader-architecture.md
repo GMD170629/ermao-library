@@ -1,7 +1,7 @@
 # Mobile Reader Architecture
 
 Status: Reader v4 download-then-read contract implementation in progress; physical-device conformance pending
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 This document is the single authoritative architecture contract for the native Reader and its Reader v4 cross-platform progress integration. If a Mobile phase document or historical acceptance artifact describes a different progress state machine, this document wins and the conflicting material must be removed rather than implemented as compatibility behavior. Read it with the Mobile phase specifications and `docs/mobile-app-development-global-guidelines.md` before changing Reader domain, storage, engines, navigation, or UI.
 
@@ -420,23 +420,24 @@ bridge.
 
 `packages/reader-contracts/reader-settings.json` is the only settings catalog.
 Its ordered sections, stable IDs, Chinese/English labels, options, numeric
-bounds and reading morphologies generate Web and KMP metadata. Native sheets
-remain SwiftUI/Compose. iOS obtains the same metadata through KMP and resolves
+bounds, reading morphologies, availability rules and disabled reasons generate
+the Web and KMP metadata and resolvers. Native sheets remain SwiftUI/Compose.
+iOS obtains the same metadata and availability decisions through KMP and resolves
 generated native localization keys. Platform adapters may map editable field
-names and SDK capabilities, but must not maintain an independent setting list.
-`generate-reader-settings.py --check` detects metadata, localization and iOS
-field-binding drift; the Web pretest gate runs it.
+names and SDK capabilities, but must not maintain an independent setting list or
+availability policy. `generate-reader-settings.py --check` detects metadata,
+localization and iOS field-binding drift; the Web pretest gate runs it.
 
-Preference storage is version **5**, independent of the unchanged Reader **v4**
+Preference storage is version **6**, independent of the unchanged Reader **v4**
 exact-progress protocol. Values stay local to the device, server and account.
-No preference API or cross-device synchronization is introduced. The Web storage
-adapter migrates old line-height-only publisher flags to a disabled/off master;
-KMP migrates native v3/v4 records while preserving the actual native master.
-iOS uses that same decoder and no longer writes a duplicate `iosDraft`. Invalid
-records are not overwritten on read. Legal custom values remain stored and are
-displayed even when they are not preset choices. Reset replaces every reading
-format's preferences in the current namespace, without touching progress,
-bookmarks, downloads or other accounts.
+No preference API or cross-device synchronization is introduced. Web, Android
+and iOS read only the current V6 record from their stable namespace. A record
+without the current `schemaVersion` or one rejected by the current decoder is
+ignored and is not overwritten. Accepted records use the current canonical
+representation. Legal custom values remain stored and are displayed even when
+they are not preset choices. Reset replaces every reading format's preferences
+in the current namespace, without touching progress, bookmarks, downloads or
+other accounts.
 
 The sole publisher setting is `preservePublisherStyles`, displayed as
 “出版方样式” / “Publisher Styles” under Advanced Settings → Paragraph and Content
@@ -474,16 +475,16 @@ settings loading UI. Genuine save/SDK errors remain errors. Normal opening,
 TOC/bookmark jumps and exact progress restoration retain their own workflows.
 Preference reflow observations remain excluded from progress persistence.
 
-For iOS reflowable reading, app-owned Previous/Next commands in scrolling mode
-navigate to the start of the adjacent original reading-order resource, including
-when Previous is invoked halfway through the current chapter. They must not first
-navigate to the previous resource's end and then issue another scroll. Toolbar,
-tap-zone and keyboard commands share the existing session navigation queue and
-link-navigation owner; left/right preserve the SDK's LTR/RTL mapping. The first
-and last resources do not wrap. Paginated commands retain the SDK's ordinary
-page-turn behavior, and normal chapter jumps persist actual visible anchors.
-No SDK modification, custom scrolling JavaScript, new preference or navigator
-recreation is involved. This rule does not alter SDK-owned VoiceOver scrolling.
+In continuous scrolling mode, app-owned Previous/Next commands move the current
+content viewport by the shared navigation-policy fraction. At a resource edge
+they navigate to the adjacent original reading-order resource and position its
+near edge; the first and last resources do not wrap. Toolbar, tap-zone and
+keyboard commands share the existing session navigation queue and link-navigation
+owner, while left/right preserve LTR/RTL semantics. Native adapters use bounded,
+one-shot WebView geometry operations because the SDK has no public viewport-turn
+command; they do not rewrite publication content or recreate the Navigator.
+Paginated commands retain the SDK's ordinary page-turn behavior. This rule does
+not alter SDK-owned VoiceOver scrolling.
 
 `apps/web/public/fonts/reader` remains the licensed font resource owner. The three
 font choices are PingFang, Songti and Kaiti. Native PingFang maps to Source Han
@@ -500,9 +501,8 @@ comic command animation uses public Navigator go options. Other comic layout,
 negative spacing, smart optimization and fixed-layout capabilities without a
 usable public interface remain disabled.
 
-Current implementation and acceptance evidence, including device and SDK limits:
-`docs/testing/reader-settings-unification-2026-08-28.md`. Compilation is not proof
-of rendering effectiveness.
+Compilation is not proof of rendering effectiveness. Verification must include
+the generated-contract check, platform tests and the relevant real-reader path.
 
 Bookmarks use the existing Reader v4 collection wire schema. Local state is
 isolated by `serverIdentity + userId + resourceId + assetId + contentFingerprint`, retains

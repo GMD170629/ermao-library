@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -41,6 +42,8 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -116,6 +119,36 @@ class ReaderScreenContentsInstrumentedTest {
         compose.waitUntil(timeoutMillis = 5_000) { controller.seekCalls.get() == 1 }
         assertEquals(1, controller.seekCalls.get())
         assertTrue(checkNotNull(controller.lastSeek.get()) > 0.5)
+    }
+
+    @Test
+    fun reflowableProgressArrowsNavigateChaptersInsteadOfPages() {
+        val controller = DeferredContentsController()
+        val previousChapter = instrumentation.targetContext.getString(R.string.reader_previous_chapter)
+        val nextChapter = instrumentation.targetContext.getString(R.string.reader_next_chapter)
+        compose.setContent {
+            ReaderScreen(
+                title = "Chapter arrow fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        controller.releaseContents()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(previousChapter).assertIsNotEnabled()
+        compose.onNodeWithContentDescription(nextChapter).assertIsEnabled().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { controller.chapterNavigationCalls.get() == 1 }
+
+        assertEquals(0, controller.previousPageCalls.get())
+        assertEquals(0, controller.nextPageCalls.get())
+        assertEquals("chapter-2.xhtml", controller.currentLocation.value?.let { (it as ReflowReaderLocation).resourceKey })
     }
 
     @Test
@@ -298,8 +331,13 @@ class ReaderScreenContentsInstrumentedTest {
 
     private class DeferredContentsController : ReaderScreenController {
         private val loadGate = CompletableDeferred<Unit>()
+        private val contentsMutex = Mutex()
+        private var contentsLoaded = false
         val loadCalls = AtomicInteger()
         val seekCalls = AtomicInteger()
+        val previousPageCalls = AtomicInteger()
+        val nextPageCalls = AtomicInteger()
+        val chapterNavigationCalls = AtomicInteger()
         val lastSeek = AtomicReference<Double?>()
         var seekAccepted = true
         private val entries = (1..1_000).map { number ->
@@ -319,7 +357,8 @@ class ReaderScreenContentsInstrumentedTest {
 
         override val morphology = ReaderMorphology.Reflowable
         override val capabilities = ReaderCapabilities.epub(supportsVolumeKeys = true, supportsCustomFonts = true)
-        override val currentLocation: StateFlow<ReaderLocation?> = MutableStateFlow(entries.first().location)
+        private val locationState = MutableStateFlow<ReaderLocation?>(entries.first().location)
+        override val currentLocation: StateFlow<ReaderLocation?> = locationState
         override val preferences: StateFlow<ReaderPreferences> = MutableStateFlow(ReaderPreferences())
         private val restoreWarningState = MutableStateFlow<ReaderError?>(null)
         override val restoreWarning: StateFlow<ReaderError?> = restoreWarningState
@@ -329,19 +368,26 @@ class ReaderScreenContentsInstrumentedTest {
         override val bookmarkSyncPending: StateFlow<Boolean> = MutableStateFlow(false)
         override val tableOfContents: List<ReaderTocEntry> = emptyList()
 
-        override suspend fun loadTableOfContents(): List<ReaderTocEntry> {
-            loadCalls.incrementAndGet()
-            loadGate.await()
-            return entries
+        override suspend fun loadTableOfContents(): List<ReaderTocEntry> = contentsMutex.withLock {
+            if (!contentsLoaded) {
+                loadCalls.incrementAndGet()
+                loadGate.await()
+                contentsLoaded = true
+            }
+            entries
         }
 
         fun releaseContents() {
             loadGate.complete(Unit)
         }
 
-        override fun goPrevious() = false
-        override fun goNext() = false
-        override fun goTo(location: ReaderLocation) = false
+        override fun goPrevious(): Boolean { previousPageCalls.incrementAndGet(); return false }
+        override fun goNext(): Boolean { nextPageCalls.incrementAndGet(); return false }
+        override fun goTo(location: ReaderLocation): Boolean {
+            chapterNavigationCalls.incrementAndGet()
+            locationState.value = location
+            return true
+        }
         override fun goToTotalProgression(totalProgression: Double): Boolean {
             seekCalls.incrementAndGet()
             lastSeek.set(totalProgression)

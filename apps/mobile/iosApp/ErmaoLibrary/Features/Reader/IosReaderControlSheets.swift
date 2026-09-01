@@ -185,8 +185,48 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
     }
 
     @ViewBuilder private func settingRow(_ setting: ReaderSettingDefinition) -> some View {
-        let available = setting.control.map { session.isEnabled($0) } ?? true
-        let stored = editor.draft.settingValue(setting)
+        let sharedPreferences = try? ReaderPreferencesJson.shared.decode(payload: editor.draft.canonicalJSON())
+        let capabilities = ErmaoShared.PublicKt.readerPlatformCapabilities(
+            morphology: session.controlMorphology,
+            volumeKeys: false,
+            pdfZoom: session.controlMorphology == .pdf,
+            pdfFit: false
+        )
+        let baseState = sharedPreferences.map { preferences in
+            ErmaoShared.ReaderSettingsCatalog.shared.resolveReaderSetting(
+                setting: setting,
+                morphology: session.controlMorphology,
+                capabilities: capabilities,
+                preferences: preferences,
+                ready: session.controlReady,
+                nativeUnavailable: Set<ErmaoShared.ReaderControl>(),
+                wideViewport: UIScreen.main.bounds.width > 640,
+                wakeLockSupported: true,
+                canZoom: true
+            )
+        }
+        let nativeUnavailable: Set<ErmaoShared.ReaderControl> = {
+            guard baseState?.availability == .available,
+                  let control = setting.control,
+                  !session.isEnabled(control)
+            else { return [] }
+            return [control]
+        }()
+        let state = nativeUnavailable.isEmpty ? baseState : sharedPreferences.map { preferences in
+            ErmaoShared.ReaderSettingsCatalog.shared.resolveReaderSetting(
+                setting: setting,
+                morphology: session.controlMorphology,
+                capabilities: capabilities,
+                preferences: preferences,
+                ready: session.controlReady,
+                nativeUnavailable: nativeUnavailable,
+                wideViewport: UIScreen.main.bounds.width > 640,
+                wakeLockSupported: true,
+                canZoom: true
+            )
+        }
+        let available = state?.availability == .available
+        let stored = sharedPreferences.map { setting.value(preferences: $0) } ?? ""
         let value = setting.options.first { option in
             option.value == stored || Double(option.value).map { $0 == Double(stored) } == true
         }?.value ?? stored
@@ -224,8 +264,8 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
             }
             if setting.id == "pdfFit" { Text("reader.pdf.fit.unavailable").font(.caption).foregroundStyle(.secondary) }
             if fixedSwipe { Text("reader.settings.swipeFixed").font(.caption).foregroundStyle(.secondary) }
-            if !available && !fixedSwipe {
-                Text(LocalizedStringKey("reader.catalog.reason.\(unavailabilityReason(for: setting))"))
+            if !available, !fixedSwipe, let reasonID = state?.reasonId {
+                Text(LocalizedStringKey("reader.catalog.reason.\(reasonID)"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             if setting.id == "letterSpacing" && !session.isEnabled(.negativeletterspacing) {
@@ -234,22 +274,6 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
             if setting.id == "fontFamily" { Text("reader.settings.fontMapping").font(.caption).foregroundStyle(.secondary) }
         }
         .accessibilityIdentifier(setting.id == "preservePublisherStyles" ? "reader.setting.publisherStyles" : "reader.setting.\(setting.id)")
-    }
-
-    private func unavailabilityReason(for setting: ReaderSettingDefinition) -> String {
-        let rules = Set(setting.availabilityRules)
-        if !session.controlReady { return "engineNotReady" }
-        if rules.contains("wideViewport") && UIScreen.main.bounds.width <= 640 { return "narrowViewport" }
-        if rules.contains("paginatedReflowable") && editor.draft.readingMode == .continuousScroll { return "scrollingMode" }
-        if rules.contains("paginatedComic") && editor.draft.comicFlow == .scrolled { return "scrollingMode" }
-        if rules.contains("doubleComicSpread") && editor.draft.comicSpread != .double { return "requiresDoubleSpread" }
-        if rules.contains("optimizationEnabled") && !editor.draft.smartOptimization { return "optimizationDisabled" }
-        if rules.contains("publisherStylesOff") && editor.draft.preservePublisherStyles { return "publisherStylesActive" }
-        if rules.contains("wakeLock") { return "wakeLockUnavailable" }
-        if rules.contains("zoom") { return "zoomUnavailable" }
-        return setting.control.map { session.platformControlEnabled($0) } == true
-            ? "publicationConstraint"
-            : "notImplemented"
     }
 }
 

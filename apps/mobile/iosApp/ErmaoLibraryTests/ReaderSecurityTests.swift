@@ -316,47 +316,78 @@ final class ReaderSecurityTests: XCTestCase {
                 try await expectRendered("document.body.textContent.includes('Paragraph 240.') && Math.abs(parseFloat(getComputedStyle(document.querySelector('p')).fontSize) - \(size)) < 0.7", "New and revisited chapters must retain full content and typography")
             }
         }
-        func expectChapterTop(_ index: Int) async throws {
+        func expectChapter(_ index: Int, atEnd: Bool = false) async throws {
             // Input callbacks enqueue work asynchronously; wait for the public
             // location notification as well as the document's visible content.
             for _ in 0 ..< 100 where session.navigator?.currentLocation?.href.string != session.tableOfContents[index].href {
                 try await Task.sleep(for: .milliseconds(100))
             }
-            try await expectRendered("document.body.textContent.includes('第\(index + 44)章') && Math.abs(window.scrollY) < 1", "Scroll navigation must enter chapter \(index + 44) at its top")
+            let edge = atEnd
+                ? "Math.abs((document.scrollingElement.scrollHeight - innerHeight) - document.scrollingElement.scrollTop) <= 1"
+                : "Math.abs(document.scrollingElement.scrollTop) <= 1"
+            try await expectRendered(
+                "document.body.textContent.includes('第\(index + 44)章') && \(edge)",
+                "Scroll navigation must enter chapter \(index + 44) at its \(atEnd ? "end" : "top")"
+            )
             XCTAssertEqual(session.navigator?.currentLocation?.href.string, session.tableOfContents[index].href)
             XCTAssertTrue(session.navigator === reopenedNavigator)
         }
-        await session.goPrevious()
-        try await expectChapterTop(0)
-        await session.goPrevious()
-        try await expectChapterTop(0) // First chapter: no wrap and no jump to its end.
-        await session.goNext()
-        try await expectChapterTop(1)
-        await session.goNext()
-        try await expectChapterTop(2)
-        await session.goNext()
-        try await expectChapterTop(2) // Last chapter: no wrap.
-        let navigationSession = session
-        async let firstPrevious: Void = navigationSession.goPrevious()
-        async let secondPrevious: Void = navigationSession.goPrevious()
-        _ = await (firstPrevious, secondPrevious)
-        try await expectChapterTop(0)
 
-        for (key, index) in [(Key.pageDown, 1), (.pageUp, 0), (.arrowRight, 1), (.arrowLeft, 0), (.space, 1)] {
-            session.navigator(reopenedNavigator, didPressKey: KeyEvent(phase: .down, key: key))
-            try await expectChapterTop(index)
-        }
-        session.handleTap(at: CGPoint(x: 10, y: 100), width: 440)
-        try await expectChapterTop(0)
+        let openedFirstChapter = await session.goToTOCEntry(session.tableOfContents[0])
+        XCTAssertTrue(openedFirstChapter)
+        try await expectChapter(0)
         await session.goNext()
+        try await expectRendered(
+            "document.scrollingElement.scrollTop > innerHeight * 0.8 && document.scrollingElement.scrollTop < innerHeight * 0.96",
+            "Scroll Next must move approximately 88 percent of the current viewport"
+        )
+        XCTAssertEqual(session.navigator?.currentLocation?.href.string, session.tableOfContents[0].href)
+        _ = try await reopenedNavigator.evaluateJavaScript(
+            "document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight - innerHeight - 20; true"
+        ).get()
+        await session.goNext()
+        try await expectChapter(0, atEnd: true)
+        await session.goNext()
+        try await expectChapter(1)
+        await session.goPrevious()
+        try await expectChapter(0, atEnd: true)
+        await session.goPrevious()
+        try await expectRendered(
+            "document.scrollingElement.scrollTop < document.scrollingElement.scrollHeight - innerHeight - 1",
+            "Scroll Previous must move within the chapter before crossing it"
+        )
+
+        let openedMiddleChapter = await session.goToTOCEntry(session.tableOfContents[1])
+        XCTAssertTrue(openedMiddleChapter)
+        try await expectChapter(1)
+        await session.handleKeyEvent(KeyEvent(phase: .down, key: .pageUp))
+        try await expectChapter(0, atEnd: true)
+        await session.handleKeyEvent(KeyEvent(phase: .down, key: .pageDown))
+        try await expectChapter(1)
+        await session.handleKeyEvent(KeyEvent(phase: .down, key: .pageDown))
+        try await expectRendered("document.scrollingElement.scrollTop > 1", "PageDown must advance within the current chapter")
+        _ = try await reopenedNavigator.evaluateJavaScript(
+            "document.scrollingElement.scrollTop = document.scrollingElement.scrollHeight - innerHeight; true"
+        ).get()
+        await session.handleKeyEvent(KeyEvent(phase: .down, key: .arrowRight))
+        try await expectChapter(2)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNil(session.activeControlPanel)
+        XCTAssertNil(reopenedNavigator.currentSelection)
+        await session.handleTap(at: CGPoint(x: 10, y: 100), width: 440)
+        try await expectChapter(1, atEnd: true)
         var reversedTaps = session.preferences
         reversedTaps.tapZones = .reversed
         let reversedApplied = await session.applyControlPreferences(reversedTaps)
         XCTAssertTrue(reversedApplied)
         // Respect the existing tap debounce when issuing another physical-style tap.
-        try await Task.sleep(for: .milliseconds(160))
-        session.handleTap(at: CGPoint(x: 430, y: 100), width: 440)
-        try await expectChapterTop(0)
+        try await Task.sleep(for: .milliseconds(500))
+        await session.handleTap(at: CGPoint(x: 10, y: 100), width: 440)
+        try await expectChapter(2)
+
+        let reopenedFirstChapter = await session.goToTOCEntry(session.tableOfContents[0])
+        XCTAssertTrue(reopenedFirstChapter)
+        try await expectChapter(0)
         await session.flushProgress()
         let chapterStartProgress = try await progressStore.load(sourceId: "controls")
         let chapterStart = try XCTUnwrap(chapterStartProgress?.location as? ErmaoShared.ReflowReaderLocation)
@@ -592,6 +623,66 @@ final class ReaderSecurityTests: XCTestCase {
         )
     }
 
+    func testDecoratedChapterQuotesCspAndRemainsStrictXhtml() throws {
+        let markup = #"""
+        <?xml version="1.0" encoding="utf-8" standalone="no"?>
+        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+        <html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title></head><body><p>Readable text</p></body></html>
+        """#
+        let secured = try IosPublicationSecurityPolicy.decorate(data: Data(markup.utf8))
+        let decorated = String(decoding: secured, as: UTF8.self)
+
+        XCTAssertTrue(decorated.contains(#"http-equiv="Content-Security-Policy" content="default-src 'none';"#))
+        XCTAssertFalse(decorated.contains(#"content=default-src"#))
+        XCTAssertTrue(decorated.contains(#"encoding="utf-8" standalone="no""#))
+
+        let parser = XMLParser(data: secured)
+        parser.shouldResolveExternalEntities = false
+        XCTAssertTrue(parser.parse(), "Decorated XHTML must remain well formed: \(String(describing: parser.parserError))")
+    }
+
+    @MainActor
+    func testReflowableResourceFailurePresentsReadErrorWithoutOverwritingFirstFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("reader-resource-error-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let defaultsName = "reader-resource-error-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let deviceIdentity = IosReaderDeviceIdentity(defaults: defaults)
+        let identity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
+            namespace: ErmaoShared.PublicKt.createReaderSyncNamespace(
+                serverIdentity: "error-server", userId: "error-user", authorizationVersion: 1
+            ),
+            clientId: deviceIdentity.stableDeviceId(), bookId: "book", resourceId: "resource"
+        )
+        let database = try IosReaderLocalDatabase(
+            identity: identity,
+            databaseURL: root.appendingPathComponent("Reader.sqlite3")
+        )
+        let session = IosReflowableReaderSession(
+            resourceID: "resource",
+            displayTitle: "Resource",
+            managedStore: try IosManagedPublicationStore(root: root.appendingPathComponent("Publications")),
+            progressStore: IosLocalOnlyReaderProgressStore(database: database),
+            deviceIdentity: deviceIdentity
+        )
+        let navigator = ReaderSecurityNavigator()
+        let failedHref = try XCTUnwrap(RelativeURL(path: "chapter-missing.xhtml"))
+
+        session.navigator(
+            navigator,
+            didFailToLoadResourceAt: failedHref,
+            withError: .decoding("synthetic chapter decode failure")
+        )
+        XCTAssertEqual(session.presentationError, .readFailed)
+        session.navigator(navigator, presentError: .copyForbidden)
+        XCTAssertEqual(session.presentationError, .readFailed, "A later navigator error must not overwrite the first failure")
+
+        try await session.close()
+        await database.close()
+    }
+
     @MainActor
     func testGeneratedChapterCspBlocksScriptsEventsConnectionsAndEmbeddedContentInWebKit() async throws {
         let configuration = WKWebViewConfiguration()
@@ -601,12 +692,20 @@ final class ReaderSecurityTests: XCTestCase {
         let loaded = expectation(description: "WebKit loaded the generated chapter")
         let delegate = ReaderSecurityNavigationDelegate(loaded: loaded)
         webView.navigationDelegate = delegate
-        let hostile = #"<html><head></head><body><p>Readable text</p><script>window.inlineRan=true</script><script src="reader-test://publication/script.js"></script><button id="event" onclick="window.eventRan=true">Click</button><img src="reader-test://external/image.png" onerror="window.eventRan=true"/><iframe src="reader-test://publication/frame"></iframe><object data="reader-test://publication/object"></object><embed src="reader-test://publication/embed"/></body></html>"#
+        let hostile = #"<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body><p>Readable text</p><script>window.inlineRan=true</script><script src="reader-test://publication/script.js"></script><button id="event" onclick="window.eventRan=true">Click</button><img src="reader-test://external/image.png" onerror="window.eventRan=true"/><iframe src="reader-test://publication/frame"></iframe><object data="reader-test://publication/object"></object><embed src="reader-test://publication/embed"/></body></html>"#
         let secured = try IosPublicationSecurityPolicy.generatedChapter(hostile)
-        webView.load(secured, mimeType: "text/html", characterEncodingName: "utf-8", baseURL: try XCTUnwrap(URL(string: "reader-test://publication/chapter")))
+        webView.load(secured, mimeType: "application/xhtml+xml", characterEncodingName: "utf-8", baseURL: try XCTUnwrap(URL(string: "reader-test://publication/chapter.xhtml")))
         await fulfillment(of: [loaded], timeout: 10)
-        let blocked = try await webView.callAsyncJavaScript(#"document.getElementById('event').click();let connectionBlocked=false;try{await fetch('reader-test://external/data')}catch{connectionBlocked=true}return !window.inlineRan&&!window.eventRan&&connectionBlocked&&getComputedStyle(document.querySelector('iframe')).display==='none'"#, arguments: [:], in: nil, contentWorld: .page)
-        XCTAssertEqual(blocked as? Bool, true)
+
+        let renderedSafely = try await webView.evaluateJavaScript(#"(()=>{document.getElementById('event').click();const blocked=['iframe','object','embed'].every(selector=>{const element=document.querySelector(selector);return element===null||getComputedStyle(element).display==='none'});return document.body.textContent.includes('Readable text')&&!window.inlineRan&&!window.eventRan&&blocked})()"#)
+        XCTAssertEqual(renderedSafely as? Bool, true)
+        try await webView.evaluateJavaScript(#"(()=>{window.connectionBlocked=null;fetch('reader-test://external/data').then(()=>{window.connectionBlocked=false},()=>{window.connectionBlocked=true});return true})()"#)
+        var connectionBlocked = false
+        for _ in 0 ..< 50 where !connectionBlocked {
+            connectionBlocked = try await webView.evaluateJavaScript("window.connectionBlocked === true") as? Bool == true
+            if !connectionBlocked { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        XCTAssertTrue(connectionBlocked)
         XCTAssertEqual(requests.count, 0, "No external or embedded resource may reach the transport")
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -763,13 +862,14 @@ final class ReaderSecurityTests: XCTestCase {
 
         let countLimit = ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryMaxCount()
         assertEpubSafetyFailure(ErmaoShared.PublicKt.readerSafetyEpubArchiveEntryCountFailure()) {
-            let entries = (0 ... countLimit).map { index in
-                IosEpubArchiveSafetyPreflight.EntryFacts(
+            var entries: [IosEpubArchiveSafetyPreflight.EntryFacts] = []
+            for index in 0 ... countLimit {
+                let offset = UInt64(index) * 2
+                entries.append(IosEpubArchiveSafetyPreflight.EntryFacts(
                     path: "OPS/\(index)", isDirectory: false, isSymbolicLink: false,
                     isEncrypted: false, uncompressedSize: 0, compressedSize: 0, crc32: 0,
-                    localHeaderOffset: UInt64(index * 2), dataOffset: UInt64(index * 2),
-                    physicalEndOffset: UInt64(index * 2)
-                )
+                    localHeaderOffset: offset, dataOffset: offset, physicalEndOffset: offset
+                ))
             }
             try IosEpubArchiveSafetyPreflight.verifyMetadata(entries, archiveLength: UInt64.max)
         }
@@ -832,4 +932,16 @@ private final class ReaderSecurityNavigationDelegate: NSObject, WKNavigationDele
     init(loaded: XCTestExpectation) { self.loaded = loaded }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded.fulfill() }
+}
+
+private final class ReaderSecurityNavigator: Navigator {
+    let publication = Publication(
+        manifest: Manifest(metadata: Metadata(title: "Reader security test"), readingOrder: [])
+    )
+    var currentLocation: Locator? { nil }
+
+    func go(to locator: Locator, options: NavigatorGoOptions) async -> Bool { false }
+    func go(to link: ReadiumShared.Link, options: NavigatorGoOptions) async -> Bool { false }
+    func goForward(options: NavigatorGoOptions) async -> Bool { false }
+    func goBackward(options: NavigatorGoOptions) async -> Bool { false }
 }

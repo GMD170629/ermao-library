@@ -6,11 +6,10 @@ import UIKit
 
 @MainActor
 func makeIosReflowableNavigator(publication: Publication, preferences: EPUBPreferences, location: Locator?) throws -> EPUBNavigatorViewController {
-    var configuration = EPUBNavigatorViewController.Configuration(
+    let configuration = EPUBNavigatorViewController.Configuration(
         preferences: preferences, editingActions: [], preloadPreviousPositionCount: 1, preloadNextPositionCount: 1,
         fontFamilyDeclarations: try iosReaderFontDeclarations()
     )
-    configuration.disablePageTurnsWhileScrolling = true
     return try EPUBNavigatorViewController(publication: publication, initialLocation: location, config: configuration)
 }
 
@@ -18,14 +17,30 @@ extension IosReflowableReaderSession: IosReaderControlSession {
     var controlMorphology: ErmaoShared.ReaderMorphology { .reflowable }
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
+    var controlAdjacentChapters: IosReaderAdjacentChapters {
+        let location = navigator?.currentLocation
+        return resolveIosReaderAdjacentChapters(
+            entries: tableOfContents,
+            currentHref: location?.href.normalized.string,
+            fragments: Set(location?.locations.fragments ?? []),
+            cssSelector: location?.locations["cssSelector"]?.string,
+            currentTitle: chapterTitle
+        )
+    }
     var controlPosition: String {
         navigator?.currentLocation?.locations.position.map { $0.formatted() }
             ?? progress.formatted(.percent.precision(.fractionLength(0)))
     }
 
     func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool {
+        if !supportsTextDirectionPreferences && (control == .readingprogression || control == .writingmode) {
+            return false
+        }
         guard let navigator else { return false }
-        var native = preferences.readium(for: navigator.traitCollection.userInterfaceStyle)
+        var native = preferences.readium(
+            for: navigator.traitCollection.userInterfaceStyle,
+            appliesTextDirectionPreferences: supportsTextDirectionPreferences
+        )
         // Null is the publisher-default value, not a reason to prevent choosing an alignment.
         if native.textAlign == nil { native.textAlign = .start }
         let editor = navigator.editor(of: native)
@@ -35,6 +50,8 @@ extension IosReflowableReaderSession: IosReaderControlSession {
             .letterspacing: editor.letterSpacing.isEffective, .pagemargins: editor.pageMargins.isEffective,
             .paragraphindent: editor.paragraphIndent.isEffective, .paragraphspacing: editor.paragraphSpacing.isEffective,
             .textalignment: editor.textAlign.isEffective, .readingmode: editor.scroll.isEffective,
+            .readingprogression: editor.readingProgression.isEffective,
+            .writingmode: editor.verticalText.isEffective,
             .spread: editor.columnCount.isEffective, .publisherstyles: editor.publisherStyles.isEffective,
         ]
         return platformControlEnabled(control, unavailable: Set(effective.filter { !$0.value }.map(\.key)))
@@ -68,10 +85,7 @@ extension IosPdfReaderSession: IosReaderControlSession {
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] { tableOfContents }
-    func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool {
-        if control == .pdfzoom { return controlReady }
-        return platformControlEnabled(control)
-    }
+    func isEnabled(_ control: ErmaoShared.ReaderControl) -> Bool { platformControlEnabled(control) }
     func applyControlPreferences(_ updated: IosReaderPreferences) async -> Bool { await applyPreferences(updated) }
     func seekControlProgress(_ progress: Double) async -> Bool { await goToPage(Int((progress * Double(max(0, canonicalPageCount - 1))).rounded())) }
     func zoomControl(_ direction: Int) {

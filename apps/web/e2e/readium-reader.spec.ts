@@ -18,13 +18,13 @@ type EpubFixtureItem = Readonly<{ href: string; title: string; body: string }>;
 async function createEpub(items: readonly EpubFixtureItem[] = [
   { href: 'chapter1.xhtml', title: '第一章', body: chapterOne },
   { href: 'chapter2.xhtml', title: '第二章', body: chapterTwo }
-]): Promise<Uint8Array> {
+], language: string | null = 'zh-CN'): Promise<Uint8Array> {
   const writer = new ZipWriter(new Uint8ArrayWriter());
   await writer.add('mimetype', new TextReader('application/epub+zip'), { level: 0 });
   await writer.add('META-INF/container.xml', new TextReader('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'));
   const manifest = items.map((item, index) => `<item id="item-${index}" href="${item.href}" media-type="application/xhtml+xml"/>`).join('');
   const spine = items.map((_item, index) => `<itemref idref="item-${index}"/>`).join('');
-  await writer.add('content.opf', new TextReader(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Readium E2E</dc:title><dc:language>zh-CN</dc:language></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`));
+  await writer.add('content.opf', new TextReader(`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Readium E2E</dc:title>${language ? `<dc:language>${language}</dc:language>` : ''}</metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`));
   await writer.add('nav.xhtml', new TextReader(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>${items.map((item) => `<li><a href="${item.href}">${item.title}</a></li>`).join('')}</ol></nav></body></html>`));
   for (const item of items) await writer.add(item.href, new TextReader(item.body));
   return writer.close();
@@ -80,9 +80,15 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
   return route.fulfill({ json: { ok: true, data: {} } });
 }
 
-async function installReaderRoutes(page: Page, snapshot: Record<string, unknown> | null = null, legacyPercent = 0, items?: readonly EpubFixtureItem[]) {
+async function installReaderRoutes(
+  page: Page,
+  snapshot: Record<string, unknown> | null = null,
+  legacyPercent = 0,
+  items?: readonly EpubFixtureItem[],
+  language: string | null = 'zh-CN'
+) {
   const writes: unknown[] = [];
-  const epub = await createEpub(items);
+  const epub = await createEpub(items, language);
   await page.route('**/api/**', (route) => fulfillApi(route, snapshot, legacyPercent, writes, epub));
   return writes;
 }
@@ -447,7 +453,7 @@ test('whole-publication percentage is display-only and never an automatic restor
 });
 
 test('Readium settings expose scrolling, auto spread and publisher styles with truthful context states', async ({ page }) => {
-  await installReaderRoutes(page);
+  await installReaderRoutes(page, null, 0, undefined, null);
   await page.goto('/reader/epub-resource');
   await visibleReadiumFrame(page);
 
@@ -480,6 +486,33 @@ test('Readium settings expose scrolling, auto spread and publisher styles with t
   await expect(swipe).toBeDisabled();
 
   await page.getByRole('button', { name: '高级设置', exact: true }).click();
+  const readingProgression = page.getByRole('group', { name: '阅读方向' });
+  await expect(readingProgression.getByRole('button', { name: 'LTR' })).toHaveAttribute('aria-pressed', 'true');
+  await readingProgression.getByRole('button', { name: 'RTL' }).click();
+  await expect(readingProgression.getByRole('button', { name: 'RTL' })).toHaveAttribute('aria-pressed', 'true');
+  const writingMode = page.getByRole('group', { name: '排版方向' });
+  await expect(writingMode.getByRole('button', { name: '横排' })).toHaveAttribute('aria-pressed', 'true');
+  await writingMode.getByRole('button', { name: '竖排' }).click();
+  await expect(writingMode.getByRole('button', { name: '竖排' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(flow.getByRole('button', { name: '分页' })).toBeDisabled();
+  await expect(spread.getByRole('button', { name: '单页' })).toBeDisabled();
+  const verticalModeHints = page.getByText('竖排模式使用滚动阅读');
+  await expect(verticalModeHints).toHaveCount(2);
+  await expect(verticalModeHints.first()).toBeVisible();
+  const verticalFrame = await visibleReadiumFrame(page);
+  await expect.poll(() => verticalFrame.contentFrame().locator('html').evaluate(
+    (root) => getComputedStyle(root).writingMode
+  )).toContain('vertical');
+  await readingProgression.getByRole('button', { name: 'LTR' }).click();
+  await expect(readingProgression.getByRole('button', { name: 'LTR' })).toHaveAttribute('aria-pressed', 'true');
+  const verticalLtrFrame = await visibleReadiumFrame(page);
+  await expect.poll(() => verticalLtrFrame.contentFrame().locator('html').evaluate(
+    (root) => getComputedStyle(root).writingMode
+  )).toContain('vertical');
+  await writingMode.getByRole('button', { name: '横排' }).click();
+  await expect(writingMode.getByRole('button', { name: '横排' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(flow.getByRole('button', { name: '分页' })).toBeEnabled();
+  await expect(spread.getByRole('button', { name: '双页' })).toBeEnabled();
   const publisher = page.getByRole('checkbox', { name: /出版方样式/ });
   await expect(publisher).toBeEnabled();
   await expect(publisher).not.toBeChecked();

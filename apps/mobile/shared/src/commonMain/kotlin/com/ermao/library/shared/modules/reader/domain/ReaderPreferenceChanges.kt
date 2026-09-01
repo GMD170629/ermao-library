@@ -20,6 +20,8 @@ fun mergeReaderPreferenceChanges(base: ReaderPreferences, requested: ReaderPrefe
             keepScreenAwake = select(base.interaction.keepScreenAwake, requested.interaction.keepScreenAwake, current.interaction.keepScreenAwake),
         ),
         epub = current.epub.copy(
+            readingProgression = select(base.epub.readingProgression, requested.epub.readingProgression, current.epub.readingProgression),
+            writingMode = select(base.epub.writingMode, requested.epub.writingMode, current.epub.writingMode),
             fontSize = select(base.epub.fontSize, requested.epub.fontSize, current.epub.fontSize),
             lineHeight = select(base.epub.lineHeight, requested.epub.lineHeight, current.epub.lineHeight),
             pageWidth = select(base.epub.pageWidth, requested.epub.pageWidth, current.epub.pageWidth),
@@ -75,6 +77,8 @@ fun changedReaderControls(before: ReaderPreferences, after: ReaderPreferences): 
     if (before.interaction.swipePageTurn != after.interaction.swipePageTurn) add(ReaderControl.Swipe)
     if (before.interaction.keyboardPageTurn != after.interaction.keyboardPageTurn) add(ReaderControl.Keyboard)
     if (before.interaction.volumeKeyPageTurn != after.interaction.volumeKeyPageTurn) add(ReaderControl.VolumeKeys)
+    if (before.epub.writingMode != after.epub.writingMode) add(ReaderControl.WritingMode)
+    if (before.epub.readingProgression != after.epub.readingProgression) add(ReaderControl.ReadingProgression)
     if (before.epub.fontSize != after.epub.fontSize) add(ReaderControl.FontSize)
     if (before.epub.fontFamily != after.epub.fontFamily) add(ReaderControl.FontFamily)
     if (before.epub.fontWeight != after.epub.fontWeight) add(ReaderControl.FontWeight)

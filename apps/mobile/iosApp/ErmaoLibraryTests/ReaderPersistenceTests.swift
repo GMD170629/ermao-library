@@ -21,9 +21,39 @@ final class ReaderPersistenceTests: XCTestCase {
         if let temporaryRoot { try? FileManager.default.removeItem(at: temporaryRoot) }
     }
 
-    @MainActor
-    func testReaderUsesFiveHundredMillisecondTrailingSave() {
-        XCTAssertEqual(IosReflowableReaderSession.progressSaveDebounceMilliseconds, 500)
+    func testProgressArrowsResolveAdjacentReflowableChaptersWithoutLooping() {
+        let chapters = [
+            IosReaderTocEntry(id: "one", title: "One", href: "one.xhtml", depth: 0),
+            IosReaderTocEntry(id: "two", title: "Two", href: "two.xhtml", depth: 0),
+            IosReaderTocEntry(id: "three", title: "Three", href: "three.xhtml", depth: 0),
+        ]
+
+        let first = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "one.xhtml")
+        XCTAssertNil(first.previous)
+        XCTAssertEqual(first.next?.id, "two")
+
+        let middle = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "two.xhtml")
+        XCTAssertEqual(middle.previous?.id, "one")
+        XCTAssertEqual(middle.next?.id, "three")
+
+        let last = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "three.xhtml")
+        XCTAssertEqual(last.previous?.id, "two")
+        XCTAssertNil(last.next)
+
+        let fragmentChapters = [
+            IosReaderTocEntry(id: "one", title: "One", href: "book.xhtml#one", depth: 0),
+            IosReaderTocEntry(id: "two", title: "Two", href: "book.xhtml#two", depth: 0),
+            IosReaderTocEntry(id: "three", title: "Three", href: "book.xhtml#three", depth: 0),
+        ]
+
+        let adjacent = resolveIosReaderAdjacentChapters(
+            entries: fragmentChapters,
+            currentHref: "book.xhtml",
+            fragments: ["two"]
+        )
+
+        XCTAssertEqual(adjacent.previous?.id, "one")
+        XCTAssertEqual(adjacent.next?.id, "three")
     }
 
     func testReaderPreferencesMatchWebDefaultsAndPersistPerServerUser() {
@@ -39,6 +69,8 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(initial.lineHeight, 1.9)
         XCTAssertEqual(initial.spreadMode, .single)
         XCTAssertEqual(initial.readingMode, .paged)
+        XCTAssertEqual(initial.readingProgression, .ltr)
+        XCTAssertEqual(initial.writingMode, .horizontal)
 
         var changed = initial
         changed.theme = .green
@@ -82,14 +114,16 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(stored.count, 1)
     }
 
-    func testPreferenceVersionFiveMigratesNativeMasterAndKeepsInvalidRecord() throws {
-        let suite = "reader-preference-migration-\(UUID().uuidString)"
+    func testCurrentPreferenceRecordIsCanonicalAndInvalidDataIsPreserved() throws {
+        let suite = "reader-preference-record-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "alice", defaults: defaults)
         let other = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "bob", defaults: defaults)
         let digest = SHA256.hash(data: Data("server-a\0alice".utf8))
-        let key = "reader.preferences.v5." + digest.map { String(format: "%02x", $0) }.joined()
+        let suffix = digest.map { String(format: "%02x", $0) }.joined()
+        let currentVersion = Int(ErmaoShared.ReaderPreferences.companion.SCHEMA_VERSION)
+        let key = "reader.preferences." + suffix
         var preferences = IosReaderPreferences()
         preferences.fontSize = 20
         preferences.lineHeight = 1.85
@@ -97,24 +131,53 @@ final class ReaderPersistenceTests: XCTestCase {
         preferences.preservePublisherStyles = true
         preferences.comicZoom = 1.7
         preferences.pdfZoom = 1.3
-        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(preferences.canonicalJSON().utf8)) as? [String: Any])
-        legacy["schemaVersion"] = 4
-        legacy["iosDraft"] = ["schemaVersion": 4]
-        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
-        defaults.set(legacyData, forKey: key)
+        XCTAssertTrue(store.save(preferences))
         XCTAssertEqual(store.load(), preferences)
-        let migrated = try XCTUnwrap(defaults.data(forKey: key))
-        XCTAssertNotEqual(migrated, legacyData)
-        XCTAssertEqual(store.load(), preferences)
-        XCTAssertEqual(defaults.data(forKey: key), migrated)
+        let stored = try XCTUnwrap(defaults.data(forKey: key))
         XCTAssertEqual(other.load(), IosReaderPreferences())
-        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: migrated) as? [String: Any])
-        XCTAssertEqual(document["schemaVersion"] as? Int, 5)
-        XCTAssertNil(document["iosDraft"])
+        let document = try XCTUnwrap(JSONSerialization.jsonObject(with: stored) as? [String: Any])
+        XCTAssertEqual(document["schemaVersion"] as? Int, currentVersion)
+        XCTAssertEqual((document["epub"] as? [String: Any])?["readingProgression"] as? String, "ltr")
+        XCTAssertEqual((document["epub"] as? [String: Any])?["writingMode"] as? String, "horizontal")
         let invalid = Data("{invalid".utf8)
         defaults.set(invalid, forKey: key)
         XCTAssertEqual(store.load(), IosReaderPreferences())
         XCTAssertEqual(defaults.data(forKey: key), invalid)
+    }
+
+    func testReadingProgressionAndWritingModeIndependentlyControlReadium() {
+        var preferences = IosReaderPreferences()
+        preferences.readingMode = .paged
+        preferences.spreadMode = .double
+        let horizontal = preferences.readium(for: .light)
+        XCTAssertEqual(horizontal.readingProgression, .ltr)
+        XCTAssertEqual(horizontal.verticalText, false)
+        XCTAssertEqual(horizontal.scroll, false)
+
+        preferences.writingMode = .vertical
+        let vertical = preferences.readium(for: .light)
+        XCTAssertEqual(vertical.readingProgression, .ltr)
+        XCTAssertEqual(vertical.verticalText, true)
+        XCTAssertEqual(vertical.scroll, true)
+
+        preferences.readingProgression = .rtl
+        let verticalRTL = preferences.readium(for: .light)
+        XCTAssertEqual(verticalRTL.readingProgression, .rtl)
+        XCTAssertEqual(verticalRTL.verticalText, true)
+        XCTAssertEqual(verticalRTL.scroll, true)
+
+        preferences.writingMode = .horizontal
+        let restored = preferences.readium(for: .light)
+        XCTAssertEqual(restored.readingProgression, .rtl)
+        XCTAssertEqual(restored.verticalText, false)
+        XCTAssertEqual(restored.scroll, false)
+        XCTAssertEqual(preferences.spreadMode, .double)
+
+        preferences.writingMode = .vertical
+        let fixed = preferences.readium(for: .light, appliesTextDirectionPreferences: false)
+        XCTAssertNil(fixed.readingProgression)
+        XCTAssertNil(fixed.verticalText)
+        XCTAssertEqual(fixed.scroll, false)
     }
 
     @MainActor

@@ -55,6 +55,20 @@ enum IosReaderReadingMode: String, CaseIterable, Codable, Identifiable, Sendable
     var id: Self { self }
 }
 
+enum IosReaderWritingMode: String, CaseIterable, Codable, Identifiable, Sendable {
+    case horizontal, vertical
+    var id: Self { self }
+}
+
+enum IosReaderReadingProgression: String, CaseIterable, Codable, Identifiable, Sendable {
+    case ltr, rtl
+    var id: Self { self }
+
+    var shared: ErmaoShared.ReaderReadingProgression {
+        self == .rtl ? .righttoleft : .lefttoright
+    }
+}
+
 enum IosReaderTextAlignment: String, CaseIterable, Codable, Identifiable, Sendable {
     case publisher, left, justify
     var id: Self { self }
@@ -67,7 +81,6 @@ enum IosPdfFit: String, CaseIterable, Codable, Identifiable, Sendable { case wid
 enum IosPdfCropMargins: String, CaseIterable, Codable, Identifiable, Sendable { case off, auto; var id: Self { self } }
 
 struct IosReaderPreferences: Codable, Equatable, Sendable {
-    var schemaVersion = 5
     var theme = IosReaderTheme.warm
     var themeMode = IosReaderThemeMode.manual
     var progressStyle = IosReaderProgressStyle.auto
@@ -77,6 +90,8 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
     var keyboardPageTurn = true
     var volumeKeyPageTurn = false
     var keepScreenAwake = false
+    var readingProgression = IosReaderReadingProgression.ltr
+    var writingMode = IosReaderWritingMode.horizontal
     var fontSize = 18
     var lineHeight = 1.9
     var pageWidth = 1350
@@ -112,7 +127,10 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
 
     init() {}
 
-    func readium(for colorScheme: UIUserInterfaceStyle) -> EPUBPreferences {
+    func readium(
+        for colorScheme: UIUserInterfaceStyle,
+        appliesTextDirectionPreferences: Bool = true
+    ) -> EPUBPreferences {
         let effectiveTheme = resolvedTheme(for: colorScheme)
         let colors = effectiveTheme.colors
         let columnCount: ColumnCount = switch spreadMode {
@@ -147,10 +165,12 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
             paragraphIndent: paragraphIndent,
             paragraphSpacing: paragraphSpacing,
             publisherStyles: preservePublisherStyles,
-            scroll: readingMode == .continuousScroll,
+            readingProgression: appliesTextDirectionPreferences ? (readingProgression == .rtl ? .rtl : .ltr) : nil,
+            scroll: appliesTextDirectionPreferences && writingMode == .vertical || readingMode == .continuousScroll,
             textAlign: textAlign,
             textColor: ReadiumNavigator.Color(hex: colors.foreground),
-            theme: readiumTheme
+            theme: readiumTheme,
+            verticalText: appliesTextDirectionPreferences ? writingMode == .vertical : nil
         )
     }
 
@@ -178,18 +198,18 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
 
     init(serverIdentity: String, userID: String, defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
-        key = "reader.preferences.v5." + digest.map { String(format: "%02x", $0) }.joined()
+        key = Self.key(serverIdentity: serverIdentity, userID: userID)
     }
 
     func load() -> IosReaderPreferences {
         guard let data = defaults.data(forKey: key),
               let source = String(data: data, encoding: .utf8),
-              let canonical = ReaderPreferencesJson().canonicalizeOrNull(payload: source),
+              let canonical = ReaderPreferencesJson.shared.canonicalizeOrNull(payload: source),
               let decoded = try? IosReaderPreferences(canonicalJSON: canonical)
         else { return IosReaderPreferences() }
         // Do not overwrite an invalid record. Canonicalization succeeds before publication.
-        if data != Data(canonical.utf8) { defaults.set(Data(canonical.utf8), forKey: key) }
+        let canonicalData = Data(canonical.utf8)
+        if data != canonicalData { defaults.set(canonicalData, forKey: key) }
         return decoded
     }
 
@@ -212,11 +232,14 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
         userID: String,
         defaults: UserDefaults = .standard
     ) {
-        let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        defaults.removeObject(forKey: "reader.preferences.v5.\(digest)")
+        defaults.removeObject(forKey: key(serverIdentity: serverIdentity, userID: userID))
     }
 
+    private static func key(serverIdentity: String, userID: String) -> String {
+        let digest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        return "reader.preferences.\(digest)"
+    }
 }
 
 struct IosReaderBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
@@ -385,7 +408,7 @@ struct IosReaderPersistenceGate: Equatable, Sendable {
 
 @MainActor
 final class IosReflowableReaderSession: NSObject, ObservableObject {
-    static let progressSaveDebounceMilliseconds = 500
+    private static let progressSaveDebounceMilliseconds = 500
     @Published private(set) var phase: IosReaderSessionPhase = .opening
     @Published private(set) var navigator: EPUBNavigatorViewController?
     @Published private(set) var progress = 0.0
@@ -423,6 +446,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private let canonicalNavigation: [IosReaderTocEntry]
     private var publication: Publication?
+    private(set) var supportsTextDirectionPreferences = true
     private var openedPublication: IosOpenedReadiumPublication?
     private var pendingSave: Task<Void, Never>?
     private var bookmarkSyncTask: Task<Void, Never>?
@@ -502,6 +526,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 assetId: managed.assetID, sourceFormat: managed.sourceFormat
             )
             let publication = openedPublication.publication
+            supportsTextDirectionPreferences = publication.metadata.layout != .fixed
             self.openedPublication = openedPublication
             let saved = try? await progressStore.load(sourceId: resourceID)
             let initial: Locator?
@@ -515,7 +540,12 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 initial = await restore(local: saved, remote: remoteSnapshot, in: publication, openedSource: openedSource)
             }
             let navigator = try makeIosReflowableNavigator(
-                publication: publication, preferences: preferences.readium(for: systemAppearance), location: initial
+                publication: publication,
+                preferences: preferences.readium(
+                    for: systemAppearance,
+                    appliesTextDirectionPreferences: supportsTextDirectionPreferences
+                ),
+                location: initial
             )
             let restoredLocation = initial ?? navigator.currentLocation
             persistenceGate.protectRestoredLocation(
@@ -523,7 +553,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             )
             self.publication = publication
             installControlNavigator(navigator)
-            submittedControlPreferences = preferences.readium(for: systemAppearance)
+            submittedControlPreferences = preferences.readium(
+                for: systemAppearance,
+                appliesTextDirectionPreferences: supportsTextDirectionPreferences
+            )
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 self?.showRemoteProgress(snapshot)
             }
@@ -560,37 +593,192 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     func goLeft() async {
-        await turnPage(navigator?.presentation.readingProgression == .rtl ? .next : .previous)
+        await turnPhysicalPage(.left)
     }
 
     func goRight() async {
-        await turnPage(navigator?.presentation.readingProgression == .rtl ? .previous : .next)
+        await turnPhysicalPage(.right)
     }
 
-    private enum PageTurnDirection { case previous, next }
+    private func turnPhysicalPage(_ side: ErmaoShared.ReaderPhysicalHorizontalSide) async {
+        let direction = ErmaoShared.ReaderNavigationPolicy.shared.physicalHorizontalPageTurn(
+            side: side,
+            readingProgression: preferences.readingProgression.shared
+        )
+        await turnPage(direction)
+    }
 
-    private func turnPage(_ direction: PageTurnDirection) async {
+    private func turnPage(_ direction: ErmaoShared.ReaderPageTurnDirection) async {
         _ = await navigationQueue.enqueue { [weak self] in
             guard let self, self.controlReady, let navigator = self.navigator else { return false }
-            if navigator.presentation.scroll {
-                let readingOrder = navigator.publication.readingOrder
-                guard let href = navigator.currentLocation?.href,
-                      let currentIndex = readingOrder.firstIndexWithHREF(href) else { return false }
-                let targetIndex = currentIndex + (direction == .previous ? -1 : 1)
-                guard readingOrder.indices.contains(targetIndex) else { return false }
-                let target = readingOrder[targetIndex]
-                // A resource link without a fragment asks Readium to locate its
-                // start. Do not go backward to the end and then scroll again.
-                return await self.executeLinkNavigation(Link(
-                    href: target.url().removingFragment().string, title: target.title
-                ))
-            }
             self.beginUserNavigation()
+            if navigator.presentation.scroll {
+                let result = await self.advanceScrollViewport(direction, navigator: navigator)
+                if result == "moved" { return true }
+                if result == "boundary" { return await self.navigateAdjacentScrollResource(direction, navigator: navigator) }
+                return false
+            }
             switch direction {
             case .previous: return await navigator.goBackward(options: self.navigationOptions)
             case .next: return await navigator.goForward(options: self.navigationOptions)
+            default: return false
             }
         }
+    }
+
+    private func advanceScrollViewport(
+        _ direction: ErmaoShared.ReaderPageTurnDirection,
+        navigator: EPUBNavigatorViewController
+    ) async -> String {
+        let horizontal = preferences.writingMode == .vertical
+        let rtl = horizontal && preferences.readingProgression == .rtl
+        let logicalDelta = direction == .next ? 1 : -1
+        let behavior = navigationOptions == .animated ? "smooth" : "auto"
+        let epsilon = ErmaoShared.ReaderNavigationPolicy.shared.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS
+        let fraction = ErmaoShared.ReaderNavigationPolicy.shared.SCROLL_VIEWPORT_FRACTION
+        let script = """
+        (() => {
+          const root = document.scrollingElement || document.documentElement;
+          if (!root) return 'unavailable';
+          \(scrollGeometryJavaScript(horizontal: horizontal, rtl: rtl))
+          const current = Math.max(0, Math.min(maximum, horizontal ? normalize(root.scrollLeft) : root.scrollTop));
+          const atBoundary = \(logicalDelta) < 0 ? current <= \(epsilon) : maximum - current <= \(epsilon);
+          if (atBoundary) return 'boundary';
+          const viewport = horizontal ? innerWidth : innerHeight;
+          const target = Math.max(0, Math.min(maximum, current + (\(logicalDelta) * viewport * \(fraction))));
+          if (horizontal) root.scrollTo({ left: denormalize(target), behavior: '\(behavior)' });
+          else root.scrollTo({ top: target, behavior: '\(behavior)' });
+          return 'moved';
+        })()
+        """
+        guard case let .success(value) = await navigator.evaluateJavaScript(script),
+              let result = value as? String else { return "unavailable" }
+        if result == "moved", navigationOptions == .animated {
+            await waitForScrollSettle(in: navigator, horizontal: horizontal, rtl: rtl)
+        }
+        return result
+    }
+
+    private func waitForScrollSettle(
+        in navigator: EPUBNavigatorViewController,
+        horizontal: Bool,
+        rtl: Bool
+    ) async {
+        var previous: Double?
+        var stableSamples = 0
+        for sampleIndex in 0 ..< 38 {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+            let script = """
+            (() => {
+              const root = document.scrollingElement || document.documentElement;
+              if (!root) return null;
+              \(scrollGeometryJavaScript(horizontal: horizontal, rtl: rtl))
+              const current = horizontal ? normalize(root.scrollLeft) : root.scrollTop;
+              return Math.max(0, Math.min(maximum, current));
+            })()
+            """
+            guard case let .success(value) = await navigator.evaluateJavaScript(script),
+                  let current = (value as? NSNumber)?.doubleValue else { return }
+            if let previous,
+               abs(current - previous) <= ErmaoShared.ReaderNavigationPolicy.shared.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS {
+                stableSamples += 1
+            } else {
+                stableSamples = 0
+            }
+            if sampleIndex >= 7, stableSamples >= 3 { return }
+            previous = current
+        }
+    }
+
+    private func navigateAdjacentScrollResource(
+        _ direction: ErmaoShared.ReaderPageTurnDirection,
+        navigator: EPUBNavigatorViewController
+    ) async -> Bool {
+        let readingOrder = navigator.publication.readingOrder
+        guard let href = navigator.currentLocation?.href,
+              let currentIndex = readingOrder.firstIndexWithHREF(href) else { return false }
+        let targetIndex = currentIndex + (direction == .next ? 1 : -1)
+        guard readingOrder.indices.contains(targetIndex),
+              let base = await navigator.publication.locate(readingOrder[targetIndex]) else { return false }
+        let progression = ErmaoShared.ReaderNavigationPolicy.shared.adjacentResourceProgression(direction: direction)
+        let target = Locator(
+            href: base.href,
+            mediaType: base.mediaType,
+            title: base.title,
+            locations: .init(progression: progression)
+        )
+        // Readium's cross-resource animation can finish after the next queued
+        // command and overwrite its locator. The viewport movement itself still
+        // follows the animation preference; resource changes must commit atomically.
+        guard await navigator.go(to: target, options: .none) else { return false }
+        var resourceLoaded = false
+        for _ in 0 ..< 40 {
+            if navigator.currentLocation?.href.normalized == target.href.normalized {
+                resourceLoaded = true
+                break
+            }
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return false }
+        }
+        guard resourceLoaded,
+              await positionScrollResourceEdge(direction, navigator: navigator) else { return false }
+        return true
+    }
+
+    private func positionScrollResourceEdge(
+        _ direction: ErmaoShared.ReaderPageTurnDirection,
+        navigator: EPUBNavigatorViewController
+    ) async -> Bool {
+        let horizontal = preferences.writingMode == .vertical
+        let rtl = horizontal && preferences.readingProgression == .rtl
+        let atEnd = direction == .previous
+        let epsilon = ErmaoShared.ReaderNavigationPolicy.shared.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS
+        let script = """
+        (() => {
+          const root = document.scrollingElement || document.documentElement;
+          if (!root) return false;
+          \(scrollGeometryJavaScript(horizontal: horizontal, rtl: rtl))
+          const target = \(atEnd) ? maximum : 0;
+          if (horizontal) root.scrollTo({ left: denormalize(target), behavior: 'auto' });
+          else root.scrollTo({ top: target, behavior: 'auto' });
+          const current = horizontal ? normalize(root.scrollLeft) : root.scrollTop;
+          return Math.abs(current - target) <= \(epsilon);
+        })()
+        """
+        var stableSamples = 0
+        for sampleIndex in 0 ..< 38 {
+            if case let .success(value) = await navigator.evaluateJavaScript(script),
+               value as? Bool == true {
+                stableSamples += 1
+            } else {
+                stableSamples = 0
+            }
+            if sampleIndex >= 24, stableSamples >= 3 { return true }
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return false }
+        }
+        return false
+    }
+
+    private func scrollGeometryJavaScript(horizontal: Bool, rtl: Bool) -> String {
+        """
+        const horizontal = \(horizontal);
+        const rtl = \(rtl);
+        const maximum = Math.max(0, horizontal ? root.scrollWidth - innerWidth : root.scrollHeight - innerHeight);
+        let rtlModel = 'reverse';
+        if (rtl) {
+          const outer = document.createElement('div');
+          const inner = document.createElement('div');
+          outer.dir = 'rtl';
+          outer.style.cssText = 'position:absolute;left:-10000px;top:-10000px;width:4px;height:1px;overflow:scroll;visibility:hidden';
+          inner.style.cssText = 'width:8px;height:1px';
+          outer.appendChild(inner);
+          document.body.appendChild(outer);
+          if (outer.scrollLeft > 0) rtlModel = 'default';
+          else { outer.scrollLeft = 1; rtlModel = outer.scrollLeft === 0 ? 'negative' : 'reverse'; }
+          outer.remove();
+        }
+        const normalize = raw => !rtl ? raw : rtlModel === 'negative' ? -raw : rtlModel === 'reverse' ? raw : maximum - raw;
+        const denormalize = value => !rtl ? value : rtlModel === 'negative' ? -value : rtlModel === 'reverse' ? value : maximum - value;
+        """
     }
 
     func goToTOCEntry(_ entry: IosReaderTocEntry) async -> Bool {
@@ -604,9 +792,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private func executeLinkNavigation(_ link: Link) async -> Bool {
         let canonicalHref = link.href
         guard controlReady, RelativeURL(string: canonicalHref) != nil else { return false }
-        if await navigationHrefMatches(canonicalHref) {
-            return true
-        }
+        if await navigationHrefMatches(canonicalHref) { return true }
         beginUserNavigation()
         pendingLaunchTargetPayload = ErmaoShared.PublicKt.encodeReaderLaunchTarget(target: ErmaoShared.ReaderNavigationTargetReflowable(href: canonicalHref))
         guard await navigator?.go(to: link, options: navigationOptions) == true else { return false }
@@ -621,12 +807,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     func goToProgression(_ progression: Double) async -> Bool {
-        guard let publication, let navigator,
-              let locator = await publication.locate(progression: progression)
-        else { return false }
-        beginUserNavigation()
-        guard await navigator.go(to: locator, options: navigationOptions) else { return false }
-        return await verifyNavigation(to: locator, in: navigator)
+        await navigationQueue.enqueue { [weak self] in
+            guard let self, let publication = self.publication, let navigator = self.navigator,
+                  let locator = await publication.locate(progression: progression)
+            else { return false }
+            self.beginUserNavigation()
+            return await navigator.go(to: locator, options: self.navigationOptions)
+        }
     }
 
     private func verifyNavigation(to target: Locator, in navigator: EPUBNavigatorViewController) async -> Bool {
@@ -669,7 +856,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     func refreshSystemAppearance(_ style: UIUserInterfaceStyle) {
         systemAppearance = style
         guard preferences.themeMode == .system, navigator != nil,
-              submittedControlPreferences != preferences.readium(for: style) else { return }
+              submittedControlPreferences != preferences.readium(
+                  for: style,
+                  appliesTextDirectionPreferences: supportsTextDirectionPreferences
+              ) else { return }
         if !executeControlPreferences(preferences) {
             presentationError = .engineError
         }
@@ -692,7 +882,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private func executeControlPreferences(_ updated: IosReaderPreferences) -> Bool {
         guard let navigator, controlReady, canApplyControlPreferences(updated),
               preferencesStore?.save(updated) != false else { return false }
-        let native = updated.readium(for: systemAppearance)
+        let native = updated.readium(
+            for: systemAppearance,
+            appliesTextDirectionPreferences: supportsTextDirectionPreferences
+        )
         if native != submittedControlPreferences {
             pendingSave?.cancel()
             persistenceGate.suppressPreferenceReflow()
@@ -703,14 +896,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         }
         preferences = updated
         return true
-    }
-
-    func isCurrentLocationBookmarked() async -> Bool {
-        guard let locator = await navigator?.firstVisibleElementLocator() else { return false }
-        return bookmarks.contains { record in
-            record.resourceKey == locator.href.string &&
-                abs((record.progression ?? 0) - (locator.locations.progression ?? 0)) < 0.0001
-        }
     }
 
     var currentBookmarkActive: Bool {
@@ -842,7 +1027,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         controlsVisible = true
     }
 
-    func handleTap(at point: CGPoint, width: CGFloat) {
+    func handleTap(at point: CGPoint, width: CGFloat) async {
         guard activeControlPanel == nil, navigator?.currentSelection == nil else { return }
         let now = Date.timeIntervalSinceReferenceDate
         guard now - lastHandledTapAt >= 0.15 else { return }
@@ -853,13 +1038,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         }
         switch point.x / max(1, width) {
         case ..<0.3:
-            Task {
-                if preferences.tapZones == .reversed { await goRight() } else { await goLeft() }
-            }
+            if preferences.tapZones == .reversed { await goRight() } else { await goLeft() }
         case 0.7...:
-            Task {
-                if preferences.tapZones == .reversed { await goLeft() } else { await goRight() }
-            }
+            if preferences.tapZones == .reversed { await goLeft() } else { await goRight() }
         default:
             controlsVisible.toggle()
         }
@@ -912,7 +1093,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         case let .success(links): publicationLinks = links
         case .failure: publicationLinks = []
         }
-        let publicationEntries = publicationLinks.enumerated().map { index, link in
+        let navigationLinks = publicationLinks.isEmpty ? publication.readingOrder : publicationLinks
+        let publicationEntries = navigationLinks.enumerated().map { index, link in
             let title = link.title?.trimmingCharacters(in: .whitespacesAndNewlines)
             return IosReaderTocEntry(
                 id: "publication:\(index)",
@@ -1241,8 +1423,23 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 }
 
 extension IosReflowableReaderSession: EPUBNavigatorDelegate {
+    func navigatorContentInset(_ navigator: VisualNavigator) -> UIEdgeInsets? {
+        guard let navigator = navigator as? EPUBNavigatorViewController else { return nil }
+        let safeArea = navigator.view.window?.safeAreaInsets ?? .zero
+        return UIEdgeInsets(
+            top: max(safeArea.top, navigator.traitCollection.verticalSizeClass == .compact ? 34 : 62),
+            left: safeArea.left,
+            bottom: 8,
+            right: safeArea.right
+        )
+    }
+
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         locationChanged(locator)
+    }
+
+    func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        presentationError = presentationError ?? .readFailed
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
@@ -1255,13 +1452,20 @@ extension IosReflowableReaderSession: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
-        handleTap(
-            at: point,
-            width: self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width
-        )
+        Task { [weak self] in
+            guard let self else { return }
+            await handleTap(
+                at: point,
+                width: self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width
+            )
+        }
     }
 
     func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
+        Task { [weak self] in await self?.handleKeyEvent(event) }
+    }
+
+    func handleKeyEvent(_ event: KeyEvent) async {
         if event.key == .escape, activeControlPanel != nil { activeControlPanel = nil; return }
         guard activeControlPanel == nil, self.navigator?.currentSelection == nil else { return }
         guard preferences.keyboardPageTurn else {
@@ -1269,16 +1473,12 @@ extension IosReflowableReaderSession: EPUBNavigatorDelegate {
             return
         }
         switch event.key {
-        case .arrowLeft: Task { await goLeft() }
-        case .arrowRight: Task { await goRight() }
-        case .pageUp: Task { await goPrevious() }
-        case .pageDown, .space: Task { await goNext() }
+        case .arrowLeft: await goLeft()
+        case .arrowRight: await goRight()
+        case .pageUp: await goPrevious()
+        case .pageDown, .space: await goNext()
         case .escape: showControls()
         default: break
         }
     }
-}
-
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

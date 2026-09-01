@@ -11,23 +11,22 @@ internal class AndroidReaderPreferencesStore(
     context: Context,
     serverIdentity: String,
     userId: String,
-    private val codec: ReaderPreferencesJson = ReaderPreferencesJson(),
 ) {
-    private val preferences = context.applicationContext.getSharedPreferences(STORE_NAME, Context.MODE_PRIVATE)
+    private val preferences = context.applicationContext.getSharedPreferences("reader_preferences", Context.MODE_PRIVATE)
     private val key = "reader-${sha256("$serverIdentity\u0000$userId")}"
 
     fun load(): ReaderPreferences {
         val stored = preferences.getString(key, null)
             ?: return enforceAndroidSinglePagePreferences(ReaderPreferences())
-        val decoded = runCatching { codec.decode(stored) }.getOrElse { return ReaderPreferences() }
+        val decoded = runCatching { ReaderPreferencesJson.decode(stored) }.getOrElse { return ReaderPreferences() }
         val supported = enforceAndroidSinglePagePreferences(decoded)
-        val canonical = codec.encode(supported)
+        val canonical = ReaderPreferencesJson.encode(supported)
         if (canonical != stored) save(supported)
         return supported
     }
 
     fun save(value: ReaderPreferences) {
-        val encodedPreferences = codec.encode(enforceAndroidSinglePagePreferences(value))
+        val encodedPreferences = ReaderPreferencesJson.encode(enforceAndroidSinglePagePreferences(value))
         try {
             preferences.edit(commit = true) { putString(key, encodedPreferences) }
         } catch (error: RuntimeException) {
@@ -41,8 +40,4 @@ internal class AndroidReaderPreferencesStore(
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { byte -> "%02x".format(byte) }
-
-    private companion object {
-        const val STORE_NAME = "reader_preferences_v3"
-    }
 }

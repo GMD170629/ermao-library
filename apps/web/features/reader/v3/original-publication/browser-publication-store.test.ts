@@ -126,17 +126,81 @@ test('eviction triggers a fresh full request and a wrong MIME never publishes', 
   assert.equal(cache.entries.size, 0);
 });
 
-test('quota failure is reported as cache I/O and leaves no partial entry', async () => {
+test('quota failure without reclaimable reader entries is explicit and leaves no partial entry', async () => {
   const cache = new MemoryCache();
   cache.put = async () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
-  const store = new BrowserPublicationStore({ open: async () => cache }, async () => response(
-    new Uint8Array([1, 2, 3, 4])
-  ), 'https://reader.test');
+  let requests = 0;
+  const store = new BrowserPublicationStore({ open: async () => cache }, async () => {
+    requests += 1;
+    return response(new Uint8Array([1, 2, 3, 4]));
+  }, 'https://reader.test');
+  await assert.rejects(
+    store.ensure(descriptor, { signal: new AbortController().signal }),
+    (error: unknown) => error instanceof OriginalPublicationStoreError && error.code === 'ORIGINAL_CACHE_QUOTA'
+  );
+  assert.equal(requests, 1);
+  assert.equal(cache.entries.size, 0);
+});
+
+test('quota failure reclaims inactive originals and retries the complete download once', async () => {
+  const cache = new MemoryCache();
+  cache.entries.set(
+    'https://reader.test/__shuku_reader_originals__/other-resource/other-asset/4%3A1234/epub',
+    response(new Uint8Array([9, 8, 7, 6]))
+  );
+  const persist = cache.put.bind(cache);
+  let putAttempts = 0;
+  cache.put = async (request, candidate) => {
+    putAttempts += 1;
+    if (putAttempts === 1) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    await persist(request, candidate);
+  };
+  let requests = 0;
+  const store = new BrowserPublicationStore({ open: async () => cache }, async () => {
+    requests += 1;
+    return response(new Uint8Array([1, 2, 3, 4]));
+  }, 'https://reader.test');
+
+  const stored = await store.ensure(descriptor, { signal: new AbortController().signal });
+
+  assert.equal(stored.cacheHit, false);
+  assert.equal(stored.blob.size, descriptor.sizeBytes);
+  assert.equal(requests, 2);
+  assert.equal(putAttempts, 2);
+  assert.equal(cache.entries.size, 1);
+});
+
+test('quota recovery makes only one clean retry when storage remains full', async () => {
+  const cache = new MemoryCache();
+  cache.entries.set(
+    'https://reader.test/__shuku_reader_originals__/other-resource/other-asset/4%3A1234/epub',
+    response(new Uint8Array([9, 8, 7, 6]))
+  );
+  cache.put = async () => { throw new DOMException('Quota exceeded', 'QuotaExceededError'); };
+  let requests = 0;
+  const store = new BrowserPublicationStore({ open: async () => cache }, async () => {
+    requests += 1;
+    return response(new Uint8Array([1, 2, 3, 4]));
+  }, 'https://reader.test');
+
+  await assert.rejects(
+    store.ensure(descriptor, { signal: new AbortController().signal }),
+    (error: unknown) => error instanceof OriginalPublicationStoreError && error.code === 'ORIGINAL_CACHE_QUOTA'
+  );
+
+  assert.equal(requests, 2);
+  assert.equal(cache.entries.size, 0);
+});
+
+test('cache availability failures are reported separately from device quota', async () => {
+  const store = new BrowserPublicationStore({
+    open: async () => { throw new DOMException('Cache unavailable', 'InvalidStateError'); }
+  }, async () => response(new Uint8Array([1, 2, 3, 4])), 'https://reader.test');
+
   await assert.rejects(
     store.ensure(descriptor, { signal: new AbortController().signal }),
     (error: unknown) => error instanceof OriginalPublicationStoreError && error.code === 'ORIGINAL_CACHE_IO'
   );
-  assert.equal(cache.entries.size, 0);
 });
 
 test('a new asset version deletes the superseded complete entry before downloading', async () => {

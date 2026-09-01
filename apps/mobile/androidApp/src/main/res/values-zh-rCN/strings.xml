@@ -360,6 +360,8 @@
     <string name="reader_close">关闭阅读器</string>
     <string name="reader_previous">上一页</string>
     <string name="reader_next">下一页</string>
+    <string name="reader_previous_chapter">上一章</string>
+    <string name="reader_next_chapter">下一章</string>
     <string name="reader_table_of_contents">目录</string>
     <string name="reader_settings">阅读设置</string>
     <string name="reader_progress_percent">%1$d%%</string>

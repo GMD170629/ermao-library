@@ -1,6 +1,5 @@
 {
-  "version": 1,
-  "preferenceVersion": 5,
+  "preferenceVersion": 6,
   "availabilityReasons": {
     "engineNotReady": {"zh-CN": "阅读引擎尚未就绪", "en-US": "The reader engine is not ready yet"},
     "notImplemented": {"zh-CN": "当前平台尚未实现", "en-US": "Not implemented on this platform"},
@@ -11,11 +10,13 @@
     "optimizationDisabled": {"zh-CN": "请先开启智能优化", "en-US": "Turn on Smart Optimization first"},
     "publisherStylesActive": {"zh-CN": "出版方样式开启时由出版物控制", "en-US": "Controlled by the publication while Publisher Styles is on"},
     "wakeLockUnavailable": {"zh-CN": "当前环境不支持保持屏幕唤醒", "en-US": "The current environment does not support keeping the screen awake"},
-    "zoomUnavailable": {"zh-CN": "当前阅读器不支持可配置缩放", "en-US": "The current reader does not support configurable zoom"}
+    "zoomUnavailable": {"zh-CN": "当前阅读器不支持可配置缩放", "en-US": "The current reader does not support configurable zoom"},
+    "verticalWritingMode": {"zh-CN": "竖排模式使用滚动阅读", "en-US": "Vertical text uses scrolling mode"}
   },
   "availabilityRules": {
     "wideViewport": ["textPageWidth", "comicPageWidth", "pdfPageWidth"],
     "paginatedReflowable": ["textSpread"],
+    "horizontalWritingMode": ["textFlow", "textSpread"],
     "paginatedComic": ["comicSpread", "comicDirection", "comicCoverSingle", "comicPageGap"],
     "doubleComicSpread": ["comicCoverSingle"],
     "optimizationEnabled": ["deduplicateIndent", "indentUnindented"],
@@ -95,6 +96,15 @@
         "en-US": "Smart Optimization"
       },
       "advanced": false
+    },
+    {
+      "id": "textLayoutAdvanced",
+      "panel": "settings",
+      "label": {
+        "zh-CN": "文字排版",
+        "en-US": "Text Layout"
+      },
+      "advanced": true
     },
     {
       "id": "paragraph",
@@ -253,6 +263,38 @@
         "label": {
           "zh-CN": "滚动",
           "en-US": "Scroll"
+        }
+      }
+    ],
+    "READER_WRITING_MODE_OPTIONS": [
+      {
+        "value": "horizontal",
+        "label": {
+          "zh-CN": "横排",
+          "en-US": "Horizontal"
+        }
+      },
+      {
+        "value": "vertical",
+        "label": {
+          "zh-CN": "竖排",
+          "en-US": "Vertical"
+        }
+      }
+    ],
+    "READER_READING_PROGRESSION_OPTIONS": [
+      {
+        "value": "ltr",
+        "label": {
+          "zh-CN": "LTR",
+          "en-US": "LTR"
+        }
+      },
+      {
+        "value": "rtl",
+        "label": {
+          "zh-CN": "RTL",
+          "en-US": "RTL"
         }
       }
     ],
@@ -1294,6 +1336,38 @@
       "control": "IndentUnindented",
       "kind": "toggle",
       "options": null,
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "textReadingProgression",
+      "label": {
+        "zh-CN": "阅读方向",
+        "en-US": "Reading Direction"
+      },
+      "section": "textLayoutAdvanced",
+      "path": "epub.readingProgression",
+      "control": "ReadingProgression",
+      "kind": "choice",
+      "options": "READER_READING_PROGRESSION_OPTIONS",
+      "formats": [
+        "reflowable"
+      ],
+      "limits": null
+    },
+    {
+      "id": "textWritingMode",
+      "label": {
+        "zh-CN": "排版方向",
+        "en-US": "Writing Direction"
+      },
+      "section": "textLayoutAdvanced",
+      "path": "epub.writingMode",
+      "control": "WritingMode",
+      "kind": "choice",
+      "options": "READER_WRITING_MODE_OPTIONS",
       "formats": [
         "reflowable"
       ],

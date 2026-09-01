@@ -25,6 +25,10 @@ import com.ermao.library.shared.modules.reader.ReaderNavigationTargetInvalid
 import com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderWritingMode
+import com.ermao.library.shared.modules.reader.ReaderReadingProgression
+import com.ermao.library.shared.modules.reader.ReaderPageTurnDirection
+import com.ermao.library.shared.modules.reader.ReaderNavigationPolicy
 import com.ermao.library.shared.modules.reader.ReaderProgress
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
@@ -55,6 +59,7 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.logging.Level
 import java.util.logging.Logger
+import kotlin.math.abs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +74,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.shared.ExperimentalReadiumApi
@@ -148,10 +154,11 @@ internal class ReadiumEpubSession(
     override var requestedNavigationTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = initialTarget
         private set
     override val morphology = ReaderMorphology.Reflowable
-    override val capabilities: ReaderCapabilities = ReaderCapabilities.epub(
+    override var capabilities: ReaderCapabilities = ReaderCapabilities.epub(
         supportsVolumeKeys = true,
         supportsCustomFonts = true,
     ).copy(supportsPageWidth = true)
+        private set
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
 
@@ -198,7 +205,6 @@ internal class ReadiumEpubSession(
     private var currentPageUnreadable = false
     private var prepared = false
     private var contentsLoaded = false
-
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
         private set
 
@@ -307,6 +313,11 @@ internal class ReadiumEpubSession(
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
         }
         publication = openedPublication
+        val supportsTextLayout = openedPublication.metadata.layout != org.readium.r2.shared.publication.Layout.FIXED
+        capabilities = capabilities.copy(
+            supportsReadingProgression = supportsTextLayout,
+            supportsWritingMode = supportsTextLayout,
+        )
         progressCoordinator?.beginSession(remoteSnapshot)
         publicationPositionIndex = ReadiumPublicationPositionIndex.from(openedPublication.positions())
         runCatching { bookmarkStore?.load() }.getOrNull()?.let { state ->
@@ -350,7 +361,10 @@ internal class ReadiumEpubSession(
 
         val fragmentFactory = EpubNavigatorFactory(openedPublication).createFragmentFactory(
             initialLocator = initialLocator,
-            initialPreferences = preferencesMapper.toReadium(_preferences.value),
+            initialPreferences = preferencesMapper.toReadium(
+                _preferences.value,
+                supportsTextLayout = capabilities.supportsWritingMode,
+            ),
             configuration = readerNavigatorConfiguration(),
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onResourceLoadFailed(href: Url, error: ReadError) {
@@ -486,8 +500,8 @@ internal class ReadiumEpubSession(
     override fun goPrevious(): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        if (_preferences.value.epub.flow == ReaderReadingMode.ContinuousScroll) {
-            return advanceContinuousScroll(direction = -1)
+        if (isContinuousScroll(_preferences.value)) {
+            return advanceContinuousScroll(direction = ReaderPageTurnDirection.Previous)
         }
         return navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
     }
@@ -495,56 +509,129 @@ internal class ReadiumEpubSession(
     override fun goNext(): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        if (_preferences.value.epub.flow == ReaderReadingMode.ContinuousScroll) {
-            return advanceContinuousScroll(direction = 1)
+        if (isContinuousScroll(_preferences.value)) {
+            return advanceContinuousScroll(direction = ReaderPageTurnDirection.Next)
         }
         return navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
     }
 
-    private fun advanceContinuousScroll(direction: Int): Boolean {
-        require(direction == -1 || direction == 1)
+    private fun isContinuousScroll(preferences: ReaderPreferences): Boolean =
+        preferences.epub.flow == ReaderReadingMode.ContinuousScroll ||
+            (capabilities.supportsWritingMode && preferences.epub.writingMode == ReaderWritingMode.Vertical)
+
+    private fun advanceContinuousScroll(direction: ReaderPageTurnDirection): Boolean {
         val activeNavigator = navigator ?: return false
         val activeScope = bookmarkScope ?: return false
         val animated = navigationAnimationsEnabled()
+        val epub = _preferences.value.epub
+        val writingMode = if (capabilities.supportsWritingMode) epub.writingMode else ReaderWritingMode.Horizontal
+        val readingProgression = if (capabilities.supportsReadingProgression) {
+            epub.readingProgression
+        } else {
+            ReaderReadingProgression.LeftToRight
+        }
         activeScope.launch(Dispatchers.Main.immediate) {
             viewportNavigationMutex.withLock {
-                val movedWithinResource = runCatching {
+                val result = runCatching {
                     activeNavigator.evaluateJavascript(
-                        continuousScrollViewportScript(direction, animated),
-                    ).orEmpty().trim().trim('"').toBooleanStrictOrNull() == true
-                }.getOrDefault(false)
-                if (!movedWithinResource) {
-                    goToAdjacentScrollResource(activeNavigator, direction, animated)
+                        continuousScrollViewportScript(
+                            direction = direction,
+                            animated = animated,
+                            writingMode = writingMode,
+                            readingProgression = readingProgression,
+                        ),
+                    ).orEmpty().trim().trim('"')
+                }.getOrDefault("unavailable")
+                if (result == "moved" && animated) {
+                    awaitContinuousScrollSettle(
+                        activeNavigator,
+                        writingMode,
+                        readingProgression,
+                    )
+                }
+                if (result == "boundary") {
+                    goToAdjacentScrollResource(activeNavigator, direction, writingMode, readingProgression)
                 }
             }
         }
         return true
     }
 
-    private fun goToAdjacentScrollResource(
+    private suspend fun awaitContinuousScrollSettle(
         activeNavigator: EpubNavigatorFragment,
-        direction: Int,
-        animated: Boolean,
-    ): Boolean {
-        val openedPublication = publication ?: return false
-        val resourceKey = (_currentLocation.value as? ReflowReaderLocation)
-            ?.resourceKey
-            ?.substringBefore('#')
-            ?: return false
+        writingMode: ReaderWritingMode,
+        readingProgression: ReaderReadingProgression,
+    ) {
+        var previous: Double? = null
+        var stableSamples = 0
+        repeat(SCROLL_SETTLE_SAMPLE_LIMIT) { sampleIndex ->
+            delay(SCROLL_SETTLE_SAMPLE_MILLIS)
+            val current = runCatching {
+                activeNavigator.evaluateJavascript(
+                    continuousScrollOffsetScript(writingMode, readingProgression),
+                ).orEmpty().trim().trim('"').toDoubleOrNull()
+            }.getOrNull() ?: return
+            stableSamples = if (previous != null && abs(current - previous) <=
+                ReaderNavigationPolicy.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS
+            ) stableSamples + 1 else 0
+            if (sampleIndex >= SCROLL_SETTLE_MINIMUM_SAMPLE_INDEX &&
+                stableSamples >= SCROLL_SETTLE_REQUIRED_SAMPLES
+            ) return
+            previous = current
+        }
+    }
+
+    private suspend fun goToAdjacentScrollResource(
+        activeNavigator: EpubNavigatorFragment,
+        direction: ReaderPageTurnDirection,
+        writingMode: ReaderWritingMode,
+        readingProgression: ReaderReadingProgression,
+    ) {
+        val openedPublication = publication ?: return
+        val resourceKey = activeNavigator.currentLocator.value.href.toString().substringBefore('#')
         val currentIndex = openedPublication.readingOrder.indexOfFirst { link ->
             link.href.toString().substringBefore('#') == resourceKey ||
                 openedPublication.url(link).toString().substringBefore('#') == resourceKey
         }
-        if (currentIndex < 0) return false
-        val targetLink = openedPublication.readingOrder.getOrNull(currentIndex + direction) ?: return false
-        val baseLocator = openedPublication.locatorFromLink(targetLink) ?: return false
-        val target = baseLocator.copyWithLocations(
-            progression = if (direction < 0) 1.0 else 0.0,
-            position = baseLocator.locations.position,
-            totalProgression = baseLocator.locations.totalProgression,
+        if (currentIndex < 0) return
+        val offset = if (direction == ReaderPageTurnDirection.Next) 1 else -1
+        val targetLink = openedPublication.readingOrder.getOrNull(currentIndex + offset) ?: return
+        val baseLocator = openedPublication.locatorFromLink(targetLink) ?: return
+        val target = baseLocator.copy(
+            locations = Locator.Locations(
+                progression = ReaderNavigationPolicy.adjacentResourceProgression(direction),
+            ),
         )
         requestedNavigationTarget = ReaderNavigationTargetReflowable(target.href.toString())
-        return activeNavigator.go(target, animated = animated)
+        // A native cross-resource animation may complete after the next queued
+        // command and overwrite its locator. Viewport turns remain animated;
+        // resource commits are intentionally atomic.
+        val accepted = activeNavigator.go(target, animated = false)
+        if (!accepted) return
+        val targetKey = target.href.toString().substringBefore('#')
+        val loaded = withTimeoutOrNull(3_000) {
+            activeNavigator.currentLocator.first {
+                it.href.toString().substringBefore('#') == targetKey
+            }
+        } != null
+        if (!loaded) return
+        var stableSamples = 0
+        repeat(SCROLL_SETTLE_SAMPLE_LIMIT) { sampleIndex ->
+            val positioned = runCatching {
+                activeNavigator.evaluateJavascript(
+                    continuousScrollResourceEdgeScript(
+                        direction,
+                        writingMode,
+                        readingProgression,
+                    ),
+                ).orEmpty().trim().trim('"').toBooleanStrictOrNull()
+            }.getOrNull() == true
+            stableSamples = if (positioned) stableSamples + 1 else 0
+            if (sampleIndex >= RESOURCE_SETTLE_MINIMUM_SAMPLE_INDEX &&
+                stableSamples >= SCROLL_SETTLE_REQUIRED_SAMPLES
+            ) return
+            delay(SCROLL_SETTLE_SAMPLE_MILLIS)
+        }
     }
 
     override fun goTo(location: ReaderLocation): Boolean {
@@ -618,8 +705,8 @@ internal class ReadiumEpubSession(
         // Persistence precedes SDK submission. Reflow is owned by Readium.
         persistPreferences(supported)
         _preferences.value = supported
-        val target = preferencesMapper.toReadium(supported)
-        if (target != preferencesMapper.toReadium(previous)) {
+        val target = preferencesMapper.toReadium(supported, capabilities.supportsWritingMode)
+        if (target != preferencesMapper.toReadium(previous, capabilities.supportsWritingMode)) {
             suppressNextPreferenceLocation = true
             active.submitPreferences(target)
         }
@@ -627,7 +714,7 @@ internal class ReadiumEpubSession(
 
     override fun unavailableControls(preferences: ReaderPreferences): Set<com.ermao.library.shared.modules.reader.ReaderControl> {
         val opened = publication ?: return com.ermao.library.shared.modules.reader.ReaderControl.entries.toSet()
-        val native = preferencesMapper.toReadium(preferences)
+        val native = preferencesMapper.toReadium(preferences, capabilities.supportsWritingMode)
         // A null textAlign means publisher default, not that selecting an alignment is unsupported.
         return EpubNavigatorFactory(opened).createPreferencesEditor(
             native.copy(textAlign = native.textAlign ?: org.readium.r2.navigator.preferences.TextAlign.START),
@@ -978,6 +1065,11 @@ internal class ReadiumEpubSession(
         val LOGGER: Logger = Logger.getLogger("MobileReader")
         const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
         const val RESTORE_STABLE_OBSERVATIONS = 3
+        const val SCROLL_SETTLE_SAMPLE_MILLIS = 16L
+        const val SCROLL_SETTLE_SAMPLE_LIMIT = 38
+        const val SCROLL_SETTLE_MINIMUM_SAMPLE_INDEX = 7
+        const val RESOURCE_SETTLE_MINIMUM_SAMPLE_INDEX = 24
+        const val SCROLL_SETTLE_REQUIRED_SAMPLES = 3
         val UNREADABLE_PAGE_MARKER =
             "data-shuku-resource-error=\"RESOURCE_UNREADABLE\"".encodeToByteArray()
     }
@@ -997,22 +1089,107 @@ private fun ByteArray.containsSequence(needle: ByteArray): Boolean {
     }
 }
 
-internal typealias ReadiumReflowableSession = ReadiumEpubSession
-
-internal fun continuousScrollViewportScript(direction: Int, animated: Boolean): String {
-    require(direction == -1 || direction == 1)
+private fun continuousScrollViewportScript(
+    direction: ReaderPageTurnDirection,
+    animated: Boolean,
+    writingMode: ReaderWritingMode,
+    readingProgression: ReaderReadingProgression,
+): String {
     val behavior = if (animated) "smooth" else "auto"
+    val logicalDelta = if (direction == ReaderPageTurnDirection.Next) 1 else -1
+    val coordinates = continuousScrollCoordinateDeclarations(writingMode, readingProgression)
     return """
         (() => {
           const root = document.scrollingElement || document.documentElement;
-          const maximum = Math.max(0, root.scrollHeight - window.innerHeight);
-          const current = root.scrollTop;
-          const target = Math.max(0, Math.min(maximum, current + ($direction * window.innerHeight * 0.88)));
-          if (Math.abs(target - current) < 1) return false;
-          root.scrollTo({ top: target, behavior: '$behavior' });
-          return true;
+          if (!root) return 'unavailable';
+$coordinates
+          const current = Math.max(0, Math.min(maximum,
+            normalize(horizontal ? root.scrollLeft : root.scrollTop)));
+          const atBoundary = $logicalDelta < 0
+            ? current <= ${ReaderNavigationPolicy.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS}
+            : maximum - current <= ${ReaderNavigationPolicy.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS};
+          if (atBoundary) return 'boundary';
+          const viewport = horizontal ? window.innerWidth : window.innerHeight;
+          const target = Math.max(0, Math.min(maximum,
+            current + ($logicalDelta * viewport * ${ReaderNavigationPolicy.SCROLL_VIEWPORT_FRACTION})));
+          if (horizontal) root.scrollTo({ left: denormalize(target), behavior: '$behavior' });
+          else root.scrollTo({ top: target, behavior: '$behavior' });
+          return 'moved';
         })()
     """.trimIndent()
+}
+
+private fun continuousScrollOffsetScript(
+    writingMode: ReaderWritingMode,
+    readingProgression: ReaderReadingProgression,
+): String {
+    val coordinates = continuousScrollCoordinateDeclarations(writingMode, readingProgression)
+    return """
+        (() => {
+          const root = document.scrollingElement || document.documentElement;
+          if (!root) return null;
+$coordinates
+          return Math.max(0, Math.min(maximum,
+            normalize(horizontal ? root.scrollLeft : root.scrollTop)));
+        })()
+    """.trimIndent()
+}
+
+private fun continuousScrollResourceEdgeScript(
+    direction: ReaderPageTurnDirection,
+    writingMode: ReaderWritingMode,
+    readingProgression: ReaderReadingProgression,
+): String {
+    val coordinates = continuousScrollCoordinateDeclarations(writingMode, readingProgression)
+    val atEnd = direction == ReaderPageTurnDirection.Previous
+    return """
+        (() => {
+          const root = document.scrollingElement || document.documentElement;
+          if (!root) return false;
+$coordinates
+          const target = $atEnd ? maximum : 0;
+          if (horizontal) root.scrollTo({ left: denormalize(target), behavior: 'auto' });
+          else root.scrollTo({ top: target, behavior: 'auto' });
+          const actual = normalize(horizontal ? root.scrollLeft : root.scrollTop);
+          return Math.abs(actual - target) <= ${ReaderNavigationPolicy.SCROLL_BOUNDARY_EPSILON_CSS_PIXELS};
+        })()
+    """.trimIndent()
+}
+
+private fun continuousScrollCoordinateDeclarations(
+    writingMode: ReaderWritingMode,
+    readingProgression: ReaderReadingProgression,
+): String {
+    val horizontal = writingMode == ReaderWritingMode.Vertical
+    val rtl = horizontal && readingProgression == ReaderReadingProgression.RightToLeft
+    return """
+        const horizontal = $horizontal;
+        const rtl = $rtl;
+        const maximum = Math.max(0, horizontal
+          ? root.scrollWidth - window.innerWidth
+          : root.scrollHeight - window.innerHeight);
+        let rtlModel = 'reverse';
+        if (rtl) {
+          const outer = document.createElement('div');
+          const inner = document.createElement('div');
+          outer.dir = 'rtl';
+          outer.style.cssText = 'position:absolute;left:-10000px;top:-10000px;width:4px;height:1px;overflow:scroll;visibility:hidden';
+          inner.style.cssText = 'width:8px;height:1px';
+          outer.appendChild(inner);
+          document.body.appendChild(outer);
+          if (outer.scrollLeft > 0) rtlModel = 'default';
+          else { outer.scrollLeft = 1; rtlModel = outer.scrollLeft === 0 ? 'negative' : 'reverse'; }
+          outer.remove();
+        }
+        const normalize = raw => !rtl ? raw
+          : rtlModel === 'negative' ? -raw
+          : rtlModel === 'reverse' ? raw
+          : maximum - raw;
+        const denormalize = value => !rtl ? value
+          : rtlModel === 'negative' ? -value
+          : rtlModel === 'reverse' ? value
+          : maximum - value;
+    """.trimIndent().prependIndent("          ")
 }
 
 private fun MobiPublicationErrorKind.toReaderErrorCode(): ReaderErrorCode = when (this) {

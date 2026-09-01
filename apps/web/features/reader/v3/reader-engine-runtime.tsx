@@ -119,7 +119,8 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'ORIGINAL_DOWNLOAD_URL_INVALID') return translate('原文件下载地址未通过安全校验。');
   if (code === 'ORIGINAL_RESPONSE_INVALID') return translate('原文件下载响应无效。');
   if (code === 'ORIGINAL_LENGTH_INVALID') return translate('原文件下载不完整，请重试。');
-  if (code === 'ORIGINAL_CACHE_IO') return translate('浏览器无法保存原文件，请检查存储空间后重试。');
+  if (code === 'ORIGINAL_CACHE_QUOTA') return translate('设备可用存储空间不足，浏览器无法保存原文件。请释放空间后重试。');
+  if (code === 'ORIGINAL_CACHE_IO') return translate('浏览器本地缓存读写失败，请重试。');
   if (code === 'ORIGINAL_NAMESPACE_INVALID') return translate('阅读缓存的账号信息无效。');
   if (code === 'READER_ENGINE_ERROR') return translate('阅读引擎失败，未提供详细原因。');
   if (code === 'PUBLICATION_CHANGED' || code === 'PUBLICATION_RESOURCE_CHANGED') return translate('出版物已更新，请重新打开。');
@@ -310,6 +311,10 @@ export function ReaderEngineRuntime({
     initialLocation: bootstrap.initialLocation,
     preferences: runtimePreferences,
     onLocationChange,
+    onPreferencesRejected: (restored) => {
+      onPreferencesChange(restored);
+      onStorageWarning(i18nAttribute('阅读设置应用失败，已恢复之前的设置。'));
+    },
     onExternalLink: (href) => window.open(href, '_blank', 'noopener,noreferrer'),
     onPasswordRequired: (reason) => {
       onReady();

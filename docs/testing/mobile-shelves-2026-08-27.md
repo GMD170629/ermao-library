@@ -46,8 +46,7 @@ final result: blocked
 ## 2026-08-28 补充复验：Web i18n / Android lint
 
 以上失败记录保留为历史证据。本次仅处理 catalog 与 lint，不修改书架、Reader
-流程或 API 合同；详细根因、命令和本地日志见
-[Reader controls 补充复验](mobile-reader-controls-2026-08-27.md#2026-08-28-follow-up-web-i18n-and-android-lint)。
+流程或 API 合同。
 
 - 旧报告中的 4 条事件翻译、AndroidX ExifInterface 和 2 个未用资源问题已由
   `9fcadcda` 修复。但 6 条被判为过期的管理员错误仍会返回前端；提取器漏识别

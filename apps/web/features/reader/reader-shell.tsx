@@ -1,19 +1,24 @@
 'use client';
 
-import { READER_SETTINGS_CATALOG, readerSettingAvailability, readerSettingValue, changeReaderSetting, type ReaderSettingId } from '@shuku/reader-core';
+import {
+  READER_SETTINGS_CATALOG,
+  changeReaderSetting,
+  readerPhysicalHorizontalPageTurn,
+  readerSettingAvailability,
+  readerSettingValue,
+  type ReaderCapabilities,
+  type ReaderKind,
+  type ReaderPreferences,
+  type ReaderSettingId
+} from '@shuku/reader-core';
 import { preferencesToReaderSettings, readerSettingsToPreferences } from './v3/presentation';
 
-import type { ReaderCapabilities, ReaderKind, ReaderPreferences } from '@shuku/reader-core';
 import { BookOpen, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, Highlighter, ListTree, Minus, NotebookPen, Palette, Plus, Settings, SlidersHorizontal, Trash2, Type, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type SyntheticEvent } from 'react';
 import { cn } from '../../components/ui/cn';
 import { ResourceSelect } from '../../components/ui/resource-select';
 import { useI18n } from '../../i18n/provider';
 import { isDarkReaderTheme, readerThemeSurfaces } from './reader-theme';
-import {
-  READER_THEME_OPTIONS,
-  type ReaderFontFamily
-} from './reader-preference-options';
 import type { ReaderBookmark } from './v3/bookmarks';
 import { resolveActiveEpubNavigationIndex } from './v3/epub-navigation';
 import type { ReaderInteractionPolicy } from './v3/adapters/reader-interaction';
@@ -33,12 +38,11 @@ type ComicPageTurnAnimation = ReaderPreferences['comic']['pageTurnAnimation'];
 type ComicImageFit = ReaderPreferences['comic']['imageFit'];
 type ComicImageVariant = ReaderPreferences['comic']['imageVariant'];
 
-export type ReaderTheme = ReaderPreferences['appearance']['theme'];
-export type { ReaderFontFamily };
-export type EbookPageTurnAnimation = ReaderPreferences['epub']['pageTurnAnimation'];
-export type EbookSpreadMode = ReaderPreferences['epub']['spreadMode'];
-export type EbookFlow = 'paginated' | 'scrolled';
-export type PdfFit = 'width' | 'page';
+type ReaderTheme = ReaderPreferences['appearance']['theme'];
+type EbookPageTurnAnimation = ReaderPreferences['epub']['pageTurnAnimation'];
+type EbookSpreadMode = ReaderPreferences['epub']['spreadMode'];
+type EbookFlow = ReaderPreferences['epub']['flow'];
+type PdfFit = ReaderPreferences['pdf']['fit'];
 
 export type ReaderProgress = {
   page: number;
@@ -67,10 +71,12 @@ export type ReaderSettings = {
   keyboardPageTurn: boolean;
   volumeKeyPageTurn: boolean;
   keepScreenAwake: boolean;
+  readingProgression: ReaderPreferences['epub']['readingProgression'];
+  writingMode: ReaderPreferences['epub']['writingMode'];
   fontSize: number;
   lineHeight: number;
   pageWidth: number;
-  fontFamily: ReaderFontFamily;
+  fontFamily: ReaderPreferences['epub']['fontFamily'];
   fontWeight: ReaderPreferences['epub']['fontWeight'];
   letterSpacing: ReaderPreferences['epub']['letterSpacing'];
   pageMargin: ReaderPreferences['epub']['pageMargin'];
@@ -316,6 +322,15 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const clockLabel = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(clockTime);
   const progressDetail = [currentNavigationLabel, locationLabel, selectedProgressLabel].filter(Boolean).join(' · ');
   const readerDirection: ComicDirection = readingDirection ?? (readerType === 'comic' ? settings.comicDirection : 'ltr');
+  const leftDirection = readerPhysicalHorizontalPageTurn('left', readerDirection);
+  const rightDirection = readerPhysicalHorizontalPageTurn('right', readerDirection);
+  const leftChapter = leftDirection === 'previous' ? previousChapter : nextChapter;
+  const rightChapter = rightDirection === 'previous' ? previousChapter : nextChapter;
+  const chapterLabels = readerType === 'reflowable';
+  const previousChapterLabel = chapterLabels ? '上一章' : '上一页';
+  const nextChapterLabel = chapterLabels ? '下一章' : '下一页';
+  const leftChapterLabel = leftDirection === 'previous' ? previousChapterLabel : nextChapterLabel;
+  const rightChapterLabel = rightDirection === 'previous' ? previousChapterLabel : nextChapterLabel;
   const zoomedPannable = readerType === 'pdf'
     ? settings.pdfZoom > 1
     : readerType === 'comic' && settings.comicZoom > 1;
@@ -1066,10 +1081,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               <div className="flex min-w-0 items-center gap-1">
                 <button
                   type="button"
-                  aria-label={i18nAttribute("上一章")}
-                  data-reader-chapter-target={previousChapter?.href ?? previousChapter?.index}
-                  disabled={!previousChapter}
-                  onClick={() => { if (previousChapter) void navigateToItem(previousChapter, false); }}
+                  aria-label={i18nAttribute(leftChapterLabel)}
+                  data-reader-chapter-target={leftChapter?.href ?? leftChapter?.index}
+                  disabled={!leftChapter}
+                  onClick={() => { if (leftChapter) void navigateToItem(leftChapter, false); }}
                   className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <ChevronLeft size={20} />
@@ -1092,10 +1107,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
               />
                 <button
                   type="button"
-                  aria-label={i18nAttribute("下一章")}
-                  data-reader-chapter-target={nextChapter?.href ?? nextChapter?.index}
-                  disabled={!nextChapter}
-                  onClick={() => { if (nextChapter) void navigateToItem(nextChapter, false); }}
+                  aria-label={i18nAttribute(rightChapterLabel)}
+                  data-reader-chapter-target={rightChapter?.href ?? rightChapter?.index}
+                  disabled={!rightChapter}
+                  onClick={() => { if (rightChapter) void navigateToItem(rightChapter, false); }}
                   className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}
                 >
                   <ChevronRight size={20} />
@@ -1129,7 +1144,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
             ) : null}
             <ReaderControlNavButton layout="dock" icon={NotebookPen} label={i18nAttribute("笔记")} active={bookmarkActive} selected={panel === 'notes'} expanded={panel === 'notes'} panelTrigger="notes" onClick={(event) => { setNotesTab('bookmarks'); togglePanel('notes', event.currentTarget); }} dark={dark} />
             <div className="min-w-0 flex-1 items-center gap-2 px-2 md:flex lg:px-4">
-            <button type="button" aria-label={i18nAttribute("上一章")} data-reader-chapter-target={previousChapter?.href ?? previousChapter?.index} disabled={!previousChapter} onClick={() => { if (previousChapter) void navigateToItem(previousChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute(leftChapterLabel)} data-reader-chapter-target={leftChapter?.href ?? leftChapter?.index} disabled={!leftChapter} onClick={() => { if (leftChapter) void navigateToItem(leftChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronLeft size={20} />
             </button>
             <div className="min-w-0 flex-1">
@@ -1154,7 +1169,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                 style={{ accentColor }}
               />
             </div>
-            <button type="button" aria-label={i18nAttribute("下一章")} data-reader-chapter-target={nextChapter?.href ?? nextChapter?.index} disabled={!nextChapter} onClick={() => { if (nextChapter) void navigateToItem(nextChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
+            <button type="button" aria-label={i18nAttribute(rightChapterLabel)} data-reader-chapter-target={rightChapter?.href ?? rightChapter?.index} disabled={!rightChapter} onClick={() => { if (rightChapter) void navigateToItem(rightChapter, false); }} className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition active:scale-[0.97] disabled:opacity-35', dark ? 'hover:bg-white/10' : 'hover:bg-stone-900/5')}>
               <ChevronRight size={20} />
             </button>
             </div>
@@ -1180,14 +1195,14 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
   const { t: i18nAttribute } = useAttributeI18n();
   return (
     <div role="group" aria-label={i18nAttribute("主题")} className={cn('shuku-reader-control-border flex items-center justify-center gap-3 rounded-2xl border p-1.5', dark ? 'bg-white/[0.06]' : 'bg-stone-900/[0.055]')}>
-      {READER_THEME_OPTIONS.map((option) => {
+      {READER_SETTINGS_CATALOG.optionGroups.READER_THEME_OPTIONS.map((option) => {
         const selected = value === option.value;
         const surface = readerThemeSurfaces[option.value];
         return (
           <button
             key={option.value}
             type="button"
-            aria-label={i18nAttribute(option.label)}
+            aria-label={i18nAttribute(option.label['zh-CN'])}
             aria-pressed={selected}
             onClick={() => onChange(option.value)}
             className={cn('flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent p-1 transition active:scale-[0.96]', selected ? '' : 'hover:border-[var(--shuku-reader-control-border)]')}
@@ -1470,11 +1485,14 @@ function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSetti
       preferences
     });
     const disabled = state.availability !== 'available';
-    const description = state.reason ? availabilityDescription(state.reason) : undefined;
+    const description = state.reason
+      ? t(READER_SETTINGS_CATALOG.availabilityReasons[state.reason]['zh-CN'])
+      : undefined;
     if (id === 'theme') return <ThemeSwatches key={id} value={settings.theme} onChange={(value) => update(id, value)} dark={dark} />;
     if (setting.kind === 'action') return onResetSettings ? <button key={id} type="button" onClick={() => { void onResetSettings(); keepControlsOpen(); }} className="min-h-11 w-full" aria-label={label}>{label}</button> : null;
     if (setting.kind === 'toggle') {
-      const checked = id === 'swipePageTurn' && readerType === 'reflowable' ? true : saved === 'true' || saved === 'system';
+      const fixedSwipe = id === 'swipePageTurn' && readerType === 'reflowable';
+      const checked = fixedSwipe || saved === 'true' || saved === 'system';
       return <ReaderToggleRow key={id} label={label} description={description} checked={checked} disabled={disabled} onChange={(value) => update(id, id === 'themeMode' ? value ? 'system' : 'manual' : String(value))} dark={dark} />;
     }
     if (setting.kind === 'number' && setting.limits) {
@@ -1485,20 +1503,6 @@ function ReaderPreferencesPanel({ panel, settings, readerType, dark, updateSetti
     if (!setting.options) return null;
     const options = READER_SETTINGS_CATALOG.optionGroups[setting.options].map((option) => ({ value: option.value, label: option.label['zh-CN'] }));
     return <CompactSettingOptions key={id} label={label} value={saved} options={options} disabled={disabled} description={description} disambiguateLabels={id === 'quickFontSize' || id === 'lineHeight'} onChange={(value) => update(id, value)} dark={dark} />;
-  }
-  function availabilityDescription(reason: keyof typeof READER_SETTINGS_CATALOG.availabilityReasons) {
-    switch (reason) {
-      case 'engineNotReady': return t('阅读引擎尚未就绪');
-      case 'notImplemented': return t('当前平台尚未实现');
-      case 'publicationConstraint': return t('当前出版物不支持此设置');
-      case 'narrowViewport': return t('可用宽度不大于 640 时自动使用全宽');
-      case 'scrollingMode': return t('滚动模式下暂不可用');
-      case 'requiresDoubleSpread': return t('仅在双页模式下可用');
-      case 'optimizationDisabled': return t('请先开启智能优化');
-      case 'publisherStylesActive': return t('出版方样式开启时由出版物控制');
-      case 'wakeLockUnavailable': return t('当前环境不支持保持屏幕唤醒');
-      case 'zoomUnavailable': return t('当前阅读器不支持可配置缩放');
-    }
   }
   function sectionView(section: typeof sections[number]) {
     const entries = READER_SETTINGS_CATALOG.settings.filter((setting) => setting.section === section.id && setting.formats.some((format) => format === readerType));

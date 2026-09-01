@@ -7,10 +7,12 @@ import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPageMargin
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
+import com.ermao.library.shared.modules.reader.ReaderReadingProgression as SharedReaderReadingProgression
 import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTextAlignment
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
+import com.ermao.library.shared.modules.reader.ReaderWritingMode
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.Color
 import org.readium.r2.navigator.preferences.ColumnCount
@@ -18,10 +20,14 @@ import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.preferences.Theme
 import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.navigator.preferences.ReadingProgression
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumPreferencesMapper(private val resources: Resources) {
-    fun toReadium(preferences: ReaderPreferences): EpubPreferences {
+    fun toReadium(
+        preferences: ReaderPreferences,
+        supportsTextLayout: Boolean,
+    ): EpubPreferences {
         val epub = preferences.epub
         val theme = effectiveTheme(preferences)
         val colors = theme.colors
@@ -45,7 +51,12 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
             paragraphIndent = epub.typography.paragraphIndent,
             paragraphSpacing = epub.typography.paragraphSpacing,
             publisherStyles = epub.typography.preservePublisherStyles,
-            scroll = epub.flow == ReaderReadingMode.ContinuousScroll,
+            readingProgression = if (supportsTextLayout) when (epub.readingProgression) {
+                SharedReaderReadingProgression.LeftToRight -> ReadingProgression.LTR
+                SharedReaderReadingProgression.RightToLeft -> ReadingProgression.RTL
+            } else null,
+            scroll = epub.flow == ReaderReadingMode.ContinuousScroll ||
+                (supportsTextLayout && epub.writingMode == ReaderWritingMode.Vertical),
             textAlign = when (epub.typography.textAlign) {
                 ReaderTextAlignment.PublisherDefault -> null
                 ReaderTextAlignment.Start -> TextAlign.START
@@ -57,6 +68,7 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
                 ReaderTheme.Night, ReaderTheme.Black -> Theme.DARK
                 ReaderTheme.Day, ReaderTheme.Green -> Theme.LIGHT
             },
+            verticalText = if (supportsTextLayout) epub.writingMode == ReaderWritingMode.Vertical else null,
         )
     }
 

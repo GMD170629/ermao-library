@@ -12,9 +12,10 @@ struct IosPdfReaderView: View {
         GeometryReader { geometry in
             ZStack {
                 palette.background.ignoresSafeArea()
-                content
-                    .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pdfPageWidth))
-                    .frame(maxHeight: .infinity)
+                IosReaderContentStatusLayout(session: session) {
+                    content
+                        .frame(width: readerContentWidth(available: geometry.size.width, preferred: session.preferences.pdfPageWidth))
+                }
                 if session.phase == .reading || session.phase == .background {
                     IosReaderControls(session: session, onClose: close)
                 }

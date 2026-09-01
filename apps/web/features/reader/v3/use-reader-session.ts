@@ -22,6 +22,7 @@ type ReaderSessionOptions = {
   initialLocation: ReaderLocation | null;
   preferences: ReaderPreferences;
   onLocationChange: (location: ReaderLocation, percent: number) => void;
+  onPreferencesRejected: (restored: ReaderPreferences) => void;
   onExternalLink?: (href: string) => void;
   onPasswordRequired?: (reason: 'need-password' | 'incorrect-password') => void;
 };
@@ -150,6 +151,7 @@ export function useReaderSession({
   initialLocation,
   preferences,
   onLocationChange,
+  onPreferencesRejected,
   onExternalLink,
   onPasswordRequired
 }: ReaderSessionOptions) {
@@ -173,11 +175,11 @@ export function useReaderSession({
   const preferenceQueueRef = useRef(new ReaderPreferenceIntentQueue());
   const openedAdapterRef = useRef<ReaderAdapter | null>(null);
   const appliedPreferencesRef = useRef<ReaderPreferences>(initialPreferencesRef.current);
-  const callbacksRef = useRef({ onLocationChange, onExternalLink, onPasswordRequired });
+  const callbacksRef = useRef({ onLocationChange, onPreferencesRejected, onExternalLink, onPasswordRequired });
 
   useEffect(() => {
-    callbacksRef.current = { onLocationChange, onExternalLink, onPasswordRequired };
-  }, [onExternalLink, onLocationChange, onPasswordRequired]);
+    callbacksRef.current = { onLocationChange, onPreferencesRejected, onExternalLink, onPasswordRequired };
+  }, [onExternalLink, onLocationChange, onPasswordRequired, onPreferencesRejected]);
 
   const beginOperation = useCallback((kind: ReaderOperationKind) => {
     // Navigation and preferences are serialized by their intent queues. Other
@@ -285,6 +287,16 @@ export function useReaderSession({
         operation: context.operation,
         preferences: requestedPreferences
       });
+      const restoreAppliedPreferences = (reason: unknown) => {
+        const restored = appliedPreferencesRef.current;
+        dispatch({ type: 'preferences/replace', operation: context.operation, preferences: restored });
+        callbacksRef.current.onPreferencesRejected(restored);
+        emitReaderDebug('warning', '阅读设置应用失败', {
+          operation: context.operation,
+          reason: reason instanceof Error ? reason.message : String(reason),
+          contentPreserved: true
+        });
+      };
       try {
         const acknowledgement = await adapter.applyPreferences(
           requestedPreferences,
@@ -295,21 +307,13 @@ export function useReaderSession({
         if (acknowledgement.accepted) {
           appliedPreferencesRef.current = requestedPreferences;
         } else {
-          emitReaderDebug('warning', '阅读设置应用失败', {
-            operation: context.operation,
-            reason: acknowledgement.reason,
-            contentPreserved: true
-          });
+          restoreAppliedPreferences(acknowledgement.reason);
         }
         return acknowledgement.accepted;
       } catch (reason) {
         if (context.signal.aborted) return false;
         dispatch({ type: 'operation/complete', operation: context.operation });
-        emitReaderDebug('warning', '阅读设置应用失败', {
-          operation: context.operation,
-          reason: reason instanceof Error ? reason.message : String(reason),
-          contentPreserved: true
-        });
+        restoreAppliedPreferences(reason);
         return false;
       } finally {
         finishOperation('preferences', context.controller);

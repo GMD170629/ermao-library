@@ -1,26 +1,36 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_READER_PREFERENCES, migrateWebReaderPreferences, normalizeReaderPreferences, READER_SCHEMA_VERSION } from '@shuku/reader-core';
+import { DEFAULT_READER_PREFERENCES, normalizeReaderPreferences } from '@shuku/reader-core';
 import { readDeviceReaderPreferences, writeDeviceReaderPreferences, clearDeviceReaderPreferences, READER_DEVICE_PREFERENCES_KEY } from './reader-device-preferences';
 import { userDevicePreferenceKey } from './user-preferences';
 
-test('Web migration drops legacy publisher switches, preserves custom values and leaves progress v4', () => {
-  const legacy = {
-    ...DEFAULT_READER_PREFERENCES, schemaVersion: 4,
-    epub: { ...DEFAULT_READER_PREFERENCES.epub, lineHeight: 1.85, letterSpacing: 0.03,
-      typography: { ...DEFAULT_READER_PREFERENCES.epub.typography, preservePublisherStyles: true, allowPublisherColors: true, allowPublisherFonts: true } }
-  };
-  const migrated = migrateWebReaderPreferences(legacy);
-  assert.equal(migrated.schemaVersion, 5);
-  assert.equal(READER_SCHEMA_VERSION, 4);
-  assert.equal(migrated.epub.typography.preservePublisherStyles, false);
-  assert.equal(migrated.epub.lineHeight, 1.85);
-  assert.equal(migrated.epub.letterSpacing, 0.03);
-  assert.deepEqual(Object.keys(migrated.epub.typography).sort(), ['paragraphIndent', 'paragraphSpacing', 'preservePublisherStyles', 'textAlign'].sort());
-  assert.deepEqual(migrateWebReaderPreferences(migrated), migrated);
+test('device storage ignores non-V6 snapshots without rewriting them', () => {
+  const records = new Map<string, string>();
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  let writes = 0;
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    localStorage: {
+      getItem: (key: string) => records.get(key) ?? null,
+      setItem: () => { writes += 1; },
+      removeItem: () => undefined
+    }
+  } });
+  try {
+    const key = userDevicePreferenceKey(READER_DEVICE_PREFERENCES_KEY, 'alice');
+    for (const snapshot of [{ epub: { fontSize: 24 } }, { ...DEFAULT_READER_PREFERENCES, schemaVersion: 5 }]) {
+      const encoded = JSON.stringify(snapshot);
+      records.set(key, encoded);
+      assert.deepEqual(readDeviceReaderPreferences('alice', {}), DEFAULT_READER_PREFERENCES);
+      assert.equal(records.get(key), encoded);
+    }
+    assert.equal(writes, 0);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
 });
 
-test('local preference migration and global-format reset are account-isolated and make no network requests', () => {
+test('local preferences and global-format reset are account-isolated and make no network requests', () => {
   const records = new Map<string, string>();
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const originalFetch = globalThis.fetch;
@@ -38,15 +48,11 @@ test('local preference migration and global-format reset are account-isolated an
   globalThis.fetch = () => { throw new Error('Reader preferences must never synchronize'); };
   try {
     const key = userDevicePreferenceKey(READER_DEVICE_PREFERENCES_KEY, 'alice');
-    const legacy = JSON.stringify({ ...DEFAULT_READER_PREFERENCES, schemaVersion: 4 });
-    records.set(key, legacy);
+    records.set(key, JSON.stringify(DEFAULT_READER_PREFERENCES));
     records.set('download-record', 'original-book');
     records.set('progress-record', 'exact-location-v4');
-    const migrated = readDeviceReaderPreferences('alice', {});
-    assert.equal(migrated.schemaVersion, 5);
-    assert.equal(writes, 1);
-    readDeviceReaderPreferences('alice', {});
-    assert.equal(writes, 1);
+    assert.deepEqual(readDeviceReaderPreferences('alice', {}), DEFAULT_READER_PREFERENCES);
+    assert.equal(writes, 0);
     const customized = normalizeReaderPreferences({ epub: { fontSize: 24 }, comic: { zoom: 1.7 }, pdf: { rotation: 90 } });
     writeDeviceReaderPreferences('bob', customized);
     writeDeviceReaderPreferences('alice', customized);

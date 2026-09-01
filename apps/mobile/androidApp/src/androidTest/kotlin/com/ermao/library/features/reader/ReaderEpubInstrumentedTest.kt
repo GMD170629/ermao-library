@@ -4,6 +4,8 @@ import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.content.Context
 import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -251,7 +253,7 @@ class ReaderEpubInstrumentedTest {
     }
 
     @Test
-    fun continuousScrollSupportsTapZoneViewportTurnsAndForcesSinglePage() {
+    fun continuousScrollSupportsViewportTurnsNativeSwipeAndForcesSinglePage() {
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
@@ -293,6 +295,11 @@ class ReaderEpubInstrumentedTest {
             waitUntilValue("continuous scroll backward viewport turn") {
                 evaluateJavascript(scenario, "document.scrollingElement.scrollTop").trim('"').toDoubleOrNull()
                     ?.let { it < advanced - 1.0 } == true
+            }
+
+            swipeNavigatorForward(scenario)
+            waitUntil(scenario, "continuous scroll native swipe") {
+                currentLocationOrNull(it)?.resourceKey?.contains("chapter2.xhtml") == true
             }
         }
     }
@@ -502,6 +509,49 @@ class ReaderEpubInstrumentedTest {
         }.get()
         return runBlocking {
             withContext(Dispatchers.Main) { navigator.evaluateJavascript(script).orEmpty() }
+        }
+    }
+
+    private fun swipeNavigatorForward(scenario: ActivityScenario<ReaderActivity>) {
+        val coordinates = AtomicReference<FloatArray>()
+        scenario.onActivity { activity ->
+            val view = checkNotNull(activity.navigatorOrNull()?.view)
+            check(view.width > 0 && view.height > 0)
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            coordinates.set(
+                floatArrayOf(
+                    location[0] + view.width * 0.8f,
+                    location[0] + view.width * 0.2f,
+                    location[1] + view.height * 0.5f,
+                ),
+            )
+        }
+        val (startX, endX, y) = coordinates.get().toList()
+        val downTime = SystemClock.uptimeMillis()
+        sendTouchEvent(MotionEvent.ACTION_DOWN, downTime, downTime, startX, y)
+        repeat(8) { step ->
+            SystemClock.sleep(16)
+            val eventTime = SystemClock.uptimeMillis()
+            val fraction = (step + 1) / 9f
+            sendTouchEvent(
+                MotionEvent.ACTION_MOVE,
+                downTime,
+                eventTime,
+                startX + (endX - startX) * fraction,
+                y,
+            )
+        }
+        SystemClock.sleep(16)
+        sendTouchEvent(MotionEvent.ACTION_UP, downTime, SystemClock.uptimeMillis(), endX, y)
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun sendTouchEvent(action: Int, downTime: Long, eventTime: Long, x: Float, y: Float) {
+        MotionEvent.obtain(downTime, eventTime, action, x, y, 0).also { event ->
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            instrumentation.sendPointerSync(event)
+            event.recycle()
         }
     }
 

@@ -1,4 +1,4 @@
-export const READER_PREFERENCES_VERSION = 5 as const;
+export const READER_PREFERENCES_VERSION = 6 as const;
 
 export const READER_SCHEMA_VERSION = 4 as const;
 
@@ -6,6 +6,8 @@ export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' 
 export type ReaderKind = 'reflowable' | 'comic' | 'pdf';
 export type ReaderTheme = 'day' | 'warm' | 'green' | 'night' | 'black';
 export type ReaderFontFamily = 'pingfang' | 'songti' | 'kaiti';
+export type ReaderWritingMode = 'horizontal' | 'vertical';
+export type ReaderReadingProgression = 'ltr' | 'rtl';
 export type ReaderLifecycle = 'bootstrapping' | 'loading' | 'ready' | 'error' | 'disposed';
 export type ReaderOperationKind = 'bootstrap' | 'navigation' | 'render' | 'preferences' | 'pagination';
 
@@ -77,6 +79,8 @@ export type ReaderPreferences = {
     keepScreenAwake: boolean;
   };
   epub: {
+    readingProgression: ReaderReadingProgression;
+    writingMode: ReaderWritingMode;
     fontSize: number;
     lineHeight: number;
     pageWidth: number;

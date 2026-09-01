@@ -15,6 +15,7 @@ protocol IosReaderControlSession: ObservableObject {
     var controlPosition: String { get }
     var preferences: IosReaderPreferences { get }
     var controlContents: [IosReaderTocEntry] { get }
+    var controlAdjacentChapters: IosReaderAdjacentChapters { get }
     var bookmarks: [IosReaderBookmarkRecord] { get }
     var bookmarkSyncPending: Bool { get }
     var currentBookmarkActive: Bool { get }
@@ -48,6 +49,7 @@ enum IosReaderPanel: String, Identifiable {
 extension IosReaderControlSession {
     var chapterTitle: String? { nil }
     var bookmarks: [IosReaderBookmarkRecord] { [] }
+    var controlAdjacentChapters: IosReaderAdjacentChapters { IosReaderAdjacentChapters() }
     var bookmarkSyncPending: Bool { false }
     var currentBookmarkActive: Bool { false }
     var canUndoControlBookmark: Bool { false }
@@ -58,11 +60,18 @@ extension IosReaderControlSession {
     func zoomControl(_ direction: Int) {}
 
     func platformControlEnabled(_ control: ErmaoShared.ReaderControl, unavailable: Set<ErmaoShared.ReaderControl> = []) -> Bool {
-        if control == .pagewidth && UIScreen.main.bounds.width <= 640 { return false }
-        return ErmaoShared.PublicKt.resolveReaderControlContext(
+        guard let payload = try? preferences.canonicalJSON(),
+              let sharedPreferences = try? ReaderPreferencesJson.shared.decode(payload: payload)
+        else { return false }
+        return ErmaoShared.ReaderSettingsCatalog.shared.resolveReaderControl(
             control: control, morphology: controlMorphology,
-            capabilities: ErmaoShared.PublicKt.readerPlatformCapabilities(morphology: controlMorphology, volumeKeys: false, pdfFit: false),
-            ready: controlReady, scrolling: preferences.readingMode == .continuousScroll,
+            capabilities: ErmaoShared.PublicKt.readerPlatformCapabilities(
+                morphology: controlMorphology,
+                volumeKeys: false,
+                pdfZoom: controlMorphology == .pdf,
+                pdfFit: false
+            ),
+            preferences: sharedPreferences, ready: controlReady,
             nativeUnavailable: unavailable
         ) == .available
     }
@@ -81,6 +90,60 @@ extension IosReaderControlSession {
         let previous = (fraction < 0.3) != (preferences.tapZones == .reversed)
         Task { if previous { await goPrevious() } else { await goNext() } }
     }
+}
+
+struct IosReaderAdjacentChapters: Equatable, Sendable {
+    let previous: IosReaderTocEntry?
+    let next: IosReaderTocEntry?
+
+    init(previous: IosReaderTocEntry? = nil, next: IosReaderTocEntry? = nil) {
+        self.previous = previous
+        self.next = next
+    }
+}
+
+func resolveIosReaderAdjacentChapters(
+    entries: [IosReaderTocEntry],
+    currentHref: String?,
+    fragments: Set<String> = [],
+    cssSelector: String? = nil,
+    currentTitle: String? = nil
+) -> IosReaderAdjacentChapters {
+    guard !entries.isEmpty else { return IosReaderAdjacentChapters() }
+    let titled = currentTitle.flatMap { title in
+        entries.indices.filter { entries[$0].title == title }.only
+    }
+    let anchored = currentHref.flatMap { href in
+        entries.indices.filter { index in
+            guard let expected = entries[index].href else { return false }
+            return ErmaoShared.PublicKt.matchesReaderNavigationHref(
+                currentHref: href,
+                expectedHref: expected,
+                fragments: fragments,
+                cssSelector: cssSelector
+            )
+        }.last
+    }
+    let sameResource = currentHref.flatMap { href in
+        entries.indices.filter { index in
+            entries[index].href?.substringBeforeFragment == href.substringBeforeFragment
+        }.only
+    }
+    guard let currentIndex = titled ?? anchored ?? sameResource else {
+        return IosReaderAdjacentChapters()
+    }
+    return IosReaderAdjacentChapters(
+        previous: entries.indices.contains(currentIndex - 1) ? entries[currentIndex - 1] : nil,
+        next: entries.indices.contains(currentIndex + 1) ? entries[currentIndex + 1] : nil
+    )
+}
+
+private extension Collection {
+    var only: Element? { count == 1 ? first : nil }
+}
+
+private extension String {
+    var substringBeforeFragment: String { split(separator: "#", maxSplits: 1).first.map(String.init) ?? self }
 }
 
 /// One owned writer coalesces slider changes while retaining the final requested value.
@@ -148,6 +211,8 @@ extension IosReaderPreferences {
             (keyboardPageTurn != previous.keyboardPageTurn, .keyboard),
             (volumeKeyPageTurn != previous.volumeKeyPageTurn, .volumekeys),
             (keepScreenAwake != previous.keepScreenAwake, .keepawake),
+            (readingProgression != previous.readingProgression, .readingprogression),
+            (writingMode != previous.writingMode, .writingmode),
             (fontSize != previous.fontSize, .fontsize),
             (lineHeight != previous.lineHeight, .lineheight),
             (pageWidth != previous.pageWidth, .pagewidth),
@@ -202,6 +267,8 @@ extension IosReaderPreferences {
         "display.progressStyle": "progressStyle",
         "display.showClock": "showClock",
         "epub.flow": "readingMode",
+        "epub.readingProgression": "readingProgression",
+        "epub.writingMode": "writingMode",
         "epub.fontFamily": "fontFamily",
         "epub.fontSize": "fontSize",
         "epub.fontWeight": "fontWeight",
@@ -232,7 +299,8 @@ extension IosReaderPreferences {
 
     func canonicalJSON() throws -> String {
         let flat = try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as? [String: Any] ?? [:]
-        var root: [String: Any] = ["schemaVersion": 5, "pdf": ["flow": "paged"]]
+        let currentVersion = Int(ErmaoShared.ReaderPreferences.companion.SCHEMA_VERSION)
+        var root: [String: Any] = ["schemaVersion": currentVersion, "pdf": ["flow": "paged"]]
         for (path, field) in Self.wireFields {
             var value = flat[field]
             if field == "readingMode" { value = readingMode == .paged ? "paginated" : "scrolled" }
@@ -240,7 +308,7 @@ extension IosReaderPreferences {
         }
         let data = try JSONSerialization.data(withJSONObject: root)
         guard let input = String(data: data, encoding: .utf8),
-              let canonical = ReaderPreferencesJson().canonicalizeOrNull(payload: input)
+              let canonical = ReaderPreferencesJson.shared.canonicalizeOrNull(payload: input)
         else { throw CocoaError(.coderInvalidValue) }
         return canonical
     }
@@ -265,16 +333,10 @@ extension IosReaderPreferences {
         root[first] = nested
     }
 
-    func settingValue(_ setting: ReaderSettingDefinition) -> String {
-        guard let json = try? canonicalJSON(),
-              let preferences = try? ReaderPreferencesJson().decode(payload: json) else { return "" }
-        return setting.value(preferences: preferences)
-    }
-
     func changing(_ setting: ReaderSettingDefinition, value: String) throws -> Self {
-        let preferences = try ReaderPreferencesJson().decode(payload: canonicalJSON())
+        let preferences = try ReaderPreferencesJson.shared.decode(payload: canonicalJSON())
         let changed = try setting.change(preferences: preferences, value: value)
-        var result = try Self(canonicalJSON: ReaderPreferencesJson().encode(preferences: changed))
+        var result = try Self(canonicalJSON: ReaderPreferencesJson.shared.encode(preferences: changed))
         if setting.id == "theme" { result.themeMode = .manual }
         return result
     }

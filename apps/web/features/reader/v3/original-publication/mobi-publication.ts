@@ -1,6 +1,8 @@
 import {
   READER_SAFETY_BUDGETS,
   READER_SAFETY_RULE_IDS,
+  type ReaderReadingProgression,
+  type ReaderWritingMode,
   type ReflowableFormat
 } from '@shuku/reader-core';
 import { createLocalPublication, type ReadiumPublication } from './local-publication';
@@ -80,6 +82,8 @@ export async function openMobiPublication(
   blob: Blob,
   format: ReflowableFormat,
   fallbackTitle: string,
+  readingProgression: ReaderReadingProgression,
+  writingMode: ReaderWritingMode,
   signal?: AbortSignal
 ): Promise<ReadiumPublication> {
   if (!MOBI_FORMATS.includes(format)) throw new Error('MOBI_FORMAT_INVALID');
@@ -174,6 +178,8 @@ export async function openMobiPublication(
     return createLocalPublication({
       title: opened.title ?? fallbackTitle,
       language: opened.language,
+      readingProgression,
+      writingMode,
       readingOrder,
       toc,
       extraResources: opened.resources

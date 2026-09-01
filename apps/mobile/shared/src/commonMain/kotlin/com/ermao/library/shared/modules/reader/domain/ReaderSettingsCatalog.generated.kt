@@ -46,6 +46,8 @@ data class ReaderSettingDefinition(
         "optimization" -> preferences.epub.optimization.enabled.toString()
         "deduplicateIndent" -> preferences.epub.optimization.deduplicateIndent.toString()
         "indentUnindented" -> preferences.epub.optimization.indentUnindented.toString()
+        "textReadingProgression" -> preferences.epub.readingProgression.wireValue
+        "textWritingMode" -> preferences.epub.writingMode.wireValue
         "paragraphIndent" -> preferences.epub.typography.paragraphIndent.toString()
         "paragraphSpacing" -> preferences.epub.typography.paragraphSpacing.toString()
         "textAlign" -> preferences.epub.typography.textAlign.wireValue
@@ -93,6 +95,8 @@ data class ReaderSettingDefinition(
         "optimization" -> preferences.copy(epub = preferences.epub.copy(optimization = preferences.epub.optimization.copy(enabled = value.toBooleanStrict())))
         "deduplicateIndent" -> preferences.copy(epub = preferences.epub.copy(optimization = preferences.epub.optimization.copy(deduplicateIndent = value.toBooleanStrict())))
         "indentUnindented" -> preferences.copy(epub = preferences.epub.copy(optimization = preferences.epub.optimization.copy(indentUnindented = value.toBooleanStrict())))
+        "textReadingProgression" -> preferences.copy(epub = preferences.epub.copy(readingProgression = ReaderReadingProgression.entries.first { it.wireValue == value }))
+        "textWritingMode" -> preferences.copy(epub = preferences.epub.copy(writingMode = ReaderWritingMode.entries.first { it.wireValue == value }))
         "paragraphIndent" -> preferences.copy(epub = preferences.epub.copy(typography = preferences.epub.typography.copy(paragraphIndent = value.toDouble())))
         "paragraphSpacing" -> preferences.copy(epub = preferences.epub.copy(typography = preferences.epub.typography.copy(paragraphSpacing = value.toDouble())))
         "textAlign" -> preferences.copy(epub = preferences.epub.copy(typography = preferences.epub.typography.copy(textAlign = ReaderTextAlignment.entries.first { it.wireValue == value })))
@@ -105,7 +109,99 @@ data class ReaderSettingDefinition(
     }
 }
 
+data class ReaderSettingState(
+    val availability: ReaderControlAvailability,
+    val reasonId: String? = null,
+)
+
 object ReaderSettingsCatalog {
+    fun resolveReaderControl(
+        control: ReaderControl,
+        morphology: ReaderMorphology,
+        capabilities: ReaderCapabilities,
+        preferences: ReaderPreferences,
+        ready: Boolean,
+        nativeUnavailable: Set<ReaderControl> = emptySet(),
+    ): ReaderControlAvailability {
+        val definitions = settings.filter { it.control == control }
+        val setting = definitions.firstOrNull { morphology in it.formats }
+        if (setting == null && definitions.isNotEmpty()) return ReaderControlAvailability.NotApplicable
+        return resolveReaderState(
+            control,
+            setting,
+            capabilities,
+            preferences,
+            ready,
+            nativeUnavailable,
+        ).availability
+    }
+
+    fun resolveReaderSetting(
+        setting: ReaderSettingDefinition,
+        morphology: ReaderMorphology,
+        capabilities: ReaderCapabilities,
+        preferences: ReaderPreferences,
+        ready: Boolean,
+        nativeUnavailable: Set<ReaderControl> = emptySet(),
+        wideViewport: Boolean = true,
+        wakeLockSupported: Boolean = true,
+        canZoom: Boolean = true,
+    ): ReaderSettingState {
+        if (morphology !in setting.formats) {
+            return ReaderSettingState(ReaderControlAvailability.NotApplicable)
+        }
+        val control = setting.control ?: return ReaderSettingState(ReaderControlAvailability.Available)
+        return resolveReaderState(
+            control,
+            setting,
+            capabilities,
+            preferences,
+            ready,
+            nativeUnavailable,
+            wideViewport,
+            wakeLockSupported,
+            canZoom,
+        )
+    }
+
+    private fun resolveReaderState(
+        control: ReaderControl,
+        setting: ReaderSettingDefinition?,
+        capabilities: ReaderCapabilities,
+        preferences: ReaderPreferences,
+        ready: Boolean,
+        nativeUnavailable: Set<ReaderControl>,
+        wideViewport: Boolean = true,
+        wakeLockSupported: Boolean = true,
+        canZoom: Boolean = true,
+    ): ReaderSettingState {
+        if (!ready) return ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "engineNotReady")
+        if (control in nativeUnavailable) return ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "publicationConstraint")
+        if (control !in capabilities.supportedControls) return ReaderSettingState(ReaderControlAvailability.NotImplemented, "notImplemented")
+        val rules = setting?.availabilityRules.orEmpty()
+        return when {
+            "wideViewport" in rules && !wideViewport ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "narrowViewport")
+            "wakeLock" in rules && !wakeLockSupported ->
+                ReaderSettingState(ReaderControlAvailability.NotImplemented, "wakeLockUnavailable")
+            "zoom" in rules && !canZoom ->
+                ReaderSettingState(ReaderControlAvailability.NotImplemented, "zoomUnavailable")
+            "paginatedReflowable" in rules && preferences.epub.flow == ReaderReadingMode.ContinuousScroll ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "scrollingMode")
+            "horizontalWritingMode" in rules && preferences.epub.writingMode == ReaderWritingMode.Vertical ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "verticalWritingMode")
+            "paginatedComic" in rules && preferences.comic.flow == ReaderReadingMode.ContinuousScroll ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "scrollingMode")
+            "doubleComicSpread" in rules && preferences.comic.spreadMode != ReaderComicSpreadMode.Double ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "requiresDoubleSpread")
+            "optimizationEnabled" in rules && !preferences.epub.optimization.enabled ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "optimizationDisabled")
+            "publisherStylesOff" in rules && preferences.epub.typography.preservePublisherStyles ->
+                ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "publisherStylesActive")
+            else -> ReaderSettingState(ReaderControlAvailability.Available)
+        }
+    }
+
     val sections: List<ReaderSettingSection> = listOf(
         ReaderSettingSection("top", "appearance", "reader.catalog.section.top", "", "", false),
         ReaderSettingSection("textAppearance", "appearance", "reader.catalog.section.textAppearance", "文字外观", "Text Appearance", false),
@@ -115,6 +211,7 @@ object ReaderSettingsCatalog {
         ReaderSettingSection("turning", "settings", "reader.catalog.section.turning", "翻页设置", "Page Turning", false),
         ReaderSettingSection("layout", "settings", "reader.catalog.section.layout", "排版", "Layout", false),
         ReaderSettingSection("optimization", "settings", "reader.catalog.section.optimization", "智能优化", "Smart Optimization", false),
+        ReaderSettingSection("textLayoutAdvanced", "settings", "reader.catalog.section.textLayoutAdvanced", "文字排版", "Text Layout", true),
         ReaderSettingSection("paragraph", "settings", "reader.catalog.section.paragraph", "段落与内容样式", "Paragraph and Content Styles", true),
         ReaderSettingSection("comicImage", "settings", "reader.catalog.section.comicImage", "漫画画面", "Comic Images", true),
         ReaderSettingSection("operations", "settings", "reader.catalog.section.operations", "操作方式", "Controls", true),
@@ -131,6 +228,7 @@ object ReaderSettingsCatalog {
         "publisherStylesActive" to ReaderAvailabilityReasonDefinition("publisherStylesActive", "reader.catalog.reason.publisherStylesActive", "出版方样式开启时由出版物控制", "Controlled by the publication while Publisher Styles is on"),
         "wakeLockUnavailable" to ReaderAvailabilityReasonDefinition("wakeLockUnavailable", "reader.catalog.reason.wakeLockUnavailable", "当前环境不支持保持屏幕唤醒", "The current environment does not support keeping the screen awake"),
         "zoomUnavailable" to ReaderAvailabilityReasonDefinition("zoomUnavailable", "reader.catalog.reason.zoomUnavailable", "当前阅读器不支持可配置缩放", "The current reader does not support configurable zoom"),
+        "verticalWritingMode" to ReaderAvailabilityReasonDefinition("verticalWritingMode", "reader.catalog.reason.verticalWritingMode", "竖排模式使用滚动阅读", "Vertical text uses scrolling mode"),
     )
     val settings: List<ReaderSettingDefinition> = listOf(
         ReaderSettingDefinition("theme", "reader.catalog.theme", "top", "choice", "主题", "Theme", ReaderControl.Theme, listOf(ReaderMorphology.Reflowable, ReaderMorphology.Comic, ReaderMorphology.Pdf), listOf(ReaderSettingOption("day", "reader.catalog.option.READER_THEME_OPTIONS.day", "白天", "Light"), ReaderSettingOption("warm", "reader.catalog.option.READER_THEME_OPTIONS.warm", "暖色", "Warm"), ReaderSettingOption("green", "reader.catalog.option.READER_THEME_OPTIONS.green", "护眼绿", "Sage green"), ReaderSettingOption("night", "reader.catalog.option.READER_THEME_OPTIONS.night", "夜间", "Dark"), ReaderSettingOption("black", "reader.catalog.option.READER_THEME_OPTIONS.black", "纯黑", "Black")), 0.0, 0.0, 0.0, setOf()),
@@ -154,8 +252,8 @@ object ReaderSettingsCatalog {
         ReaderSettingDefinition("comicAnimation", "reader.catalog.comicAnimation", "turning", "choice", "动画", "Animation", ReaderControl.CommandAnimation, listOf(ReaderMorphology.Comic), listOf(ReaderSettingOption("slide", "reader.catalog.option.READER_PAGE_TURN_ANIMATION_OPTIONS.slide", "平移", "Slide"), ReaderSettingOption("off", "reader.catalog.option.READER_PAGE_TURN_ANIMATION_OPTIONS.off", "关闭", "Close")), 0.0, 0.0, 0.0, setOf()),
         ReaderSettingDefinition("tapZones", "reader.catalog.tapZones", "turning", "choice", "点击区域", "Tap Zones", ReaderControl.TapZones, listOf(ReaderMorphology.Reflowable, ReaderMorphology.Comic, ReaderMorphology.Pdf), listOf(ReaderSettingOption("standard", "reader.catalog.option.READER_TAP_ZONE_OPTIONS.standard", "标准", "Standard"), ReaderSettingOption("reversed", "reader.catalog.option.READER_TAP_ZONE_OPTIONS.reversed", "反向", "Reversed"), ReaderSettingOption("disabled", "reader.catalog.option.READER_TAP_ZONE_OPTIONS.disabled", "关闭", "Close")), 0.0, 0.0, 0.0, setOf()),
         ReaderSettingDefinition("swipePageTurn", "reader.catalog.swipePageTurn", "turning", "toggle", "滑动翻页", "Swipe to Turn Pages", ReaderControl.Swipe, listOf(ReaderMorphology.Reflowable, ReaderMorphology.Comic, ReaderMorphology.Pdf), listOf(), 0.0, 0.0, 0.0, setOf()),
-        ReaderSettingDefinition("textFlow", "reader.catalog.textFlow", "layout", "choice", "阅读方式", "Reading Mode", ReaderControl.ReadingMode, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("paginated", "reader.catalog.option.READER_FLOW_OPTIONS.paginated", "分页", "Paginated"), ReaderSettingOption("scrolled", "reader.catalog.option.READER_FLOW_OPTIONS.scrolled", "滚动", "Scroll")), 0.0, 0.0, 0.0, setOf()),
-        ReaderSettingDefinition("textSpread", "reader.catalog.textSpread", "layout", "choice", "页面", "Pages", ReaderControl.Spread, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("auto", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.auto", "自动", "Auto"), ReaderSettingOption("single", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.single", "单页", "Single Page"), ReaderSettingOption("double", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.double", "双页", "Double")), 0.0, 0.0, 0.0, setOf("paginatedReflowable")),
+        ReaderSettingDefinition("textFlow", "reader.catalog.textFlow", "layout", "choice", "阅读方式", "Reading Mode", ReaderControl.ReadingMode, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("paginated", "reader.catalog.option.READER_FLOW_OPTIONS.paginated", "分页", "Paginated"), ReaderSettingOption("scrolled", "reader.catalog.option.READER_FLOW_OPTIONS.scrolled", "滚动", "Scroll")), 0.0, 0.0, 0.0, setOf("horizontalWritingMode")),
+        ReaderSettingDefinition("textSpread", "reader.catalog.textSpread", "layout", "choice", "页面", "Pages", ReaderControl.Spread, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("auto", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.auto", "自动", "Auto"), ReaderSettingOption("single", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.single", "单页", "Single Page"), ReaderSettingOption("double", "reader.catalog.option.READER_TEXT_SPREAD_MODE_OPTIONS.double", "双页", "Double")), 0.0, 0.0, 0.0, setOf("paginatedReflowable", "horizontalWritingMode")),
         ReaderSettingDefinition("comicFlow", "reader.catalog.comicFlow", "layout", "choice", "阅读方式", "Reading Mode", ReaderControl.ReadingMode, listOf(ReaderMorphology.Comic), listOf(ReaderSettingOption("paginated", "reader.catalog.option.READER_COMIC_FLOW_OPTIONS.paginated", "分页", "Paginated"), ReaderSettingOption("scrolled", "reader.catalog.option.READER_COMIC_FLOW_OPTIONS.scrolled", "竖向连续", "Vertical Continuous")), 0.0, 0.0, 0.0, setOf()),
         ReaderSettingDefinition("comicSpread", "reader.catalog.comicSpread", "layout", "choice", "模式", "Mode", ReaderControl.Spread, listOf(ReaderMorphology.Comic), listOf(ReaderSettingOption("single", "reader.catalog.option.READER_SPREAD_MODE_OPTIONS.single", "单页", "Single Page"), ReaderSettingOption("double", "reader.catalog.option.READER_SPREAD_MODE_OPTIONS.double", "双页", "Double")), 0.0, 0.0, 0.0, setOf("paginatedComic")),
         ReaderSettingDefinition("comicDirection", "reader.catalog.comicDirection", "layout", "choice", "方向", "Direction", ReaderControl.ComicDirection, listOf(ReaderMorphology.Comic), listOf(ReaderSettingOption("ltr", "reader.catalog.option.READER_COMIC_DIRECTION_OPTIONS.ltr", "左至右", "Left to Right"), ReaderSettingOption("rtl", "reader.catalog.option.READER_COMIC_DIRECTION_OPTIONS.rtl", "右至左", "Right to Left")), 0.0, 0.0, 0.0, setOf("paginatedComic")),
@@ -168,6 +266,8 @@ object ReaderSettingsCatalog {
         ReaderSettingDefinition("optimization", "reader.catalog.optimization", "optimization", "toggle", "安全优化", "Safe Optimization", ReaderControl.SmartOptimization, listOf(ReaderMorphology.Reflowable), listOf(), 0.0, 0.0, 0.0, setOf()),
         ReaderSettingDefinition("deduplicateIndent", "reader.catalog.deduplicateIndent", "optimization", "toggle", "重复缩进去重", "Remove Duplicate Indentation", ReaderControl.DeduplicateIndent, listOf(ReaderMorphology.Reflowable), listOf(), 0.0, 0.0, 0.0, setOf("optimizationEnabled")),
         ReaderSettingDefinition("indentUnindented", "reader.catalog.indentUnindented", "optimization", "toggle", "无缩进正文补齐", "Indent Unindented Paragraphs", ReaderControl.IndentUnindented, listOf(ReaderMorphology.Reflowable), listOf(), 0.0, 0.0, 0.0, setOf("optimizationEnabled")),
+        ReaderSettingDefinition("textReadingProgression", "reader.catalog.textReadingProgression", "textLayoutAdvanced", "choice", "阅读方向", "Reading Direction", ReaderControl.ReadingProgression, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("ltr", "reader.catalog.option.READER_READING_PROGRESSION_OPTIONS.ltr", "LTR", "LTR"), ReaderSettingOption("rtl", "reader.catalog.option.READER_READING_PROGRESSION_OPTIONS.rtl", "RTL", "RTL")), 0.0, 0.0, 0.0, setOf()),
+        ReaderSettingDefinition("textWritingMode", "reader.catalog.textWritingMode", "textLayoutAdvanced", "choice", "排版方向", "Writing Direction", ReaderControl.WritingMode, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("horizontal", "reader.catalog.option.READER_WRITING_MODE_OPTIONS.horizontal", "横排", "Horizontal"), ReaderSettingOption("vertical", "reader.catalog.option.READER_WRITING_MODE_OPTIONS.vertical", "竖排", "Vertical")), 0.0, 0.0, 0.0, setOf()),
         ReaderSettingDefinition("paragraphIndent", "reader.catalog.paragraphIndent", "paragraph", "choice", "段首缩进", "First-line Indent", ReaderControl.ParagraphIndent, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("0", "reader.catalog.option.READER_PARAGRAPH_INDENT_OPTIONS.0", "关闭", "Close"), ReaderSettingOption("1", "reader.catalog.option.READER_PARAGRAPH_INDENT_OPTIONS.1", "一字", "1 character"), ReaderSettingOption("2", "reader.catalog.option.READER_PARAGRAPH_INDENT_OPTIONS.2", "两字", "2 characters"), ReaderSettingOption("3", "reader.catalog.option.READER_PARAGRAPH_INDENT_OPTIONS.3", "三字", "3 characters")), 0.0, 4.0, 0.1, setOf("publisherStylesOff")),
         ReaderSettingDefinition("paragraphSpacing", "reader.catalog.paragraphSpacing", "paragraph", "choice", "段间距", "Paragraph Spacing", ReaderControl.ParagraphSpacing, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("0", "reader.catalog.option.READER_PARAGRAPH_SPACING_OPTIONS.0", "原书", "Publisher Default"), ReaderSettingOption("0.4", "reader.catalog.option.READER_PARAGRAPH_SPACING_OPTIONS.0.4", "小", "Small"), ReaderSettingOption("0.8", "reader.catalog.option.READER_PARAGRAPH_SPACING_OPTIONS.0.8", "中", "Medium"), ReaderSettingOption("1.2", "reader.catalog.option.READER_PARAGRAPH_SPACING_OPTIONS.1.2", "大", "Large")), 0.0, 1.5, 0.1, setOf("publisherStylesOff")),
         ReaderSettingDefinition("textAlign", "reader.catalog.textAlign", "paragraph", "choice", "文本对齐", "Text Alignment", ReaderControl.TextAlignment, listOf(ReaderMorphology.Reflowable), listOf(ReaderSettingOption("publisher", "reader.catalog.option.READER_TEXT_ALIGN_OPTIONS.publisher", "原书", "Publisher Default"), ReaderSettingOption("left", "reader.catalog.option.READER_TEXT_ALIGN_OPTIONS.left", "左对齐", "Left aligned"), ReaderSettingOption("justify", "reader.catalog.option.READER_TEXT_ALIGN_OPTIONS.justify", "两端对齐", "Justified")), 0.0, 0.0, 0.0, setOf("publisherStylesOff")),

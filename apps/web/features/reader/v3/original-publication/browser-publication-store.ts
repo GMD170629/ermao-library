@@ -37,6 +37,20 @@ export type OriginalDownloadTransport = (
 type CacheEntryPort = Pick<Cache, 'match' | 'put' | 'delete' | 'keys'>;
 type CacheStoragePort = { open(name: string): Promise<CacheEntryPort> };
 
+function isQuotaExceededError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'QuotaExceededError';
+}
+
+function throwPublicationStoreError(cause: unknown): never {
+  if (cause instanceof OriginalPublicationStoreError) throw cause;
+  if (cause instanceof ReaderSafetyPolicyError) throw cause;
+  if (cause instanceof Error && cause.name === 'AbortError') throw cause;
+  throw new OriginalPublicationStoreError(
+    isQuotaExceededError(cause) ? 'ORIGINAL_CACHE_QUOTA' : 'ORIGINAL_CACHE_IO',
+    { cause }
+  );
+}
+
 function normalizedMime(value: string): string {
   return value.split(';', 1)[0]?.trim().toLowerCase() ?? '';
 }
@@ -95,6 +109,14 @@ async function deleteSupersededEntries(
   }
 }
 
+async function deleteInactiveEntries(cache: CacheEntryPort, activeRequest: Request): Promise<number> {
+  let deleted = 0;
+  for (const request of await cache.keys()) {
+    if (request.url !== activeRequest.url && await cache.delete(request)) deleted += 1;
+  }
+  return deleted;
+}
+
 function metadataHeaders(descriptor: OriginalPublicationDescriptor): Headers {
   const headers = new Headers({
     'Content-Type': descriptor.mimeType,
@@ -136,6 +158,60 @@ async function validatedBlob(
   return blob;
 }
 
+async function downloadAndPublish(
+  cache: CacheEntryPort,
+  request: Request,
+  descriptor: OriginalPublicationDescriptor,
+  transport: OriginalDownloadTransport,
+  options: Readonly<{
+    signal: AbortSignal;
+    onProgress?: (progress: OriginalDownloadProgress) => void;
+  }>
+): Promise<Blob> {
+  options.onProgress?.({ loadedBytes: 0, totalBytes: descriptor.sizeBytes, percent: 0 });
+  const response = await transport(descriptor, options.signal);
+  if (!response.ok || response.status !== 200 || !response.body) {
+    throw new OriginalPublicationStoreError('ORIGINAL_RESPONSE_INVALID');
+  }
+  if (response.headers.get('Content-Length') !== String(descriptor.sizeBytes)) {
+    throw new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID');
+  }
+  if (response.headers.get('X-Asset-Version') !== descriptor.assetVersion) {
+    throw new OriginalPublicationStoreError('ORIGINAL_VERSION_CHANGED');
+  }
+  if (normalizedMime(response.headers.get('Content-Type') ?? '') !== normalizedMime(descriptor.mimeType)) {
+    rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
+  }
+  let loadedBytes = 0;
+  const meter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      loadedBytes += chunk.byteLength;
+      if (loadedBytes > descriptor.sizeBytes) {
+        controller.error(new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID'));
+        return;
+      }
+      options.onProgress?.({
+        loadedBytes,
+        totalBytes: descriptor.sizeBytes,
+        percent: Math.min(100, (loadedBytes / descriptor.sizeBytes) * 100)
+      });
+      controller.enqueue(chunk);
+    },
+    flush() {
+      if (loadedBytes !== descriptor.sizeBytes) {
+        throw new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID');
+      }
+    }
+  });
+  await cache.put(request, new Response(response.body.pipeThrough(meter, { signal: options.signal }), {
+    status: 200,
+    headers: metadataHeaders(descriptor)
+  }));
+  const stored = await validatedBlob(cache, request, descriptor);
+  if (!stored) throw new OriginalPublicationStoreError('ORIGINAL_CACHE_IO');
+  return stored;
+}
+
 export class BrowserPublicationStore {
   constructor(
     private readonly cacheStorage: CacheStoragePort = window.caches,
@@ -151,64 +227,35 @@ export class BrowserPublicationStore {
     }>
   ): Promise<Readonly<{ blob: Blob; cacheHit: boolean }>> {
     assertDescriptor(descriptor, this.origin);
-    const cache = await this.cacheStorage.open(privateCacheName(descriptor.namespace, STORE_VERSION));
-    const request = cacheRequest(descriptor, this.origin);
-    await deleteSupersededEntries(cache, request, descriptor, this.origin);
-    const cached = await validatedBlob(cache, request, descriptor);
-    if (cached) {
-      options.onProgress?.({ loadedBytes: descriptor.sizeBytes, totalBytes: descriptor.sizeBytes, percent: 100 });
-      return { blob: cached, cacheHit: true };
-    }
-    await cache.delete(request);
-    options.onProgress?.({ loadedBytes: 0, totalBytes: descriptor.sizeBytes, percent: 0 });
+    let cache: CacheEntryPort;
     try {
-      const response = await this.transport(descriptor, options.signal);
-      if (!response.ok || response.status !== 200 || !response.body) {
-        throw new OriginalPublicationStoreError('ORIGINAL_RESPONSE_INVALID');
+      cache = await this.cacheStorage.open(privateCacheName(descriptor.namespace, STORE_VERSION));
+    } catch (cause) {
+      throwPublicationStoreError(cause);
+    }
+    const request = cacheRequest(descriptor, this.origin);
+    try {
+      await deleteSupersededEntries(cache, request, descriptor, this.origin);
+      const cached = await validatedBlob(cache, request, descriptor);
+      if (cached) {
+        options.onProgress?.({ loadedBytes: descriptor.sizeBytes, totalBytes: descriptor.sizeBytes, percent: 100 });
+        return { blob: cached, cacheHit: true };
       }
-      if (response.headers.get('Content-Length') !== String(descriptor.sizeBytes)) {
-        throw new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID');
+      await cache.delete(request);
+      try {
+        const stored = await downloadAndPublish(cache, request, descriptor, this.transport, options);
+        return { blob: stored, cacheHit: false };
+      } catch (cause) {
+        await cache.delete(request).catch(() => false);
+        if (!isQuotaExceededError(cause)) throw cause;
+        const deletedEntries = await deleteInactiveEntries(cache, request);
+        if (deletedEntries === 0) throw cause;
+        const stored = await downloadAndPublish(cache, request, descriptor, this.transport, options);
+        return { blob: stored, cacheHit: false };
       }
-      if (response.headers.get('X-Asset-Version') !== descriptor.assetVersion) {
-        throw new OriginalPublicationStoreError('ORIGINAL_VERSION_CHANGED');
-      }
-      if (normalizedMime(response.headers.get('Content-Type') ?? '') !== normalizedMime(descriptor.mimeType)) {
-        rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
-      }
-      let loadedBytes = 0;
-      const meter = new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          loadedBytes += chunk.byteLength;
-          if (loadedBytes > descriptor.sizeBytes) {
-            controller.error(new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID'));
-            return;
-          }
-          options.onProgress?.({
-            loadedBytes,
-            totalBytes: descriptor.sizeBytes,
-            percent: Math.min(100, (loadedBytes / descriptor.sizeBytes) * 100)
-          });
-          controller.enqueue(chunk);
-        },
-        flush() {
-          if (loadedBytes !== descriptor.sizeBytes) {
-            throw new OriginalPublicationStoreError('ORIGINAL_LENGTH_INVALID');
-          }
-        }
-      });
-      await cache.put(request, new Response(response.body.pipeThrough(meter, { signal: options.signal }), {
-        status: 200,
-        headers: metadataHeaders(descriptor)
-      }));
-      const stored = await validatedBlob(cache, request, descriptor);
-      if (!stored) throw new OriginalPublicationStoreError('ORIGINAL_CACHE_IO');
-      return { blob: stored, cacheHit: false };
     } catch (cause) {
       await cache.delete(request).catch(() => false);
-      if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-      if (cause instanceof OriginalPublicationStoreError) throw cause;
-      if (cause instanceof ReaderSafetyPolicyError) throw cause;
-      throw new OriginalPublicationStoreError('ORIGINAL_CACHE_IO', { cause });
+      throwPublicationStoreError(cause);
     }
   }
 }

@@ -9,6 +9,12 @@ const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
 const sourceCatalog = JSON.parse(readFileSync(sourceCatalogPath, 'utf8'));
 
 const exactOverrides = {
+  '文字排版': 'Text Layout',
+  '阅读方向': 'Reading Direction',
+  '排版方向': 'Writing Direction',
+  '横排': 'Horizontal',
+  '竖排': 'Vertical',
+  '竖排模式使用滚动阅读': 'Vertical text uses scrolling mode',
   '保存后移除当前自定义封面': 'The current custom cover will be removed when saved',
   '保留当前封面': 'Keep current cover',
   '编辑图书元数据': 'Edit book metadata',
@@ -271,6 +277,9 @@ const exactOverrides = {
   '完成': 'Done',
   '确定': 'OK',
   '操作失败': 'Operation failed',
+  '设备可用存储空间不足，浏览器无法保存原文件。请释放空间后重试。': 'The device is low on available storage, so the browser cannot save the original file. Free some space and try again.',
+  '浏览器本地缓存读写失败，请重试。': 'The browser could not read or write its local cache. Try again.',
+  '阅读设置应用失败，已恢复之前的设置。': 'The reading settings could not be applied. Your previous settings were restored.',
   '保存失败': 'Save failed',
   '保存信息': 'Save Information',
   '编辑信息': 'Edit Information',

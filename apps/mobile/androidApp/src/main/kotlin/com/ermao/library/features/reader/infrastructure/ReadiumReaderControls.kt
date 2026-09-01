@@ -12,10 +12,6 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 internal fun readerNavigatorConfiguration(): EpubNavigatorFragment.Configuration =
     EpubNavigatorFragment.Configuration(
         servedAssets = listOf("fonts/reader/.*"),
-        // Continuous-scroll readers must keep touch page turns enabled. The
-        // application handles tap-zone viewport advances through the same
-        // navigator session instead of asking Readium's paginated JS to turn.
-        disablePageTurnsWhileScrolling = false,
     ).apply {
         listOf("Shuku Sans" to "sans", "Shuku Songti" to "songti", "Shuku Kaiti" to "kaiti")
             .forEach { (family, asset) ->

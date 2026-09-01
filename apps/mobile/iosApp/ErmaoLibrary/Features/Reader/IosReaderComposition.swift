@@ -835,8 +835,9 @@ final class IosReaderBootstrapHost: ObservableObject {
             await shutdownTask.value
             return
         }
-        let task = Task { @MainActor [weak self] in
-            await self?.performShutdown()
+        let task = Task<Void, Never> { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performShutdown()
         }
         shutdownTask = task
         await task.value

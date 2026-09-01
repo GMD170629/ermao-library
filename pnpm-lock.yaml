@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@readium/navigator@2.8.2':
-    hash: of37yhraru4qwltsykx6wx7ixu
+    hash: emjlglmjrpzp3fvgdmdtsd2o2e
     path: patches/@readium__navigator@2.8.2.patch
   pdfjs-dist@6.1.200:
     hash: chlft75vihbbupf53xc4f35jd4
@@ -24,7 +24,7 @@ importers:
     dependencies:
       '@readium/navigator':
         specifier: 2.8.2
-        version: 2.8.2(patch_hash=of37yhraru4qwltsykx6wx7ixu)
+        version: 2.8.2(patch_hash=emjlglmjrpzp3fvgdmdtsd2o2e)
       '@readium/shared':
         specifier: 2.4.0
         version: 2.4.0
@@ -43,7 +43,7 @@ importers:
     dependencies:
       '@readium/navigator':
         specifier: 2.8.2
-        version: 2.8.2(patch_hash=of37yhraru4qwltsykx6wx7ixu)
+        version: 2.8.2(patch_hash=emjlglmjrpzp3fvgdmdtsd2o2e)
       '@readium/shared':
         specifier: 2.4.0
         version: 2.4.0
@@ -3812,7 +3812,7 @@ snapshots:
       '@readium/helpers': 1.0.0
       '@readium/shared': 2.4.0
 
-  '@readium/navigator@2.8.2(patch_hash=of37yhraru4qwltsykx6wx7ixu)':
+  '@readium/navigator@2.8.2(patch_hash=emjlglmjrpzp3fvgdmdtsd2o2e)':
     dependencies:
       '@readium/decorator': 1.0.2
       '@readium/helpers': 1.0.0

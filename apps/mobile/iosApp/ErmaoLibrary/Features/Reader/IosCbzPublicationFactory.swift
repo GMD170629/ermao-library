@@ -46,7 +46,7 @@ struct IosCbzArchiveIndex: Sendable {
             throw iosArchiveReaderFailure(failure)
         }
         defer { core.close() }
-        let mappedPages = core.pages.compactMap { page in
+        let mappedPages = core.pages.compactMap { page -> IosCbzPage? in
             guard let mediaType = Self.imageMediaType(page.path) else { return nil }
             return IosCbzPage(
                 pageIndex: page.index,
@@ -89,7 +89,7 @@ struct IosCbzPublicationFactory {
         } catch {
             throw IosReaderFailure(code: .comicArchiveOpenFailed, underlyingError: error as NSError)
         }
-        let localPages = core.pages.compactMap { page in
+        let localPages = core.pages.compactMap { page -> IosCbzPage? in
             guard let mediaType = IosCbzArchiveIndex.imageMediaType(page.path) else { return nil }
             return IosCbzPage(
                 pageIndex: page.index,

@@ -19,9 +19,7 @@ enum IosPublicationSecurityPolicy {
         "style-src 'self' readium://assets blob: 'unsafe-inline'; img-src 'self' blob: data:; " +
         "font-src 'self' readium://assets blob: data:; media-src 'self' blob: data:"
     private static var securityHead: String {
-        let meta = #"<meta http-equiv="Content-Security-Policy" content="# +
-            contentSecurityPolicy +
-            #""/>"#
+        let meta = #"<meta http-equiv="Content-Security-Policy" content="\#(contentSecurityPolicy)"/>"#
         let selectors = ErmaoShared.PublicKt.readerSafetySanitizedElementSelectors()
             .joined(separator: ",")
         let style = selectors.isEmpty ? "" : "<style>\(selectors){display:none!important;}</style>"
@@ -79,17 +77,20 @@ enum IosPublicationSecurityPolicy {
         _ markup: String,
         sourceByteCount: Int64
     ) throws -> ErmaoShared.ReaderSanitizedMarkup {
-        do {
-            return try ErmaoShared.ReaderSafetyFacade().requireSanitizedMarkup(
-                markup: markup,
-                sourceByteCount: sourceByteCount
-            )
-        } catch let error as ErmaoShared.ReaderSafetyException {
+        let result = ErmaoShared.ReaderSafetyFacade().sanitizeMarkup(
+            markup: markup,
+            sourceByteCount: sourceByteCount
+        )
+        if let accepted = result as? ErmaoShared.ReaderSafetyMarkupResultAccepted {
+            return accepted.value
+        }
+        if let rejected = result as? ErmaoShared.ReaderSafetyMarkupResultRejected {
             throw IosPublicationSecurityError.rejected(
-                ruleId: error.failure.ruleId,
-                errorCode: error.failure.errorCode
+                ruleId: rejected.failure.ruleId,
+                errorCode: rejected.failure.errorCode
             )
         }
+        throw IosPublicationSecurityError.invalidMarkup
     }
 
     private static func decode(_ data: Data) throws -> String {
@@ -142,7 +143,7 @@ enum IosPublicationSecurityPolicy {
         }
         let replacement = String(markup[declaration]).replacingOccurrences(
             of: #"(?i)encoding\s*=\s*[\"'][^\"']+[\"']"#,
-            with: #"encoding="utf-8"#,
+            with: "encoding=\"utf-8\"",
             options: .regularExpression
         )
         var result = markup

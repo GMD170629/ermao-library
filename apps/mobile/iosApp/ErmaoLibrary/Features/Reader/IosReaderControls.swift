@@ -26,6 +26,45 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
         ReaderPalette(theme: editor.draft.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
     }
 
+    private func physicalTurn(
+        _ side: ErmaoShared.ReaderPhysicalHorizontalSide
+    ) -> ErmaoShared.ReaderPageTurnDirection {
+        ErmaoShared.ReaderNavigationPolicy.shared.physicalHorizontalPageTurn(
+            side: side,
+            readingProgression: editor.draft.readingProgression.shared
+        )
+    }
+
+    private var leftChapter: IosReaderTocEntry? {
+        physicalTurn(.left) == .previous
+            ? session.controlAdjacentChapters.previous
+            : session.controlAdjacentChapters.next
+    }
+
+    private var rightChapter: IosReaderTocEntry? {
+        physicalTurn(.right) == .previous
+            ? session.controlAdjacentChapters.previous
+            : session.controlAdjacentChapters.next
+    }
+
+    private func activate(_ side: ErmaoShared.ReaderPhysicalHorizontalSide) async {
+        if session.controlMorphology == .reflowable {
+            guard let chapter = side == .left ? leftChapter : rightChapter else { return }
+            navigationFailed = !(await session.goToTOCEntry(chapter))
+        } else if side == .left {
+            await session.goPrevious()
+        } else {
+            await session.goNext()
+        }
+    }
+
+    private func progressControlLabel(_ side: ErmaoShared.ReaderPhysicalHorizontalSide) -> String {
+        guard session.controlMorphology == .reflowable else {
+            return side == .left ? "reader.previous" : "reader.next"
+        }
+        return physicalTurn(side) == .previous ? "reader.previous.chapter" : "reader.next.chapter"
+    }
+
     private var toolbar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -53,27 +92,30 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
             }.padding(.horizontal, 8).background(palette.surface)
             Spacer(minLength: 0)
             VStack(spacing: 8) {
-                if navigationFailed { Text("reader.navigation.failed").foregroundStyle(.red) }
+                if navigationFailed {
+                    Text("reader.navigation.failed")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("reader.navigation.failed")
+                }
                 if session.canUndoControlBookmark {
                     Button("common.undo") { session.undoControlBookmark() }
                 }
                 HStack(spacing: 8) {
-                    Button { Task { await session.goPrevious() } } label: {
-                        Image(systemName: "backward.end").frame(width: 44, height: 44)
-                    }.accessibilityLabel(Text("reader.previous")).accessibilityIdentifier("reader.previous")
+                    Button { Task { await activate(.left) } } label: {
+                        Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                    }.accessibilityLabel(Text(LocalizedStringKey(progressControlLabel(.left))))
+                        .accessibilityIdentifier(progressControlLabel(.left))
+                        .disabled(session.controlMorphology == .reflowable && leftChapter == nil)
                     Slider(value: $sliderValue, in: 0 ... 1) { editing in
                         sliderIsEditing = editing
                         if !editing { Task { navigationFailed = !(await session.seekControlProgress(sliderValue)) } }
                     }.tint(palette.accent).accessibilityLabel(Text("reader.progress")).accessibilityIdentifier("reader.progress")
-                    Button { Task { await session.goNext() } } label: {
-                        Image(systemName: "forward.end").frame(width: 44, height: 44)
-                    }.accessibilityLabel(Text("reader.next")).accessibilityIdentifier("reader.next")
+                    Button { Task { await activate(.right) } } label: {
+                        Image(systemName: "chevron.right").frame(width: 44, height: 44)
+                    }.accessibilityLabel(Text(LocalizedStringKey(progressControlLabel(.right))))
+                        .accessibilityIdentifier(progressControlLabel(.right))
+                        .disabled(session.controlMorphology == .reflowable && rightChapter == nil)
                 }
-                HStack {
-                    progressLabel
-                    Spacer()
-                    if editor.draft.showClock { ReaderClockView() }
-                }.font(.caption.monospacedDigit()).foregroundStyle(palette.secondary)
                 HStack(spacing: 0) {
                     panelButton(.contents, title: "reader.toc", image: "list.bullet")
                     panelButton(.bookmarks, title: "reader.bookmarks", image: "bookmark")
@@ -118,13 +160,62 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
         .focused($keyboardPanel, equals: panel)
     }
 
+}
+
+struct IosReaderContentStatusLayout<Session: IosReaderControlSession, Content: View>: View {
+    @ObservedObject var session: Session
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content().frame(maxHeight: .infinity)
+            if session.controlReady &&
+                (session.preferences.progressStyle != .hidden || session.preferences.showClock) {
+                IosReaderPassiveStatus(session: session)
+                    .opacity(session.controlsVisible ? 0 : 1)
+                    .accessibilityHidden(session.controlsVisible)
+            }
+        }
+    }
+}
+
+private struct IosReaderPassiveStatus<Session: IosReaderControlSession>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var session: Session
+
+    private var palette: ReaderPalette {
+        ReaderPalette(theme: session.preferences.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            progressLabel
+            Spacer(minLength: 12)
+            if session.preferences.showClock { ReaderClockView() }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(palette.secondary)
+        .background(palette.background)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("reader.passive.status")
+    }
+
     @ViewBuilder private var progressLabel: some View {
-        switch editor.draft.progressStyle {
+        switch session.preferences.progressStyle {
         case .hidden: EmptyView()
         case .position: Text(session.controlPosition)
         case .remaining:
-            Text(String(format: String(localized: "reader.progress.remaining.format"), locale: .current, Int(((1 - session.progress) * 100).rounded())))
-        case .auto, .percent: Text(session.progress, format: .percent.precision(.fractionLength(0)))
+            Text(String(
+                format: String(localized: "reader.progress.remaining.format"),
+                locale: .current,
+                Int(((1 - session.progress) * 100).rounded())
+            ))
+        case .auto, .percent:
+            Text(session.progress, format: .percent.precision(.fractionLength(0)))
         }
     }
 }
