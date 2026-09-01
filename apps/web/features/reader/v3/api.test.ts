@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { READER_SAFETY_RULE_IDS } from '@shuku/reader-core';
+import { READER_SAFETY_RULE_IDS, ReaderSafetyPolicyError } from '@shuku/reader-core';
 import { fetchReaderBootstrap } from './api';
 
 const cases = [
@@ -132,6 +132,139 @@ test('PDF and comic remain streamed while audio never enters the Reader download
     };
     await assert.rejects(fetchReaderBootstrap('audio-resource', new AbortController().signal));
     assert.equal(requests.some((url) => url.startsWith('/api/resources/')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('IMAGE_DIR bootstraps from PAGE assets and the comic manifest without a directory content asset', async () => {
+  const originalFetch = globalThis.fetch;
+  const resourceId = 'image-dir-resource';
+  const revision = `sha256:${'b'.repeat(64)}`;
+  const requests: string[] = [];
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith('/comic/manifest')) {
+        return Response.json({ ok: true, data: {
+          schemaVersion: 2,
+          kind: 'comic',
+          resourceId,
+          revision,
+          sourceFormat: 'image_dir',
+          pageCount: 2,
+          readingOrder: [0, 1].map((pageIndex) => ({
+            pageIndex,
+            resourceHref: `pages/${pageIndex}`,
+            title: `Page ${pageIndex + 1}`,
+            mediaType: 'image/png',
+            width: 320,
+            height: 480,
+            sizeBytes: 68
+          }))
+        } });
+      }
+      return Response.json({ ok: true, data: {
+        schemaVersion: 4,
+        userId: 'user-1',
+        readerType: 'comic',
+        sourceFormat: 'image_dir',
+        book: { id: 'book-1', title: 'Image directory' },
+        resource: {
+          id: resourceId,
+          bookId: 'book-1',
+          title: 'Image directory',
+          format: 'IMAGE_DIR',
+          readerType: 'comic',
+          sortOrder: 0,
+          pageCount: 2
+        },
+        availableResources: [],
+        assets: [0, 1].map((pageIndex) => ({
+          id: `page-${pageIndex}`,
+          title: `Page ${pageIndex + 1}`,
+          resourceId,
+          sourceNodeId: `page-source-${pageIndex}`,
+          role: 'PAGE',
+          mimeType: 'image/png',
+          sizeBytes: 68,
+          sortOrder: pageIndex,
+          url: `/api/assets/page-${pageIndex}`
+        })),
+        units: [],
+        publication: {
+          kind: 'comic',
+          manifestUrl: `/api/reader/v4/resources/${resourceId}/comic/manifest`,
+          pageUrlTemplate: `/api/reader/v4/resources/${resourceId}/comic/pages/{pageIndex}`,
+          imageVariants: ['original', 'data-saver']
+        },
+        capabilities: {},
+        progressSnapshot: null
+      } });
+    };
+
+    const bootstrap = await fetchReaderBootstrap(resourceId, new AbortController().signal);
+
+    assert.equal(bootstrap.source.kind, 'comic');
+    assert.equal(bootstrap.source.sourceFormat, 'image_dir');
+    assert.equal(bootstrap.source.contentUrl, '');
+    assert.equal(bootstrap.comicRevision, revision);
+    assert.deepEqual(bootstrap.pages.map((page) => page.mimeType), ['image/png', 'image/png']);
+    assert.deepEqual(bootstrap.pages.map((page) => page.safetyError), [undefined, undefined]);
+    assert.equal(requests.some((url) => url.includes('/api/assets/')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('comic archive bootstrap still rejects an asset with the wrong MIME type', async () => {
+  const originalFetch = globalThis.fetch;
+  const resourceId = 'invalid-cbz-resource';
+  try {
+    globalThis.fetch = async () => Response.json({ ok: true, data: {
+      schemaVersion: 4,
+      userId: 'user-1',
+      readerType: 'comic',
+      sourceFormat: 'cbz',
+      book: { id: 'book-1', title: 'Invalid archive' },
+      resource: {
+        id: resourceId,
+        bookId: 'book-1',
+        title: 'Invalid archive',
+        format: 'CBZ',
+        readerType: 'comic',
+        sortOrder: 0,
+        pageCount: 1
+      },
+      availableResources: [],
+      assets: [{
+        id: 'wrong-asset',
+        title: 'Not an archive',
+        resourceId,
+        sourceNodeId: 'wrong-source',
+        role: 'PRIMARY',
+        mimeType: 'application/pdf',
+        sizeBytes: 68,
+        sortOrder: 0,
+        url: '/api/assets/wrong-asset'
+      }],
+      units: [],
+      publication: {
+        kind: 'comic',
+        manifestUrl: `/api/reader/v4/resources/${resourceId}/comic/manifest`,
+        pageUrlTemplate: `/api/reader/v4/resources/${resourceId}/comic/pages/{pageIndex}`,
+        imageVariants: ['original', 'data-saver']
+      },
+      capabilities: {},
+      progressSnapshot: null
+    } });
+
+    await assert.rejects(
+      fetchReaderBootstrap(resourceId, new AbortController().signal),
+      (reason: unknown) => reason instanceof ReaderSafetyPolicyError
+        && reason.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

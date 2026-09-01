@@ -57,10 +57,12 @@ private fun ReaderCapabilities.supportsDeclaredControl(control: ReaderControl): 
     ReaderControl.CommandAnimation -> supportsPageTurnAnimation
     ReaderControl.Keyboard -> supportsKeyboardPageTurn
     ReaderControl.VolumeKeys -> supportsVolumeKeyPageTurn
-    ReaderControl.ComicDirection -> supportsComicDirection
-    ReaderControl.ComicCoverSingle -> supportsComicCoverSingle
-    ReaderControl.ComicPageGap -> supportsComicPageGap
-    ReaderControl.ComicZoom, ReaderControl.ComicFit, ReaderControl.ComicQuality -> false
+    ReaderControl.ComicDirection -> comic.supportsDirection || supportsComicDirection
+    ReaderControl.ComicCoverSingle -> comic.supportsCoverSingle || supportsComicCoverSingle
+    ReaderControl.ComicPageGap -> comic.supportsPageGap || supportsComicPageGap
+    ReaderControl.ComicZoom -> comic.supportsZoom
+    ReaderControl.ComicFit -> comic.supportsFit
+    ReaderControl.ComicQuality -> comic.supportsQuality
     ReaderControl.PdfZoom -> supportsPdfZoomPreference
     ReaderControl.PdfFit -> supportsPdfFit
     ReaderControl.PdfRotation -> supportsPdfRotation

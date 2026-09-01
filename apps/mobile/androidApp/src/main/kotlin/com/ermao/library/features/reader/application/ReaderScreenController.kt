@@ -53,6 +53,8 @@ internal interface ReaderScreenController {
     val morphology: ReaderMorphology
     val capabilities: ReaderCapabilities
     val currentLocation: StateFlow<ReaderLocation?>
+    /** Renderer-owned display progress when it cannot be inferred from the exact locator. */
+    val presentationProgress: StateFlow<Double?>? get() = null
     val preferences: StateFlow<ReaderPreferences>
     val contentError: StateFlow<ReaderError?>? get() = null
     val restoreWarning: StateFlow<ReaderError?>

@@ -75,6 +75,7 @@ import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.ReaderReadingProgression
+import com.ermao.library.shared.modules.reader.ReaderComicDirection
 import com.ermao.library.shared.modules.reader.ReaderPhysicalHorizontalSide
 import com.ermao.library.shared.modules.reader.ReaderPageTurnDirection
 import com.ermao.library.shared.modules.reader.ReaderNavigationPolicy
@@ -99,17 +100,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.readium.r2.navigator.epub.EpubNavigatorFragment
-import org.readium.r2.navigator.image.ImageNavigatorFragment
-import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
-import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFragment
-import androidx.fragment.app.FragmentFactory
-import org.readium.r2.shared.ExperimentalReadiumApi
 import java.util.logging.Level
 import java.util.logging.Logger
 import java.io.File
 
-@OptIn(ExperimentalReadiumApi::class)
 class ReaderActivity : AppCompatActivity() {
     private var controller by mutableStateOf<ReaderScreenController?>(null)
     private var opening by mutableStateOf(true)
@@ -156,10 +150,9 @@ class ReaderActivity : AppCompatActivity() {
         get() = controlsVisible
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        supportFragmentManager.fragmentFactory = readerNavigatorDummyFactory()
-        super.onCreate(savedInstanceState)
+        // Sessions restore their exact locator; SDK navigator fragments must not be restored.
+        super.onCreate(null)
         enableEdgeToEdge()
-        removeRestoredNavigator()
         val runtime = (application as ErmaoLibraryApplication).mobileRuntime
         accountObservation = runtime.observeSession {
             runOnUiThread { if (launchNamespace != null && !isLaunchCurrent()) closeReader() }
@@ -353,13 +346,18 @@ class ReaderActivity : AppCompatActivity() {
         side: ReaderPhysicalHorizontalSide,
         reversed: Boolean = false,
     ): Boolean {
-        val progression = if (
+        val preferences = reader.preferences.value
+        val progression = when {
+            reader.morphology == ReaderMorphology.Comic &&
+                reader.capabilities.comic.supportsDirection -> {
+                when (preferences.comic.direction) {
+                    ReaderComicDirection.LeftToRight -> ReaderReadingProgression.LeftToRight
+                    ReaderComicDirection.RightToLeft -> ReaderReadingProgression.RightToLeft
+                }
+            }
             reader.morphology == ReaderMorphology.Reflowable &&
-            reader.capabilities.supportsReadingProgression
-        ) {
-            reader.preferences.value.epub.readingProgression
-        } else {
-            ReaderReadingProgression.LeftToRight
+                reader.capabilities.supportsReadingProgression -> preferences.epub.readingProgression
+            else -> ReaderReadingProgression.LeftToRight
         }
         val effectiveSide = if (!reversed) side else when (side) {
             ReaderPhysicalHorizontalSide.Left -> ReaderPhysicalHorizontalSide.Right
@@ -1144,14 +1142,6 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
-    private fun removeRestoredNavigator() {
-        val restored = supportFragmentManager.fragments.toList()
-        if (restored.isEmpty()) return
-        supportFragmentManager.commitNow(allowStateLoss = true) {
-            restored.forEach(::remove)
-        }
-    }
-
     private fun attachNavigatorIfReady() {
         if (!isLaunchCurrent()) return
         val prepared = navigatorAttachment.claim(session, supportFragmentManager.isStateSaved) ?: return
@@ -1349,21 +1339,4 @@ private object NonBlockingReaderProgressStore : ReaderProgressStore {
     override suspend fun load(resourceId: String): ReaderProgress? = null
     override suspend fun save(progress: ReaderProgress) = Unit
     override suspend fun delete(resourceId: String) = Unit
-}
-
-@OptIn(ExperimentalReadiumApi::class)
-private fun readerNavigatorDummyFactory(): FragmentFactory {
-    val epubFactory = EpubNavigatorFragment.createDummyFactory()
-    val imageFactory = ImageNavigatorFragment.createDummyFactory()
-    val pdfFactory = PdfiumNavigatorFragment.createDummyFactory(PdfiumEngineProvider())
-    return object : FragmentFactory() {
-        override fun instantiate(classLoader: ClassLoader, className: String): Fragment =
-            if (className == ImageNavigatorFragment::class.java.name) {
-                imageFactory.instantiate(classLoader, className)
-            } else if (className == PdfiumNavigatorFragment::class.java.name) {
-                pdfFactory.instantiate(classLoader, className)
-            } else {
-                epubFactory.instantiate(classLoader, className)
-            }
-    }
 }

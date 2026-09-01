@@ -22,6 +22,15 @@ class ReaderPresentationTest {
             readerTotalProgression(ComicReaderLocation("page-2.jpg", 1), lastPageIndex = 2),
         )
         assertEquals(
+            0.5,
+            readerTotalProgression(
+                ComicReaderLocation("page-1.jpg", 0),
+                lastPageIndex = 2,
+                presentationProgress = 0.5,
+            ),
+            "Double-page comics report the last visible logical page while keeping the exact locator",
+        )
+        assertEquals(
             0.75,
             readerTotalProgression(PdfReaderLocation(3, 0.0), lastPageIndex = 4),
         )

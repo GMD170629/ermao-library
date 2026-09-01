@@ -3,6 +3,7 @@ package com.ermao.library.shared.modules.downloads
 import com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace
 import com.ermao.library.shared.core.network.ApiClientFactory
 import com.ermao.library.shared.modules.downloads.infrastructure.parseDownloadReaderType
+import com.ermao.library.shared.modules.downloads.domain.matchesVersion
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
@@ -79,6 +80,9 @@ fun PrivateDataNamespace.toDownloadNamespace(): DownloadNamespace = DownloadName
 )
 
 fun downloadReaderType(value: String): DownloadReaderType = parseDownloadReaderType(value)
+
+fun downloadDescriptorsMatch(expected: DownloadDescriptor, candidate: DownloadDescriptor): Boolean =
+    expected.matchesVersion(candidate)
 
 fun summarizeDownloadBatch(
     selectedResourceIds: Set<String>,

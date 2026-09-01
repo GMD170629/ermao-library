@@ -306,6 +306,81 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   assert.equal(compatibilityClick.propagationStopped, true);
   assert.equal(adapter.getInteractionPolicy().horizontalPaging, 'adapter-interactive');
 
+  const first = await adapter.execute({ type: 'first' }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(first.accepted, true);
+  assert.equal(adapter.getViewModel().currentPage, 0);
+
+  const firstNoop = await adapter.execute({ type: 'first' }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(firstNoop.accepted, false);
+
+  const nextFromFirst = await adapter.execute({ type: 'next' }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(nextFromFirst.accepted, true);
+  assert.equal(adapter.getViewModel().currentPage, 1);
+
+  const indexZero = await adapter.execute({ type: 'go-to-index', index: 0 }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(indexZero.accepted, true);
+  assert.equal(adapter.getViewModel().currentPage, 0);
+
+  await adapter.execute({ type: 'next' }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  const progressZero = await adapter.execute({ type: 'go-to-progress', progression: 0 }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(progressZero.accepted, true);
+  assert.equal(adapter.getViewModel().currentPage, 0);
+
+  await adapter.execute({ type: 'next' }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  const locationZero = await adapter.execute({
+    type: 'go-to-location',
+    location: { kind: 'comic', resourceId: 'resource-1', pageIndex: 0 }
+  }, {
+    operation: operation(++sequence),
+    signal: new AbortController().signal
+  });
+  assert.equal(locationZero.accepted, true);
+  assert.equal(adapter.getViewModel().currentPage, 0);
+
+  const swipeDisabled = {
+    ...DEFAULT_READER_PREFERENCES,
+    interaction: {
+      ...DEFAULT_READER_PREFERENCES.interaction,
+      swipePageTurn: false
+    },
+    comic: {
+      ...DEFAULT_READER_PREFERENCES.comic,
+      pageTurnAnimation: 'off' as const
+    }
+  };
+  const applied = await adapter.applyPreferences(swipeDisabled, {
+    operation: operation(++sequence, 'preferences'),
+    signal: new AbortController().signal
+  });
+  assert.equal(applied.accepted, true);
+  assert.equal(adapter.getInteractionPolicy().horizontalPaging, 'none');
+
+  viewport.dispatch('pointerdown', pointer(viewport, 8, 650, 200));
+  viewport.dispatch('pointerup', pointer(viewport, 8, 80, 250));
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  assert.equal(adapter.getViewModel().currentPage, 0);
+
   adapter.dispose();
 });
 
@@ -420,7 +495,11 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   const container = new FakeElement(ownerDocument);
   const preferences = {
     ...DEFAULT_READER_PREFERENCES,
-    comic: { ...DEFAULT_READER_PREFERENCES.comic, flow: 'scrolled' as const }
+    comic: {
+      ...DEFAULT_READER_PREFERENCES.comic,
+      flow: 'scrolled' as const,
+      imageFit: 'height' as const
+    }
   };
   const adapter = new ComicReaderAdapter({
     container: container as unknown as HTMLElement,
@@ -448,9 +527,18 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
 
   const stream = container.children[1];
   assert.equal(stream.dataset.comicContinuous, 'true');
+  assert.equal(adapter.getViewModel().imageFit, 'height');
+  assert.equal(adapter.getInteractionPolicy().horizontalPaging, 'none');
+  assert.equal(stream.listeners.has('pointerdown'), false);
   assert.equal(stream.children.length, 3);
   const slots = stream.children;
   const images = slots.map((slot) => slot.children[0]);
+  assert.deepEqual(images.map((image) => ({ width: image.style.width, height: image.style.height })), [
+    { width: '100%', height: 'auto' },
+    { width: '100%', height: 'auto' },
+    { width: '100%', height: 'auto' }
+  ]);
+  assert.deepEqual(slots.map((slot) => slot.style.width), ['800px', '800px', '800px']);
   assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
   assert.deepEqual(images.map((image) => image.src), [
     `/api/reader/v4/resources/resource-1/comic/pages/0?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
@@ -485,8 +573,22 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   assert.equal(slots[0].children[0], images[0]);
   assert.deepEqual(slots.map((slot) => slot.children[0]), images);
 
-  const jump = await adapter.execute({ type: 'go-to-index', index: 2 }, {
+  const zoom = await adapter.execute({ type: 'set-zoom', zoom: 1.5 }, {
     operation: operation(2),
+    signal: new AbortController().signal
+  });
+  assert.equal(zoom.accepted, true);
+  assert.equal(stream.style.overflowX, 'auto');
+  assert.deepEqual(slots.map((slot) => slot.style.width), ['1200px', '1200px', '1200px']);
+  assert.deepEqual(images.map((image) => ({ width: image.style.width, height: image.style.height })), [
+    { width: '100%', height: 'auto' },
+    { width: '100%', height: 'auto' },
+    { width: '100%', height: 'auto' }
+  ]);
+  assert.equal(stream.scrollTop, 900);
+
+  const jump = await adapter.execute({ type: 'go-to-index', index: 2 }, {
+    operation: operation(3),
     signal: new AbortController().signal
   });
   assert.equal(jump.accepted, true);

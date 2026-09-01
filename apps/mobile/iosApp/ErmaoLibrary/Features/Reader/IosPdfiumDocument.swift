@@ -8,19 +8,8 @@ import UIKit
 import ShukuPdfium
 #endif
 
-/// The PDFium adapter may ask for the complete original when its availability
-/// state cannot be satisfied by the private Range cache.  The materializer is
-/// deliberately a UI-independent facade over DownloadCenterStore: it starts
-/// or joins the canonical download and returns only an already verified file.
 @MainActor
-protocol IosPdfiumDownloadMaterializing: AnyObject, Sendable {
-    func materialize(
-        descriptor: ErmaoShared.DownloadDescriptor
-    ) async throws -> IosManagedPublication
-}
-
-@MainActor
-final class IosPdfiumDownloadMaterializer: IosPdfiumDownloadMaterializing, @unchecked Sendable {
+final class IosPdfiumDownloadMaterializer: @unchecked Sendable {
     private let downloads: DownloadCenterStore
     private let completedDownloads: any CompletedDownloadProviding
     private let managedStore: IosManagedPublicationStore
@@ -54,7 +43,7 @@ final class IosPdfiumDownloadMaterializer: IosPdfiumDownloadMaterializing, @unch
               record.namespace == context.namespaceKey,
               record.isVerifiedOfflineCopy,
               let artifact = record.verifiedSharedArtifact,
-              Self.sameDownloadDescriptor(artifact.descriptor, descriptor),
+              PublicKt.downloadDescriptorsMatch(expected: artifact.descriptor, candidate: descriptor),
               artifact.verifiedBytes == descriptor.totalBytes else {
             throw IosReaderFailure(code: .publicationChanged)
         }
@@ -87,24 +76,6 @@ final class IosPdfiumDownloadMaterializer: IosPdfiumDownloadMaterializing, @unch
         return publication
     }
 
-    private static func sameDownloadDescriptor(
-        _ lhs: ErmaoShared.DownloadDescriptor,
-        _ rhs: ErmaoShared.DownloadDescriptor
-    ) -> Bool {
-        lhs.identity.bookId == rhs.identity.bookId
-            && lhs.identity.resourceId == rhs.identity.resourceId
-            && lhs.identity.assetId == rhs.identity.assetId
-            && lhs.identity.namespace_.serverIdentity == rhs.identity.namespace_.serverIdentity
-            && lhs.identity.namespace_.userId == rhs.identity.namespace_.userId
-            && lhs.identity.namespace_.authorizationVersion == rhs.identity.namespace_.authorizationVersion
-            && lhs.format.caseInsensitiveCompare(rhs.format) == .orderedSame
-            && lhs.readerType.name.caseInsensitiveCompare(rhs.readerType.name) == .orderedSame
-            && lhs.artifactKind == rhs.artifactKind
-            && lhs.source.apiPath == rhs.source.apiPath
-            && lhs.source.mimeType == rhs.source.mimeType
-            && lhs.source.totalBytes == rhs.source.totalBytes
-            && lhs.source.sourceModifiedAtMillis?.int64Value == rhs.source.sourceModifiedAtMillis?.int64Value
-    }
 }
 
 /// All calls into the repository PDFium wrapper run through one background
@@ -164,7 +135,7 @@ final class IosPdfiumDocument: @unchecked Sendable {
         cache: ErmaoShared.PdfRangeMemory,
         server: any ErmaoShared.PdfRangeServerPort,
         descriptor: ErmaoShared.DownloadDescriptor? = nil,
-        materializer: (any IosPdfiumDownloadMaterializing)? = nil
+        materializer: IosPdfiumDownloadMaterializer? = nil
     ) async throws -> IosPdfiumDocument {
         #if canImport(ShukuPdfium)
         guard IosPdfiumFeatureFlags.nativeLibraryMatchesLock else {
@@ -589,7 +560,7 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
     private let expectedBookID: String?
     private let expectedAssetID: String?
     private let descriptor: ErmaoShared.DownloadDescriptor?
-    private let materializer: (any IosPdfiumDownloadMaterializing)?
+    private let materializer: IosPdfiumDownloadMaterializer?
 
     private enum DrainResult {
         case noPendingRequest
@@ -603,7 +574,7 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
         identity: ErmaoShared.PdfRangeCacheIdentity,
         length: UInt64,
         descriptor: ErmaoShared.DownloadDescriptor?,
-        materializer: (any IosPdfiumDownloadMaterializing)?
+        materializer: IosPdfiumDownloadMaterializer?
     ) {
         self.length = length
         backing = .remote(loader: loader, cache: cache, identity: identity)

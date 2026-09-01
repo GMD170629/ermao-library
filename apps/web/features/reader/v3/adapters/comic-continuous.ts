@@ -1,4 +1,4 @@
-import { comicImageSizing, type ComicImageFit } from './comic-model';
+import { comicImageSizing } from './comic-model';
 import type { ComicTrackPage } from './comic-track';
 import { normalizeLocale } from '../../../../i18n/config';
 import { translateMessage } from '../../../../i18n/messages';
@@ -7,7 +7,6 @@ import { continuousItemAtReadingLine } from './continuous-layout';
 export type ComicContinuousView = {
   currentPage: number;
   pageCount: number;
-  imageFit: ComicImageFit;
   zoom: number;
   pageWidth: number;
   pages: ComicTrackPage[];
@@ -109,7 +108,7 @@ export class ComicContinuousController {
       if (!slot.loaded) {
         slot.element.style.minHeight = `${pageHeight(page, availableWidth, this.root.clientHeight)}px`;
       }
-      this.renderSlot(slot, page, view);
+      this.renderSlot(slot, page);
       if (slot.element.parentElement !== this.root) this.root.append(slot.element);
     });
     if (scrollToCurrentPage || !hadSlots) this.scrollToPage(view.currentPage);
@@ -148,7 +147,7 @@ export class ComicContinuousController {
     return slot;
   }
 
-  private renderSlot(slot: ComicPageSlot, page: ComicTrackPage, view: ComicContinuousView) {
+  private renderSlot(slot: ComicPageSlot, page: ComicTrackPage) {
     const contentKey = page.safetyError
       ? `blocked:${page.safetyError.ruleId}`
       : page.url
@@ -203,7 +202,10 @@ export class ComicContinuousController {
       }
     }
     if (slot.image) {
-      Object.assign(slot.image.style, comicImageSizing(view.imageFit));
+      // Continuous comics have one vertical reading line.  Keep the persisted
+      // fit preference available to the view model, but apply the canonical
+      // width-fit rule to every image in the stream.
+      Object.assign(slot.image.style, comicImageSizing('width'));
       slot.image.style.transform = '';
       slot.image.style.transformOrigin = '';
       if (slot.image.complete && slot.image.naturalWidth > 0) {

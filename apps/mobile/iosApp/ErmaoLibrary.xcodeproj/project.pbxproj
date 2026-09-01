@@ -94,6 +94,7 @@
 		B18000000000000000000180 /* IosCbzPublicationFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18000000000000000000180 /* IosCbzPublicationFactory.swift */; };
 		B18100000000000000000181 /* IosComicReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18100000000000000000181 /* IosComicReaderSession.swift */; };
 		B18200000000000000000182 /* IosComicReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18200000000000000000182 /* IosComicReaderView.swift */; };
+		B20000000000000000000200 /* IosComicNavigatorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000200 /* IosComicNavigatorViewController.swift */; };
 		B18300000000000000000183 /* CbzPublicationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18300000000000000000183 /* CbzPublicationTests.swift */; };
 		B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18400000000000000000184 /* IosPdfReaderSession.swift */; };
 		B18500000000000000000185 /* IosPdfReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F18500000000000000000185 /* IosPdfReaderView.swift */; };
@@ -279,6 +280,7 @@
 		F18000000000000000000180 /* IosCbzPublicationFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosCbzPublicationFactory.swift; sourceTree = "<group>"; };
 		F18100000000000000000181 /* IosComicReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosComicReaderSession.swift; sourceTree = "<group>"; };
 		F18200000000000000000182 /* IosComicReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosComicReaderView.swift; sourceTree = "<group>"; };
+		F20000000000000000000200 /* IosComicNavigatorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosComicNavigatorViewController.swift; sourceTree = "<group>"; };
 		F18300000000000000000183 /* CbzPublicationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CbzPublicationTests.swift; sourceTree = "<group>"; };
 		F18400000000000000000184 /* IosPdfReaderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderSession.swift; sourceTree = "<group>"; };
 		F18500000000000000000185 /* IosPdfReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPdfReaderView.swift; sourceTree = "<group>"; };
@@ -691,6 +693,7 @@
 				F18000000000000000000180 /* IosCbzPublicationFactory.swift */,
 				F18100000000000000000181 /* IosComicReaderSession.swift */,
 				F18200000000000000000182 /* IosComicReaderView.swift */,
+				F20000000000000000000200 /* IosComicNavigatorViewController.swift */,
 				F18400000000000000000184 /* IosPdfReaderSession.swift */,
 				F18500000000000000000185 /* IosPdfReaderView.swift */,
 				F18600000000000000000186 /* IosPdfPageCountStore.swift */,
@@ -1024,6 +1027,7 @@
 				B18000000000000000000180 /* IosCbzPublicationFactory.swift in Sources */,
 				B18100000000000000000181 /* IosComicReaderSession.swift in Sources */,
 				B18200000000000000000182 /* IosComicReaderView.swift in Sources */,
+				B20000000000000000000200 /* IosComicNavigatorViewController.swift in Sources */,
 				B18400000000000000000184 /* IosPdfReaderSession.swift in Sources */,
 				B18500000000000000000185 /* IosPdfReaderView.swift in Sources */,
 				B18600000000000000000186 /* IosPdfPageCountStore.swift in Sources */,

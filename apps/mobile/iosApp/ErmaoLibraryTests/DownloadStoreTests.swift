@@ -51,17 +51,8 @@ final class DownloadStoreTests: XCTestCase {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let store = ManagedDownloadStore(rootDirectory: root)
-        let pageSize = CGSize(width: 320, height: 480)
-        let rendererFormat = UIGraphicsImageRendererFormat()
-        rendererFormat.scale = 1
-        let pages = [UIColor.systemBlue, UIColor.systemOrange].enumerated().map { index, color in
-            UIGraphicsImageRenderer(size: pageSize, format: rendererFormat).pngData { context in
-                color.setFill()
-                context.fill(CGRect(origin: .zero, size: pageSize))
-                UIColor.white.setFill()
-                context.fill(CGRect(x: 40, y: 80, width: 80 + index * 80, height: 200))
-            }
-        }
+        let pageSize = Self.imageDirectoryFixtureSize
+        let pages = Self.makeImageDirectoryFixturePages()
         let totalBytes = pages.reduce(0) { $0 + $1.count }
         let record = try await store.seedDownload(
             namespace: namespace,
@@ -115,16 +106,455 @@ final class DownloadStoreTests: XCTestCase {
         let opened = try IosImageDirectoryPublicationFactory().open(managed, pageTitleHints: bundle.pages)
         for (index, link) in opened.publication.readingOrder.enumerated() {
             let resource = try XCTUnwrap(opened.publication.get(link))
-            let bytes = try await resource.read().get()
+            let bytes = try await FixtureResourceBox(resource).resource.read().get()
             XCTAssertEqual(bytes, pages[index], "Reader must return each original PAGE in order")
             let image = try XCTUnwrap(UIImage(data: bytes))
             XCTAssertEqual(image.size, pageSize)
+            let pixel = try XCTUnwrap(Self.rgbaPixel(in: image, normalizedPoint: CGPoint(x: 0.9, y: 0.5)))
+            Self.assertFixtureBackground(pixel, pageIndex: index)
             let attachment = XCTAttachment(image: image)
             attachment.name = "original-image-directory-page-\(index)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
         await opened.close()
+    }
+
+    @MainActor
+    func testRemoteImageDirectoryPublicationResourcesReturnDecodableFixture() async throws {
+        let pages = Self.makeImageDirectoryFixturePages()
+        let pageHints = pages.enumerated().map { index, _ in
+            IosCbzPage(
+                pageIndex: index,
+                resourceHref: "pages/\(index)",
+                mediaType: "image/png",
+                width: Int(Self.imageDirectoryFixtureSize.width),
+                height: Int(Self.imageDirectoryFixtureSize.height)
+            )
+        }
+        let sourcePages = pageHints.map {
+            ErmaoShared.RemoteComicPage(
+                pageIndex: Int32($0.pageIndex),
+                resourceHref: $0.resourceHref,
+                mediaType: $0.mediaType,
+                width: KotlinInt(int: Int32($0.width ?? 0)),
+                height: KotlinInt(int: Int32($0.height ?? 0))
+            )
+        }
+        let source = ErmaoShared.RemoteComicReaderSource(
+            resourceId: "remote-image-directory",
+            displayTitle: "Remote image directory",
+            bookId: "book",
+            assetId: nil,
+            namespace: ErmaoShared.PublicKt.createReaderSyncNamespace(
+                serverIdentity: "fixture-server",
+                userId: "fixture-user",
+                authorizationVersion: 1
+            ),
+            sourceFormat: .imagedir,
+            manifestApiPath: "/api/resources/remote-image-directory/comic-manifest",
+            pageApiPathTemplate: "/api/resources/remote-image-directory/comic-pages/{pageIndex}",
+            revision: "sha256:\(String(repeating: "a", count: 64))",
+            pages: sourcePages
+        )
+        let server = FixtureComicPageServer(pages: pages)
+        let opened = try IosRemoteComicPublicationFactory().open(
+            source: source,
+            pages: pageHints,
+            server: server,
+            imageVariant: .original,
+            onFailure: { _ in }
+        )
+
+        for (index, link) in opened.publication.readingOrder.enumerated() {
+            let resource = try XCTUnwrap(opened.publication.get(link))
+            let bytes = try await FixtureResourceBox(resource).resource.read().get()
+            XCTAssertEqual(bytes, pages[index])
+            let image = try XCTUnwrap(UIImage(data: bytes))
+            XCTAssertEqual(image.size, Self.imageDirectoryFixtureSize)
+            let pixel = try XCTUnwrap(Self.rgbaPixel(in: image, normalizedPoint: CGPoint(x: 0.9, y: 0.5)))
+            Self.assertFixtureBackground(pixel, pageIndex: index)
+        }
+        let requestedPageIndexes = await server.requestedPageIndexes
+        XCTAssertEqual(requestedPageIndexes, [0, 1])
+        await opened.close()
+    }
+
+    @MainActor
+    func testImageDirectoryNavigatorRendersFixturePixels() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = root.appendingPathComponent("pages", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let pages = Self.makeImageDirectoryFixturePages()
+        for (index, page) in pages.enumerated() {
+            try page.write(to: directory.appendingPathComponent("page-\(index).png"))
+        }
+        let manifest: [String: Any] = [
+            "contractVersion": 4,
+            "artifactKind": "OriginalPageSet",
+            "resourceId": "navigator-image-directory",
+            "artifactId": "page-set:navigator-image-directory",
+            "totalBytes": pages.reduce(0) { $0 + $1.count },
+            "members": pages.enumerated().map { index, page -> [String: Any] in [
+                "assetId": "page-\(index)", "sequenceIndex": index, "mimeType": "image/png",
+                "sizeBytes": page.count, "fileName": "page-\(index).png",
+            ] },
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: directory.appendingPathComponent("bundle.json"))
+        let managed = IosManagedPublication(
+            resourceID: "navigator-image-directory",
+            displayTitle: "Navigator image directory",
+            fileURL: directory,
+            byteCount: Int64(pages.reduce(0) { $0 + $1.count }),
+            bookID: "book",
+            assetID: "page-set:navigator-image-directory",
+            namespace: namespace,
+            sourceFormat: .imagedir
+        )
+        let pageHints = pages.enumerated().map { index, _ in
+            IosCbzPage(pageIndex: index, resourceHref: "pages/\(index)", mediaType: "image/png", width: 320, height: 480)
+        }
+        let opened = try IosImageDirectoryPublicationFactory().open(managed, pageTitleHints: pageHints)
+        let navigator = try IosComicNavigatorViewController(
+            publication: opened.publication,
+            pages: pageHints,
+            initialLocation: nil,
+            preferences: IosReaderPreferences()
+        )
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = navigator
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+        }
+        navigator.view.frame = window.bounds
+        window.layoutIfNeeded()
+
+        let first = try await Self.waitForFixturePixel(
+            in: window,
+            navigator: navigator,
+            expectedPageIndex: 0
+        )
+        XCTAssertEqual(first.pageIndex, 0)
+        XCTAssertEqual(first.imageSize, Self.imageDirectoryFixtureSize)
+        let movedForward = await navigator.goForward(animated: false)
+        XCTAssertTrue(movedForward)
+        let second = try await Self.waitForFixturePixel(
+            in: window,
+            navigator: navigator,
+            expectedPageIndex: 1
+        )
+        XCTAssertEqual(second.pageIndex, 1)
+        XCTAssertEqual(second.imageSize, Self.imageDirectoryFixtureSize)
+        XCTAssertNotEqual(first.pixel, second.pixel)
+
+        var doublePage = IosReaderPreferences()
+        doublePage.comicSpread = .double
+        doublePage.comicDirection = .rtl
+        doublePage.comicPageGap = 16
+        let appliedDoublePage = await navigator.applyPreferences(doublePage)
+        XCTAssertTrue(appliedDoublePage)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let visibleImages = Self.visibleImageViews(in: navigator.view)
+            .filter { imageView in
+                guard imageView.image != nil,
+                      !imageView.isHidden,
+                      imageView.alpha > 0,
+                      imageView.window === window
+                else { return false }
+                let frame = imageView.convert(imageView.bounds, to: window)
+                return frame.width > 0 && frame.height > 0 && frame.intersects(window.bounds)
+            }
+            .sorted { $0.convert($0.bounds, to: window).minX < $1.convert($1.bounds, to: window).minX }
+        XCTAssertEqual(visibleImages.count, 2, "Narrow iPhone must still honor the double-page preference")
+        if visibleImages.count == 2 {
+            let leftFrame = visibleImages[0].convert(visibleImages[0].bounds, to: window)
+            let rightFrame = visibleImages[1].convert(visibleImages[1].bounds, to: window)
+            XCTAssertEqual(rightFrame.minX - leftFrame.maxX, 16, accuracy: 1)
+        }
+        if visibleImages.count == 2 {
+            let spreadScreenshot = Self.render(window: window)
+            let leftFrame = visibleImages[0].convert(visibleImages[0].bounds, to: window)
+            let rightFrame = visibleImages[1].convert(visibleImages[1].bounds, to: window)
+            let leftPixel = try XCTUnwrap(Self.rgbaPixel(in: spreadScreenshot, point: CGPoint(x: leftFrame.midX, y: leftFrame.maxY - 10)))
+            let rightPixel = try XCTUnwrap(Self.rgbaPixel(in: spreadScreenshot, point: CGPoint(x: rightFrame.midX, y: rightFrame.maxY - 10)))
+            XCTAssertTrue(Self.isFixtureBackground(leftPixel, pageIndex: 1), "RTL must put logical page 1 in the left visual slot")
+            XCTAssertTrue(Self.isFixtureBackground(rightPixel, pageIndex: 0), "RTL must put logical page 0 in the right visual slot")
+        }
+
+        var continuous = doublePage
+        continuous.comicFlow = .scrolled
+        continuous.comicImageFit = "height"
+        continuous.comicZoom = 1.25
+        let appliedContinuous = await navigator.applyPreferences(continuous)
+        XCTAssertTrue(appliedContinuous)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertFalse(navigator.view.gestureRecognizers?.contains { gesture in
+            (gesture as? UITapGestureRecognizer)?.numberOfTapsRequired == 2
+        } ?? false)
+        let continuousScrollView = try XCTUnwrap(
+            navigator.view.subviews.compactMap { $0 as? UIScrollView }.first
+        )
+        XCTAssertEqual(continuousScrollView.decelerationRate, .normal)
+        XCTAssertEqual(continuousScrollView.zoomScale, 1.25, accuracy: 0.001)
+        let continuousCanvas = try XCTUnwrap(continuousScrollView.subviews.first)
+        let continuousFrames = continuousCanvas.subviews.map(\.frame).sorted { $0.minY < $1.minY }
+        XCTAssertEqual(continuousFrames.count, 2)
+        if continuousFrames.count == 2 {
+            XCTAssertEqual(continuousFrames[0].minY, 0, accuracy: 0.001)
+            XCTAssertEqual(continuousFrames[1].minY, continuousFrames[0].maxY, accuracy: 0.001)
+            XCTAssertEqual(continuousFrames[0].width, window.bounds.width, accuracy: 0.001)
+            XCTAssertEqual(continuousFrames[0].height / continuousFrames[0].width, 1.5, accuracy: 0.001)
+        }
+        XCTAssertLessThanOrEqual(continuousCanvas.subviews.count, 3)
+        await opened.close()
+    }
+
+    @MainActor
+    func testContinuousDecodeCompletionReflowsPagesWithoutMovingViewport() async throws {
+        let fixturePages = Self.makeImageDirectoryFixturePages()
+        let pages = fixturePages.indices.map { index in
+            // Local archive indexes do not currently expose image dimensions.
+            // This exercises placeholder geometry before the decoded image
+            // supplies its real intrinsic dimensions.
+            IosCbzPage(
+                pageIndex: index,
+                resourceHref: "pages/\(index)",
+                mediaType: "image/png",
+                width: nil,
+                height: nil
+            )
+        }
+        let container = try DelayedComicFixtureContainer(
+            resources: Dictionary(uniqueKeysWithValues: zip(pages, fixturePages).map {
+                ($0.resourceHref, $1)
+            }),
+            delay: .milliseconds(350)
+        )
+        let readingOrder = pages.compactMap { page -> Link? in
+            guard let mediaType = MediaType(page.mediaType) else { return nil }
+            return Link(href: page.resourceHref, mediaType: mediaType)
+        }
+        XCTAssertEqual(readingOrder.count, pages.count)
+        let publication = Publication(
+            manifest: Manifest(
+                metadata: Metadata(
+                    identifier: "urn:shuku:test:continuous-stability",
+                    conformsTo: [.divina],
+                    title: "Continuous stability",
+                    layout: .fixed,
+                    readingProgression: .ltr,
+                    numberOfPages: pages.count
+                ),
+                readingOrder: readingOrder
+            ),
+            container: container
+        )
+        defer { publication.close() }
+
+        var preferences = IosReaderPreferences()
+        preferences.comicFlow = .scrolled
+        let navigator = try IosComicNavigatorViewController(
+            publication: publication,
+            pages: pages,
+            initialLocation: nil,
+            preferences: preferences
+        )
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = navigator
+        window.makeKeyAndVisible()
+        defer {
+            navigator.close()
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+        }
+        navigator.view.frame = window.bounds
+        window.layoutIfNeeded()
+
+        let scrollView = try XCTUnwrap(navigator.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        let maximumOffset = max(0, scrollView.contentSize.height - scrollView.bounds.height)
+        XCTAssertGreaterThan(maximumOffset, 0)
+        let simulatedUserOffset = CGPoint(x: scrollView.contentOffset.x, y: min(80, maximumOffset))
+        scrollView.setContentOffset(simulatedUserOffset, animated: false)
+        window.layoutIfNeeded()
+
+        let offsetBeforeDecode = scrollView.contentOffset
+        let canvas = try XCTUnwrap(scrollView.subviews.first)
+        let pageFramesBeforeDecode = canvas.subviews.map(\.frame).sorted { $0.minY < $1.minY }
+        XCTAssertEqual(pageFramesBeforeDecode.count, pages.count)
+
+        try await Task.sleep(for: .milliseconds(700))
+        window.layoutIfNeeded()
+
+        let offsetAfterDecode = scrollView.contentOffset
+        XCTAssertEqual(offsetAfterDecode.x, offsetBeforeDecode.x, accuracy: 0.001)
+        XCTAssertEqual(offsetAfterDecode.y, offsetBeforeDecode.y, accuracy: 0.001)
+        let pageFramesAfterDecode = canvas.subviews.map(\.frame).sorted { $0.minY < $1.minY }
+        XCTAssertEqual(pageFramesAfterDecode.count, pages.count)
+        if pageFramesBeforeDecode.count == pages.count, pageFramesAfterDecode.count == pages.count {
+            XCTAssertNotEqual(
+                pageFramesAfterDecode[0].height,
+                pageFramesBeforeDecode[0].height,
+                "Resolving an unknown intrinsic image size must be allowed to reflow the document"
+            )
+            XCTAssertEqual(
+                pageFramesAfterDecode[0].height / pageFramesAfterDecode[0].width,
+                1.5,
+                accuracy: 0.001
+            )
+            XCTAssertEqual(pageFramesAfterDecode[1].minY, pageFramesAfterDecode[0].maxY, accuracy: 0.001)
+        }
+    }
+
+    private static let imageDirectoryFixtureSize = CGSize(width: 320, height: 480)
+
+    private static func makeImageDirectoryFixturePages() -> [Data] {
+        let rendererFormat = UIGraphicsImageRendererFormat()
+        rendererFormat.scale = 1
+        let colors: [UIColor] = [
+            UIColor(red: 0.02, green: 0.32, blue: 0.96, alpha: 1),
+            UIColor(red: 0.98, green: 0.42, blue: 0.02, alpha: 1),
+        ]
+        return colors.enumerated().map { index, color in
+            UIGraphicsImageRenderer(size: imageDirectoryFixtureSize, format: rendererFormat).pngData { context in
+                color.setFill()
+                context.fill(CGRect(origin: .zero, size: imageDirectoryFixtureSize))
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 40, y: 80, width: 80 + index * 80, height: 200))
+            }
+        }
+    }
+
+    private static func assertFixtureBackground(_ pixel: FixturePixel, pageIndex: Int,
+                                                file: StaticString = #filePath, line: UInt = #line) {
+        switch pageIndex {
+        case 0:
+            XCTAssertGreaterThan(pixel.blue, 0.65, file: file, line: line)
+            XCTAssertLessThan(pixel.red, 0.35, file: file, line: line)
+            XCTAssertLessThan(pixel.green, 0.55, file: file, line: line)
+        case 1:
+            XCTAssertGreaterThan(pixel.red, 0.65, file: file, line: line)
+            XCTAssertGreaterThan(pixel.green, 0.20, file: file, line: line)
+            XCTAssertLessThan(pixel.blue, 0.35, file: file, line: line)
+        default:
+            XCTFail("Unexpected image directory fixture page \(pageIndex)", file: file, line: line)
+        }
+    }
+
+    @MainActor
+    private static func waitForFixturePixel(
+        in window: UIWindow,
+        navigator: IosComicNavigatorViewController,
+        expectedPageIndex: Int
+    ) async throws -> FixturePixelEvidence {
+        var lastPixel: FixturePixel?
+        var lastImageSize: CGSize?
+        for _ in 0 ..< 120 {
+            guard navigator.currentLocation?.href.string == "pages/\(expectedPageIndex)" else {
+                try await Task.sleep(for: .milliseconds(100))
+                continue
+            }
+            let screenshot = Self.render(window: window)
+            let pixel = Self.rgbaPixel(in: screenshot, normalizedPoint: CGPoint(x: 0.9, y: 0.5))
+            let image = Self.visibleImage(in: navigator.view)
+            lastPixel = pixel
+            lastImageSize = image?.size
+            if let pixel, let image, Self.isFixtureBackground(pixel, pageIndex: expectedPageIndex) {
+                return FixturePixelEvidence(
+                    pageIndex: expectedPageIndex,
+                    imageSize: image.size,
+                    pixel: pixel
+                )
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTFail(
+            "Timed out waiting for IMAGE_DIR page \(expectedPageIndex) to render; " +
+                "pixel=\(String(describing: lastPixel)) imageSize=\(String(describing: lastImageSize))"
+        )
+        throw FixturePixelEvidenceError.notRendered
+    }
+
+    private static func isFixtureBackground(_ pixel: FixturePixel, pageIndex: Int) -> Bool {
+        switch pageIndex {
+        case 0: pixel.blue > 0.65 && pixel.red < 0.35 && pixel.green < 0.55
+        case 1: pixel.red > 0.65 && pixel.green > 0.20 && pixel.blue < 0.35
+        default: false
+        }
+    }
+
+    private static func render(window: UIWindow) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = window.screen.scale
+        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+    }
+
+    private static func visibleImage(in view: UIView) -> UIImage? {
+        if let imageView = view as? UIImageView,
+           !imageView.isHidden,
+           imageView.alpha > 0,
+           imageView.window != nil,
+           let image = imageView.image {
+            return image
+        }
+        for child in view.subviews.reversed() {
+            if let image = visibleImage(in: child) { return image }
+        }
+        return nil
+    }
+
+    private static func visibleImageViews(in view: UIView) -> [UIImageView] {
+        let own = (view as? UIImageView).map { [$0] } ?? []
+        return own + view.subviews.flatMap(visibleImageViews(in:))
+    }
+
+    private static func rgbaPixel(in image: UIImage, normalizedPoint: CGPoint) -> FixturePixel? {
+        guard let cgImage = image.cgImage, cgImage.width > 0, cgImage.height > 0 else { return nil }
+        let x = min(max(Int(CGFloat(cgImage.width) * normalizedPoint.x), 0), cgImage.width - 1)
+        let y = min(max(Int(CGFloat(cgImage.height) * normalizedPoint.y), 0), cgImage.height - 1)
+        guard let sample = cgImage.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return nil }
+        var bytes = [UInt8](repeating: 0, count: 4)
+        bytes.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress,
+                  let context = CGContext(
+                      data: baseAddress,
+                      width: 1,
+                      height: 1,
+                      bitsPerComponent: 8,
+                      bytesPerRow: 4,
+                      space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  )
+            else { return }
+            context.draw(sample, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return FixturePixel(
+            red: CGFloat(bytes[0]) / 255,
+            green: CGFloat(bytes[1]) / 255,
+            blue: CGFloat(bytes[2]) / 255,
+            alpha: CGFloat(bytes[3]) / 255
+        )
+    }
+
+    private static func rgbaPixel(in image: UIImage, point: CGPoint) -> FixturePixel? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        return rgbaPixel(
+            in: image,
+            normalizedPoint: CGPoint(x: point.x / image.size.width, y: point.y / image.size.height)
+        )
     }
 
     func testManifestV3RecordMigratesToV4WithoutDeletingCompletedFile() async throws {
@@ -810,5 +1240,115 @@ private extension ManagedDownloadStore {
         fixture.completedAt = now
         try update(fixture)
         return fixture
+    }
+}
+
+private final class DelayedComicFixtureContainer: Container, @unchecked Sendable {
+    let sourceURL: AbsoluteURL? = nil
+    let entries: Set<AnyURL>
+    private let resources: [String: Data]
+    private let delay: Duration
+
+    init(resources: [String: Data], delay: Duration) throws {
+        self.resources = resources
+        self.delay = delay
+        entries = try Set(resources.keys.map { href in
+            guard let url = AnyURL(string: href) else {
+                throw FixtureComicPageServerError.pageUnavailable
+            }
+            return url
+        })
+    }
+
+    subscript(url: any URLConvertible) -> (any ReadiumShared.Resource)? {
+        let href = url.anyURL.removingQuery().removingFragment().string
+        guard let data = resources[href] else { return nil }
+        return DataResource { [delay] in
+            try? await Task.sleep(for: delay)
+            return .success(data)
+        }
+    }
+
+    func close() {}
+}
+
+private struct FixturePixel: Equatable, CustomStringConvertible {
+    let red: CGFloat
+    let green: CGFloat
+    let blue: CGFloat
+    let alpha: CGFloat
+
+    var description: String {
+        String(format: "rgba(%.3f, %.3f, %.3f, %.3f)", red, green, blue, alpha)
+    }
+}
+
+private struct FixturePixelEvidence {
+    let pageIndex: Int
+    let imageSize: CGSize
+    let pixel: FixturePixel
+}
+
+private enum FixturePixelEvidenceError: Error {
+    case notRendered
+}
+
+private enum FixtureComicPageServerError: Error {
+    case pageUnavailable
+}
+
+private final class FixtureResourceBox: @unchecked Sendable {
+    let resource: any ReadiumShared.Resource
+
+    init(_ resource: any ReadiumShared.Resource) {
+        self.resource = resource
+    }
+}
+
+private final class FixtureComicPageServer: ErmaoShared.ComicPageServerPort, @unchecked Sendable {
+    private let pages: [Data]
+    private let requestLog = FixturePageRequestLog()
+
+    init(pages: [Data]) {
+        self.pages = pages
+    }
+
+    var requestedPageIndexes: [Int32] {
+        get async {
+            await requestLog.values()
+        }
+    }
+
+    func read(
+        source: ErmaoShared.RemoteComicReaderSource,
+        pageIndex: Int32,
+        variant: ErmaoShared.ReaderComicImageVariant
+    ) async throws -> any ErmaoShared.ComicPageReadResult {
+        await requestLog.append(pageIndex)
+        guard pages.indices.contains(Int(pageIndex)) else {
+            throw FixtureComicPageServerError.pageUnavailable
+        }
+        let bytes = KotlinByteArray(size: Int32(pages[Int(pageIndex)].count))
+        for (index, byte) in pages[Int(pageIndex)].enumerated() {
+            bytes.set(index: Int32(index), value: Int8(bitPattern: byte))
+        }
+        return ErmaoShared.ComicPageReadResultContent(
+            pageIndex: pageIndex,
+            mediaType: "image/png",
+            actualVariant: variant,
+            bytes: bytes
+        )
+    }
+}
+
+private actor FixturePageRequestLog {
+    private var indexes: [Int32] = []
+
+    func append(_ pageIndex: Int32) {
+        indexes.append(pageIndex)
+    }
+
+    func values() -> [Int32] {
+        indexes
     }
 }

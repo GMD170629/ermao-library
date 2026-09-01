@@ -112,7 +112,7 @@ struct IosComicReaderView: View {
 }
 
 private struct ComicNavigatorHost: UIViewControllerRepresentable {
-    let navigator: CBZNavigatorViewController
-    func makeUIViewController(context: Context) -> CBZNavigatorViewController { navigator }
-    func updateUIViewController(_ uiViewController: CBZNavigatorViewController, context: Context) {}
+    let navigator: IosComicNavigatorViewController
+    func makeUIViewController(context: Context) -> IosComicNavigatorViewController { navigator }
+    func updateUIViewController(_ uiViewController: IosComicNavigatorViewController, context: Context) {}
 }

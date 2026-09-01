@@ -1,6 +1,5 @@
 import Foundation
 @preconcurrency import ErmaoShared
-@preconcurrency import ReadiumAdapterGCDWebServer
 @preconcurrency import ReadiumNavigator
 @preconcurrency import ReadiumShared
 import SwiftUI
@@ -12,7 +11,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     static let progressSaveDebounceMilliseconds = 500
 
     @Published private(set) var phase: IosReaderSessionPhase = .opening
-    @Published private(set) var navigator: CBZNavigatorViewController?
+    @Published private(set) var navigator: IosComicNavigatorViewController?
     @Published private(set) var pageIndex = 0
     @Published private(set) var presentationError: IosReaderFailureCode?
     @Published private(set) var restoreWarning: IosReaderFailureCode?
@@ -38,7 +37,6 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     private let comicPageServer: (any ErmaoShared.ComicPageServerPort)?
     private let preferencesStore: IosReaderPreferencesStore
     private var openedPublication: IosOpenedReadiumPublication?
-    private var httpServer: GCDHTTPServer?
     private var pendingSave: Task<Void, Never>?
     private var expectedRestoredPage: IosCbzPage?
     private var hasReadingActivity = false
@@ -86,8 +84,11 @@ final class IosComicReaderSession: NSObject, ObservableObject {
     }
 
     var pageCount: Int { pages.count }
-    var progress: Double { pages.count <= 1 ? 1 : Double(pageIndex) / Double(pages.count - 1) }
-    var pageLabel: String { "\(pageIndex + 1) / \(max(1, pages.count))" }
+    var supportsComicQuality: Bool { remoteSource != nil }
+    var progress: Double { navigator?.currentProgress ?? (pages.count <= 1 ? 1 : Double(pageIndex) / Double(pages.count - 1)) }
+    var pageLabel: String {
+        navigator?.visiblePageLabel ?? "\(pageIndex + 1) / \(max(1, pages.count))"
+    }
 
     func open() async {
         guard !didOpen else { return }
@@ -97,12 +98,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             let openedSource: ErmaoShared.ReaderSource
             if let remoteSource {
                 guard let comicPageServer else { throw IosReaderFailure(code: .networkUnavailable) }
-                opened = try IosRemoteComicPublicationFactory().open(
-                    source: remoteSource,
-                    pages: pages,
-                    server: comicPageServer,
-                    onFailure: { [weak self] failure in self?.presentationError = failure.code }
-                )
+                opened = try openRemotePublication(source: remoteSource, server: comicPageServer, preferences: preferences)
                 openedSource = remoteSource
             } else {
                 let managed = try await managedStore.resolve(
@@ -133,17 +129,14 @@ final class IosComicReaderSession: NSObject, ObservableObject {
                 openedSource: openedSource
             )
             let initial = initialPage.map(locator(for:))
-            let server = GCDHTTPServer(
-                assetRetriever: AssetRetriever(httpClient: DefaultHTTPClient(ephemeral: true))
-            )
-            let navigator = try CBZNavigatorViewController(
+            let navigator = try IosComicNavigatorViewController(
                 publication: opened.publication,
+                pages: pages,
                 initialLocation: initial,
-                httpServer: server
+                preferences: preferences
             )
             navigator.delegate = self
             openedPublication = opened
-            httpServer = server
             self.navigator = navigator
             progressCoordination?.noticeHandler = { [weak self] snapshot in
                 guard snapshot?.locator is ErmaoShared.ComicPublicationLocation else { return }
@@ -167,13 +160,72 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         }
     }
 
-    func goPrevious() async { _ = await navigator?.goBackward(options: .init(animated: preferences.comicPageTurnAnimation == "slide")) }
-    func goNext() async { _ = await navigator?.goForward(options: .init(animated: preferences.comicPageTurnAnimation == "slide")) }
+    func goPrevious() async { _ = await navigator?.goBackward(animated: preferences.comicPageTurnAnimation == "slide") }
+    func goNext() async { _ = await navigator?.goForward(animated: preferences.comicPageTurnAnimation == "slide") }
 
     func applyPreferences(_ updated: IosReaderPreferences) async -> Bool {
         guard canApplyControlPreferences(updated) else { return false }
+        if updated.comicImageVariant != preferences.comicImageVariant {
+            return await replaceRemotePublication(for: updated)
+        }
+        if let navigator {
+            guard await navigator.applyPreferences(updated) else { return false }
+        }
         guard preferencesStore.save(updated) else { return false }
         preferences = updated
+        return true
+    }
+
+    /// A remote image variant changes the bytes returned by every Readium
+    /// Resource. Reopen the publication as one transaction so no old request
+    /// can populate the new renderer's cache or remain in flight.
+    private func replaceRemotePublication(for updated: IosReaderPreferences) async -> Bool {
+        guard let remoteSource,
+              let comicPageServer,
+              let oldNavigator = navigator,
+              let oldPublication = openedPublication,
+              let currentLocation = oldNavigator.currentLocation
+        else { return false }
+
+        var replacementPublication: IosOpenedReadiumPublication?
+        let replacementNavigator: IosComicNavigatorViewController
+        do {
+            let opened = try openRemotePublication(
+                source: remoteSource,
+                server: comicPageServer,
+                preferences: updated
+            )
+            replacementPublication = opened
+            replacementNavigator = try IosComicNavigatorViewController(
+                publication: opened.publication,
+                pages: pages,
+                initialLocation: currentLocation,
+                preferences: updated
+            )
+            guard await replacementNavigator.prepareCurrentPresentation() else {
+                throw IosReaderFailure(code: .comicArchiveOpenFailed)
+            }
+        } catch {
+            await replacementPublication?.close()
+            presentationError = presentationError ?? .comicArchiveOpenFailed
+            return false
+        }
+
+        guard preferencesStore.save(updated) else {
+            replacementNavigator.close()
+            await replacementPublication?.close()
+            return false
+        }
+
+        replacementNavigator.delegate = self
+        openedPublication = replacementPublication
+        navigator = replacementNavigator
+        preferences = updated
+        pageIndex = replacementNavigator.currentPageIndex
+
+        oldNavigator.delegate = nil
+        oldNavigator.close()
+        await oldPublication.close()
         return true
     }
 
@@ -188,7 +240,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         guard pages.indices.contains(index), let navigator else { return false }
         let expected = pages[index]
         if pageIndex == expected.pageIndex { return true }
-        guard await navigator.go(to: locator(for: expected), options: .init(animated: preferences.comicPageTurnAnimation == "slide")) else { return false }
+        guard await navigator.go(to: locator(for: expected), animated: preferences.comicPageTurnAnimation == "slide") else { return false }
         await verifyCurrentPage(expected: pages[index])
         return pageIndex == expected.pageIndex && pages[pageIndex].resourceHref == expected.resourceHref
     }
@@ -248,8 +300,8 @@ final class IosComicReaderSession: NSObject, ObservableObject {
         try? await persistCurrentPage(waitForSynchronization: false)
         progressCoordination?.close()
         navigator?.delegate = nil
+        navigator?.close()
         navigator = nil
-        httpServer = nil
         await openedPublication?.close()
         openedPublication = nil
         phase = .closed
@@ -384,7 +436,7 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             engineLocator: nil
         )
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
-        let percent = pages.count <= 1 ? 100 : Double(page.pageIndex) / Double(pages.count - 1) * 100
+        let percent = (navigator?.currentProgress ?? (pages.count <= 1 ? 1 : Double(page.pageIndex) / Double(pages.count - 1))) * 100
         return ErmaoShared.ReaderProgress(
             resourceId: resourceID,
             location: location,
@@ -393,27 +445,50 @@ final class IosComicReaderSession: NSObject, ObservableObject {
             percent: KotlinDouble(double: percent)
         )
     }
+
+    private func openRemotePublication(
+        source: ErmaoShared.RemoteComicReaderSource,
+        server: any ErmaoShared.ComicPageServerPort,
+        preferences: IosReaderPreferences
+    ) throws -> IosOpenedReadiumPublication {
+        let variant = ErmaoShared.ReaderComicImageVariant.entries.first {
+            $0.wireValue == preferences.comicImageVariant
+        } ?? .original
+        return try IosRemoteComicPublicationFactory().open(
+            source: source,
+            pages: pages,
+            server: server,
+            imageVariant: variant,
+            onFailure: { [weak self] failure in self?.presentationError = failure.code }
+        )
+    }
 }
 
-extension IosComicReaderSession: CBZNavigatorDelegate {
-    func navigator(_ navigator: Navigator, locationDidChange locator: Locator) { locationChanged(locator) }
-    func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+extension IosComicReaderSession: IosComicNavigatorDelegate {
+    func comicNavigator(_ navigator: IosComicNavigatorViewController, locationDidChange locator: Locator) {
+        locationChanged(locator)
+    }
+
+    func comicNavigator(_ navigator: IosComicNavigatorViewController, didFail error: Error) {
         presentationError = presentationError ?? .comicArchiveOpenFailed
     }
-    func navigator(_ navigator: Navigator, presentError error: NavigatorError) { presentationError = .engineError }
-    func navigator(_ navigator: Navigator, presentExternalURL url: URL) {}
-    func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {
+
+    func comicNavigator(_ navigator: IosComicNavigatorViewController, didTapAt point: CGPoint) {
         let width = max(1, self.navigator?.view.bounds.width ?? UIScreen.main.bounds.width)
         routeControlTap(fraction: point.x / width)
     }
-    func navigator(_ navigator: VisualNavigator, didPressKey event: KeyEvent) {
-        if event.key == .escape { activeControlPanel = nil; controlsVisible = true; return }
-        guard activeControlPanel == nil, preferences.keyboardPageTurn else { return }
-        switch event.key {
-        case .arrowLeft, .pageUp: Task { await goPrevious() }
-        case .arrowRight, .pageDown, .space: Task { await goNext() }
-        default: break
+
+    func comicNavigator(_ navigator: IosComicNavigatorViewController, didRequest navigation: IosComicNavigationRequest) {
+        switch navigation {
+        case .escape:
+            activeControlPanel = nil
+            controlsVisible = true
+        case .previous:
+            guard activeControlPanel == nil, preferences.keyboardPageTurn else { return }
+            Task { await goPrevious() }
+        case .next:
+            guard activeControlPanel == nil, preferences.keyboardPageTurn else { return }
+            Task { await goNext() }
         }
     }
-    func navigator(_ navigator: VisualNavigator, didReleaseKey event: KeyEvent) {}
 }

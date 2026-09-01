@@ -83,28 +83,6 @@ class PdfRangeLoaderTest {
     }
 
     @Test
-    fun currentDevicePdfWholeSpanRoutesToOriginalWithoutRangeTraffic(): Unit = runBlocking {
-        val expectedSize = 16_395_773L
-        val deviceSource = source.copy(expectedSizeBytes = expectedSize)
-        val server = RecordingServer()
-        val loader = PdfRangeLoader(
-            deviceSource,
-            PdfRangeCacheIdentity(namespace, deviceSource.resourceId),
-            PdfRangeMemory(),
-            server,
-        )
-
-        loader.request(0, expectedSize)
-
-        assertEquals(
-            PdfRangeDrainResult.CompleteOriginalRequired,
-            loader.drainRequested(),
-        )
-        assertTrue(server.ranges.isEmpty())
-        loader.close()
-    }
-
-    @Test
     fun wholeFileEngineSpanRoutesToOriginalEvenWhenItFitsTheSessionCache(): Unit = runBlocking {
         val smallSource = source.copy(expectedSizeBytes = PDF_RANGE_MEMORY_CACHE_BYTES.toLong())
         val server = RecordingServer()

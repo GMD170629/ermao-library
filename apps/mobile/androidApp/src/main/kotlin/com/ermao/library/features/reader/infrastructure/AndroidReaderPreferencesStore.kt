@@ -2,7 +2,6 @@ package com.ermao.library.features.reader.infrastructure
 
 import android.content.Context
 import androidx.core.content.edit
-import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderPreferencesJson
 import java.security.MessageDigest
@@ -17,16 +16,15 @@ internal class AndroidReaderPreferencesStore(
 
     fun load(): ReaderPreferences {
         val stored = preferences.getString(key, null)
-            ?: return enforceAndroidSinglePagePreferences(ReaderPreferences())
+            ?: return ReaderPreferences()
         val decoded = runCatching { ReaderPreferencesJson.decode(stored) }.getOrElse { return ReaderPreferences() }
-        val supported = enforceAndroidSinglePagePreferences(decoded)
-        val canonical = ReaderPreferencesJson.encode(supported)
-        if (canonical != stored) save(supported)
-        return supported
+        val canonical = ReaderPreferencesJson.encode(decoded)
+        if (canonical != stored) save(decoded)
+        return decoded
     }
 
     fun save(value: ReaderPreferences) {
-        val encodedPreferences = ReaderPreferencesJson.encode(enforceAndroidSinglePagePreferences(value))
+        val encodedPreferences = ReaderPreferencesJson.encode(value)
         try {
             preferences.edit(commit = true) { putString(key, encodedPreferences) }
         } catch (error: RuntimeException) {
@@ -35,7 +33,7 @@ internal class AndroidReaderPreferencesStore(
         if (preferences.getString(key, null) != encodedPreferences) throw com.ermao.library.features.reader.application.ReaderPreferenceSaveFailure()
     }
 
-    fun reset(): ReaderPreferences = enforceAndroidSinglePagePreferences(ReaderPreferences()).also(::save)
+    fun reset(): ReaderPreferences = ReaderPreferences().also(::save)
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))

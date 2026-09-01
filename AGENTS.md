@@ -1,5 +1,48 @@
 # Agent Working Guidelines
 
+## Default Multi-Agent Collaboration
+
+Multi-agent execution is enabled by default whenever the agent runtime supports it. The primary agent must look for useful delegation opportunities before implementation and again during verification. When at least one safe, useful, bounded subtask can proceed independently, the primary agent must delegate at least one such subtask. A non-trivial task may remain single-agent only when no such subtask exists, the runtime cannot create child agents, or context-transfer, coordination, or merge risk clearly outweighs the benefit; the primary agent must briefly state which exception applies.
+
+### Child-agent model
+
+- Every child agent must be created with `gpt-5.6-luna` and reasoning effort `max`, including any nested child agent explicitly authorized by the primary agent.
+- An explicit user instruction to use a different model or reasoning effort takes precedence for the affected delegation.
+- If the required child-agent configuration is unavailable, the primary agent must report that limitation and retain the work instead of silently using a different configuration.
+
+### Primary-agent responsibilities
+
+The primary agent owns the task as a whole. It must:
+
+1. understand the requested outcome, inspect repository constraints, find the authoritative implementation to reuse, and make architecture and boundary decisions;
+2. decompose the work, assign bounded tasks with explicit scope and acceptance criteria, sequence dependencies, and prevent overlapping writes;
+3. continue the architecture, integration, and risk analysis while delegated work runs;
+4. inspect every returned diff and evidence, reconcile conflicting findings, request rework when needed, and run or confirm the decisive final checks; and
+5. make the final acceptance decision and communicate the integrated result, remaining risks, and verification evidence to the user.
+
+A child agent's success report is evidence for review, not proof that the overall task is complete. The primary agent may not delegate away architecture ownership, scope decisions, integration responsibility, or final acceptance.
+
+### Child-agent responsibilities
+
+Child agents execute simple, well-bounded work defined by the primary agent. Appropriate delegations include:
+
+- repository searches, inventories, call-path tracing, and focused research;
+- small mechanical or localized implementation tasks with clear file boundaries and acceptance criteria;
+- focused test execution, failure reproduction, log analysis, and result summarization;
+- independent verification of another agent's change; and
+- before/after, implementation/reference, platform, locale, contract, or test-result comparisons.
+
+Child agents must stay within the assigned scope, preserve unrelated user changes, avoid redefining architecture or public contracts, and report blockers or boundary conflicts instead of expanding the task. Each child must return the files inspected or changed, commands and tests run, material results, and unresolved risks. When concurrency permits, assign verification or comparison to a child other than the implementer.
+
+The primary agent owns task assignment. A child agent may create a nested child only when the primary agent explicitly authorizes that delegation; the nested task must inherit the authorized scope, write boundaries, model configuration, and acceptance criteria.
+
+### Coordination and acceptance
+
+- Give concurrent child agents non-overlapping write scopes. Serialize work that must touch the same files or shared generated artifacts.
+- Use read-only child agents freely for independent review and comparison, even while implementation is in progress.
+- The primary agent must review the actual workspace state rather than relying only on summaries, and must verify that delegated changes follow all architecture, reuse, internationalization, testing, and safety rules in this file.
+- Multi-agent execution accelerates bounded work; it does not reduce the required end-to-end verification or the Definition of Done.
+
 ## Target-State Code Quality Standard
 
 This section defines the required target architecture for the repository. It is not a description of the current code and existing legacy code is not a precedent for new work.

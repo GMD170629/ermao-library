@@ -64,6 +64,27 @@ extension IosReflowableReaderSession: IosReaderControlSession {
 
 extension IosComicReaderSession: IosReaderControlSession {
     var controlMorphology: ErmaoShared.ReaderMorphology { .comic }
+    var controlCapabilities: ErmaoShared.ReaderCapabilities {
+        let comic = ErmaoShared.ReaderComicCapabilities(
+            supportsFlow: true,
+            supportsSpread: true,
+            supportsDirection: true,
+            supportsCoverSingle: true,
+            supportsPageGap: true,
+            supportsZoom: true,
+            supportsFit: true,
+            supportsQuality: supportsComicQuality,
+            supportsAnimation: true,
+            supportsPageWidth: true
+        )
+        return ErmaoShared.PublicKt.readerPlatformCapabilities(
+            morphology: .comic,
+            volumeKeys: false,
+            pdfZoom: false,
+            pdfFit: false,
+            comic: comic
+        )
+    }
     var controlReady: Bool { navigator != nil && (phase == .reading || phase == .background) }
     var controlPosition: String { pageLabel }
     var controlContents: [IosReaderTocEntry] {

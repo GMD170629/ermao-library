@@ -24,7 +24,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.readium.r2.navigator.image.ImageNavigatorFragment
+import com.ermao.library.features.reader.infrastructure.ComicNavigatorFragment
 
 @RunWith(AndroidJUnit4::class)
 class ReaderCbzInstrumentedTest {
@@ -64,7 +64,7 @@ class ReaderCbzInstrumentedTest {
         ).use { scenario ->
             scenario.keepReaderTestFixtureVisible()
             waitUntil(scenario, "CBZ first page") {
-                it.imageNavigatorOrNull()?.view != null &&
+                it.comicNavigatorOrNull()?.view != null &&
                     (it.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)?.pageIndex == 0
             }
             scenario.onActivity { activity -> assertTrue(checkNotNull(activity.controllerForTesting).goNext()) }
@@ -118,6 +118,6 @@ class ReaderCbzInstrumentedTest {
     private fun scenarioActivity(scenario: ActivityScenario<ReaderActivity>): ReaderActivity =
         AtomicReference<ReaderActivity>().also { result -> scenario.onActivity(result::set) }.get()
 
-    private fun ReaderActivity.imageNavigatorOrNull(): ImageNavigatorFragment? =
-        supportFragmentManager.fragments.filterIsInstance<ImageNavigatorFragment>().singleOrNull()
+    private fun ReaderActivity.comicNavigatorOrNull(): ComicNavigatorFragment? =
+        supportFragmentManager.fragments.filterIsInstance<ComicNavigatorFragment>().singleOrNull()
 }

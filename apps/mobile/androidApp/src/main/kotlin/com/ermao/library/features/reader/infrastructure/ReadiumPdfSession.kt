@@ -1,6 +1,5 @@
 package com.ermao.library.features.reader.infrastructure
 
-import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
 
 import com.ermao.library.shared.modules.reader.PdfRangeLoader
 import com.ermao.library.shared.modules.reader.PdfRangeFailure
@@ -95,7 +94,7 @@ internal class ReadiumPdfSession(
     )
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
-    private val _preferences = MutableStateFlow(enforceAndroidSinglePagePreferences(initialPreferences))
+    private val _preferences = MutableStateFlow(initialPreferences)
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
     override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
@@ -379,7 +378,7 @@ internal class ReadiumPdfSession(
         return moved
     }
     override fun updatePreferences(updated: ReaderPreferences) {
-        val supported = enforceAndroidSinglePagePreferences(updated)
+        val supported = updated
         if (_preferences.value == supported) return
         persistPreferences(supported)
         _preferences.value = supported

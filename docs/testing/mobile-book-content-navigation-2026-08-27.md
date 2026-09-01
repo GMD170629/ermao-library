@@ -174,6 +174,7 @@ iOS 结果包：`/tmp/ermao-directory-browser-only-20260827.xcresult`；执行�
 - 14:42:16 保留数据安装、14:42:19 冷启动 `com.ermao.library`，版本 1.0.0（1）；实机沿用当前登录服务器，非 UI fixture。
 - 《星港巡夜人》根页初始显示开始阅读；点击进入真实资源标题“02”的漫画 Reader。返回后根页显示“正在阅读 · 02”、进度条和继续阅读，再次继续仍打开“02”、恢复到 2/2。下级“单行本”仍为精简目录，返回保留根页阅读区。测试期间切到 Reader 1/2，显示百分比降至 0 时根页恢复开始按钮，未以最大历史百分比维持错误进度。
 - **Reader 内容渲染未通过**：该 IMAGE_DIR 卷册在镜像中呈黑色画面，控制栏和页码可显示、切页；仅证明阅读入口目标与返回进度生效，不能据此声称图片正常渲染。本轮未更改 Reader 引擎。
+- **2026-09-01 后续复核**：上述现场资源的两张 PAGE 实际为 1×1 黑色 PNG，因此黑色画面不是可归因于 Reader 的生产缺陷。后续使用两张不同颜色的 320×480 PNG，在实体 iPhone 上分别通过 OriginalPageSet 原字节/像素、远程 Publication Resource 到 `UIImage`、以及真实 `CBZNavigatorViewController` 首页与下一页像素渲染和翻页验证；生产 Reader 未修改。结果包：`apps/mobile/iosApp/build/Logs/Test/Test-ErmaoLibrary-2026.09.01_11-46-06-+0800.xcresult`。
 - 切页检查后已恢复本轮进入 Reader 时的 2/2 页，并返回图书详情。测试产生了正常的资源进度保存，没有清空图书、下载或登录数据。
 - Android Lint 仍有 4 个既有错误（两处 ExifInterface、两项未使用字符串）；Web `pnpm i18n:check` 仍有管理员文案 4 个缺失／6 个过期。新阅读区文案已同时提供英文和中文，iOS 新占位符匹配；未降低门禁。iOS 既有 Readium/SwiftUI 过时接口警告及滚动锚点重复帧更新警告保留记录。
 

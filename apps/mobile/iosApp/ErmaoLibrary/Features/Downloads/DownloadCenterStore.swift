@@ -101,9 +101,9 @@ final class DownloadCenterStore: ObservableObject {
     func beginReaderDownload(resourceID: String, descriptor: DownloadDescriptor) -> Bool {
         guard context != nil else { return false }
         if let activeDescriptor = runningReaderDescriptors[resourceID] {
-            // One canonical task may have many readers, but only if all of
-            // them refer to the exact same asset version.
-            guard Self.descriptorsMatch(activeDescriptor, descriptor) else { return false }
+            guard PublicKt.downloadDescriptorsMatch(expected: activeDescriptor, candidate: descriptor) else {
+                return false
+            }
             return false
         }
         guard runningTasks[resourceID] == nil else { return false }
@@ -191,7 +191,7 @@ final class DownloadCenterStore: ObservableObject {
         let joinedOrStarted = beginReaderDownload(resourceID: descriptor.identity.resourceId, descriptor: descriptor)
         if !joinedOrStarted,
            let activeDescriptor = runningReaderDescriptors[descriptor.identity.resourceId] {
-            guard Self.descriptorsMatch(activeDescriptor, descriptor) else {
+            guard PublicKt.downloadDescriptorsMatch(expected: activeDescriptor, candidate: descriptor) else {
                 throw ManagedDownloadTransferError.versionChanged
             }
         } else if !joinedOrStarted,
@@ -318,21 +318,6 @@ final class DownloadCenterStore: ObservableObject {
         case "DOWNLOAD_CANCELLED": return .cancelled
         default: return .transportUnavailable
         }
-    }
-
-    private static func descriptorsMatch(
-        _ lhs: DownloadDescriptor,
-        _ rhs: DownloadDescriptor
-    ) -> Bool {
-        DownloadTask(
-            id: "reader-validation",
-            descriptor: lhs,
-            status: .queued,
-            transferredBytes: 0,
-            failureCode: nil,
-            artifact: nil
-        )
-            .matchesDescriptor(candidate: rhs)
     }
 
 }

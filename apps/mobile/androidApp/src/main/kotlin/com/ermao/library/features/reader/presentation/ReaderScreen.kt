@@ -182,6 +182,8 @@ internal fun ReaderScreen(
         ?: remember { mutableStateOf(ReaderPreferences()) }
     val currentLocation by controller?.currentLocation?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderLocation?>(null) }
+    val presentationProgress by controller?.presentationProgress?.collectAsStateWithLifecycle()
+        ?: remember { mutableStateOf<Double?>(null) }
     val contentError by controller?.contentError?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderError?>(null) }
     val displayedError = openError ?: contentError
@@ -355,6 +357,7 @@ internal fun ReaderScreen(
             if (!controlsVisible && controller != null) {
                 ReaderPassiveStatus(
                     currentLocation = currentLocation,
+                    presentationProgress = presentationProgress,
                     preferences = preferences,
                     lastPageIndex = controller.tableOfContents.lastIndex,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -366,6 +369,7 @@ internal fun ReaderScreen(
                     title = title,
                     controller = controller,
                     location = currentLocation,
+                    presentationProgress = presentationProgress,
                     preferences = preferences,
                     adjacentChapters = adjacentChapters,
                     bookmarks = bookmarks,
@@ -631,6 +635,7 @@ private fun ReaderControlOverlay(
     title: String,
     controller: ReaderScreenController?,
     location: ReaderLocation?,
+    presentationProgress: Double?,
     preferences: ReaderPreferences,
     adjacentChapters: ReaderAdjacentChapters,
     bookmarks: List<ReaderBookmark>,
@@ -699,6 +704,7 @@ private fun ReaderControlOverlay(
         ReaderBottomConsole(
             controller,
             location,
+            presentationProgress,
             preferences,
             adjacentChapters,
             onPanel,
@@ -715,6 +721,7 @@ private fun ReaderControlOverlay(
 private fun ReaderBottomConsole(
     controller: ReaderScreenController?,
     currentLocation: ReaderLocation?,
+    presentationProgress: Double?,
     preferences: ReaderPreferences,
     adjacentChapters: ReaderAdjacentChapters,
     onPanel: (ReaderPanel) -> Unit,
@@ -727,6 +734,7 @@ private fun ReaderBottomConsole(
     val totalProgression = readerTotalProgression(
         currentLocation,
         controller?.tableOfContents.orEmpty().lastIndex,
+        presentationProgress,
     )
     var sliderProgress by remember { mutableFloatStateOf(totalProgression?.toFloat() ?: 0f) }
     var dragging by remember { mutableStateOf(false) }
@@ -837,11 +845,12 @@ private fun ReaderBottomConsole(
 @Composable
 private fun ReaderPassiveStatus(
     currentLocation: ReaderLocation?,
+    presentationProgress: Double?,
     preferences: ReaderPreferences,
     lastPageIndex: Int,
     modifier: Modifier = Modifier,
 ) {
-    val totalProgression = readerTotalProgression(currentLocation, lastPageIndex)?.toFloat()
+    val totalProgression = readerTotalProgression(currentLocation, lastPageIndex, presentationProgress)?.toFloat()
     val progress = progressLabel(preferences, currentLocation, totalProgression)
     val clock = rememberClock(preferences.display.showClock)
     if (progress.isEmpty() && clock == null) return
@@ -1043,7 +1052,11 @@ private fun progressLabel(preferences: ReaderPreferences, location: ReaderLocati
     }
 }
 
-internal fun readerTotalProgression(location: ReaderLocation?, lastPageIndex: Int): Double? = when (location) {
+internal fun readerTotalProgression(
+    location: ReaderLocation?,
+    lastPageIndex: Int,
+    presentationProgress: Double? = null,
+): Double? = presentationProgress ?: when (location) {
     is ReflowReaderLocation -> location.totalProgression
     is ComicReaderLocation -> pageProgression(location.pageIndex, lastPageIndex)
     is PdfReaderLocation -> pageProgression(location.pageIndex, lastPageIndex)

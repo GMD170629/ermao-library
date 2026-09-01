@@ -100,6 +100,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
   private readonly handlePointerDown = (event: PointerEvent) => {
     if (
       !this.onInputIntent
+      || this.preferences?.interaction.swipePageTurn === false
       || this.zoom > 1
       || this.status !== 'ready'
       || event.button !== 0
@@ -218,6 +219,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
 
   getInteractionPolicy(): ReaderInteractionPolicy {
     if (this.preferences?.comic.flow === 'scrolled') return { horizontalPaging: 'none' };
+    if (this.preferences?.interaction.swipePageTurn === false) return { horizontalPaging: 'none' };
     if (this.zoom > 1) return { horizontalPaging: 'none' };
     return { horizontalPaging: this.onInputIntent ? 'adapter-interactive' : 'shell-discrete' };
   }
@@ -330,8 +332,13 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       this.zoom = Math.max(0.6, Math.min(2.4, command.zoom));
       if (this.zoom > 1) this.trackController.suspend();
       else this.trackController.interrupt();
-      this.track.render();
-      this.track.recenter();
+      // A continuous comic owns one vertical stream.  Its zoom is applied by
+      // ComicContinuousController to every slot; the hidden paginated track
+      // must not be allowed to take over that update.
+      if (this.preferences.comic.flow !== 'scrolled') {
+        this.track.render();
+        this.track.recenter();
+      }
       this.emitView();
       return this.ack(context.operation, true, { location: this.location() });
     }
@@ -361,7 +368,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       });
     }
 
-    if (!nextPage || nextPage === this.currentPage && command.type !== 'retry') {
+    if (nextPage === undefined || nextPage === this.currentPage && command.type !== 'retry') {
       return this.failOperation(context, 'no-op');
     }
 
@@ -619,7 +626,6 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.continuous.render({
       currentPage: this.currentPage,
       pageCount: this.pages.length,
-      imageFit: preferences.comic.imageFit,
       zoom: this.zoom,
       pageWidth: effectiveReaderPageWidth(
         preferences.comic.pageWidth,

@@ -11,6 +11,7 @@ import com.ermao.library.shared.modules.downloads.domain.DownloadTaskEvent
 import com.ermao.library.shared.modules.downloads.domain.DownloadTaskStatus
 import com.ermao.library.shared.modules.downloads.domain.DownloadArtifactKind
 import com.ermao.library.shared.modules.downloads.domain.DownloadNamespace
+import com.ermao.library.shared.modules.downloads.domain.matchesVersion
 import com.ermao.library.shared.modules.downloads.domain.transition
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -138,7 +139,7 @@ class DownloadResourceRuntime(
             is DownloadBootstrapResult.Failure -> return@withLock failure(resourceId, result.error, observer)
         }
         require(descriptor.identity.namespace == context.namespace && descriptor.identity.resourceId == resourceId)
-        if (expectedDescriptor != null && !DownloadTask(taskId, expectedDescriptor).matchesDescriptor(descriptor)) {
+        if (expectedDescriptor != null && !expectedDescriptor.matchesVersion(descriptor)) {
             return@withLock failure(resourceId, AppError(AppErrorKind.Conflict, "ASSET_VERSION_CHANGED"), observer)
         }
         if (!descriptor.isDownloadable) return@withLock failure(

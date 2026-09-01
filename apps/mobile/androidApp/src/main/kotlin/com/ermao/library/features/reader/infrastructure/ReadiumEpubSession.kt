@@ -1,7 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
 import com.ermao.library.features.reader.application.ReaderScreenController
-import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
 import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.shared.modules.reader.ReaderMorphology
@@ -162,7 +161,7 @@ internal class ReadiumEpubSession(
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
 
-    private val _preferences = MutableStateFlow(enforceAndroidSinglePagePreferences(initialPreferences))
+    private val _preferences = MutableStateFlow(initialPreferences)
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
 
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
@@ -700,7 +699,7 @@ internal class ReadiumEpubSession(
     override fun updatePreferences(updated: ReaderPreferences) {
         val active = checkNotNull(navigator) { "READER_NOT_READY" }
         val previous = _preferences.value
-        val supported = enforceAndroidSinglePagePreferences(updated)
+        val supported = updated
         if (previous == supported) return
         // Persistence precedes SDK submission. Reflow is owned by Readium.
         persistPreferences(supported)

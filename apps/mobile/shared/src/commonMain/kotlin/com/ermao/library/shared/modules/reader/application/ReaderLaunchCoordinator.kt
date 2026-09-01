@@ -8,7 +8,7 @@ import com.ermao.library.shared.modules.downloads.DownloadBootstrapSuccess
 import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.shared.modules.downloads.DownloadDescriptor
 import com.ermao.library.shared.modules.downloads.DownloadRequestContext
-import com.ermao.library.shared.modules.downloads.DownloadTask
+import com.ermao.library.shared.modules.downloads.domain.matchesVersion
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.ReaderDeliveryMode
 import com.ermao.library.shared.modules.reader.domain.ReaderFormatSupport
@@ -103,7 +103,7 @@ class ReaderLaunchCoordinator(
                 val descriptor = result.bootstrap.descriptor
                 val localFailure = ReaderAdmission.localFailure(descriptor.format, descriptor.totalBytes)
                 val local = localArtifacts
-                    .filter { descriptor.matches(it.descriptor) }
+                    .filter { descriptor.matchesVersion(it.descriptor) }
                     .maxByOrNull { it.completedAtEpochMillis }
                 when {
                     localFailure != null -> ReaderLaunch.Unavailable(
@@ -123,7 +123,7 @@ class ReaderLaunchCoordinator(
     suspend fun complete(descriptor: DownloadDescriptor): ReaderLaunch {
         val candidates = catalog.listArtifacts(descriptor.identity.namespace)
             .filter { it.identity.resourceId == descriptor.identity.resourceId }
-        val artifact = candidates.filter { descriptor.matches(it.descriptor) }
+        val artifact = candidates.filter { descriptor.matchesVersion(it.descriptor) }
             .maxByOrNull { it.completedAtEpochMillis }
             ?: return ReaderLaunch.Unavailable(
                 if (candidates.isEmpty()) ReaderErrorCode.ResourceMissing else ReaderErrorCode.PublicationChanged,
@@ -144,9 +144,6 @@ class ReaderLaunchCoordinator(
             else -> ReaderLaunch.Local(artifact)
         }
     }
-
-    private fun DownloadDescriptor.matches(candidate: DownloadDescriptor): Boolean =
-        DownloadTask("reader-validation", this).matchesDescriptor(candidate)
 
     private fun DownloadDescriptor.deliveryMode(): ReaderDeliveryMode =
         ReaderFormatSupport.deliveryMode(readerType.name, format)

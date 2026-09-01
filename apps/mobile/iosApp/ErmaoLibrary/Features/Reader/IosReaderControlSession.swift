@@ -6,6 +6,9 @@ import SwiftUI
 @MainActor
 protocol IosReaderControlSession: ObservableObject {
     var controlMorphology: ErmaoShared.ReaderMorphology { get }
+    /// Concrete renderer capabilities; morphology alone is not evidence that
+    /// a control is implemented by the native reader.
+    var controlCapabilities: ErmaoShared.ReaderCapabilities { get }
     var controlReady: Bool { get }
     var activeControlPanel: IosReaderPanel? { get set }
     var controlsVisible: Bool { get set }
@@ -59,18 +62,34 @@ extension IosReaderControlSession {
     func goToBookmark(id: String) async -> Bool { false }
     func zoomControl(_ direction: Int) {}
 
+    var controlCapabilities: ErmaoShared.ReaderCapabilities {
+        ErmaoShared.PublicKt.readerPlatformCapabilities(
+            morphology: controlMorphology,
+            volumeKeys: false,
+            pdfZoom: controlMorphology == .pdf,
+            pdfFit: false,
+            comic: ErmaoShared.ReaderComicCapabilities(
+                supportsFlow: false,
+                supportsSpread: false,
+                supportsDirection: false,
+                supportsCoverSingle: false,
+                supportsPageGap: false,
+                supportsZoom: false,
+                supportsFit: false,
+                supportsQuality: false,
+                supportsAnimation: false,
+                supportsPageWidth: false
+            )
+        )
+    }
+
     func platformControlEnabled(_ control: ErmaoShared.ReaderControl, unavailable: Set<ErmaoShared.ReaderControl> = []) -> Bool {
         guard let payload = try? preferences.canonicalJSON(),
               let sharedPreferences = try? ReaderPreferencesJson.shared.decode(payload: payload)
         else { return false }
         return ErmaoShared.ReaderSettingsCatalog.shared.resolveReaderControl(
             control: control, morphology: controlMorphology,
-            capabilities: ErmaoShared.PublicKt.readerPlatformCapabilities(
-                morphology: controlMorphology,
-                volumeKeys: false,
-                pdfZoom: controlMorphology == .pdf,
-                pdfFit: false
-            ),
+            capabilities: controlCapabilities,
             preferences: sharedPreferences, ready: controlReady,
             nativeUnavailable: unavailable
         ) == .available

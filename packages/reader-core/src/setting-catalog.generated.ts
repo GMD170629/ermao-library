@@ -62,11 +62,13 @@ export const READER_SETTINGS_CATALOG = {
     "paginatedComic": [
       "comicSpread",
       "comicDirection",
+      "comicFit",
       "comicCoverSingle",
       "comicPageGap"
     ],
     "doubleComicSpread": [
-      "comicCoverSingle"
+      "comicCoverSingle",
+      "comicPageGap"
     ],
     "optimizationEnabled": [
       "deduplicateIndent",

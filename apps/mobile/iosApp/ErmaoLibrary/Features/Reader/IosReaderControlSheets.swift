@@ -140,6 +140,7 @@ struct ReaderNotesSheet<Session: IosReaderControlSession>: View {
 
 struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @ObservedObject var session: Session
     @ObservedObject var editor: IosReaderPreferenceEditor
     let panel: String
@@ -166,7 +167,12 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
                     DisclosureGroup("reader.settings.advanced", isExpanded: $advanced) {
                         ForEach(sections.filter { $0.advanced }, id: \.id) { section in catalogSection(section) }
                     }
-                    Button(LocalizedStringKey("reader.catalog.reset"), role: .destructive) { editor.reset() }
+                    if let reset = ReaderSettingsCatalog.shared.settings.first(where: { $0.id == "reset" }) {
+                        Button(
+                            catalogText(key: reset.key, chinese: reset.chinese, english: reset.english),
+                            role: .destructive
+                        ) { editor.reset() }
+                    }
                 }
             }
             .navigationTitle(panel == "appearance" ? "reader.appearance" : "reader.settings")
@@ -180,18 +186,15 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
         Section {
             ForEach(settings(in: section), id: \.id) { setting in settingRow(setting) }
         } header: {
-            if !section.chinese.isEmpty { Text(LocalizedStringKey(section.key)) }
+            if !section.chinese.isEmpty {
+                Text(verbatim: catalogText(key: section.key, chinese: section.chinese, english: section.english))
+            }
         }
     }
 
     @ViewBuilder private func settingRow(_ setting: ReaderSettingDefinition) -> some View {
         let sharedPreferences = try? ReaderPreferencesJson.shared.decode(payload: editor.draft.canonicalJSON())
-        let capabilities = ErmaoShared.PublicKt.readerPlatformCapabilities(
-            morphology: session.controlMorphology,
-            volumeKeys: false,
-            pdfZoom: session.controlMorphology == .pdf,
-            pdfFit: false
-        )
+        let capabilities = session.controlCapabilities
         let baseState = sharedPreferences.map { preferences in
             ErmaoShared.ReaderSettingsCatalog.shared.resolveReaderSetting(
                 setting: setting,
@@ -233,15 +236,18 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
         let displayedValue = Double(value)?.formatted(.number.precision(.fractionLength(0 ... 4))) ?? value
         let fixedSwipe = setting.id == "swipePageTurn" && !available
         let binding = Binding(get: { value }, set: { editor.changeSetting(setting, value: $0) })
+        let title = catalogText(key: setting.key, chinese: setting.chinese, english: setting.english)
         VStack(alignment: .leading, spacing: 6) {
             if setting.kind == "toggle" {
-                Toggle(LocalizedStringKey(setting.key), isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { fixedSwipe || available && (stored == "true" || stored == "system") },
                     set: { editor.changeSetting(setting, value: setting.id == "themeMode" ? ($0 ? "system" : "manual") : String($0)) }
-                )).disabled(!available)
+                )) {
+                    Text(verbatim: title)
+                }.disabled(!available)
             } else if setting.kind == "number" {
                 ReaderValueSlider(
-                    title: LocalizedStringKey(setting.key),
+                    title: title,
                     value: Binding(get: { Double(stored) ?? setting.minimum }, set: { number in
                         let value = setting.step >= 1 ? String(Int(number.rounded())) : String((number * 100).rounded() / 100)
                         editor.changeSetting(setting, value: value)
@@ -252,21 +258,26 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
                     identifier: "reader.setting.\(setting.id)"
                 ).disabled(!available)
             } else {
-                Picker(LocalizedStringKey(setting.key), selection: binding) {
+                Picker(selection: binding) {
                     ForEach(setting.options, id: \.value) { option in
-                        Text(LocalizedStringKey(option.key)).tag(option.value)
+                        Text(verbatim: catalogText(key: option.key, chinese: option.chinese, english: option.english))
+                            .tag(option.value)
                             .disabled(setting.id == "letterSpacing" && (Double(option.value) ?? 0) < 0 && !session.isEnabled(.negativeletterspacing))
                     }
                     if !setting.options.contains(where: { $0.value == value }) {
                         Text(verbatim: displayedValue).tag(value)
                     }
+                } label: {
+                    Text(verbatim: title)
                 }.disabled(!available)
             }
             if setting.id == "pdfFit" { Text("reader.pdf.fit.unavailable").font(.caption).foregroundStyle(.secondary) }
             if fixedSwipe { Text("reader.settings.swipeFixed").font(.caption).foregroundStyle(.secondary) }
             if !available, !fixedSwipe, let reasonID = state?.reasonId {
-                Text(LocalizedStringKey("reader.catalog.reason.\(reasonID)"))
-                    .font(.caption).foregroundStyle(.secondary)
+                if let reason = ReaderSettingsCatalog.shared.availabilityReasons[reasonID] {
+                    Text(verbatim: catalogText(key: reason.key, chinese: reason.chinese, english: reason.english))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if setting.id == "letterSpacing" && !session.isEnabled(.negativeletterspacing) {
                 Text("reader.settings.negativeSpacingRetained").font(.caption).foregroundStyle(.secondary)
@@ -275,10 +286,16 @@ struct ReaderPreferenceSheet<Session: IosReaderControlSession>: View {
         }
         .accessibilityIdentifier(setting.id == "preservePublisherStyles" ? "reader.setting.publisherStyles" : "reader.setting.\(setting.id)")
     }
+
+    private func catalogText(key: String, chinese: String, english: String) -> String {
+        let localized = localizedReaderOption(key, locale: locale)
+        guard localized == key else { return localized }
+        return locale.language.languageCode?.identifier == "zh" ? chinese : english
+    }
 }
 
 struct ReaderValueSlider: View {
-    let title: LocalizedStringKey
+    let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
     let step: Double
@@ -287,9 +304,9 @@ struct ReaderValueSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack { Text(title); Spacer(); Text(valueText).foregroundStyle(.secondary) }
+            HStack { Text(verbatim: title); Spacer(); Text(valueText).foregroundStyle(.secondary) }
             Slider(value: $value, in: range, step: step)
-                .accessibilityLabel(Text(title))
+                .accessibilityLabel(Text(verbatim: title))
                 .accessibilityValue(Text(valueText))
                 .accessibilityIdentifier(identifier)
         }

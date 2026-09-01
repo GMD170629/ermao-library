@@ -231,4 +231,34 @@ final class LocalizationTests: XCTestCase {
             )
         }
     }
+
+    func testEveryReaderCatalogRuntimeKeyResolvesForTheActiveAppLocale() {
+        var labels: [(key: String, chinese: String, english: String)] = []
+        labels += ReaderSettingsCatalog.shared.sections
+            .filter { !$0.chinese.isEmpty || !$0.english.isEmpty }
+            .map { ($0.key, $0.chinese, $0.english) }
+        labels += ReaderSettingsCatalog.shared.settings.map { ($0.key, $0.chinese, $0.english) }
+        labels += ReaderSettingsCatalog.shared.settings.flatMap { setting in
+            setting.options.map { ($0.key, $0.chinese, $0.english) }
+        }
+        labels += ReaderSettingsCatalog.shared.availabilityReasons.values.map {
+            ($0.key, $0.chinese, $0.english)
+        }
+
+        for label in labels {
+            let chinese = localizedReaderOption(
+                label.key,
+                locale: Locale(identifier: "zh-Hans-CN")
+            )
+            XCTAssertEqual(chinese, label.chinese, "Unresolved Simplified Chinese key: \(label.key)")
+            XCTAssertNotEqual(chinese, label.key)
+
+            let english = localizedReaderOption(
+                label.key,
+                locale: Locale(identifier: "en-US")
+            )
+            XCTAssertEqual(english, label.english, "Unresolved English key: \(label.key)")
+            XCTAssertNotEqual(english, label.key)
+        }
+    }
 }

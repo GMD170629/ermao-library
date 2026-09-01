@@ -67,4 +67,10 @@ tasks.withType<Test>().configureEach {
         "readerSafetyReportPath",
         layout.buildDirectory.file("reports/reader-safety-conformance/kmp.json").get().asFile.absolutePath,
     )
+    systemProperty(
+        "readerComicSemanticsFixturePath",
+        rootProject.layout.projectDirectory.dir(
+            "../../packages/reader-contracts/fixtures/comic-reader-semantics-v1.json",
+        ).asFile.absolutePath,
+    )
 }

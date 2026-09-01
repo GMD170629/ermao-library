@@ -167,20 +167,27 @@ data class DownloadTask(
         require(failureCode == null || failureCode.isNotBlank())
     }
 
-    /** Display metadata never changes task identity; persisted completed originals survive metadata enrichment. */
     fun matchesDescriptor(candidate: DownloadDescriptor): Boolean =
-        status != DownloadTaskStatus.Cancelled && descriptor.identity == candidate.identity &&
-            descriptor.format.equals(candidate.format, ignoreCase = true) &&
-            descriptor.readerType == candidate.readerType && descriptor.artifactKind == candidate.artifactKind &&
-            descriptor.bundleMembers.size == candidate.bundleMembers.size &&
-            descriptor.bundleMembers.zip(candidate.bundleMembers).all { (stored, remote) ->
-                stored.assetId == remote.assetId && stored.sequenceIndex == remote.sequenceIndex &&
-                    stored.source.apiPath == remote.source.apiPath && stored.source.mimeType == remote.source.mimeType &&
-                    stored.source.totalBytes == remote.source.totalBytes &&
-                    (stored.source.sourceModifiedAtMillis == remote.source.sourceModifiedAtMillis ||
-                        (artifact != null && stored.source.sourceModifiedAtMillis == null))
-            }
+        status != DownloadTaskStatus.Cancelled && descriptor.matchesVersion(
+            candidate,
+            allowMissingStoredModificationTime = artifact != null,
+        )
 }
+
+fun DownloadDescriptor.matchesVersion(
+    candidate: DownloadDescriptor,
+    allowMissingStoredModificationTime: Boolean = false,
+): Boolean = identity == candidate.identity &&
+    format.equals(candidate.format, ignoreCase = true) &&
+    readerType == candidate.readerType && artifactKind == candidate.artifactKind &&
+    bundleMembers.size == candidate.bundleMembers.size &&
+    bundleMembers.zip(candidate.bundleMembers).all { (stored, remote) ->
+        stored.assetId == remote.assetId && stored.sequenceIndex == remote.sequenceIndex &&
+            stored.source.apiPath == remote.source.apiPath && stored.source.mimeType == remote.source.mimeType &&
+            stored.source.totalBytes == remote.source.totalBytes &&
+            (stored.source.sourceModifiedAtMillis == remote.source.sourceModifiedAtMillis ||
+                (allowMissingStoredModificationTime && stored.source.sourceModifiedAtMillis == null))
+    }
 
 sealed interface DownloadTaskEvent {
     data object Start : DownloadTaskEvent

@@ -253,6 +253,26 @@ data class ReaderPreferences(
     }
 }
 
+/**
+ * Renderer capabilities specific to fixed-layout comics.
+ *
+ * These flags describe actual native behavior, not merely whether a setting
+ * exists in the shared settings catalog.  Defaults are false so a platform
+ * cannot advertise a control before its renderer applies it.
+ */
+data class ReaderComicCapabilities(
+    val supportsFlow: Boolean = false,
+    val supportsSpread: Boolean = false,
+    val supportsDirection: Boolean = false,
+    val supportsCoverSingle: Boolean = false,
+    val supportsPageGap: Boolean = false,
+    val supportsZoom: Boolean = false,
+    val supportsFit: Boolean = false,
+    val supportsQuality: Boolean = false,
+    val supportsAnimation: Boolean = false,
+    val supportsPageWidth: Boolean = false,
+)
+
 /** Runtime availability for the complete Web Reader control surface on native EPUB. */
 data class ReaderCapabilities(
     val canGoPrevious: Boolean,
@@ -292,6 +312,7 @@ data class ReaderCapabilities(
     val supportsPublisherStyles: Boolean = false,
     val supportsReadingProgression: Boolean = false,
     val supportsWritingMode: Boolean = false,
+    val comic: ReaderComicCapabilities = ReaderComicCapabilities(),
 ) {
     companion object {
         fun epub(supportsVolumeKeys: Boolean, supportsCustomFonts: Boolean = true) = ReaderCapabilities(

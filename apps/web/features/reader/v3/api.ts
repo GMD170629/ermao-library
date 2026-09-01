@@ -304,19 +304,21 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     }
   }
   const sourceFormatPolicy = readerSafetyFormatPolicy(format);
+  const requiresContentAsset = readerType === 'pdf'
+    || (readerType === 'comic' && format !== 'image_dir');
   const contentAsset = readerType === 'pdf'
     ? assets.find((asset) => readerSafetyAcceptsMimeType(READER_SAFETY_FORMATS.PDF, asset.mimeType))
     : readerType === 'comic'
       ? assets.find((asset) => sourceFormatPolicy !== null
         && readerSafetyAcceptsMimeType(sourceFormatPolicy, asset.mimeType))
       : null;
-  if (readerType !== 'reflowable' && assets.length > 0 && !contentAsset) {
+  if (requiresContentAsset && assets.length > 0 && !contentAsset) {
     rejectReaderSafety(READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME);
   }
-  if (readerType !== 'reflowable' && (!contentAsset || !contentAsset.url)) {
+  if (requiresContentAsset && (!contentAsset || !contentAsset.url)) {
     throw new Error('阅读器启动信息缺少内容资产');
   }
-  if (contentAsset && readerType !== 'reflowable') {
+  if (contentAsset && requiresContentAsset) {
     if (!Number.isSafeInteger(contentAsset.sizeBytes) || contentAsset.sizeBytes <= 0) {
       throw new ReaderBootstrapError('READER_BOOTSTRAP_INVALID', '阅读资产大小无效');
     }

@@ -1,7 +1,5 @@
 package com.ermao.library.features.reader.infrastructure
 
-import com.ermao.library.features.reader.application.enforceAndroidSinglePagePreferences
-
 import com.ermao.library.archive.infrastructure.ArchiveCoreException
 import com.ermao.library.features.reader.application.ReaderBookmarkChange
 import com.ermao.library.features.reader.application.ReaderResumeNotice
@@ -27,6 +25,9 @@ import com.ermao.library.shared.modules.reader.ComicPublicationLocation
 import com.ermao.library.shared.modules.reader.ReaderRestoreComicPage
 import com.ermao.library.shared.modules.reader.ReaderRestoreExactLocalLocation
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
+import com.ermao.library.shared.modules.reader.ReaderComicCapabilities
+import com.ermao.library.shared.modules.reader.ReaderControl
+import com.ermao.library.shared.modules.reader.changedReaderControls
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.decideReaderResume
 import com.ermao.library.shared.modules.reader.planReaderProgressRestore
@@ -45,8 +46,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.readium.r2.navigator.image.ImageNavigatorFragment
-import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 
 internal class ReadiumComicSession(
@@ -84,25 +83,39 @@ internal class ReadiumComicSession(
         supportsNegativeLetterSpacing = false,
         supportsPageMargins = false,
         supportsPageWidth = true,
-        supportsReadingMode = false,
-        supportsSpreadMode = false,
+        supportsReadingMode = true,
+        supportsSpreadMode = true,
         supportsParagraphLayout = false,
         supportsProgressStyles = true,
         supportsClock = true,
         supportsKeepAwake = true,
         supportsTapZones = true,
-        supportsSwipeToggle = false,
-        supportsPageTurnAnimation = false,
+        supportsSwipeToggle = true,
+        supportsPageTurnAnimation = true,
         supportsSmartOptimization = false,
         supportsKeyboardPageTurn = true,
         supportsVolumeKeyPageTurn = true,
+        comic = ReaderComicCapabilities(
+            supportsFlow = true,
+            supportsSpread = true,
+            supportsDirection = true,
+            supportsCoverSingle = true,
+            supportsPageGap = true,
+            supportsZoom = true,
+            supportsFit = true,
+            supportsQuality = source is RemoteComicReaderSource,
+            supportsAnimation = true,
+            supportsPageWidth = true,
+        ),
     )
     private val _contentError = MutableStateFlow<ReaderError?>(null)
     override val contentError: StateFlow<ReaderError?> = _contentError.asStateFlow()
 
     private val _currentLocation = MutableStateFlow<ReaderLocation?>(null)
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
-    private val _preferences = MutableStateFlow(enforceAndroidSinglePagePreferences(initialPreferences))
+    private val _presentationProgress = MutableStateFlow<Double?>(null)
+    override val presentationProgress: StateFlow<Double?> = _presentationProgress.asStateFlow()
+    private val _preferences = MutableStateFlow(initialPreferences)
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
     private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
     override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
@@ -116,9 +129,11 @@ internal class ReadiumComicSession(
         private set
 
     private var publication: Publication? = null
-    private var navigator: ImageNavigatorFragment? = null
+    private var navigator: ComicNavigatorFragment? = null
     private var locationJob: Job? = null
+    private var presentationJob: Job? = null
     private var lastPersistedLocation: ComicReaderLocation? = null
+    private var lastPersistedPercent: Double? = null
     private var expectedRestore: ReaderComicPage? = null
     private var remoteTarget: ReaderProgressSnapshotV4? = null
     private var awaitingInitialObservation = true
@@ -129,7 +144,7 @@ internal class ReadiumComicSession(
         _restoreWarning.value = null
     }
 
-    override suspend fun prepare(classLoader: ClassLoader): ImageNavigatorFragment {
+    override suspend fun prepare(@Suppress("UNUSED_PARAMETER") classLoader: ClassLoader): androidx.fragment.app.Fragment {
         check(!prepared) { "Reader session is already prepared" }
         prepared = true
         val opened = try {
@@ -208,14 +223,14 @@ internal class ReadiumComicSession(
                 else -> null
             }
         }
-        val initialLocator = restorePage?.let { page -> locatorFor(page, opened) }
         expectedRestore = restorePage
-        if ((restorePlan.localProgress != null || restorePlan.remoteSnapshot != null) && initialLocator == null) {
+        if ((restorePlan.localProgress != null || restorePlan.remoteSnapshot != null) && restorePage == null) {
             publishReaderRestoreWarning(_restoreWarning, "comic", "candidate_resolution")
         } else if (restorePlan.usesLocalExact) {
             val location = restorePlan.localProgress?.location as? ComicReaderLocation
             _currentLocation.value = location
             lastPersistedLocation = location
+            lastPersistedPercent = restorePlan.localProgress?.percent
         }
         tableOfContents = canonicalPages.map { page ->
             ReaderTocEntry(
@@ -225,14 +240,27 @@ internal class ReadiumComicSession(
                 index = page.pageIndex,
             )
         }
-        val factory = ImageNavigatorFragment.createFactory(opened, initialLocator)
-        return (factory.instantiate(classLoader, ImageNavigatorFragment::class.java.name) as ImageNavigatorFragment)
-            .also { navigator = it }
+        return ComicNavigatorFragment().also {
+            it.configure(
+                publication = opened,
+                pages = canonicalPages,
+                preferences = _preferences.value,
+                initialPageIndex = restorePage?.pageIndex ?: 0,
+                onError = { error -> _contentError.value = error },
+            )
+            navigator = it
+        }
     }
 
     override fun bind(scope: CoroutineScope) {
         val currentNavigator = checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
+        check(presentationJob == null) { "Reader presentation is already bound" }
+        presentationJob = scope.launch {
+            currentNavigator.presentation.collectLatest { current ->
+                _presentationProgress.value = current?.plan?.progress
+            }
+        }
         progressCoordinator?.let { coordinator ->
             scope.launch {
                 coordinator.remoteProgressNotices.collectLatest { notice ->
@@ -253,8 +281,8 @@ internal class ReadiumComicSession(
             }
         }
         locationJob = scope.launch {
-            currentNavigator.currentLocator.collectLatest { locator ->
-                val location = locator.toCanonicalLocation() ?: run {
+            currentNavigator.currentLocation.collectLatest { locationValue ->
+                val location = locationValue as? ComicReaderLocation ?: run {
                     publishReaderRestoreWarning(_restoreWarning, "comic", "locator_mapping")
                     return@collectLatest
                 }
@@ -276,14 +304,16 @@ internal class ReadiumComicSession(
                     remoteTarget = null
                     _resumeNotice.value = null
                     lastPersistedLocation = location
+                    lastPersistedPercent = target.displayPercent
                     return@collectLatest
                 }
                 if (awaitingInitialObservation) {
                     awaitingInitialObservation = false
                     return@collectLatest
                 }
+                val presentationProgress = currentNavigator.currentProgress
                 delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
-                persist(location)
+                persist(location, presentationProgress)
             }
         }
     }
@@ -297,15 +327,13 @@ internal class ReadiumComicSession(
         val page = canonicalPages.getOrNull(comic.pageIndex)
             ?.takeIf { it.resourceHref == comic.resourceHref }
             ?: return false
-        val locator = publication?.let { locatorFor(page, it) } ?: return false
         expectedRestore = page
-        return navigator?.go(locator, animated = navigationAnimationsEnabled()) ?: false
+        return navigator?.goTo(page.pageIndex, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goToTotalProgression(totalProgression: Double): Boolean {
         require(totalProgression in 0.0..1.0) { "Total progression is outside 0..1" }
-        val index = ((canonicalPages.lastIndex * totalProgression).toInt()).coerceIn(canonicalPages.indices)
-        return goTo(canonicalPages[index].toLocation())
+        return navigator?.goToProgress(totalProgression, animated = navigationAnimationsEnabled()) ?: false
     }
 
     private fun navigationAnimationsEnabled(): Boolean =
@@ -326,11 +354,59 @@ internal class ReadiumComicSession(
         return moved
     }
 
+    override fun unavailableControls(preferences: ReaderPreferences): Set<ReaderControl> =
+        if (source is RemoteComicReaderSource) emptySet() else setOf(ReaderControl.ComicQuality)
+
+    override fun canApplyPreferences(updated: ReaderPreferences): Boolean {
+        if (updated == com.ermao.library.shared.modules.reader.resetReaderPreferences()) return true
+        val unavailable = unavailableControls(_preferences.value)
+        return changedReaderControls(_preferences.value, updated).all { control ->
+            com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.resolveReaderControl(
+                control,
+                morphology,
+                capabilities,
+                updated,
+                true,
+                unavailable,
+            ) == com.ermao.library.shared.modules.reader.ReaderControlAvailability.Available
+        }
+    }
+
     override fun updatePreferences(updated: ReaderPreferences) {
-        val supported = enforceAndroidSinglePagePreferences(updated)
-        if (_preferences.value == supported) return
-        persistPreferences(supported)
-        _preferences.value = supported
+        val previous = _preferences.value
+        if (previous == updated) return
+        val currentNavigator = navigator
+        val currentPublication = publication
+        val replacementPublication = if (
+            source is RemoteComicReaderSource && previous.comic.imageVariant != updated.comic.imageVariant
+        ) {
+            RemoteComicReadiumPublicationFactory(
+                requireNotNull(comicPageServer) { "Comic page server is missing" },
+                onFailure = { _contentError.value = it },
+            ).open(source, updated.comic.imageVariant)
+        } else {
+            null
+        }
+        if (replacementPublication != null) {
+            currentNavigator?.replacePublication(replacementPublication, updated)
+            publication = replacementPublication
+        } else {
+            currentNavigator?.updatePreferences(updated)
+        }
+        try {
+            persistPreferences(updated)
+            _preferences.value = updated
+            if (replacementPublication != null) currentPublication?.close()
+        } catch (error: RuntimeException) {
+            if (replacementPublication != null && currentPublication != null) {
+                currentNavigator?.replacePublication(currentPublication, previous)
+                publication = currentPublication
+                replacementPublication.close()
+            } else {
+                currentNavigator?.updatePreferences(previous)
+            }
+            throw error
+        }
     }
 
     override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
@@ -340,7 +416,9 @@ internal class ReadiumComicSession(
     override fun goToBookmark(id: String): Boolean = false
 
     override suspend fun flush() {
-        (_currentLocation.value as? ComicReaderLocation)?.let { persist(it) }
+        (_currentLocation.value as? ComicReaderLocation)?.let { location ->
+            persist(location, navigator?.currentProgress)
+        }
     }
 
     override suspend fun close() {
@@ -354,6 +432,9 @@ internal class ReadiumComicSession(
     override fun release() {
         locationJob?.cancel()
         locationJob = null
+        presentationJob?.cancel()
+        presentationJob = null
+        navigator?.release()
         navigator = null
         publication?.close()
         publication = null
@@ -361,18 +442,6 @@ internal class ReadiumComicSession(
 
     private fun canonicalPage(resourceHref: String, pageIndex: Int): ReaderComicPage? =
         canonicalPages.getOrNull(pageIndex)?.takeIf { it.resourceHref == resourceHref }
-
-    private fun locatorFor(page: ReaderComicPage, opened: Publication): Locator? =
-        opened.readingOrder.getOrNull(page.pageIndex)
-            ?.takeIf { it.href.toString() == page.resourceHref }
-            ?.let(opened::locatorFromLink)
-
-    private fun Locator.toCanonicalLocation(): ComicReaderLocation? {
-        val href = href.toString()
-        val index = publication?.readingOrder?.indexOfFirst { it.href.toString() == href } ?: -1
-        val page = canonicalPages.getOrNull(index)?.takeIf { it.resourceHref == href } ?: return null
-        return page.toLocation()
-    }
 
     private fun ReaderComicPage.toLocation() = ComicReaderLocation(
         resourceHref = resourceHref,
@@ -388,14 +457,16 @@ internal class ReadiumComicSession(
         null
     }
 
-    private suspend fun persist(location: ComicReaderLocation) = saveMutex.withLock {
-        if (lastPersistedLocation == location) return@withLock
+    private suspend fun persist(
+        location: ComicReaderLocation,
+        presentationProgress: Double?,
+    ) = saveMutex.withLock {
         val capturedAt = nowEpochMillis()
-        val percent = if (canonicalPages.size <= 1) {
-            100.0
-        } else {
-            location.pageIndex.toDouble() / canonicalPages.lastIndex * 100.0
+        val fallbackProgress = if (canonicalPages.size <= 1) 1.0 else {
+            location.pageIndex.toDouble() / canonicalPages.lastIndex
         }
+        val percent = (presentationProgress ?: fallbackProgress).coerceIn(0.0, 1.0) * 100.0
+        if (lastPersistedLocation == location && lastPersistedPercent == percent) return@withLock
         val progress = ReaderProgress(
             resourceId = source.resourceId,
             location = location,
@@ -411,6 +482,7 @@ internal class ReadiumComicSession(
             return@withLock
         }
         lastPersistedLocation = location
+        lastPersistedPercent = percent
         _restoreWarning.value = null
         val namespace = presentationNamespaceKey ?: return@withLock
         val bookId = source.bookId ?: return@withLock

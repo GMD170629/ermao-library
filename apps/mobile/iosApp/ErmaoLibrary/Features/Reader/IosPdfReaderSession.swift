@@ -25,7 +25,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let rangeCache: ErmaoShared.PdfRangeMemory?
     private let rangeServer: (any ErmaoShared.PdfRangeServerPort)?
     private let remoteDescriptor: ErmaoShared.DownloadDescriptor?
-    private let pdfiumMaterializer: (any IosPdfiumDownloadMaterializing)?
+    private let pdfiumMaterializer: IosPdfiumDownloadMaterializer?
     private let preferencesStore: IosReaderPreferencesStore
 
     private let managedStore: IosManagedPublicationStore
@@ -55,7 +55,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         rangeCache: ErmaoShared.PdfRangeMemory? = nil,
         rangeServer: (any ErmaoShared.PdfRangeServerPort)? = nil,
         remoteDescriptor: ErmaoShared.DownloadDescriptor? = nil,
-        pdfiumMaterializer: (any IosPdfiumDownloadMaterializing)? = nil,
+        pdfiumMaterializer: IosPdfiumDownloadMaterializer? = nil,
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,

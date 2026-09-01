@@ -49,20 +49,79 @@ typealias ReaderSettingState = com.ermao.library.shared.modules.reader.domain.Re
 fun resetReaderPreferences(): ReaderPreferences =
     com.ermao.library.shared.modules.reader.domain.resetReaderPreferences()
 
+fun comicOrderedPages(pageCount: Int): List<Int> =
+    com.ermao.library.shared.modules.reader.domain.comicOrderedPages(pageCount)
+
+fun comicSpreadStarts(
+    orderedPages: List<Int>,
+    mode: ReaderComicSpreadMode,
+    pairing: ComicPairingPolicy = ComicPairingPolicy.PairedFromFirst,
+): List<Int> = com.ermao.library.shared.modules.reader.domain.comicSpreadStarts(orderedPages, mode, pairing)
+
+fun comicNormalizePage(
+    orderedPages: List<Int>,
+    page: Int,
+    mode: ReaderComicSpreadMode,
+    pairing: ComicPairingPolicy = ComicPairingPolicy.PairedFromFirst,
+): Int = com.ermao.library.shared.modules.reader.domain.comicNormalizePage(orderedPages, page, mode, pairing)
+
+fun comicSpreadPages(
+    orderedPages: List<Int>,
+    page: Int,
+    mode: ReaderComicSpreadMode,
+    pairing: ComicPairingPolicy = ComicPairingPolicy.PairedFromFirst,
+): List<Int> = com.ermao.library.shared.modules.reader.domain.comicSpreadPages(orderedPages, page, mode, pairing)
+
+fun comicVisualPages(
+    orderedPages: List<Int>,
+    page: Int,
+    mode: ReaderComicSpreadMode,
+    direction: ReaderComicDirection,
+    pairing: ComicPairingPolicy = ComicPairingPolicy.PairedFromFirst,
+): List<Int> = com.ermao.library.shared.modules.reader.domain.comicVisualPages(
+    orderedPages,
+    page,
+    mode,
+    direction,
+    pairing,
+)
+
+fun comicNavigationPrevious(): ComicNavigationCommand =
+    com.ermao.library.shared.modules.reader.domain.ComicNavigationCommand.Previous
+
+fun comicNavigationNext(): ComicNavigationCommand =
+    com.ermao.library.shared.modules.reader.domain.ComicNavigationCommand.Next
+
+fun comicNavigationGoToIndex(pageIndex: Int): ComicNavigationCommand =
+    com.ermao.library.shared.modules.reader.domain.ComicNavigationCommand.GoToIndex(pageIndex)
+
+fun comicNavigationGoToProgress(progression: Double): ComicNavigationCommand =
+    com.ermao.library.shared.modules.reader.domain.ComicNavigationCommand.GoToProgress(progression)
+
 fun readerPlatformCapabilities(
     morphology: ReaderMorphology,
     volumeKeys: Boolean,
     pdfZoom: Boolean,
     pdfFit: Boolean,
+    comic: ReaderComicCapabilities = ReaderComicCapabilities(),
 ): ReaderCapabilities {
     val reflowable = ReaderCapabilities.epub(supportsVolumeKeys = volumeKeys)
     if (morphology == ReaderMorphology.Reflowable) return reflowable
+    val comicSurface = morphology == ReaderMorphology.Comic
     return reflowable.copy(
         supportsBookmarks = false, supportsFontSize = false, supportsFontFamily = false,
         supportsFontWeight = false, supportsLineHeight = false, supportsPositiveLetterSpacing = false,
-        supportsPageMargins = false, supportsPageWidth = true, supportsReadingMode = false, supportsSpreadMode = false,
+        supportsPageMargins = false,
+        supportsPageWidth = !comicSurface || comic.supportsPageWidth,
+        supportsReadingMode = comicSurface && comic.supportsFlow,
+        supportsSpreadMode = comicSurface && comic.supportsSpread,
         supportsParagraphLayout = false, supportsPublisherStyles = false,
-        supportsPageTurnAnimation = false, supportsReadingProgression = false, supportsWritingMode = false,
+        supportsPageTurnAnimation = comicSurface && comic.supportsAnimation,
+        supportsReadingProgression = false, supportsWritingMode = false,
+        supportsComicDirection = comicSurface && comic.supportsDirection,
+        supportsComicCoverSingle = comicSurface && comic.supportsCoverSingle,
+        supportsComicPageGap = comicSurface && comic.supportsPageGap,
+        comic = if (comicSurface) comic else ReaderComicCapabilities(),
         supportsPdfFit = morphology == ReaderMorphology.Pdf && pdfFit,
         supportsPdfZoomPreference = morphology == ReaderMorphology.Pdf && pdfZoom,
     )
@@ -347,10 +406,18 @@ typealias ReaderPageTurnDirection = com.ermao.library.shared.modules.reader.doma
 typealias ReaderPhysicalHorizontalSide = com.ermao.library.shared.modules.reader.domain.ReaderPhysicalHorizontalSide
 typealias ReaderNavigationPolicy = com.ermao.library.shared.modules.reader.domain.ReaderNavigationPolicy
 typealias ReaderComicPreferences = com.ermao.library.shared.modules.reader.domain.ReaderComicPreferences
+typealias ReaderComicCapabilities = com.ermao.library.shared.modules.reader.domain.ReaderComicCapabilities
 typealias ReaderComicDirection = com.ermao.library.shared.modules.reader.domain.ReaderComicDirection
 typealias ReaderComicSpreadMode = com.ermao.library.shared.modules.reader.domain.ReaderComicSpreadMode
 typealias ReaderComicImageFit = com.ermao.library.shared.modules.reader.domain.ReaderComicImageFit
 typealias ReaderComicImageVariant = com.ermao.library.shared.modules.reader.domain.ReaderComicImageVariant
+typealias ComicPairingPolicy = com.ermao.library.shared.modules.reader.domain.ComicPairingPolicy
+typealias ComicViewport = com.ermao.library.shared.modules.reader.domain.ComicViewport
+typealias ComicPresentationPlan = com.ermao.library.shared.modules.reader.domain.ComicPresentationPlan
+typealias ComicPresentationInput = com.ermao.library.shared.modules.reader.domain.ComicPresentationInput
+typealias ComicNavigationCommand = com.ermao.library.shared.modules.reader.domain.ComicNavigationCommand
+typealias ComicNavigationResult = com.ermao.library.shared.modules.reader.domain.ComicNavigationResult
+typealias ComicReaderRuntime = com.ermao.library.shared.modules.reader.domain.ComicReaderRuntime
 typealias ReaderPdfPreferences = com.ermao.library.shared.modules.reader.domain.ReaderPdfPreferences
 typealias ReaderPdfFit = com.ermao.library.shared.modules.reader.domain.ReaderPdfFit
 typealias ReaderPdfFlow = com.ermao.library.shared.modules.reader.domain.ReaderPdfFlow
