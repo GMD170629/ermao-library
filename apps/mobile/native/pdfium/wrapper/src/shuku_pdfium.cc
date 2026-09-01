@@ -14,9 +14,11 @@ namespace {
 
 int g_library_references = 0;
 
-std::mutex& LibraryMutex() {
-  // PDFium treats exit-time destructors as build errors. This lock protects a
-  // process-wide library lifecycle and intentionally lives until process exit.
+std::mutex& PdfiumMutex() {
+  // PDFium treats exit-time destructors as build errors. This lock protects
+  // every PDFium call and intentionally lives until process exit. The public
+  // fpdfview.h contract requires embedders to serialize the complete PDFium
+  // call, including the synchronous file-availability callbacks it invokes.
   static std::mutex* const mutex = new std::mutex();
   return *mutex;
 }
@@ -36,6 +38,7 @@ bool IsValidRange(uint64_t length, uint64_t offset, uint64_t size) {
 }
 
 ShukuPdfiumStatus LastDocumentError() {
+  // The caller must hold PdfiumMutex().
   return FPDF_GetLastError() == FPDF_ERR_PASSWORD ? SHUKU_PDFIUM_ENCRYPTED
                                                    : SHUKU_PDFIUM_INVALID_DOCUMENT;
 }
@@ -56,6 +59,9 @@ namespace {
 FPDF_BOOL IsDataAvailable(FX_FILEAVAIL* interface,
                           size_t offset,
                           size_t size) {
+  // Called synchronously by PDFium while PdfiumMutex() is held. This callback
+  // may only query the host's already-cached bytes; it must not call back into
+  // this wrapper, wait for I/O, or touch UI state.
   auto* context = reinterpret_cast<FileAvailabilityContext*>(interface);
   ShukuPdfiumDocument* document = context->owner;
   if (document == nullptr || !IsValidRange(document->source.length, offset, size)) {
@@ -70,6 +76,9 @@ int ReadCachedBlock(void* parameter,
                     unsigned long position,
                     unsigned char* destination,
                     unsigned long size) {
+  // Called synchronously by PDFium while PdfiumMutex() is held. The host
+  // callback must be a bounded copy from already-cached data and must not
+  // re-enter this wrapper.
   auto* document = static_cast<ShukuPdfiumDocument*>(parameter);
   if (document == nullptr || destination == nullptr ||
       !IsValidRange(document->source.length, position, size)) {
@@ -81,6 +90,9 @@ int ReadCachedBlock(void* parameter,
 }
 
 void RequestRange(FX_DOWNLOADHINTS* interface, size_t offset, size_t size) {
+  // Called synchronously by PDFium while PdfiumMutex() is held. The host
+  // callback may only enqueue/signal asynchronous acquisition; it must not
+  // perform I/O, wait, touch UI, or re-enter this wrapper.
   auto* context = reinterpret_cast<DownloadHintsContext*>(interface);
   ShukuPdfiumDocument* document = context->owner;
   if (document == nullptr || !IsValidRange(document->source.length, offset, size)) {
@@ -105,6 +117,9 @@ ShukuPdfiumStatus AvailabilityStatus(int status) {
 ShukuPdfiumStatus LoadPage(ShukuPdfiumDocument* document,
                            int page_index,
                            FPDF_PAGE* output) {
+  // The caller must hold PdfiumMutex(). Keep this helper lock-free so a
+  // wrapper operation can compose several PDFium calls without recursive
+  // locking.
   if (document == nullptr || document->document == nullptr || output == nullptr ||
       page_index < 0 || page_index >= FPDF_GetPageCount(document->document)) {
     return SHUKU_PDFIUM_INVALID_ARGUMENT;
@@ -122,7 +137,7 @@ ShukuPdfiumStatus LoadPage(ShukuPdfiumDocument* document,
 }  // namespace
 
 ShukuPdfiumStatus shuku_pdfium_initialize(void) {
-  std::lock_guard<std::mutex> lock(LibraryMutex());
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (g_library_references++ == 0) {
     FPDF_LIBRARY_CONFIG config{};
     config.version = 2;
@@ -132,7 +147,7 @@ ShukuPdfiumStatus shuku_pdfium_initialize(void) {
 }
 
 void shuku_pdfium_shutdown(void) {
-  std::lock_guard<std::mutex> lock(LibraryMutex());
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (g_library_references <= 0) {
     return;
   }
@@ -144,6 +159,7 @@ void shuku_pdfium_shutdown(void) {
 ShukuPdfiumStatus shuku_pdfium_document_create(
     const ShukuPdfiumByteSource* source,
     ShukuPdfiumDocument** output) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (source == nullptr || output == nullptr || source->length == 0 ||
       source->length > ULONG_MAX || source->is_range_cached == nullptr ||
       source->read_cached_block == nullptr || source->request_range == nullptr) {
@@ -175,6 +191,7 @@ ShukuPdfiumStatus shuku_pdfium_document_create(
 }
 
 void shuku_pdfium_document_close(ShukuPdfiumDocument* document) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (document == nullptr) {
     return;
   }
@@ -188,6 +205,7 @@ void shuku_pdfium_document_close(ShukuPdfiumDocument* document) {
 }
 
 ShukuPdfiumStatus shuku_pdfium_document_step(ShukuPdfiumDocument* document) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (document == nullptr || document->availability == nullptr) {
     return SHUKU_PDFIUM_INVALID_ARGUMENT;
   }
@@ -205,6 +223,7 @@ ShukuPdfiumStatus shuku_pdfium_document_step(ShukuPdfiumDocument* document) {
 
 ShukuPdfiumStatus shuku_pdfium_page_step(ShukuPdfiumDocument* document,
                                          int page_index) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (document == nullptr || document->document == nullptr || page_index < 0 ||
       page_index >= FPDF_GetPageCount(document->document)) {
     return SHUKU_PDFIUM_INVALID_ARGUMENT;
@@ -214,6 +233,7 @@ ShukuPdfiumStatus shuku_pdfium_page_step(ShukuPdfiumDocument* document,
 }
 
 int shuku_pdfium_page_count(const ShukuPdfiumDocument* document) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   return document == nullptr || document->document == nullptr
              ? -1
              : FPDF_GetPageCount(document->document);
@@ -222,6 +242,7 @@ int shuku_pdfium_page_count(const ShukuPdfiumDocument* document) {
 ShukuPdfiumStatus shuku_pdfium_page_size(ShukuPdfiumDocument* document,
                                          int page_index,
                                          ShukuPdfiumPageSize* output) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (output == nullptr) {
     return SHUKU_PDFIUM_INVALID_ARGUMENT;
   }
@@ -246,6 +267,7 @@ ShukuPdfiumStatus shuku_pdfium_render_page_bgra(
     int stride,
     uint64_t max_pixels,
     void* destination) {
+  std::lock_guard<std::mutex> lock(PdfiumMutex());
   if (width <= 0 || height <= 0 || width > INT_MAX / 4 || stride < width * 4 || destination == nullptr ||
       max_pixels == 0) {
     return SHUKU_PDFIUM_INVALID_ARGUMENT;

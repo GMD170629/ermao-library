@@ -262,8 +262,10 @@ The shared `ReaderDeliveryMode` has three values. `DOWNLOAD_ORIGINAL` covers EPU
 FB2, TXT, MOBI, AZW, AZW3 and PRC; `STREAM` covers PDF and comics; unsupported
 formats do not enter Reader. The former online-readability gate and online-limit
 fallback are removed. PDF delivery follows `PDF.RANGE_PROTOCOL` and rejects an
-ignored Range before body consumption; comic page delivery and native SDK ordinary
-caches remain.
+ignored Range before body consumption. Native PDFium engine requests are distinct
+from HTTP spans: requests that exceed the 8 MiB volatile cache route to the canonical
+Downloads runtime, then install the verified local file in the same PDFium session.
+Web pdf.js and comic page delivery remain online-first.
 
 Android and iOS use the repository-owned PDFium adapter for both local and streamed
 PDF opening. The former local Readium/PDFKit versus remote PDFium split is removed.
@@ -287,7 +289,9 @@ reason. The only native complete-file transfer remains `DownloadResourceRuntime`
 open without network and remain managed by Downloads. Closing detaches the launch and
 pauses only its owned transfer; late completion cannot open a closed or different-account
 reader. A missing/stale artifact is rebuilt through Downloads, while local parse failure
-never loops or redownloads. PDF and comic errors never select this transition.
+never loops or redownloads. PDFium's transparent materialization has no transition UI
+and creates a normal Download Center task that continues after Reader close; ordinary
+PDF errors and all comic errors do not select it.
 
 The original chapter target, or the latest persisted Reader progress, is restored after download using the existing progress owner. All file lengths, offsets and totals use 64-bit arithmetic. Product admission policy is passed to C through explicit open options; no duplicated native file gate remains in Reader. TXT/FB2 full materialization and MOBI parser memory behavior remain existing engine constraints; OS memory termination cannot be reliably recovered.
 

@@ -132,6 +132,7 @@ data class ReaderSafetyReflowableProfile(
 data class ReaderSafetyPdfProfile(
     val blockedActions: List<String>, val requireFinitePageGeometry: Boolean,
     val requireIdentityContentEncoding: Boolean, val requireStrongRevision: Boolean,
+    val engineRequestLimit: String, val largeRequestAction: String,
     val allowWholeResponseFallback: Boolean,
 )
 data class ReaderSafetyComicProfile(
@@ -147,9 +148,9 @@ data class ReaderSafetyAudioProfile(
 
 object ReaderSafetyPolicy {
     const val schemaVersion: Int = 1
-    const val policyVersion: Int = 1
+    const val policyVersion: Int = 2
     const val policyId: String = "shuku.reader-safety"
-    const val policyDigest: String = "12f3e2ba610d907fa4ca5eefd0ab2319e000a8b5348c45549c9e2bc721579a46"
+    const val policyDigest: String = "d23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2"
 
     val implementationFailureCodes: List<ReaderSafetyErrorCode> = listOf(ReaderSafetyErrorCode.ENGINE_POLICY_ALGORITHM_UNSUPPORTED, ReaderSafetyErrorCode.PLATFORM_POLICY_ALGORITHM_UNSUPPORTED)
 
@@ -238,7 +239,7 @@ object ReaderSafetyPolicy {
         ReaderSafetyRule(ReaderSafetyRuleId.PDF_DISABLE_ACTIVE_CONTENT, listOf(ReaderSafetyFormat.PDF), ReaderSafetyStage.SANITIZE, ReaderSafetyAlgorithmId.PDF_ACTIVE_CONTENT, listOf("profiles.pdf.blockedActions"), ReaderSafetyAction.SANITIZE, null, listOf(ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
         ReaderSafetyRule(ReaderSafetyRuleId.PDF_PAGE_GEOMETRY, listOf(ReaderSafetyFormat.PDF), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.PDF_PAGE_GEOMETRY, listOf("budgets.pdfPageMaxCount", "profiles.pdf.requireFinitePageGeometry"), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_PAGE_LIMIT, listOf(ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
         ReaderSafetyRule(ReaderSafetyRuleId.PDF_RENDER_BUDGET, listOf(ReaderSafetyFormat.PDF), ReaderSafetyStage.RENDER, ReaderSafetyAlgorithmId.PDF_RENDER_BUDGET, listOf("budgets.pdfRenderMaxPixels", "budgets.pdfCanvasMaxDimension"), ReaderSafetyAction.BLOCK_RESOURCE, ReaderSafetyErrorCode.PDF_RENDER_LIMIT, listOf(ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
-        ReaderSafetyRule(ReaderSafetyRuleId.PDF_RANGE_PROTOCOL, listOf(ReaderSafetyFormat.PDF), ReaderSafetyStage.DELIVERY, ReaderSafetyAlgorithmId.PDF_RANGE_PROTOCOL, listOf("budgets.pdfRangeChunkBytes", "budgets.pdfRangeRequestMaxBytes", "budgets.pdfRangeMaxConcurrent", "budgets.pdfRangeMemoryCacheMaxBytes", "profiles.pdf.requireIdentityContentEncoding", "profiles.pdf.requireStrongRevision", "profiles.pdf.allowWholeResponseFallback"), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_RANGE_INVALID, listOf(ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
+        ReaderSafetyRule(ReaderSafetyRuleId.PDF_RANGE_PROTOCOL, listOf(ReaderSafetyFormat.PDF), ReaderSafetyStage.DELIVERY, ReaderSafetyAlgorithmId.PDF_RANGE_PROTOCOL, listOf("budgets.pdfRangeChunkBytes", "budgets.pdfRangeRequestMaxBytes", "budgets.pdfRangeMaxConcurrent", "budgets.pdfRangeMemoryCacheMaxBytes", "profiles.pdf.requireIdentityContentEncoding", "profiles.pdf.requireStrongRevision", "profiles.pdf.engineRequestLimit", "profiles.pdf.largeRequestAction", "profiles.pdf.allowWholeResponseFallback"), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_RANGE_INVALID, listOf(ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
         ReaderSafetyRule(ReaderSafetyRuleId.COMIC_PAGE_MIME, listOf(ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR, ReaderSafetyFormat.IMAGE_DIR), ReaderSafetyStage.RESOURCE, ReaderSafetyAlgorithmId.COMIC_PAGE_MIME, listOf("profiles.comic.allowedPageMimeTypes", "profiles.comic.pageMimeTypesByExtension"), ReaderSafetyAction.BLOCK_RESOURCE, ReaderSafetyErrorCode.COMIC_MIME_MISMATCH, listOf(ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
         ReaderSafetyRule(ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE, listOf(ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.COMIC_ARCHIVE_STRUCTURE, listOf("profiles.comic.archiveFatalFindings"), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED, listOf(ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
         ReaderSafetyRule(ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT, listOf(ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR, ReaderSafetyFormat.IMAGE_DIR), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.MAX_COMIC_PAGE_COUNT, listOf("budgets.comicPageMaxCount"), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED, listOf(ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
@@ -583,6 +584,8 @@ object ReaderSafetyPolicy {
         requireFinitePageGeometry = true,
         requireIdentityContentEncoding = true,
         requireStrongRevision = true,
+        engineRequestLimit = "SOURCE_LENGTH",
+        largeRequestAction = "MATERIALIZE_VERIFIED_ORIGINAL",
         allowWholeResponseFallback = false,
     )
     val comicProfile = ReaderSafetyComicProfile(

@@ -1,11 +1,123 @@
 import Darwin
 import Foundation
+import OSLog
 import UIKit
 @preconcurrency import ErmaoShared
 
 #if canImport(ShukuPdfium)
 import ShukuPdfium
 #endif
+
+/// The PDFium adapter may ask for the complete original when its availability
+/// state cannot be satisfied by the private Range cache.  The materializer is
+/// deliberately a UI-independent facade over DownloadCenterStore: it starts
+/// or joins the canonical download and returns only an already verified file.
+@MainActor
+protocol IosPdfiumDownloadMaterializing: AnyObject, Sendable {
+    func materialize(
+        descriptor: ErmaoShared.DownloadDescriptor
+    ) async throws -> IosManagedPublication
+}
+
+@MainActor
+final class IosPdfiumDownloadMaterializer: IosPdfiumDownloadMaterializing, @unchecked Sendable {
+    private let downloads: DownloadCenterStore
+    private let completedDownloads: any CompletedDownloadProviding
+    private let managedStore: IosManagedPublicationStore
+    private let context: ContentRequestContext
+
+    init(
+        downloads: DownloadCenterStore,
+        completedDownloads: any CompletedDownloadProviding,
+        managedStore: IosManagedPublicationStore,
+        context: ContentRequestContext
+    ) {
+        self.downloads = downloads
+        self.completedDownloads = completedDownloads
+        self.managedStore = managedStore
+        self.context = context
+    }
+
+    func materialize(
+        descriptor: ErmaoShared.DownloadDescriptor
+    ) async throws -> IosManagedPublication {
+        guard downloads.isCurrent(context) else {
+            throw IosReaderFailure(code: .unauthorized)
+        }
+        let record = try await downloads.awaitVerifiedReaderDownload(
+            descriptor: descriptor,
+            context: context
+        )
+        guard record.resourceID == descriptor.identity.resourceId,
+              record.assetID == descriptor.identity.assetId,
+              record.bookID == descriptor.identity.bookId,
+              record.namespace == context.namespaceKey,
+              record.isVerifiedOfflineCopy,
+              let artifact = record.verifiedSharedArtifact,
+              Self.sameDownloadDescriptor(artifact.descriptor, descriptor),
+              artifact.verifiedBytes == descriptor.totalBytes else {
+            throw IosReaderFailure(code: .publicationChanged)
+        }
+
+        guard let completed = try await completedDownloads.completedFile(
+            recordID: record.id,
+            namespace: context.namespaceKey
+        ), completed.resourceID == descriptor.identity.resourceId,
+              completed.assetID == descriptor.identity.assetId,
+              completed.bookID == descriptor.identity.bookId,
+              completed.sourceFormat.caseInsensitiveCompare(descriptor.format) == .orderedSame,
+              completed.byteCount == descriptor.totalBytes else {
+            throw IosReaderFailure(code: .resourceMissing)
+        }
+        guard let sourceFormat = IosManagedPublicationStore.sourceFormat(completed.sourceFormat),
+              sourceFormat == .pdf else {
+            throw IosReaderFailure(code: .corruptFile)
+        }
+        let publication = IosManagedPublication(
+            resourceID: completed.resourceID,
+            displayTitle: completed.displayTitle,
+            fileURL: completed.fileURL,
+            byteCount: completed.byteCount,
+            bookID: completed.bookID,
+            assetID: completed.assetID,
+            namespace: context.namespaceKey,
+            sourceFormat: sourceFormat
+        )
+        await managedStore.bindCompleted(publication)
+        return publication
+    }
+
+    private static func sameDownloadDescriptor(
+        _ lhs: ErmaoShared.DownloadDescriptor,
+        _ rhs: ErmaoShared.DownloadDescriptor
+    ) -> Bool {
+        lhs.identity.bookId == rhs.identity.bookId
+            && lhs.identity.resourceId == rhs.identity.resourceId
+            && lhs.identity.assetId == rhs.identity.assetId
+            && lhs.identity.namespace_.serverIdentity == rhs.identity.namespace_.serverIdentity
+            && lhs.identity.namespace_.userId == rhs.identity.namespace_.userId
+            && lhs.identity.namespace_.authorizationVersion == rhs.identity.namespace_.authorizationVersion
+            && lhs.format.caseInsensitiveCompare(rhs.format) == .orderedSame
+            && lhs.readerType.name.caseInsensitiveCompare(rhs.readerType.name) == .orderedSame
+            && lhs.artifactKind == rhs.artifactKind
+            && lhs.source.apiPath == rhs.source.apiPath
+            && lhs.source.mimeType == rhs.source.mimeType
+            && lhs.source.totalBytes == rhs.source.totalBytes
+            && lhs.source.sourceModifiedAtMillis?.int64Value == rhs.source.sourceModifiedAtMillis?.int64Value
+    }
+}
+
+/// All calls into the repository PDFium wrapper run through one background
+/// actor.  The C wrapper also serializes its calls, but keeping the actor here
+/// guarantees that the MainActor never performs a synchronous PDFium step and
+/// prevents multiple documents from interleaving lifecycle operations.
+private actor IosPdfiumExecutor {
+    static let shared = IosPdfiumExecutor()
+
+    func run<T: Sendable>(_ operation: @Sendable () throws -> T) async throws -> T {
+        try operation()
+    }
+}
 
 enum IosPdfiumFeatureFlags {
     static let expectedRevision = "153.0.8009.0"
@@ -25,14 +137,18 @@ enum IosPdfiumFeatureFlags {
 final class IosPdfiumDocument: @unchecked Sendable {
     let pageCount: Int
 
-    #if canImport(ShukuPdfium)
-    private let native: OpaquePointer
+#if canImport(ShukuPdfium)
+    private struct NativeHandle: @unchecked Sendable {
+        let pointer: OpaquePointer
+    }
+
+    private let native: NativeHandle
     private let context: IosPdfiumByteSourceContext
-    private let operationLock = NSLock()
+    private let stateLock = NSLock()
     private var closed = false
 
     private init(native: OpaquePointer, context: IosPdfiumByteSourceContext, pageCount: Int) {
-        self.native = native
+        self.native = NativeHandle(pointer: native)
         self.context = context
         self.pageCount = pageCount
     }
@@ -42,10 +158,13 @@ final class IosPdfiumDocument: @unchecked Sendable {
     }
     #endif
 
+    @MainActor
     static func open(
         source: ErmaoShared.RemoteByteRangeReaderSource,
         cache: ErmaoShared.PdfRangeMemory,
-        server: any ErmaoShared.PdfRangeServerPort
+        server: any ErmaoShared.PdfRangeServerPort,
+        descriptor: ErmaoShared.DownloadDescriptor? = nil,
+        materializer: (any IosPdfiumDownloadMaterializing)? = nil
     ) async throws -> IosPdfiumDocument {
         #if canImport(ShukuPdfium)
         guard IosPdfiumFeatureFlags.nativeLibraryMatchesLock else {
@@ -56,6 +175,11 @@ final class IosPdfiumDocument: @unchecked Sendable {
                 ErmaoShared.PublicKt.readerSafetyPdfRangeProtocolFailure()
             )
         }
+        if let descriptor {
+            guard Self.descriptor(descriptor, matches: source) else {
+                throw IosReaderFailure(code: .pdfResourceChanged)
+            }
+        }
         let loader = ErmaoShared.PdfRangeLoader(source: source,
             identity: ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId), cache: cache, server: server)
         do { try await loader.probe() }
@@ -64,7 +188,9 @@ final class IosPdfiumDocument: @unchecked Sendable {
             loader: loader,
             cache: cache,
             identity: ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId),
-            length: UInt64(source.expectedSizeBytes)
+            length: UInt64(source.expectedSizeBytes),
+            descriptor: descriptor,
+            materializer: materializer
         )
         return try await open(context: context)
         #else
@@ -72,6 +198,29 @@ final class IosPdfiumDocument: @unchecked Sendable {
         #endif
     }
 
+    #if canImport(ShukuPdfium)
+    private static func descriptor(
+        _ descriptor: ErmaoShared.DownloadDescriptor,
+        matches source: ErmaoShared.RemoteByteRangeReaderSource
+    ) -> Bool {
+        let downloadNamespace = descriptor.identity.namespace_
+        let readerNamespace = source.namespace_
+        return descriptor.identity.resourceId == source.resourceId
+            && descriptor.identity.bookId == source.bookId
+            && descriptor.identity.assetId == source.assetId
+            && downloadNamespace.serverIdentity == readerNamespace.serverIdentity
+            && downloadNamespace.userId == readerNamespace.userId
+            && downloadNamespace.authorizationVersion == readerNamespace.authorizationVersion
+            && descriptor.format.caseInsensitiveCompare("pdf") == .orderedSame
+            && descriptor.readerType.name.caseInsensitiveCompare("pdf") == .orderedSame
+            && descriptor.artifactKind == .singleoriginalasset
+            && descriptor.source.apiPath == source.apiPath
+            && descriptor.source.totalBytes == source.expectedSizeBytes
+            && descriptor.totalBytes == source.expectedSizeBytes
+    }
+    #endif
+
+    @MainActor
     static func open(publication: IosManagedPublication) async throws -> IosPdfiumDocument {
         #if canImport(ShukuPdfium)
         guard IosPdfiumFeatureFlags.nativeLibraryMatchesLock else {
@@ -80,17 +229,20 @@ final class IosPdfiumDocument: @unchecked Sendable {
         guard publication.byteCount >= 0 else {
             throw IosReaderFailure(code: .corruptFile)
         }
-        let reader: IosPdfiumLocalFileReader
-        do {
-            reader = try IosPdfiumLocalFileReader(fileURL: publication.fileURL)
-        } catch let failure as IosReaderFailure {
-            throw failure
-        } catch {
-            throw IosReaderFailure.fileRead(error)
-        }
-        guard reader.length == UInt64(publication.byteCount) else {
-            reader.close()
-            throw IosReaderFailure(code: .corruptFile)
+        let reader = try await IosPdfiumExecutor.shared.run { () throws -> IosPdfiumLocalFileReader in
+            let reader: IosPdfiumLocalFileReader
+            do {
+                reader = try IosPdfiumLocalFileReader(fileURL: publication.fileURL)
+            } catch let failure as IosReaderFailure {
+                throw failure
+            } catch {
+                throw IosReaderFailure.fileRead(error)
+            }
+            guard reader.length == UInt64(publication.byteCount) else {
+                reader.close()
+                throw IosReaderFailure(code: .corruptFile)
+            }
+            return reader
         }
         return try await open(context: IosPdfiumByteSourceContext(reader: reader))
         #else
@@ -101,58 +253,83 @@ final class IosPdfiumDocument: @unchecked Sendable {
     #if canImport(ShukuPdfium)
     private static func open(context: IosPdfiumByteSourceContext) async throws -> IosPdfiumDocument {
         let retained = Unmanaged.passRetained(context)
-        var byteSource = ShukuPdfiumByteSource(
-            length: context.length,
-            user_data: retained.toOpaque(),
-            is_range_cached: iosPdfiumIsRangeCached,
-            read_cached_block: iosPdfiumReadCachedBlock,
-            request_range: iosPdfiumRequestRange
-        )
-        guard shuku_pdfium_initialize() == SHUKU_PDFIUM_OK else {
-            context.close()
+        let creation = try await IosPdfiumExecutor.shared.run { () -> NativeCreation in
+            var byteSource = ShukuPdfiumByteSource(
+                length: context.length,
+                user_data: retained.toOpaque(),
+                is_range_cached: iosPdfiumIsRangeCached,
+                read_cached_block: iosPdfiumReadCachedBlock,
+                request_range: iosPdfiumRequestRange
+            )
+            let initializeStatus = shuku_pdfium_initialize()
+            guard initializeStatus == SHUKU_PDFIUM_OK else {
+                return NativeCreation(status: initializeStatus, document: nil, initialized: false)
+            }
+            var document: OpaquePointer?
+            let createStatus = shuku_pdfium_document_create(&byteSource, &document)
+            let handle = document.map { NativeHandle(pointer: $0) }
+            return NativeCreation(status: createStatus, document: handle, initialized: true)
+        }
+        guard creation.initialized else {
+            try? await IosPdfiumExecutor.shared.run { context.close() }
             retained.release()
             throw engineUnavailable()
         }
-        var document: OpaquePointer?
-        let createStatus = shuku_pdfium_document_create(&byteSource, &document)
-        guard createStatus == SHUKU_PDFIUM_OK, let document else {
-            context.close()
+        guard creation.status == SHUKU_PDFIUM_OK, let document = creation.document else {
+            try? await IosPdfiumExecutor.shared.run {
+                context.close()
+                if let document = creation.document {
+                    shuku_pdfium_document_close(document.pointer)
+                }
+                shuku_pdfium_shutdown()
+            }
             retained.release()
-            shuku_pdfium_shutdown()
-            if context.length == 0, createStatus == SHUKU_PDFIUM_INVALID_ARGUMENT {
+            if context.length == 0, creation.status == SHUKU_PDFIUM_INVALID_ARGUMENT {
                 throw IosReaderFailure(code: .pdfInvalid)
             }
-            throw IosPdfiumDocument.failure(createStatus)
+            throw IosPdfiumDocument.failure(creation.status)
         }
         do {
             try await advanceUntilAvailable(context: context) {
-                shuku_pdfium_document_step(document)
+                try await IosPdfiumExecutor.shared.run {
+                    shuku_pdfium_document_step(document.pointer)
+                }
             }
-            let count = Int(shuku_pdfium_page_count(document))
+            let count = try await IosPdfiumExecutor.shared.run {
+                Int(shuku_pdfium_page_count(document.pointer))
+            }
             guard count > 0 else { throw IosReaderFailure(code: .pdfInvalid) }
             guard Int64(count) <= ErmaoShared.PublicKt.readerSafetyPdfPageMaxCount() else {
                 throw IosReaderFailure.safety(
                     ErmaoShared.PublicKt.readerSafetyPdfPageGeometryFailure()
                 )
             }
-            return IosPdfiumDocument(native: document, context: context, pageCount: count)
+            return IosPdfiumDocument(native: document.pointer, context: context, pageCount: count)
         } catch {
-            context.close()
-            shuku_pdfium_document_close(document)
+            try? await IosPdfiumExecutor.shared.run {
+                context.close()
+                shuku_pdfium_document_close(document.pointer)
+                shuku_pdfium_shutdown()
+            }
             retained.release()
-            shuku_pdfium_shutdown()
             throw error
         }
+    }
+
+    private struct NativeCreation: @unchecked Sendable {
+        let status: ShukuPdfiumStatus
+        let document: NativeHandle?
+        let initialized: Bool
     }
     #endif
 
     func pageSize(_ pageIndex: Int) async throws -> CGSize {
         #if canImport(ShukuPdfium)
         try await ensurePage(pageIndex)
-        return try operationLock.withLock {
+        let size = try await IosPdfiumExecutor.shared.run { () throws -> CGSize in
             try requireOpen()
-            var size = ShukuPdfiumPageSize(width_points: 0, height_points: 0)
-            let status = shuku_pdfium_page_size(native, Int32(pageIndex), &size)
+            var nativeSize = ShukuPdfiumPageSize(width_points: 0, height_points: 0)
+            let status = shuku_pdfium_page_size(native.pointer, Int32(pageIndex), &nativeSize)
             if status == SHUKU_PDFIUM_INVALID_DOCUMENT {
                 throw IosReaderFailure.safety(
                     ErmaoShared.PublicKt.readerSafetyPdfPageGeometryFailure()
@@ -161,14 +338,15 @@ final class IosPdfiumDocument: @unchecked Sendable {
             guard status == SHUKU_PDFIUM_OK else {
                 throw Self.failure(status)
             }
-            guard size.width_points.isFinite, size.height_points.isFinite,
-                  size.width_points > 0, size.height_points > 0 else {
+            guard nativeSize.width_points.isFinite, nativeSize.height_points.isFinite,
+                  nativeSize.width_points > 0, nativeSize.height_points > 0 else {
                 throw IosReaderFailure.safety(
                     ErmaoShared.PublicKt.readerSafetyPdfPageGeometryFailure()
                 )
             }
-            return CGSize(width: CGFloat(size.width_points), height: CGFloat(size.height_points))
+            return CGSize(width: CGFloat(nativeSize.width_points), height: CGFloat(nativeSize.height_points))
         }
+        return size
         #else
         throw Self.engineUnavailable()
         #endif
@@ -206,12 +384,12 @@ final class IosPdfiumDocument: @unchecked Sendable {
             )
         }
         let stride = width * 4
-        var pixels = Data(count: stride * height)
-        try operationLock.withLock {
+        let pixels = try await IosPdfiumExecutor.shared.run { () throws -> Data in
+            var pixels = Data(count: stride * height)
             try requireOpen()
             let status = pixels.withUnsafeMutableBytes { buffer in
                 shuku_pdfium_render_page_bgra(
-                    native,
+                    native.pointer,
                     Int32(pageIndex),
                     Int32(width),
                     Int32(height),
@@ -228,6 +406,7 @@ final class IosPdfiumDocument: @unchecked Sendable {
             guard status == SHUKU_PDFIUM_OK else {
                 throw Self.failure(status)
             }
+            return pixels
         }
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let provider = CGDataProvider(data: pixels as CFData),
@@ -255,13 +434,21 @@ final class IosPdfiumDocument: @unchecked Sendable {
 
     func close() {
         #if canImport(ShukuPdfium)
-        operationLock.withLock {
-            guard !closed else { return }
+        let shouldClose = stateLock.withLock { () -> Bool in
+            guard !closed else { return false }
             closed = true
-            context.close()
-            shuku_pdfium_document_close(native)
-            Unmanaged.passUnretained(context).release()
-            shuku_pdfium_shutdown()
+            return true
+        }
+        guard shouldClose else { return }
+        let native = native
+        let context = context
+        Task.detached(priority: .userInitiated) {
+            try? await IosPdfiumExecutor.shared.run {
+                context.close()
+                shuku_pdfium_document_close(native.pointer)
+                Unmanaged.passUnretained(context).release()
+                shuku_pdfium_shutdown()
+            }
         }
         #endif
     }
@@ -275,9 +462,9 @@ final class IosPdfiumDocument: @unchecked Sendable {
         }
         context.activateUnit(pageIndex: Int32(pageIndex))
         try await Self.advanceUntilAvailable(context: context) { [self] in
-            try operationLock.withLock {
+            try await IosPdfiumExecutor.shared.run {
                 try requireOpen()
-                return shuku_pdfium_page_step(native, Int32(pageIndex))
+                return shuku_pdfium_page_step(native.pointer, Int32(pageIndex))
             }
         }
         #else
@@ -288,18 +475,38 @@ final class IosPdfiumDocument: @unchecked Sendable {
     #if canImport(ShukuPdfium)
     private static func advanceUntilAvailable(
         context: IosPdfiumByteSourceContext,
-        step: () throws -> ShukuPdfiumStatus
+        step: @escaping @Sendable () async throws -> ShukuPdfiumStatus
+    ) async throws {
+        try await driveAvailability(
+            step: step,
+            drainRequested: { try await context.drainRequested() }
+        )
+    }
+
+    /// Drives PDFium's bounded availability state machine. A NEED_DATA result
+    /// without a new AddSegment hint is a legal transient state after the byte
+    /// source changes to a complete local file, so it is retried rather than
+    /// surfaced as a false Reader failure.
+    static func driveAvailability(
+        step: @escaping @Sendable () async throws -> ShukuPdfiumStatus,
+        drainRequested: @escaping @Sendable () async throws -> Bool
     ) async throws {
         for _ in 0 ..< 256 {
             try Task.checkCancellation()
-            let status = try step()
+            let status = try await step()
             if status == SHUKU_PDFIUM_OK { return }
             guard status == SHUKU_PDFIUM_NEED_DATA else {
                 throw failure(status)
             }
             do {
-                guard try await context.drainRequested() else {
-                    throw IosReaderFailure(code: .engineError)
+                let acquiredRequestedData = try await drainRequested()
+                if !acquiredRequestedData {
+                    // PDFium can require another availability pass even when
+                    // the verified local source already covers every byte and
+                    // AddSegment did not enqueue a new range. The bounded loop
+                    // remains the progress guard; this state is not an engine
+                    // failure by itself.
+                    await Task.yield()
                 }
             } catch { throw rangeFailure(error) }
         }
@@ -337,7 +544,8 @@ final class IosPdfiumDocument: @unchecked Sendable {
     }
 
     private func requireOpen() throws {
-        if closed { throw IosReaderFailure(code: .engineError) }
+        let isClosed = stateLock.withLock { closed }
+        if isClosed { throw IosReaderFailure(code: .engineError) }
     }
     #endif
 
@@ -361,6 +569,8 @@ final class IosPdfiumDocument: @unchecked Sendable {
 private final class IosPdfiumByteSourceContext: @unchecked Sendable {
     let length: UInt64
 
+    private static let logger = Logger(subsystem: "com.ermao.library", category: "Pdfium")
+
     private enum Backing {
         case remote(
             loader: ErmaoShared.PdfRangeLoader,
@@ -370,25 +580,55 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
         case local(IosPdfiumLocalFileReader)
     }
 
-    private let backing: Backing
+    private let stateLock = NSLock()
+    private var backing: Backing
+    private var closed = false
+    private var materializationError: IosReaderFailure?
+    private var materializationTask: Task<IosManagedPublication, Error>?
+    private let expectedResourceID: String?
+    private let expectedBookID: String?
+    private let expectedAssetID: String?
+    private let descriptor: ErmaoShared.DownloadDescriptor?
+    private let materializer: (any IosPdfiumDownloadMaterializing)?
+
+    private enum DrainResult {
+        case noPendingRequest
+        case rangesAvailable
+        case switchedToLocal
+    }
 
     init(
         loader: ErmaoShared.PdfRangeLoader,
         cache: ErmaoShared.PdfRangeMemory,
         identity: ErmaoShared.PdfRangeCacheIdentity,
-        length: UInt64
+        length: UInt64,
+        descriptor: ErmaoShared.DownloadDescriptor?,
+        materializer: (any IosPdfiumDownloadMaterializing)?
     ) {
         self.length = length
         backing = .remote(loader: loader, cache: cache, identity: identity)
+        expectedResourceID = descriptor?.identity.resourceId
+        expectedBookID = descriptor?.identity.bookId
+        expectedAssetID = descriptor?.identity.assetId
+        self.descriptor = descriptor
+        self.materializer = materializer
     }
 
     init(reader: IosPdfiumLocalFileReader) {
         length = reader.length
         backing = .local(reader)
+        expectedResourceID = nil
+        expectedBookID = nil
+        expectedAssetID = nil
+        descriptor = nil
+        materializer = nil
     }
 
     func isRangeAvailable(offset: UInt64, size: UInt64) -> Bool {
         guard size > 0, offset <= length, size <= length - offset else { return false }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed else { return false }
         switch backing {
         case let .remote(_, cache, identity):
             guard offset <= UInt64(Int64.max), size <= UInt64(Int32.max) else { return false }
@@ -408,6 +648,9 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
         destination: UnsafeMutableRawPointer
     ) -> Bool {
         guard isRangeAvailable(offset: offset, size: size) else { return false }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed else { return false }
         switch backing {
         case let .remote(_, cache, identity):
             guard let bytes = cache.readCached(
@@ -428,6 +671,10 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
     }
 
     func request(offset: UInt64, size: UInt64) {
+        guard size > 0, offset <= length, size <= length - offset else { return }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed else { return }
         switch backing {
         case let .remote(loader, _, _):
             guard offset <= UInt64(Int64.max), size <= UInt64(Int64.max) else { return }
@@ -438,26 +685,151 @@ private final class IosPdfiumByteSourceContext: @unchecked Sendable {
     }
 
     func drainRequested() async throws -> Bool {
-        switch backing {
-        case let .remote(loader, _, _):
-            return try await loader.drainRequested().boolValue
-        case .local:
-            return false
+        switch try await drain() {
+        case .noPendingRequest: return false
+        case .rangesAvailable, .switchedToLocal: return true
         }
     }
 
+    private func drain() async throws -> DrainResult {
+        let loader: ErmaoShared.PdfRangeLoader? = stateLock.withLock {
+            guard !closed else { return nil }
+            guard case let .remote(loader, _, _) = backing else { return nil }
+            return loader
+        }
+        guard let loader else { return .noPendingRequest }
+        let result = try await loader.drainRequested()
+        switch result {
+        case is ErmaoShared.PdfRangeDrainResultNoPendingRequest:
+            return .noPendingRequest
+        case is ErmaoShared.PdfRangeDrainResultRangesAvailable:
+            return .rangesAvailable
+        case is ErmaoShared.PdfRangeDrainResultCompleteOriginalRequired:
+            guard descriptor != nil, materializer != nil else {
+                throw IosReaderFailure(code: .engineError)
+            }
+            return try await materialize()
+        default:
+            throw IosReaderFailure(code: .engineError)
+        }
+    }
+
+    private func materialize() async throws -> DrainResult {
+        let task = try stateLock.withLock { () throws -> Task<IosManagedPublication, Error> in
+            if let materializationTask { return materializationTask }
+            if let materializationError { throw materializationError }
+            guard !closed, case .remote = backing,
+                  let descriptor, let materializer else {
+                throw IosReaderFailure(code: .engineError)
+            }
+            let task = Task { [self] in
+                do {
+                    logMaterialization(stage: "materialization_start", result: "requested")
+                    let publication = try await materializer.materialize(descriptor: descriptor)
+                    // Opening the verified file and changing the backing are
+                    // serialized with every native call. This keeps a
+                    // callback from observing a half-installed source and
+                    // keeps all file I/O off MainActor.
+                    try await IosPdfiumExecutor.shared.run {
+                        try installLocal(publication, descriptor: descriptor)
+                    }
+                    logMaterialization(stage: "source_installed", result: "verified_local")
+                    return publication
+                } catch is CancellationError {
+                    logMaterialization(stage: "materialization_cancelled", result: "cancelled")
+                    throw CancellationError()
+                } catch let failure as IosReaderFailure {
+                    stateLock.withLock { materializationError = failure }
+                    logMaterialization(stage: "materialization_failed", result: failure.code.rawValue)
+                    throw failure
+                } catch {
+                    let failure = IosReaderFailure(code: .engineError, underlyingError: error as NSError)
+                    stateLock.withLock { materializationError = failure }
+                    logMaterialization(stage: "materialization_failed", result: failure.code.rawValue)
+                    throw failure
+                }
+            }
+            materializationTask = task
+            return task
+        }
+        _ = try await task.value
+        return try stateLock.withLock {
+            guard !closed else { throw CancellationError() }
+            guard case .local = backing else {
+                if let materializationError { throw materializationError }
+                throw IosReaderFailure(code: .engineError)
+            }
+            return .switchedToLocal
+        }
+    }
+
+    private func installLocal(
+        _ publication: IosManagedPublication,
+        descriptor: ErmaoShared.DownloadDescriptor
+    ) throws {
+        guard publication.resourceID == expectedResourceID,
+              publication.resourceID == descriptor.identity.resourceId,
+              publication.bookID == expectedBookID,
+              publication.bookID == descriptor.identity.bookId,
+              publication.assetID == expectedAssetID,
+              publication.assetID == descriptor.identity.assetId,
+              publication.sourceFormat == .pdf,
+              publication.byteCount == Int64(length),
+              descriptor.totalBytes == Int64(length) else {
+            throw IosReaderFailure(code: .pdfResourceChanged)
+        }
+        let reader = try IosPdfiumLocalFileReader(fileURL: publication.fileURL)
+        guard reader.length == length else {
+            reader.close()
+            throw IosReaderFailure(code: .pdfResourceChanged)
+        }
+
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed else {
+            reader.close()
+            throw CancellationError()
+        }
+        guard case let .remote(loader, cache, _) = backing else {
+            reader.close()
+            if case .local = backing { return }
+            throw IosReaderFailure(code: .engineError)
+        }
+        backing = .local(reader)
+        // The cache is private Reader state. It must not become a partial
+        // Downloads file and is invalid once the verified original is active.
+        loader.close()
+        cache.clear()
+    }
+
     func activateUnit(pageIndex: Int32) {
-        guard case let .remote(loader, _, _) = backing else { return }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !closed, case let .remote(loader, _, _) = backing else { return }
         loader.activateUnit(pageIndex: pageIndex)
     }
 
     func close() {
-        switch backing {
+        let previous = stateLock.withLock { () -> Backing? in
+            guard !closed else { return nil }
+            closed = true
+            materializationTask?.cancel()
+            return backing
+        }
+        guard let previous else { return }
+        switch previous {
         case let .remote(loader, _, _):
             loader.close()
         case let .local(reader):
             reader.close()
         }
+    }
+
+    private func logMaterialization(stage: String, result: String) {
+        let resourceID = expectedResourceID ?? "unknown"
+        Self.logger.notice(
+            "pdf_materialization platform=ios resource_id=\(resourceID, privacy: .public) stage=\(stage, privacy: .public) result=\(result, privacy: .public) bytes=\(self.length, privacy: .public)"
+        )
     }
 }
 

@@ -88,10 +88,13 @@ import com.ermao.library.shared.createAndroidPdfRangeServerPort
 import com.ermao.library.shared.createAndroidComicPageServerPort
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.downloads.toDownloadNamespace
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -514,7 +517,7 @@ class ReaderActivity : AppCompatActivity() {
         launchDownloads = downloads
         val coordinator = downloads.readerLaunchCoordinator()
         launchCoordinator = coordinator
-        when (val launch = coordinator.prepare(downloads.requestContext, request.resourceId)) {
+        val streamDescriptor = when (val launch = coordinator.prepare(downloads.requestContext, request.resourceId)) {
             is com.ermao.library.shared.modules.reader.ReaderLaunchLocal -> {
                 openLaunchArtifact(launch.artifact, request)
                 return
@@ -523,7 +526,7 @@ class ReaderActivity : AppCompatActivity() {
                 showOpenError(launch.code, launch.safetyFailure)
                 return
             }
-            is com.ermao.library.shared.modules.reader.ReaderLaunchStream -> Unit
+            is com.ermao.library.shared.modules.reader.ReaderLaunchStream -> launch.descriptor
             is com.ermao.library.shared.modules.reader.ReaderLaunchDownload -> {
                 startRequiredDownload(launch, request)
                 return
@@ -654,11 +657,87 @@ class ReaderActivity : AppCompatActivity() {
                         AndroidRemotePdfiumSessionConfiguration(
                             cache = rangeCache,
                             server = createAndroidPdfRangeServerPort(applicationContext, authenticated.profile),
+                            materializeOriginal = {
+                                materializePdfOriginal(downloads, coordinator, streamDescriptor)
+                            },
                         )
                     },
                 )
                 prepareSession(checkNotNull(session))
             }
+        }
+    }
+
+    private suspend fun materializePdfOriginal(
+        downloads: com.ermao.library.features.downloads.AccountDownloads,
+        coordinator: com.ermao.library.shared.modules.reader.ReaderLaunchCoordinator,
+        descriptor: com.ermao.library.shared.modules.downloads.DownloadDescriptor,
+    ): File {
+        val resourceId = descriptor.identity.resourceId
+        try {
+            val existing = coordinator.complete(descriptor)
+            val local = if (existing is com.ermao.library.shared.modules.reader.ReaderLaunchLocal) {
+                LOGGER.info(
+                    "event=pdf_materialization_reused platform=android resource=$resourceId " +
+                        "bytes=${descriptor.totalBytes} result=success",
+                )
+                existing
+            } else {
+                LOGGER.info(
+                    "event=pdf_materialization_started platform=android resource=$resourceId " +
+                        "bytes=${descriptor.totalBytes}",
+                )
+                withContext(Dispatchers.Main.immediate) {
+                    downloads.requestDownload(resourceId, descriptor)
+                }
+                combine(downloads.recordsByResource, downloads.failureByResource) { _, failures ->
+                    failures[resourceId]?.let { failureCode ->
+                        LOGGER.warning(
+                            "event=pdf_materialization_failed platform=android resource=$resourceId " +
+                                "bytes=${descriptor.totalBytes} result=$failureCode",
+                        )
+                        throw ReaderOpenFailure(
+                            ReaderError(
+                                com.ermao.library.shared.modules.reader.readerErrorCodeForFailure(
+                                    failureCode,
+                                    false,
+                                ),
+                            ),
+                        )
+                    }
+                    coordinator.complete(descriptor)
+                }.first { it is com.ermao.library.shared.modules.reader.ReaderLaunchLocal }
+                    as com.ermao.library.shared.modules.reader.ReaderLaunchLocal
+            }
+            if (!withContext(Dispatchers.Main.immediate) { isLaunchCurrent() }) {
+                throw kotlinx.coroutines.CancellationException("Reader namespace changed")
+            }
+            val file = (application as ErmaoLibraryApplication).downloadFiles
+                .resolveLocalReference(local.artifact.localReference)
+            if (file == null || !file.isFile || file.length() != descriptor.totalBytes) {
+                LOGGER.warning(
+                    "event=pdf_materialization_failed platform=android resource=$resourceId " +
+                        "bytes=${descriptor.totalBytes} result=DOWNLOAD_LOCAL_FILE_INVALID",
+                )
+                throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ResourceMissing))
+            }
+            LOGGER.info(
+                "event=pdf_materialization_completed platform=android resource=$resourceId " +
+                    "bytes=${descriptor.totalBytes} result=success",
+            )
+            return file
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            LOGGER.info(
+                "event=pdf_materialization_cancelled platform=android resource=$resourceId " +
+                    "bytes=${descriptor.totalBytes} result=cancelled",
+            )
+            throw cancelled
+        } catch (error: Exception) {
+            LOGGER.warning(
+                "event=pdf_materialization_failed platform=android resource=$resourceId " +
+                    "bytes=${descriptor.totalBytes} result=terminal_failure",
+            )
+            throw error
         }
     }
 

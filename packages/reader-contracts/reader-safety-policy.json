@@ -2,8 +2,8 @@
   "$schema": "./schemas/reader-safety-policy-v1.schema.json",
   "schemaVersion": 1,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 1,
-  "policyDigest": "12f3e2ba610d907fa4ca5eefd0ab2319e000a8b5348c45549c9e2bc721579a46",
+  "policyVersion": 2,
+  "policyDigest": "d23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2",
   "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"],
   "implementationFailureCodes": ["ENGINE_POLICY_ALGORITHM_UNSUPPORTED", "PLATFORM_POLICY_ALGORITHM_UNSUPPORTED"],
   "formats": [
@@ -122,6 +122,8 @@
       "requireFinitePageGeometry": true,
       "requireIdentityContentEncoding": true,
       "requireStrongRevision": true,
+      "engineRequestLimit": "SOURCE_LENGTH",
+      "largeRequestAction": "MATERIALIZE_VERIFIED_ORIGINAL",
       "allowWholeResponseFallback": false
     },
     "comic": {
@@ -168,7 +170,7 @@
     {"id": "PDF.DISABLE_ACTIVE_CONTENT", "formats": ["PDF"], "stage": "SANITIZE", "algorithm": "PDF_ACTIVE_CONTENT", "parameterRefs": ["profiles.pdf.blockedActions"], "action": "SANITIZE", "errorCode": null, "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
     {"id": "PDF.PAGE_GEOMETRY", "formats": ["PDF"], "stage": "PARSE", "algorithm": "PDF_PAGE_GEOMETRY", "parameterRefs": ["budgets.pdfPageMaxCount", "profiles.pdf.requireFinitePageGeometry"], "action": "REJECT_PUBLICATION", "errorCode": "PDF_PAGE_LIMIT", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
     {"id": "PDF.RENDER_BUDGET", "formats": ["PDF"], "stage": "RENDER", "algorithm": "PDF_RENDER_BUDGET", "parameterRefs": ["budgets.pdfRenderMaxPixels", "budgets.pdfCanvasMaxDimension"], "action": "BLOCK_RESOURCE", "errorCode": "PDF_RENDER_LIMIT", "requiredConsumers": ["WEB", "ANDROID", "IOS"]},
-    {"id": "PDF.RANGE_PROTOCOL", "formats": ["PDF"], "stage": "DELIVERY", "algorithm": "PDF_RANGE_PROTOCOL", "parameterRefs": ["budgets.pdfRangeChunkBytes", "budgets.pdfRangeRequestMaxBytes", "budgets.pdfRangeMaxConcurrent", "budgets.pdfRangeMemoryCacheMaxBytes", "profiles.pdf.requireIdentityContentEncoding", "profiles.pdf.requireStrongRevision", "profiles.pdf.allowWholeResponseFallback"], "action": "REJECT_PUBLICATION", "errorCode": "PDF_RANGE_INVALID", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    {"id": "PDF.RANGE_PROTOCOL", "formats": ["PDF"], "stage": "DELIVERY", "algorithm": "PDF_RANGE_PROTOCOL", "parameterRefs": ["budgets.pdfRangeChunkBytes", "budgets.pdfRangeRequestMaxBytes", "budgets.pdfRangeMaxConcurrent", "budgets.pdfRangeMemoryCacheMaxBytes", "profiles.pdf.requireIdentityContentEncoding", "profiles.pdf.requireStrongRevision", "profiles.pdf.engineRequestLimit", "profiles.pdf.largeRequestAction", "profiles.pdf.allowWholeResponseFallback"], "action": "REJECT_PUBLICATION", "errorCode": "PDF_RANGE_INVALID", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
     {"id": "COMIC.PAGE_MIME", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "RESOURCE", "algorithm": "COMIC_PAGE_MIME", "parameterRefs": ["profiles.comic.allowedPageMimeTypes", "profiles.comic.pageMimeTypesByExtension"], "action": "BLOCK_RESOURCE", "errorCode": "COMIC_MIME_MISMATCH", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
     {"id": "COMIC.ARCHIVE_STRUCTURE", "formats": ["CBZ", "ZIP", "CBR", "RAR"], "stage": "PARSE", "algorithm": "COMIC_ARCHIVE_STRUCTURE", "parameterRefs": ["profiles.comic.archiveFatalFindings"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
     {"id": "COMIC.PAGE_MAX_COUNT", "formats": ["CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR"], "stage": "PARSE", "algorithm": "MAX_COMIC_PAGE_COUNT", "parameterRefs": ["budgets.comicPageMaxCount"], "action": "REJECT_PUBLICATION", "errorCode": "COMIC_SECURITY_REJECTED", "requiredConsumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},

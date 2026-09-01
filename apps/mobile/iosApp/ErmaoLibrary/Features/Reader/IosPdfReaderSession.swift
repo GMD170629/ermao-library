@@ -24,6 +24,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let remoteSource: ErmaoShared.RemoteByteRangeReaderSource?
     private let rangeCache: ErmaoShared.PdfRangeMemory?
     private let rangeServer: (any ErmaoShared.PdfRangeServerPort)?
+    private let remoteDescriptor: ErmaoShared.DownloadDescriptor?
+    private let pdfiumMaterializer: (any IosPdfiumDownloadMaterializing)?
     private let preferencesStore: IosReaderPreferencesStore
 
     private let managedStore: IosManagedPublicationStore
@@ -52,6 +54,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         remoteSource: ErmaoShared.RemoteByteRangeReaderSource? = nil,
         rangeCache: ErmaoShared.PdfRangeMemory? = nil,
         rangeServer: (any ErmaoShared.PdfRangeServerPort)? = nil,
+        remoteDescriptor: ErmaoShared.DownloadDescriptor? = nil,
+        pdfiumMaterializer: (any IosPdfiumDownloadMaterializing)? = nil,
         managedStore: IosManagedPublicationStore,
         progressStore: any ErmaoShared.ReaderProgressSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
@@ -71,6 +75,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         self.remoteSource = remoteSource
         self.rangeCache = rangeCache
         self.rangeServer = rangeServer
+        self.remoteDescriptor = remoteDescriptor
+        self.pdfiumMaterializer = pdfiumMaterializer
         self.managedStore = managedStore
         self.progressStore = progressStore
         self.progressCoordination = progressCoordination
@@ -105,7 +111,9 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 document = try await IosPdfiumDocument.open(
                     source: remoteSource,
                     cache: rangeCache,
-                    server: rangeServer
+                    server: rangeServer,
+                    descriptor: remoteDescriptor,
+                    materializer: pdfiumMaterializer
                 )
                 source = remoteSource
             } else {
@@ -397,8 +405,11 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             initialPageIndex: initialPage
         )
         navigator.onPageChanged = { [weak self] index in self?.pdfiumLocationChanged(index) }
-        navigator.onFailure = { [weak self] failure in
-            guard let self else { return }
+        navigator.onFailure = { [weak self, weak navigator] failure in
+            guard let self, let navigator, self.navigator === navigator,
+                  phase == .reading || phase == .background else {
+                return
+            }
             if failure.safeContext["ruleId"] == ErmaoShared.PublicKt.readerSafetyPdfRenderBudgetFailure().ruleId {
                 presentationError = failure.code
                 return

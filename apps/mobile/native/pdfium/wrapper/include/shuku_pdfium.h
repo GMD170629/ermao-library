@@ -27,7 +27,9 @@ typedef enum ShukuPdfiumStatus {
   SHUKU_PDFIUM_OUT_OF_MEMORY_RISK = 7,
 } ShukuPdfiumStatus;
 
-// All callbacks are invoked synchronously on the calling PDFium thread.
+// All callbacks are invoked synchronously on the calling PDFium thread while
+// the wrapper's process-wide PDFium mutex is held. They must not call any
+// shuku_pdfium_* API, wait for another PDFium operation, or touch UI state.
 // read_cached_block() must only copy already-cached bytes and must never wait
 // for the network. request_range() only schedules asynchronous acquisition.
 typedef struct ShukuPdfiumByteSource {

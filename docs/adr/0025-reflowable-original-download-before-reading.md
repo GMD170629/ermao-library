@@ -9,6 +9,10 @@
 过滤动作与错误码。本 ADR 保持完整原文件下载、任务所有权和禁止派生出版物的
 决定；下载后的内存 Publication 可以按生成契约执行 `SANITIZE`。
 
+PDF 补充（2026-09-01）：ADR 0027 修订原生 PDF 的交付规则。PDFium 仍优先
+使用有界 Range；当引擎要求整文件或工作集超出易失缓存时，透明复用 Downloads
+物化已验证原件并在同一 document handle 中切源。Web pdf.js 与漫画规则不变。
+
 ## 决策
 
 `EPUB`、`FB2`、`TXT`、`MOBI`、`AZW`、`AZW3`、`PRC` 在所有第一方
@@ -16,9 +20,11 @@ Reader 中统一使用完整原文件：启动时验证本地工件，缺失或�
 Reader 加载页和真实传输进度，完整校验成功后由本地解析器创建内存
 Publication。阅读入口与详情文案不暴露新的产品模式。
 
-PDF 和漫画继续使用现有页面／Range 在线交付，不因在线错误隐式下载；有声书
-继续由播放器能力负责。通用在线可读性判定、可重排 RWPM／positions／章节
-交付以及 `OnlineLimit`／`RangeUnsupported` 下载回退被删除。
+漫画继续使用现有分页在线交付；PDF 的普通请求仍优先 Range，但原生 PDFium
+按 ADR 0027 可将合法的大工作集请求透明路由到 Downloads 完整原件。该路由不是
+普通网络／内容错误 fallback，也不适用于 Web。有声书继续由播放器能力负责。
+通用在线可读性判定、可重排 RWPM／positions／章节交付以及
+`OnlineLimit`／`RangeUnsupported` 下载回退被删除。
 
 下载工件以 `namespace + resourceId + assetId + size:mtime` 标识，并校验实际
 格式、MIME 与长度。原文件是唯一持久化 Reader 正文；不得转换、持久化解包

@@ -18,6 +18,7 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
     private let document: IosPdfiumDocument
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
+    private var readerBackgroundColor: UIColor = .systemBackground
     private var preferredZoom = 1.0
     private var renderedPageIndex: Int?
     private var renderingPageIndex: Int?
@@ -48,9 +49,9 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        view.backgroundColor = readerBackgroundColor
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.backgroundColor = .black
+        scrollView.backgroundColor = readerBackgroundColor
         scrollView.delegate = self
         scrollView.minimumZoomScale = 0.6
         scrollView.maximumZoomScale = 5
@@ -124,6 +125,13 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
 
     func zoomToFit() { scrollView.setZoomScale(1, animated: true) }
 
+    func setReaderBackgroundColor(_ color: UIColor) {
+        readerBackgroundColor = color
+        guard isViewLoaded else { return }
+        view.backgroundColor = color
+        scrollView.backgroundColor = color
+    }
+
     func close() {
         renderTask?.cancel()
         renderGeneration += 1
@@ -181,11 +189,21 @@ final class IosPdfiumNavigatorViewController: UIViewController, UIScrollViewDele
             } catch is CancellationError {
                 return false
             } catch let failure as IosReaderFailure {
-                guard !Task.isCancelled else { return false }
+                guard !Task.isCancelled,
+                      renderGeneration == generation,
+                      renderingPageIndex == requestedPage,
+                      commitsNavigation || requestedPage == pageIndex else {
+                    return false
+                }
                 onFailure?(failure)
                 return false
             } catch {
-                guard !Task.isCancelled else { return false }
+                guard !Task.isCancelled,
+                      renderGeneration == generation,
+                      renderingPageIndex == requestedPage,
+                      commitsNavigation || requestedPage == pageIndex else {
+                    return false
+                }
                 onFailure?(IosReaderFailure(code: .pdfRenderFailed, underlyingError: error as NSError))
                 return false
             }

@@ -91,7 +91,11 @@ struct IosPdfReaderView: View {
             .padding(24).foregroundStyle(palette.foreground)
         default:
             if let navigator = session.navigator {
-                PdfiumNavigatorHost(navigator: navigator).ignoresSafeArea()
+                PdfiumNavigatorHost(
+                    navigator: navigator,
+                    backgroundColor: UIColor(palette.background)
+                )
+                .ignoresSafeArea()
             }
         }
     }
@@ -151,6 +155,17 @@ struct IosPageRemoteProgressNotice: View {
 
 private struct PdfiumNavigatorHost: UIViewControllerRepresentable {
     let navigator: IosPdfiumNavigatorViewController
-    func makeUIViewController(context: Context) -> IosPdfiumNavigatorViewController { navigator }
-    func updateUIViewController(_ uiViewController: IosPdfiumNavigatorViewController, context: Context) {}
+    let backgroundColor: UIColor
+
+    func makeUIViewController(context: Context) -> IosPdfiumNavigatorViewController {
+        navigator.setReaderBackgroundColor(backgroundColor)
+        return navigator
+    }
+
+    func updateUIViewController(
+        _ uiViewController: IosPdfiumNavigatorViewController,
+        context: Context
+    ) {
+        uiViewController.setReaderBackgroundColor(backgroundColor)
+    }
 }

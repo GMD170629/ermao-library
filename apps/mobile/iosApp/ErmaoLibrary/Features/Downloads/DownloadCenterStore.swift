@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 @preconcurrency import ErmaoShared
 
 struct ManagedDownloadBatchResult: Sendable {
@@ -9,6 +10,11 @@ struct ManagedDownloadBatchResult: Sendable {
 
 @MainActor
 final class DownloadCenterStore: ObservableObject {
+    private static let readerMaterializationLogger = Logger(
+        subsystem: "com.ermao.library",
+        category: "Downloads"
+    )
+
     @Published private(set) var records: [ManagedDownloadRecord] = []
     @Published private(set) var storageErrorCode: String?
     @Published private(set) var readerFailures: [String: String] = [:]
@@ -21,6 +27,9 @@ final class DownloadCenterStore: ObservableObject {
     private let transfer: any ManagedDownloadTransferring
     private var context: ContentRequestContext?
     private var runningTasks: [String: Task<Void, Never>] = [:]
+    /// Descriptors owned by Reader-started transfers. A resource key alone
+    /// is not enough: a changed asset version must never be joined silently.
+    private var runningReaderDescriptors: [String: DownloadDescriptor] = [:]
 
     init(repository: ManagedDownloadStore = ManagedDownloadStore(), transfer: any ManagedDownloadTransferring = UnavailableManagedDownloadTransfer()) {
         self.repository = repository
@@ -45,6 +54,7 @@ final class DownloadCenterStore: ObservableObject {
         guard self.context?.namespaceKey != context.namespaceKey else { return }
         runningTasks.values.forEach { $0.cancel() }
         runningTasks.removeAll()
+        runningReaderDescriptors.removeAll()
         self.context = context
         records = []
         readerFailures = [:]
@@ -55,6 +65,7 @@ final class DownloadCenterStore: ObservableObject {
     func cancelAllTransfers() async {
         let tasks = Array(runningTasks.values)
         runningTasks.removeAll()
+        runningReaderDescriptors.removeAll()
         tasks.forEach { $0.cancel() }
         for task in tasks { await task.value }
     }
@@ -88,8 +99,21 @@ final class DownloadCenterStore: ObservableObject {
 
     /// Returns ownership of the transfer, not ownership of the persisted download.
     func beginReaderDownload(resourceID: String, descriptor: DownloadDescriptor) -> Bool {
-        let owned = runningTasks[resourceID] == nil
+        guard context != nil else { return false }
+        if let activeDescriptor = runningReaderDescriptors[resourceID] {
+            // One canonical task may have many readers, but only if all of
+            // them refer to the exact same asset version.
+            guard Self.descriptorsMatch(activeDescriptor, descriptor) else { return false }
+            return false
+        }
+        guard runningTasks[resourceID] == nil else { return false }
+        let owned = true
+        runningReaderDescriptors[resourceID] = descriptor
         start(resourceID: resourceID, expectedDescriptor: descriptor)
+        if runningTasks[resourceID] == nil {
+            runningReaderDescriptors[resourceID] = nil
+            return false
+        }
         return owned
     }
 
@@ -116,6 +140,93 @@ final class DownloadCenterStore: ObservableObject {
             record.isVerifiedOfflineCopy ? record : nil
         }
     }
+
+    /// Starts or joins the canonical Reader download and waits for its exact,
+    /// verified artifact. The Reader never owns a second transfer pipeline;
+    /// this method is the small iOS facade used when PDFium must materialize
+    /// its remote byte source.
+    func awaitVerifiedReaderDownload(
+        descriptor: DownloadDescriptor,
+        context: ContentRequestContext
+    ) async throws -> ManagedDownloadRecord {
+        do {
+            return try await awaitVerifiedReaderDownloadOperation(
+                descriptor: descriptor,
+                context: context
+            )
+        } catch is CancellationError {
+            Self.readerMaterializationLogger.notice(
+                "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_cancelled result=DOWNLOAD_CANCELLED bytes=\(descriptor.totalBytes, privacy: .public)"
+            )
+            throw CancellationError()
+        } catch let error as ManagedDownloadTransferError {
+            Self.readerMaterializationLogger.error(
+                "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_failed result=\(error.stableCode, privacy: .public) bytes=\(descriptor.totalBytes, privacy: .public)"
+            )
+            throw error
+        } catch {
+            Self.readerMaterializationLogger.error(
+                "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_failed result=DOWNLOAD_MANIFEST_READ_FAILED bytes=\(descriptor.totalBytes, privacy: .public)"
+            )
+            throw error
+        }
+    }
+
+    private func awaitVerifiedReaderDownloadOperation(
+        descriptor: DownloadDescriptor,
+        context: ContentRequestContext
+    ) async throws -> ManagedDownloadRecord {
+        guard isCurrent(context) else { throw ManagedDownloadTransferError.unauthorized }
+
+        if let completed = try await completedReaderRecord(descriptor: descriptor, context: context) {
+            Self.readerMaterializationLogger.notice(
+                "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_reuse result=verified_existing bytes=\(descriptor.totalBytes, privacy: .public)"
+            )
+            return completed
+        }
+
+        Self.readerMaterializationLogger.notice(
+            "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_start result=join_or_start bytes=\(descriptor.totalBytes, privacy: .public)"
+        )
+        let joinedOrStarted = beginReaderDownload(resourceID: descriptor.identity.resourceId, descriptor: descriptor)
+        if !joinedOrStarted,
+           let activeDescriptor = runningReaderDescriptors[descriptor.identity.resourceId] {
+            guard Self.descriptorsMatch(activeDescriptor, descriptor) else {
+                throw ManagedDownloadTransferError.versionChanged
+            }
+        } else if !joinedOrStarted,
+                  runningTasks[descriptor.identity.resourceId] != nil,
+                  readerRecord(descriptor: descriptor) == nil {
+            // A non-Reader transfer owns this resource and its descriptor is
+            // not available for an exact join. Do not attach PDFium to it.
+            throw ManagedDownloadTransferError.versionChanged
+        }
+        for await (records, failures) in $records.combineLatest($readerFailures).values {
+            try Task.checkCancellation()
+            guard isCurrent(context) else { throw CancellationError() }
+
+            let record = readerRecord(descriptor: descriptor, records: records)
+            if let record, record.isVerifiedOfflineCopy {
+                // Re-read the persisted manifest so a projected Published
+                // value can never be mistaken for an exact local artifact.
+                if let completed = try await completedReaderRecord(descriptor: descriptor, context: context) {
+                    Self.readerMaterializationLogger.notice(
+                        "pdf_materialization platform=ios resource_id=\(descriptor.identity.resourceId, privacy: .public) stage=download_complete result=verified_artifact bytes=\(descriptor.totalBytes, privacy: .public)"
+                    )
+                    return completed
+                }
+                throw ManagedDownloadTransferError.invalidResponse
+            }
+
+            guard let record, record.state == .failedRetryable || record.state == .failedTerminal else {
+                continue
+            }
+            let code = failures[descriptor.identity.resourceId] ?? record.stableErrorCode
+            throw Self.transferError(for: code)
+        }
+        throw ManagedDownloadTransferError.cancelled
+    }
+
     func pauseReaderDownload(resourceID: String) { runningTasks[resourceID]?.cancel() }
 
     func rebuildReaderDownload(resourceID: String, descriptor: DownloadDescriptor) async -> Bool {
@@ -166,7 +277,10 @@ final class DownloadCenterStore: ObservableObject {
         let task = Task { [weak self, repository, transfer] in
             guard let self else { return }
             defer {
-                if self.context?.namespaceKey == context.namespaceKey { self.runningTasks[resourceID] = nil }
+                if self.context?.namespaceKey == context.namespaceKey {
+                    self.runningTasks[resourceID] = nil
+                    if expectedDescriptor != nil { self.runningReaderDescriptors[resourceID] = nil }
+                }
             }
             do {
                 try await transfer.download(context: context, resourceID: resourceID, repository: repository, expectedDescriptor: expectedDescriptor) { [weak self] record in
@@ -192,6 +306,33 @@ final class DownloadCenterStore: ObservableObject {
         if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
         else { records.append(record) }
         records.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    private static func transferError(for code: String?) -> ManagedDownloadTransferError {
+        switch code {
+        case "ASSET_VERSION_CHANGED": return .versionChanged
+        case "DOWNLOAD_INSUFFICIENT_SPACE": return .insufficientSpace
+        case "DOWNLOAD_UNAUTHORIZED": return .unauthorized
+        case "DOWNLOAD_CONTENT_UNAVAILABLE": return .inaccessible
+        case "DOWNLOAD_INVALID_RESPONSE", "DOWNLOAD_LOCAL_FILE_INVALID": return .invalidResponse
+        case "DOWNLOAD_CANCELLED": return .cancelled
+        default: return .transportUnavailable
+        }
+    }
+
+    private static func descriptorsMatch(
+        _ lhs: DownloadDescriptor,
+        _ rhs: DownloadDescriptor
+    ) -> Bool {
+        DownloadTask(
+            id: "reader-validation",
+            descriptor: lhs,
+            status: .queued,
+            transferredBytes: 0,
+            failureCode: nil,
+            artifact: nil
+        )
+            .matchesDescriptor(candidate: rhs)
     }
 
 }

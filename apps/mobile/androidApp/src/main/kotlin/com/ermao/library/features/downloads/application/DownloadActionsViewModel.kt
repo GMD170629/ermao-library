@@ -23,11 +23,14 @@ import com.ermao.library.shared.modules.downloads.DownloadBatchResult
 import java.util.UUID
 import java.util.logging.Logger
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class DownloadActionsViewModel(
     private val androidCatalog: AndroidDownloadCatalog,
@@ -36,6 +39,7 @@ class DownloadActionsViewModel(
     private val gateway: KtorDownloadsGateway,
     private val context: DownloadRequestContext,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
+    private val transferDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
     private val runtime = DownloadResourceRuntime(sharedCatalog, gateway, nowEpochMillis)
     private val namespace = AndroidDownloadNamespace(
@@ -62,7 +66,11 @@ class DownloadActionsViewModel(
                     .mapValues { (_, assets) -> assets.maxBy(AndroidDownloadRecord::updatedAtEpochMillis) }
             }
         }
-        viewModelScope.launch { containTaskFailure("recovery") { runtime.recoverInterrupted(context.namespace) } }
+        viewModelScope.launch {
+            withContext(transferDispatcher) {
+                containTaskFailure("recovery") { runtime.recoverInterrupted(context.namespace) }
+            }
+        }
     }
 
     fun requestDownload(resourceId: String) {
@@ -89,11 +97,13 @@ class DownloadActionsViewModel(
         if (readerOwned) readerOwnedTransfers += resourceId
         mutableFailureByResource.value -= resourceId
         val job = viewModelScope.launch {
-            containTaskFailure(resourceId) {
-                when (val result = runtime.ensure(context, resourceId, UUID.randomUUID().toString(), sink,
-                    expectedDescriptor = expectedDescriptor)) {
-                    is DownloadResourceFailure -> saveBootstrapFailure(resourceId, result.error.code)
-                    else -> Unit
+            withContext(transferDispatcher) {
+                containTaskFailure(resourceId) {
+                    when (val result = runtime.ensure(context, resourceId, UUID.randomUUID().toString(), sink,
+                        expectedDescriptor = expectedDescriptor)) {
+                        is DownloadResourceFailure -> saveBootstrapFailure(resourceId, result.error.code)
+                        else -> Unit
+                    }
                 }
             }
         }

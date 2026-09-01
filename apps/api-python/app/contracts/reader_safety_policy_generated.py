@@ -303,6 +303,8 @@ class ReaderSafetyPdfProfile:
     require_finite_page_geometry: bool
     require_identity_content_encoding: bool
     require_strong_revision: bool
+    engine_request_limit: str
+    large_request_action: str
     allow_whole_response_fallback: bool
 
 @dataclass(frozen=True, slots=True)
@@ -322,9 +324,9 @@ class ReaderSafetyAudioProfile:
     require_ordered_track_identity: bool
 
 READER_SAFETY_POLICY_SCHEMA_VERSION: Final = 1
-READER_SAFETY_POLICY_VERSION: Final = 1
+READER_SAFETY_POLICY_VERSION: Final = 2
 READER_SAFETY_POLICY_ID: Final = 'shuku.reader-safety'
-READER_SAFETY_POLICY_DIGEST: Final = '12f3e2ba610d907fa4ca5eefd0ab2319e000a8b5348c45549c9e2bc721579a46'
+READER_SAFETY_POLICY_DIGEST: Final = 'd23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2'
 READER_SAFETY_IMPLEMENTATION_FAILURE_CODES: Final = (ReaderSafetyErrorCode.ENGINE_POLICY_ALGORITHM_UNSUPPORTED, ReaderSafetyErrorCode.PLATFORM_POLICY_ALGORITHM_UNSUPPORTED)
 
 READER_SAFETY_FORMATS = MappingProxyType({
@@ -410,7 +412,7 @@ READER_SAFETY_RULES = MappingProxyType({
     ReaderSafetyRuleId.PDF_DISABLE_ACTIVE_CONTENT: ReaderSafetyRule(ReaderSafetyRuleId.PDF_DISABLE_ACTIVE_CONTENT, (ReaderSafetyFormat.PDF,), ReaderSafetyStage.SANITIZE, ReaderSafetyAlgorithmId.PDF_ACTIVE_CONTENT, ('profiles.pdf.blockedActions',), ReaderSafetyAction.SANITIZE, None, (ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
     ReaderSafetyRuleId.PDF_PAGE_GEOMETRY: ReaderSafetyRule(ReaderSafetyRuleId.PDF_PAGE_GEOMETRY, (ReaderSafetyFormat.PDF,), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.PDF_PAGE_GEOMETRY, ('budgets.pdfPageMaxCount', 'profiles.pdf.requireFinitePageGeometry'), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_PAGE_LIMIT, (ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
     ReaderSafetyRuleId.PDF_RENDER_BUDGET: ReaderSafetyRule(ReaderSafetyRuleId.PDF_RENDER_BUDGET, (ReaderSafetyFormat.PDF,), ReaderSafetyStage.RENDER, ReaderSafetyAlgorithmId.PDF_RENDER_BUDGET, ('budgets.pdfRenderMaxPixels', 'budgets.pdfCanvasMaxDimension'), ReaderSafetyAction.BLOCK_RESOURCE, ReaderSafetyErrorCode.PDF_RENDER_LIMIT, (ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
-    ReaderSafetyRuleId.PDF_RANGE_PROTOCOL: ReaderSafetyRule(ReaderSafetyRuleId.PDF_RANGE_PROTOCOL, (ReaderSafetyFormat.PDF,), ReaderSafetyStage.DELIVERY, ReaderSafetyAlgorithmId.PDF_RANGE_PROTOCOL, ('budgets.pdfRangeChunkBytes', 'budgets.pdfRangeRequestMaxBytes', 'budgets.pdfRangeMaxConcurrent', 'budgets.pdfRangeMemoryCacheMaxBytes', 'profiles.pdf.requireIdentityContentEncoding', 'profiles.pdf.requireStrongRevision', 'profiles.pdf.allowWholeResponseFallback'), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_RANGE_INVALID, (ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
+    ReaderSafetyRuleId.PDF_RANGE_PROTOCOL: ReaderSafetyRule(ReaderSafetyRuleId.PDF_RANGE_PROTOCOL, (ReaderSafetyFormat.PDF,), ReaderSafetyStage.DELIVERY, ReaderSafetyAlgorithmId.PDF_RANGE_PROTOCOL, ('budgets.pdfRangeChunkBytes', 'budgets.pdfRangeRequestMaxBytes', 'budgets.pdfRangeMaxConcurrent', 'budgets.pdfRangeMemoryCacheMaxBytes', 'profiles.pdf.requireIdentityContentEncoding', 'profiles.pdf.requireStrongRevision', 'profiles.pdf.engineRequestLimit', 'profiles.pdf.largeRequestAction', 'profiles.pdf.allowWholeResponseFallback'), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.PDF_RANGE_INVALID, (ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
     ReaderSafetyRuleId.COMIC_PAGE_MIME: ReaderSafetyRule(ReaderSafetyRuleId.COMIC_PAGE_MIME, (ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR, ReaderSafetyFormat.IMAGE_DIR), ReaderSafetyStage.RESOURCE, ReaderSafetyAlgorithmId.COMIC_PAGE_MIME, ('profiles.comic.allowedPageMimeTypes', 'profiles.comic.pageMimeTypesByExtension'), ReaderSafetyAction.BLOCK_RESOURCE, ReaderSafetyErrorCode.COMIC_MIME_MISMATCH, (ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
     ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE: ReaderSafetyRule(ReaderSafetyRuleId.COMIC_ARCHIVE_STRUCTURE, (ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.COMIC_ARCHIVE_STRUCTURE, ('profiles.comic.archiveFatalFindings',), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED, (ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
     ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT: ReaderSafetyRule(ReaderSafetyRuleId.COMIC_PAGE_MAX_COUNT, (ReaderSafetyFormat.CBZ, ReaderSafetyFormat.ZIP, ReaderSafetyFormat.CBR, ReaderSafetyFormat.RAR, ReaderSafetyFormat.IMAGE_DIR), ReaderSafetyStage.PARSE, ReaderSafetyAlgorithmId.MAX_COMIC_PAGE_COUNT, ('budgets.comicPageMaxCount',), ReaderSafetyAction.REJECT_PUBLICATION, ReaderSafetyErrorCode.COMIC_SECURITY_REJECTED, (ReaderSafetyConsumer.BACKEND, ReaderSafetyConsumer.WEB, ReaderSafetyConsumer.ANDROID, ReaderSafetyConsumer.IOS)),
@@ -755,6 +757,8 @@ READER_SAFETY_PDF_PROFILE: Final = ReaderSafetyPdfProfile(
     require_finite_page_geometry=True,
     require_identity_content_encoding=True,
     require_strong_revision=True,
+    engine_request_limit='SOURCE_LENGTH',
+    large_request_action='MATERIALIZE_VERIFIED_ORIGINAL',
     allow_whole_response_fallback=False,
 )
 

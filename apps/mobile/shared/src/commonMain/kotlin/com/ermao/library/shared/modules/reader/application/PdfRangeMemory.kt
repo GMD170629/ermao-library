@@ -11,11 +11,15 @@ import kotlinx.coroutines.flow.update
 /** Session-only bytes shared by native PDF renderers. No filesystem representation exists. */
 class PdfRangeMemory {
     private data class State(
+        val epoch: Long = 0,
         val identity: PdfRangeCacheIdentity? = null,
         val unit: Int? = null,
         val chunks: Map<Long, ByteArray> = emptyMap(),
     )
     private val state = MutableStateFlow(State())
+
+    /** Identifies the cache lifetime owned by one remote Reader session. */
+    fun currentEpoch(): Long = state.value.epoch
 
     fun isCached(identity: PdfRangeCacheIdentity, offset: Long, count: Int): Boolean =
         slices(state.value, identity, offset, count) != null
@@ -39,10 +43,16 @@ class PdfRangeMemory {
     }
 
     @Throws(IllegalArgumentException::class)
-    fun writeAlignedRange(identity: PdfRangeCacheIdentity, begin: Long, bytes: ByteArray) {
+    fun writeAlignedRange(
+        identity: PdfRangeCacheIdentity,
+        begin: Long,
+        bytes: ByteArray,
+        expectedEpoch: Long? = null,
+    ) {
         require(begin >= 0 && begin % PDF_RANGE_CHUNK_BYTES == 0L)
         require(bytes.size in 1..PDF_RANGE_MAX_REQUEST_BYTES)
         state.update { current ->
+            if (expectedEpoch != null && current.epoch != expectedEpoch) return@update current
             val chunks = if (current.identity == identity) current.chunks.toMutableMap() else linkedMapOf()
             var consumed = 0
             while (consumed < bytes.size) {
@@ -56,7 +66,7 @@ class PdfRangeMemory {
             while (size > PDF_RANGE_MEMORY_CACHE_BYTES) {
                 size -= requireNotNull(chunks.remove(chunks.keys.first())).size
             }
-            State(identity, current.unit, chunks)
+            State(current.epoch, identity, current.unit, chunks)
         }
     }
 
@@ -65,10 +75,18 @@ class PdfRangeMemory {
     }
 
     fun activateNamespace(namespace: ReaderSyncNamespace) {
-        state.update { if (it.identity?.namespace == namespace) it else State() }
+        state.update {
+            if (it.identity?.namespace == namespace) it
+            else State(epoch = nextEpoch(it.epoch))
+        }
     }
 
-    fun clear() { state.value = State() }
+    fun clear() {
+        state.update { current -> State(epoch = nextEpoch(current.epoch)) }
+    }
+
+    private fun nextEpoch(epoch: Long): Long =
+        if (epoch == Long.MAX_VALUE) 0 else epoch + 1
 
     private data class Slice(val index: Long, val start: Int, val size: Int)
 

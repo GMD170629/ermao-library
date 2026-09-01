@@ -2,8 +2,8 @@
   "$schema": "../../schemas/reader-safety-conformance-suite-v1.schema.json",
   "schemaVersion": 1,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 1,
-  "policyDigest": "12f3e2ba610d907fa4ca5eefd0ab2319e000a8b5348c45549c9e2bc721579a46",
+  "policyVersion": 2,
+  "policyDigest": "d23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2",
   "fixtureManifest": "manifest.json",
   "cases": [
     {"id": "safe-xhtml-11-http", "ruleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE", "evaluator": "REFLOWABLE_MARKUP", "semanticProjection": "ROOT_LOCAL_NAME", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},

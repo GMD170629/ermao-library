@@ -175,7 +175,8 @@ final class IosReaderComposition: ObservableObject {
     }
 
     fileprivate func bootstrap(
-        _ request: IosReaderLaunchRequest
+        _ request: IosReaderLaunchRequest,
+        streamDescriptor: DownloadDescriptor? = nil
     ) async throws -> IosReaderSession {
         let namespace = ErmaoShared.PublicKt.createReaderSyncNamespace(
             serverIdentity: request.context.serverIdentity,
@@ -486,6 +487,17 @@ final class IosReaderComposition: ObservableObject {
                         profile: profile
                     )
                     : nil,
+                remoteDescriptor: source is ErmaoShared.RemoteByteRangeReaderSource ? streamDescriptor : nil,
+                pdfiumMaterializer: source is ErmaoShared.RemoteByteRangeReaderSource
+                    ? downloads.map {
+                        IosPdfiumDownloadMaterializer(
+                            downloads: $0,
+                            completedDownloads: completedDownloads,
+                            managedStore: managedStore,
+                            context: request.context
+                        )
+                    }
+                    : nil,
                 managedStore: managedStore,
                 progressStore: progressStore,
                 progressCoordination: progressCoordination,
@@ -655,6 +667,7 @@ final class IosReaderBootstrapHost: ObservableObject {
     private var ownsDownload = false
     private var closed = false
     private var localRequest: IosReaderLaunchRequest?
+    private var streamDescriptor: DownloadDescriptor?
     private var missingArtifactRebuildAttempted = false
     @Published private(set) var downloadDescriptor: DownloadDescriptor?
     @Published private(set) var downloadRecord: ManagedDownloadRecord?
@@ -710,7 +723,8 @@ final class IosReaderBootstrapHost: ObservableObject {
             try await open(localRequest ?? request)
         } else if let download = launch as? ReaderLaunchDownload {
             beginDownload(download.descriptor, coordinator: coordinator)
-        } else if launch is ReaderLaunchStream {
+        } else if let stream = launch as? ReaderLaunchStream {
+            streamDescriptor = stream.descriptor
             try await open(request)
         } else if let unavailable = launch as? ReaderLaunchUnavailable {
             if let failure = unavailable.safetyFailure {
@@ -723,7 +737,7 @@ final class IosReaderBootstrapHost: ObservableObject {
     }
 
     private func open(_ request: IosReaderLaunchRequest) async throws {
-        let session = try await composition.bootstrap(request)
+        let session = try await composition.bootstrap(request, streamDescriptor: streamDescriptor)
         if Task.isCancelled {
             await close(session)
             throw CancellationError()

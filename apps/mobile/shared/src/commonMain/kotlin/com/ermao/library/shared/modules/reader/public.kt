@@ -437,6 +437,7 @@ typealias ReaderPublicationBootstrapResult =
 typealias PdfRangeServerPort = com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 typealias PdfRangeProbeResult = com.ermao.library.shared.modules.reader.application.PdfRangeProbeResult
 typealias PdfRangeReadResult = com.ermao.library.shared.modules.reader.application.PdfRangeReadResult
+typealias PdfRangeDrainResult = com.ermao.library.shared.modules.reader.application.PdfRangeDrainResult
 typealias BootstrapReaderPublication =
     com.ermao.library.shared.modules.reader.application.BootstrapReaderPublication
 typealias ReaderPublicationBootstrapContent =

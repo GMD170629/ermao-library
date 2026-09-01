@@ -14,12 +14,15 @@ import com.ermao.library.shared.modules.reader.domain.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.domain.RemoteByteRangeReaderSource
 import java.nio.ByteBuffer
 import java.nio.file.Files
+import java.io.RandomAccessFile
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class AndroidPdfiumByteSourceTest {
@@ -81,6 +84,67 @@ class AndroidPdfiumByteSourceTest {
         }
     }
 
+    @Test
+    fun completePdfiumRequestInstallsOneVerifiedLocalSourceWithoutLargeRangeRequest() = runTest {
+        val file = Files.createTempFile("shuku-pdf-materialized", ".pdf").toFile()
+        val expectedSize = 16_395_773L
+        RandomAccessFile(file, "rw").use { output ->
+            output.setLength(expectedSize)
+            output.seek(expectedSize - 1)
+            output.write(0x5A)
+        }
+        try {
+            val identity = PdfRangeCacheIdentity(namespace(), "resource-1")
+            val server = RecordingServer()
+            val loader = PdfRangeLoader(source(expectedSize), identity, PdfRangeMemory(), server)
+            val materializations = AtomicInteger()
+            val dataSource = AndroidRemotePdfiumDataSource(expectedSize, loader, "resource-1") {
+                materializations.incrementAndGet()
+                file
+            }
+
+            dataSource.requestRange(0, expectedSize)
+
+            assertTrue(dataSource.acquireRequested())
+            assertEquals(1, materializations.get())
+            assertTrue(server.ranges.isEmpty())
+            assertTrue(dataSource.isRangeCached(0, expectedSize))
+            val lastByte = ByteBuffer.allocateDirect(1)
+            assertTrue(dataSource.readCachedBlock(expectedSize - 1, lastByte))
+            lastByte.flip()
+            assertEquals(0x5A.toByte(), lastByte.get())
+            assertFalse(dataSource.acquireRequested())
+            assertEquals(1, materializations.get())
+
+            dataSource.requestRange(0, expectedSize)
+            assertFalse(dataSource.acquireRequested())
+            assertTrue(server.ranges.isEmpty())
+            dataSource.close()
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun failedMaterializationIsTerminalForTheCurrentPdfiumSession() = runTest {
+        val expectedSize = 16_395_773L
+        val identity = PdfRangeCacheIdentity(namespace(), "resource-1")
+        val server = RecordingServer()
+        val loader = PdfRangeLoader(source(expectedSize), identity, PdfRangeMemory(), server)
+        val materializations = AtomicInteger()
+        val dataSource = AndroidRemotePdfiumDataSource(expectedSize, loader, "resource-1") {
+            materializations.incrementAndGet()
+            error("download failed")
+        }
+        dataSource.requestRange(0, expectedSize)
+
+        assertFailsWith<IllegalStateException> { dataSource.acquireRequested() }
+        assertFailsWith<IllegalStateException> { dataSource.acquireRequested() }
+        assertEquals(1, materializations.get())
+        assertTrue(server.ranges.isEmpty())
+        dataSource.close()
+    }
+
     private suspend fun withCache(
         block: suspend (PdfRangeMemory, PdfRangeCacheIdentity) -> Unit,
     ) {
@@ -93,14 +157,14 @@ class AndroidPdfiumByteSourceTest {
         }
     }
 
-    private fun source() = RemoteByteRangeReaderSource(
+    private fun source(expectedSizeBytes: Long = 12L * CHUNK) = RemoteByteRangeReaderSource(
         resourceId = "resource-1",
         displayTitle = "PDF",
         bookId = "book-1",
         assetId = "asset-1",
         namespace = namespace(),
         apiPath = "/api/resources/resource-1/asset",
-        expectedSizeBytes = 12L * CHUNK,
+        expectedSizeBytes = expectedSizeBytes,
     )
 
     private fun namespace(authorizationVersion: Long = 3) =

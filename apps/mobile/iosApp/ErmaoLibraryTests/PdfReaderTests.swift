@@ -1,6 +1,10 @@
 import Foundation
 import XCTest
+import UIKit
 @preconcurrency import ErmaoShared
+#if canImport(ShukuPdfium)
+@preconcurrency import ShukuPdfium
+#endif
 @testable import ErmaoLibrary
 
 final class PdfReaderTests: XCTestCase {
@@ -81,6 +85,62 @@ final class PdfReaderTests: XCTestCase {
     }
 
     @MainActor
+    func testPdfNavigatorAppliesReaderThemeBackgroundBeforeAndAfterLoading() async throws {
+        #if canImport(ShukuPdfium)
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString).pdf")
+        let original = minimalPdf()
+        try original.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let managed = IosManagedPublication(
+            resourceID: "resource-pdfium-theme",
+            displayTitle: "PDF theme",
+            fileURL: file,
+            byteCount: Int64(original.count),
+            bookID: "book-pdfium-theme",
+            assetID: "asset-pdfium-theme",
+            namespace: "namespace-pdfium-theme",
+            sourceFormat: .pdf
+        )
+        let document = try await IosPdfiumDocument.open(publication: managed)
+        let navigator = IosPdfiumNavigatorViewController(document: document, initialPageIndex: 0)
+        defer { navigator.close() }
+        let warmBackground = UIColor(red: 0.992, green: 0.965, blue: 0.918, alpha: 1)
+        navigator.setReaderBackgroundColor(warmBackground)
+
+        navigator.loadViewIfNeeded()
+
+        XCTAssertEqual(navigator.view.backgroundColor, warmBackground)
+        let scrollView = try XCTUnwrap(navigator.view.subviews.compactMap { $0 as? UIScrollView }.first)
+        XCTAssertEqual(scrollView.backgroundColor, warmBackground)
+
+        let greenBackground = UIColor(red: 0.91, green: 0.94, blue: 0.89, alpha: 1)
+        navigator.setReaderBackgroundColor(greenBackground)
+        XCTAssertEqual(navigator.view.backgroundColor, greenBackground)
+        XCTAssertEqual(scrollView.backgroundColor, greenBackground)
+        #else
+        XCTFail("The locked repository-owned ShukuPdfium artifact is required on physical iOS.")
+        #endif
+    }
+
+    func testPdfiumNeedDataWithoutANewRangeHintRetriesInsteadOfReportingEngineFailure() async throws {
+        #if canImport(ShukuPdfium)
+        let probe = PdfAvailabilityProbe()
+
+        try await IosPdfiumDocument.driveAvailability(
+            step: { await probe.nextStatus() },
+            drainRequested: { await probe.drainWithoutRequest() }
+        )
+
+        let counts = await probe.counts()
+        XCTAssertEqual(counts.steps, 2)
+        XCTAssertEqual(counts.drains, 1)
+        #else
+        XCTFail("The locked repository-owned ShukuPdfium artifact is required on physical iOS.")
+        #endif
+    }
+
+    @MainActor
     func testReadiumRuntimeHasNoPdfFallback() async throws {
         let managed = IosManagedPublication(
             resourceID: "resource-no-readium-pdf",
@@ -117,7 +177,7 @@ final class PdfReaderTests: XCTestCase {
         let source = try remoteSource()
         let identity = ErmaoShared.PdfRangeCacheIdentity(namespace: source.namespace_, resourceId: source.resourceId)
         cache.activateUnit(pageIndex: 0)
-        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: KotlinByteArray(size: 32))
+        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: KotlinByteArray(size: 32), expectedEpoch: nil)
         cache.activateUnit(pageIndex: 1)
         XCTAssertNil(cache.readCached(identity: identity, offset: 0, count: 1))
     }
@@ -129,7 +189,7 @@ final class PdfReaderTests: XCTestCase {
         let chunk = KotlinByteArray(size: Int32(Int64(256 * 1024)))
         for index in 0 ..< chunk.size { chunk.set(index: index, value: 7) }
 
-        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: chunk)
+        try cache.writeAlignedRange(identity: identity, begin: 0, bytes: chunk, expectedEpoch: nil)
 
         XCTAssertEqual(cache.readCached(identity: identity, offset: 11, count: 16)?.foundationData(), Data(repeating: 7, count: 16))
         XCTAssertNil(cache.readCached(
@@ -143,7 +203,7 @@ final class PdfReaderTests: XCTestCase {
         let cache = ErmaoShared.PdfRangeMemory()
         let previous = ErmaoShared.PdfRangeCacheIdentity(namespace: try remoteSource(authorizationVersion: 1).namespace_, resourceId: "resource-pdf")
         let current = ErmaoShared.PdfRangeCacheIdentity(namespace: try remoteSource(authorizationVersion: 2).namespace_, resourceId: "resource-pdf")
-        try cache.writeAlignedRange(identity: previous, begin: 0, bytes: KotlinByteArray(size: 32))
+        try cache.writeAlignedRange(identity: previous, begin: 0, bytes: KotlinByteArray(size: 32), expectedEpoch: nil)
 
         cache.activateNamespace(namespace: current.namespace_)
 
@@ -203,3 +263,24 @@ final class PdfReaderTests: XCTestCase {
         return copied ? data : nil
     }
 }
+
+#if canImport(ShukuPdfium)
+private actor PdfAvailabilityProbe {
+    private var stepCount = 0
+    private var drainCount = 0
+
+    func nextStatus() -> ShukuPdfiumStatus {
+        stepCount += 1
+        return stepCount == 1 ? SHUKU_PDFIUM_NEED_DATA : SHUKU_PDFIUM_OK
+    }
+
+    func drainWithoutRequest() -> Bool {
+        drainCount += 1
+        return false
+    }
+
+    func counts() -> (steps: Int, drains: Int) {
+        (stepCount, drainCount)
+    }
+}
+#endif

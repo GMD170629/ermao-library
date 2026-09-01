@@ -238,7 +238,12 @@ internal class ReadiumPdfSession(
             server = configuration.server,
         )
         return openPdfiumPublication(
-            dataSource = AndroidRemotePdfiumDataSource(remoteSource.expectedSizeBytes, loader),
+            dataSource = AndroidRemotePdfiumDataSource(
+                length = remoteSource.expectedSizeBytes,
+                loader = loader,
+                resourceId = remoteSource.resourceId,
+                materializeOriginal = configuration.materializeOriginal,
+            ),
             identifier = remoteSource.resourceId,
             title = remoteSource.displayTitle,
         )
@@ -257,22 +262,22 @@ internal class ReadiumPdfSession(
             pages = pageHints(document.pageCount),
         )
     } catch (failure: ReaderOpenFailure) {
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
         throw failure
     } catch (failure: PdfRangeFailure) {
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
         val safeContext = failure.safetyFailure?.let { safety ->
             mapOf("ruleId" to safety.ruleId, "errorCode" to safety.errorCode)
         }.orEmpty()
         throw ReaderOpenFailure(ReaderError(failure.code, safeContext), cause = failure)
     } catch (failure: ShukuPdfiumFailure) {
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
         throw ReaderOpenFailure(ReaderError(failure.code, failure.safeContext), cause = failure)
     } catch (failure: OutOfMemoryError) {
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
         throw ReaderOpenFailure(ReaderError(ReaderErrorCode.OutOfMemoryRisk), cause = failure)
     } catch (failure: RuntimeException) {
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
         throw ReaderOpenFailure(ReaderError(ReaderErrorCode.ReaderEngineError), cause = failure)
     }
 
@@ -384,10 +389,12 @@ internal class ReadiumPdfSession(
     override fun goToBookmark(id: String): Boolean = false
     override suspend fun flush() { (_currentLocation.value as? PdfReaderLocation)?.let { persist(it) } }
     override suspend fun close() {
+        val document = nativeDocument
         try {
             flush()
         } finally {
             release()
+            document?.closeAndJoin()
         }
     }
     override fun release() {
@@ -400,15 +407,21 @@ internal class ReadiumPdfSession(
         closeNativeDocument()
     }
 
-    private fun closeOpeningResources(opened: Publication) {
+    private suspend fun closeOpeningResources(opened: Publication) {
         opened.close()
-        closeNativeDocument()
+        closeNativeDocumentAndJoin()
     }
 
     private fun closeNativeDocument() {
         nativeDocument?.close()
         nativeDocument = null
         remotePdfium?.cache?.clear()
+    }
+
+    private suspend fun closeNativeDocumentAndJoin() {
+        val document = nativeDocument
+        closeNativeDocument()
+        document?.closeAndJoin()
     }
 
     private fun isValidPage(pageIndex: Int): Boolean = pageIndex in 0 until pageCount
@@ -461,4 +474,5 @@ internal class ReadiumPdfSession(
 internal data class AndroidRemotePdfiumSessionConfiguration(
     val cache: PdfRangeMemory,
     val server: PdfRangeServerPort,
+    val materializeOriginal: suspend () -> File,
 )

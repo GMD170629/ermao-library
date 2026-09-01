@@ -73,6 +73,14 @@ table. Standard XHTML DOCTYPEs can therefore be accepted without resolving an
 external DTD, and every platform parses `&nbsp;`, `&copy;` and the remaining
 standard names with the same semantics while rejecting unknown names.
 
+For PDF, `pdfRangeRequestMaxBytes` is the maximum HTTP transport span and
+`pdfRangeMemoryCacheMaxBytes` is the maximum volatile session cache. The
+PDFium engine may request any positive `Long` span within the admitted source
+length; a span that cannot remain in the bounded cache is routed to
+`MATERIALIZE_VERIFIED_ORIGINAL`. This is an explicit hand-off to the shared
+Downloads owner, not a whole-response Range fallback, so
+`allowWholeResponseFallback` remains `false`.
+
 `schemaVersion` changes only when the JSON shape changes. Every semantic change
 increments `policyVersion`. The source `policyDigest` hashes canonical JSON
 (UTF-8, sorted object keys, no insignificant whitespace) after removing only

@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -65,7 +66,7 @@ class EpubContentSecurityPolicyTest {
         assertTrue(!output.contains("onload="))
         assertTrue(!output.contains("javascript:"))
         assertTrue(output.contains("href=\"https://example.com\""))
-        assertTrue(output.contains("data-shuku-safety-policy-version=\"1\""))
+        assertTrue(output.contains("data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\""))
         assertTrue(output.contains("script-src https://*/readium/scripts/readium-reflowable.js"))
         assertTrue(!output.contains("http-equiv=\"refresh\""))
     }
@@ -115,7 +116,9 @@ class EpubContentSecurityPolicyTest {
         """.trimIndent()
 
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
-        val profileIndex = decorated.indexOf("data-shuku-safety-policy-version=\"1\"")
+        val profileIndex = decorated.indexOf(
+            "data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\"",
+        )
 
         assertTrue(profileIndex > decorated.indexOf("<!-- <head>"))
         assertTrue(profileIndex < decorated.indexOf("<title>Real</title>"))

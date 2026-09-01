@@ -28,6 +28,20 @@ sealed interface PdfRangeReadResult {
     ) : PdfRangeReadResult
 }
 
+/**
+ * Result of servicing the byte ranges requested by the native PDF engine.
+ *
+ * The native engine may request a span that cannot be retained in the bounded
+ * session cache. That is a routing decision, not a protocol or safety error:
+ * the platform must materialize the verified original through Downloads and
+ * install it as the current PDFium session's local byte source.
+ */
+sealed interface PdfRangeDrainResult {
+    data object NoPendingRequest : PdfRangeDrainResult
+    data object RangesAvailable : PdfRangeDrainResult
+    data object CompleteOriginalRequired : PdfRangeDrainResult
+}
+
 interface PdfRangeServerPort {
     suspend fun probe(source: RemoteByteRangeReaderSource): PdfRangeProbeResult
     suspend fun read(source: RemoteByteRangeReaderSource, range: PdfByteRange): PdfRangeReadResult

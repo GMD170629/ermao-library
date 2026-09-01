@@ -33,7 +33,17 @@ class PdfRangeLoader(
     private val cache: PdfRangeMemory,
     private val server: PdfRangeServerPort,
 ) {
-    private data class Pending(val unit: Int? = null, val generation: Long = 0, val ranges: Set<PdfByteRange> = emptySet(), val invalid: Boolean = false, val closed: Boolean = false)
+    private val cacheEpoch = cache.currentEpoch()
+    private data class EngineRange(val begin: Long, val endExclusive: Long)
+    private data class Pending(
+        val unit: Int? = null,
+        val generation: Long = 0,
+        val ranges: Set<PdfByteRange> = emptySet(),
+        val engineCoverage: List<EngineRange> = emptyList(),
+        val materializationRequired: Boolean = false,
+        val invalid: Boolean = false,
+        val closed: Boolean = false,
+    )
     private val pending = MutableStateFlow(Pending())
     private val active = MutableStateFlow<Set<Job>>(emptySet())
     private val acquisition = Mutex()
@@ -48,33 +58,60 @@ class PdfRangeLoader(
     }
 
     fun request(offset: Long, size: Long) {
-        if (size <= 0 || size > PDF_RANGE_MEMORY_CACHE_BYTES || offset < 0 || offset > source.expectedSizeBytes - size) {
-            pending.update { it.copy(invalid = true) }
+        if (!isValidEngineRange(offset, size)) {
+            pending.update { if (it.closed) it else it.copy(invalid = true) }
             return
         }
-        val ranges = missingRanges(offset, offset + size)
+        val endExclusive = offset + size
+        val requiresCompleteOriginalBySpan =
+            size > PDF_RANGE_MEMORY_CACHE_BYTES ||
+                (offset == 0L && size == source.expectedSizeBytes)
+        val ranges = if (requiresCompleteOriginalBySpan) {
+            emptyList()
+        } else {
+            missingRanges(offset, endExclusive)
+        }
         pending.update {
-            if (it.closed) it else {
-                val combined = it.ranges + ranges
-                if (combined.sumOf { range -> range.endExclusive - range.begin } > PDF_RANGE_MEMORY_CACHE_BYTES) it.copy(invalid = true)
-                else it.copy(ranges = combined)
+            if (it.closed || it.materializationRequired) it else {
+                val coverage = mergeEngineRanges(it.engineCoverage + EngineRange(offset, endExclusive))
+                val requiresCompleteOriginal =
+                    requiresCompleteOriginalBySpan ||
+                        coversWholeFile(coverage) ||
+                        unionLength(ranges + it.ranges) > PDF_RANGE_MEMORY_CACHE_BYTES
+                if (requiresCompleteOriginal) {
+                    it.copy(
+                        engineCoverage = coverage,
+                        ranges = emptySet(),
+                        materializationRequired = true,
+                    )
+                } else {
+                    it.copy(engineCoverage = coverage, ranges = it.ranges + ranges)
+                }
             }
         }
     }
 
     @Throws(Exception::class)
     suspend fun awaitRange(offset: Long, size: Long) = owned {
-        require(size in 1..PDF_RANGE_MEMORY_CACHE_BYTES && offset >= 0 && offset <= source.expectedSizeBytes - size)
+        require(isValidEngineRange(offset, size) && size <= PDF_RANGE_MEMORY_CACHE_BYTES)
         for (range in missingRanges(offset, offset + size)) acquire(range)
     }
 
     @Throws(Exception::class)
-    suspend fun drainRequested(): Boolean = owned {
+    suspend fun drainRequested(): PdfRangeDrainResult = owned {
         var requested: Pending
-        do { requested = pending.value } while (!pending.compareAndSet(requested, requested.copy(ranges = emptySet())))
+        do {
+            requested = pending.value
+        } while (!pending.compareAndSet(requested, requested.copy(ranges = emptySet())))
         if (requested.invalid) throw pdfRangePolicyFailure()
+        if (requested.materializationRequired) return@owned PdfRangeDrainResult.CompleteOriginalRequired
+        if (requested.ranges.isEmpty()) return@owned PdfRangeDrainResult.NoPendingRequest
         for (range in requested.ranges) acquire(range)
-        requested.ranges.isNotEmpty()
+        if (pending.value.materializationRequired) {
+            PdfRangeDrainResult.CompleteOriginalRequired
+        } else {
+            PdfRangeDrainResult.RangesAvailable
+        }
     }
 
     fun activateUnit(pageIndex: Int) {
@@ -108,15 +145,66 @@ class PdfRangeLoader(
         when (val result = server.read(source, range)) {
             is PdfRangeReadResult.Content -> {
                 coroutineContext.ensureActive()
-                if (pending.value.closed || pending.value.generation != generation) return@withLock
+                if (pending.value.closed ||
+                    pending.value.generation != generation ||
+                    pending.value.materializationRequired
+                ) return@withLock
                 if (result.range != range || result.bytes.size.toLong() != range.endExclusive - range.begin) {
                     throw pdfRangePolicyFailure()
                 }
-                cache.writeAlignedRange(identity, range.begin, result.bytes)
+                cache.writeAlignedRange(identity, range.begin, result.bytes, expectedEpoch = cacheEpoch)
             }
             is PdfRangeReadResult.Failure ->
                 throw PdfRangeFailure(result.code, result.recoverable, result.safetyFailure)
         }
+    }
+
+    private fun isValidEngineRange(offset: Long, size: Long): Boolean =
+        source.expectedSizeBytes > 0 &&
+            offset >= 0 &&
+            size > 0 &&
+            offset <= source.expectedSizeBytes &&
+            size <= source.expectedSizeBytes - offset
+
+    private fun coversWholeFile(ranges: List<EngineRange>): Boolean =
+        ranges.firstOrNull()?.begin == 0L &&
+            ranges.firstOrNull()?.endExclusive == source.expectedSizeBytes
+
+    private fun mergeEngineRanges(ranges: List<EngineRange>): List<EngineRange> {
+        if (ranges.isEmpty()) return emptyList()
+        val merged = mutableListOf<EngineRange>()
+        for (range in ranges.sortedWith(compareBy(EngineRange::begin, EngineRange::endExclusive))) {
+            val previous = merged.lastOrNull()
+            if (previous == null || range.begin > previous.endExclusive) {
+                merged += range
+            } else if (range.endExclusive > previous.endExclusive) {
+                merged[merged.lastIndex] = previous.copy(endExclusive = range.endExclusive)
+            }
+        }
+        return merged
+    }
+
+    private fun unionLength(ranges: Collection<PdfByteRange>): Long {
+        var total = 0L
+        for (range in mergeTransportRanges(ranges)) {
+            val length = range.endExclusive - range.begin
+            total = if (Long.MAX_VALUE - total < length) Long.MAX_VALUE else total + length
+        }
+        return total
+    }
+
+    private fun mergeTransportRanges(ranges: Collection<PdfByteRange>): List<PdfByteRange> {
+        if (ranges.isEmpty()) return emptyList()
+        val merged = mutableListOf<PdfByteRange>()
+        for (range in ranges.sortedWith(compareBy(PdfByteRange::begin, PdfByteRange::endExclusive))) {
+            val previous = merged.lastOrNull()
+            if (previous == null || range.begin > previous.endExclusive) {
+                merged += range
+            } else if (range.endExclusive > previous.endExclusive) {
+                merged[merged.lastIndex] = PdfByteRange(previous.begin, range.endExclusive)
+            }
+        }
+        return merged
     }
 
     private fun missingRanges(begin: Long, endExclusive: Long): List<PdfByteRange> {

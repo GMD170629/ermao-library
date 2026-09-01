@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,7 +26,7 @@ class EpubContentSecurityPolicyInstrumentedTest {
 
         val decorated = EpubContentSecurityPolicy.decorateHtml(markup.encodeToByteArray()).decodeToString()
 
-        assertTrue(decorated.contains("data-shuku-safety-policy-version=\"1\""))
+        assertTrue(decorated.contains("data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\""))
         assertTrue(decorated.contains("<p>Readable chapter</p>"))
     }
 }

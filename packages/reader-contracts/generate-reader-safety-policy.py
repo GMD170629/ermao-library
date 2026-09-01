@@ -238,6 +238,22 @@ def validate_policy(value: object) -> dict[str, object]:
         "audio",
     }:
         raise ValueError("profiles must contain the four morphology profiles")
+    pdf = profiles["pdf"]
+    if not isinstance(pdf, dict) or set(pdf) != {
+        "blockedActions",
+        "requireFinitePageGeometry",
+        "requireIdentityContentEncoding",
+        "requireStrongRevision",
+        "engineRequestLimit",
+        "largeRequestAction",
+        "allowWholeResponseFallback",
+    }:
+        raise ValueError("pdf profile has unexpected fields")
+    if pdf["engineRequestLimit"] != "SOURCE_LENGTH":
+        raise ValueError("PDF engine requests must be bounded by the source length")
+    if pdf["largeRequestAction"] != "MATERIALIZE_VERIFIED_ORIGINAL":
+        raise ValueError("large PDFium requests must materialize the verified original")
+
     audio = profiles["audio"]
     if not isinstance(audio, dict) or not isinstance(
         audio.get("containerMimeTypes"), dict
@@ -856,6 +872,7 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         "data class ReaderSafetyPdfProfile(",
         "    val blockedActions: List<String>, val requireFinitePageGeometry: Boolean,",
         "    val requireIdentityContentEncoding: Boolean, val requireStrongRevision: Boolean,",
+        "    val engineRequestLimit: String, val largeRequestAction: String,",
         "    val allowWholeResponseFallback: Boolean,",
         ")",
         "data class ReaderSafetyComicProfile(",
@@ -1014,6 +1031,8 @@ def render_kotlin(policy: Mapping[str, object], digest: str) -> str:
         f"        requireFinitePageGeometry = {str(pdf['requireFinitePageGeometry']).lower()},",
         f"        requireIdentityContentEncoding = {str(pdf['requireIdentityContentEncoding']).lower()},",
         f"        requireStrongRevision = {str(pdf['requireStrongRevision']).lower()},",
+        f"        engineRequestLimit = {kotlin_string(pdf['engineRequestLimit'])},",
+        f"        largeRequestAction = {kotlin_string(pdf['largeRequestAction'])},",
         f"        allowWholeResponseFallback = {str(pdf['allowWholeResponseFallback']).lower()},",
         "    )",
         "    val comicProfile = ReaderSafetyComicProfile(",
@@ -1222,6 +1241,8 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         "    require_finite_page_geometry: bool",
         "    require_identity_content_encoding: bool",
         "    require_strong_revision: bool",
+        "    engine_request_limit: str",
+        "    large_request_action: str",
         "    allow_whole_response_fallback: bool",
         "",
         "@dataclass(frozen=True, slots=True)",
@@ -1343,6 +1364,8 @@ def render_python(policy: Mapping[str, object], digest: str) -> str:
         f"    require_finite_page_geometry={pdf['requireFinitePageGeometry']},",
         f"    require_identity_content_encoding={pdf['requireIdentityContentEncoding']},",
         f"    require_strong_revision={pdf['requireStrongRevision']},",
+        f"    engine_request_limit={py_string(pdf['engineRequestLimit'])},",
+        f"    large_request_action={py_string(pdf['largeRequestAction'])},",
         f"    allow_whole_response_fallback={pdf['allowWholeResponseFallback']},",
         ")",
         "",

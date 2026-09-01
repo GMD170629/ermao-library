@@ -115,6 +115,19 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             set(self.policy["implementationFailureCodes"]),
         )
 
+    def test_pdf_engine_and_transport_limits_are_distinct(self) -> None:
+        pdf = self.policy["profiles"]["pdf"]
+        self.assertEqual("SOURCE_LENGTH", pdf["engineRequestLimit"])
+        self.assertEqual("MATERIALIZE_VERIFIED_ORIGINAL", pdf["largeRequestAction"])
+        self.assertFalse(pdf["allowWholeResponseFallback"])
+        self.assertEqual(1 * 1024**2, self.policy["budgets"]["pdfRangeRequestMaxBytes"])
+        self.assertEqual(8 * 1024**2, self.policy["budgets"]["pdfRangeMemoryCacheMaxBytes"])
+        range_rule = next(
+            rule for rule in self.policy["rules"] if rule["id"] == "PDF.RANGE_PROTOCOL"
+        )
+        self.assertIn("profiles.pdf.engineRequestLimit", range_rule["parameterRefs"])
+        self.assertIn("profiles.pdf.largeRequestAction", range_rule["parameterRefs"])
+
     def test_budget_boundaries_and_rule_ownership(self) -> None:
         budgets = self.policy["budgets"]
         self.assertEqual(2 * 1024**3, budgets["originalMaxBytes"])
