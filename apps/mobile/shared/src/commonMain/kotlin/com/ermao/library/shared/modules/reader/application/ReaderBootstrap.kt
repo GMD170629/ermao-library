@@ -31,24 +31,76 @@ data class ReaderBootstrapResource(
     val bookId: String,
     val sourceFormat: ReaderSourceFormat,
     val assetId: String? = null,
+    val sortOrder: Int = 0,
+    val durationMillis: Long? = null,
+    val trackCount: Int? = null,
+    val chapterCount: Int? = null,
 ) {
     init {
         require(resourceId.isNotBlank())
         require(displayTitle.isNotBlank())
         require(bookId.isNotBlank())
         require(assetId == null || assetId.isNotBlank())
-        require(sourceFormat == ReaderSourceFormat.ImageDir || assetId != null) {
-            "A single-file Reader source must retain its original Asset identity"
-        }
         require(sourceFormat != ReaderSourceFormat.ImageDir || assetId == null) {
             "IMAGE_DIR must not advertise one PAGE Asset as the publication"
         }
+        require(durationMillis == null || durationMillis >= 0)
+        require(trackCount == null || trackCount >= 0)
+        require(chapterCount == null || chapterCount >= 0)
+    }
+}
+
+/** Book identity and display metadata retained by the resource-first bootstrap. */
+data class ReaderBootstrapBook(
+    val bookId: String,
+    val title: String,
+    val author: String? = null,
+    val coverApiPath: String? = null,
+) {
+    init {
+        require(bookId.isNotBlank())
+        require(title.isNotBlank())
+        require(author == null || author.isNotBlank())
+        require(coverApiPath == null || coverApiPath.startsWith("/api/"))
+    }
+}
+
+/** Ordered original Asset metadata. The media bytes remain behind an authenticated API path. */
+data class ReaderBootstrapAsset(
+    val assetId: String,
+    val resourceId: String,
+    val title: String,
+    val apiPath: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val durationMillis: Long? = null,
+    val discNumber: Int? = null,
+    val trackNumber: Int? = null,
+    val sortOrder: Int,
+    val codec: String? = null,
+) {
+    init {
+        require(assetId.isNotBlank() && resourceId.isNotBlank())
+        require(title.isNotBlank())
+        require(apiPath.startsWith("/api/") && '#' !in apiPath && '?' !in apiPath)
+        require(mimeType.isNotBlank())
+        require(sizeBytes > 0)
+        require(durationMillis == null || durationMillis >= 0)
+        require(discNumber == null || discNumber >= 0)
+        require(trackNumber == null || trackNumber >= 0)
+        require(codec == null || codec.isNotBlank())
     }
 }
 
 data class ReaderBootstrap(
     val target: ReaderProgressSyncTarget,
     val resource: ReaderBootstrapResource,
+    val book: ReaderBootstrapBook = ReaderBootstrapBook(
+        bookId = resource.bookId,
+        title = resource.displayTitle,
+    ),
+    val availableResources: List<ReaderBootstrapResource> = emptyList(),
+    val assets: List<ReaderBootstrapAsset> = emptyList(),
     val pdfAccess: ReaderPdfAccess? = null,
     val remoteSnapshot: ReaderProgressSnapshotV4?,
     /** Fixed-layout/audio navigation metadata. Reflowable navigation is always parsed locally. */
@@ -74,6 +126,9 @@ data class ReaderBootstrap(
         require(target.resourceId == resource.resourceId)
         require(target.bookId == resource.bookId)
         require(target.sourceFormat == resource.sourceFormat.readerFormat)
+        require(resource.sourceFormat == ReaderSourceFormat.ImageDir || resource.assetId != null) {
+            "The current single-file Reader source must retain its original Asset identity"
+        }
         require(!resource.sourceFormat.isReflowable || units.isEmpty()) {
             "Reflowable Reader bootstrap must not contain server navigation units"
         }
@@ -88,6 +143,14 @@ data class ReaderBootstrap(
         require(pdfPages.map(ReaderPdfPage::pageIndex) == pdfPages.indices.toList()) {
             "PDF pages are not canonical and contiguous"
         }
+        require(book.bookId == resource.bookId)
+        require(availableResources.map(ReaderBootstrapResource::resourceId).distinct().size == availableResources.size)
+        require(availableResources.all { it.bookId == resource.bookId })
+        require(assets == assets.sortedWith(compareBy(ReaderBootstrapAsset::sortOrder, ReaderBootstrapAsset::assetId)))
+        require(assets.map(ReaderBootstrapAsset::assetId).distinct().size == assets.size)
+        require(assets.all { it.resourceId == resource.resourceId })
+        require(resource.sourceFormat == ReaderSourceFormat.ImageDir || assets.isEmpty() ||
+            assets.any { it.assetId == resource.assetId })
     }
 
 }

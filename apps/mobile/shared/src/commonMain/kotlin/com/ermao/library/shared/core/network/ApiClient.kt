@@ -10,6 +10,7 @@ import io.ktor.client.request.forms.formData
 import io.ktor.client.request.request
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.headers
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.bodyAsChannel
@@ -98,6 +99,64 @@ class ApiClient internal constructor(
         require(apiPath.startsWith("/api/")) { "API path must start with /api/" }
         require(!apiPath.contains('#') && !apiPath.contains('?')) { "API path must not contain a query or fragment" }
         return profile.baseUrl.resolveApiPath(apiPath)
+    }
+
+    /**
+     * Opens the single authenticated incremental-body primitive used by native PDF and audio
+     * adapters. Redirect, Cookie, TLS and base-path behavior therefore cannot drift by format.
+     */
+    internal suspend fun openAuthenticatedStream(
+        request: AuthenticatedStreamRequest,
+    ): ApiResult<AuthenticatedMediaStream> {
+        try {
+            var requestUrl = profile.baseUrl.resolveApiPath(request.apiPath)
+            var redirectCount = 0
+            while (true) {
+                val response = client.prepareRequest(requestUrl) {
+                    method = when (request.method) {
+                        AuthenticatedStreamMethod.Head -> HttpMethod.Head
+                        AuthenticatedStreamMethod.Get -> HttpMethod.Get
+                    }
+                    headers {
+                        request.rangeStart?.let { start ->
+                            val range = request.rangeEndInclusive?.let { end -> "bytes=$start-$end" }
+                                ?: "bytes=$start-"
+                            append(HttpHeaders.Range, range)
+                        }
+                        request.ifRange?.let { append(HttpHeaders.IfRange, it) }
+                    }
+                }.execute()
+                if (response.status.value in REDIRECT_STATUS_CODES) {
+                    response.bodyAsChannel().cancel(null)
+                    val location = response.headers[HttpHeaders.Location]
+                        ?: return redirectFailure("REDIRECT_LOCATION_MISSING")
+                    val targetUrl = RedirectPolicy.resolve(requestUrl, location)
+                        ?: return redirectFailure("REDIRECT_LOCATION_INVALID")
+                    if (!RedirectPolicy.shouldFollow(requestUrl, targetUrl)) {
+                        return redirectFailure("REDIRECT_REJECTED")
+                    }
+                    if (redirectCount >= MAX_REDIRECTS) {
+                        return redirectFailure("TOO_MANY_REDIRECTS")
+                    }
+                    redirectCount += 1
+                    requestUrl = targetUrl
+                    continue
+                }
+                val headers = response.headers.entries().associate { it.key to it.value }
+                return ApiResult.Success(
+                    AuthenticatedMediaStream(response.status.value, headers, response.bodyAsChannel()),
+                    ApiResponseMetadata(response.status.value, headers),
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (timeout: HttpRequestTimeoutException) {
+            return ApiResult.Failure(AppError(AppErrorKind.Timeout, "REQUEST_TIMEOUT", cause = timeout))
+        } catch (error: PlatformStorageException) {
+            return ApiResult.Failure(AppError(AppErrorKind.StorageFailure, "STORAGE_FAILURE", cause = error))
+        } catch (error: Throwable) {
+            return ApiResult.Failure(mapTransportError(error).copy(cause = error))
+        }
     }
 
     suspend fun <T> execute(request: ApiRequest<T>): ApiResult<T> {

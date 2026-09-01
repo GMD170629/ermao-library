@@ -30,6 +30,34 @@
     <string name="shelves_refresh">刷新</string>
     <string name="app_name">二毛图书</string>
 
+    <string name="audio_notification_channel_name">有声书播放</string>
+    <string name="audio_unknown_title">有声书</string>
+    <string name="audio_no_chapter">无章节</string>
+    <string name="audio_play">播放</string>
+    <string name="audio_pause">暂停</string>
+    <string name="audio_progress">播放进度</string>
+    <string name="audio_scrubber">播放位置</string>
+    <string name="audio_now_playing">正在播放</string>
+    <string name="audio_collapse">收起播放器</string>
+    <string name="audio_more_actions">更多播放操作</string>
+    <string name="audio_stop">停止播放</string>
+    <string name="audio_retry">重试播放</string>
+    <string name="audio_previous">上一个</string>
+    <string name="audio_next">下一个</string>
+    <string name="audio_back_15">后退 15 秒</string>
+    <string name="audio_forward_30">前进 30 秒</string>
+    <string name="audio_speed_value">%1$.2fx</string>
+    <string name="audio_chapters_queue">章节和音轨</string>
+    <string name="audio_track_current">当前音轨</string>
+    <string name="audio_cover_description">《%1$s》的有声书封面</string>
+    <string name="audio_status_loading">正在加载</string>
+    <string name="audio_status_ready">已就绪</string>
+    <string name="audio_status_playing">正在播放</string>
+    <string name="audio_status_paused">已暂停</string>
+    <string name="audio_status_buffering">正在缓冲</string>
+    <string name="audio_status_ended">已播放完</string>
+    <string name="audio_status_error">播放出错</string>
+
     <string name="server_screen_description">添加自托管服务器，开始阅读。</string>
     <string name="server_add_title">添加服务器</string>
     <string name="server_display_name_label">名称</string>
@@ -464,7 +492,6 @@
     <string name="reader_not_implemented_title">阅读器不可用</string>
     <string name="reader_not_implemented_message">下载已完成，但此格式的原生阅读器尚未交付。</string>
     <string name="work_reader_renderer_pending">PDF 和漫画支持在线流式读取，但此版本尚未提供原生渲染器。</string>
-    <string name="work_audiobook_player_unavailable">此版本暂不支持有声书播放。</string>
     <string name="reader_resume_prompt">其他设备已阅读至 %2$s · %1$s</string>
     <string name="reader_page_number">第 %1$d 页</string>
     <string name="reader_resume_return">跳转至最新位置</string>

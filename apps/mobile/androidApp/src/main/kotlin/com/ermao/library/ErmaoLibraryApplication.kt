@@ -20,6 +20,10 @@ import com.ermao.library.shared.modules.downloads.DownloadCatalogRepository
 import com.ermao.library.application.ReaderProgressPresentationCenter
 import com.ermao.library.shared.modules.workmanagement.application.WorkManagementRepository
 import com.ermao.library.platform.persistence.AndroidMobileStorageContract
+import com.ermao.library.features.audio.application.AndroidAudioPlaybackRuntime
+import com.ermao.library.features.audio.infrastructure.AndroidAudioTransportRegistry
+import com.ermao.library.features.audio.infrastructure.AuthenticatedAudioDataSourceProvider
+import com.ermao.library.features.audio.infrastructure.RegisteredAuthenticatedAudioDataSourceProvider
 
 class ErmaoLibraryApplication : Application() {
     private val downloadsViewModelStore = androidx.lifecycle.ViewModelStore()
@@ -81,6 +85,16 @@ class ErmaoLibraryApplication : Application() {
         private set
     lateinit var readerProgressPresentationCenter: ReaderProgressPresentationCenter
         private set
+    /**
+     * Supplied by the shared Audio composition when that capability is available. The default
+     * fails closed for remote media and never bypasses the shared Cookie/TLS transport policy.
+     */
+    lateinit var audioTransportProvider: AuthenticatedAudioDataSourceProvider
+        private set
+    lateinit var audioTransportRegistry: AndroidAudioTransportRegistry
+        private set
+    lateinit var audioPlaybackRuntime: AndroidAudioPlaybackRuntime
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -96,6 +110,9 @@ class ErmaoLibraryApplication : Application() {
         downloadFiles = AtomicDownloadFileSink(downloadRoot)
         sharedDownloadCatalog = SharedDownloadCatalogAdapter(downloadCatalog, downloadFiles)
         readerProgressPresentationCenter = ReaderProgressPresentationCenter()
+        audioTransportRegistry = AndroidAudioTransportRegistry()
+        audioTransportProvider = RegisteredAuthenticatedAudioDataSourceProvider(audioTransportRegistry)
+        audioPlaybackRuntime = AndroidAudioPlaybackRuntime(this, audioTransportRegistry)
         mobileRuntime = createAndroidMobileRuntime(
             context = this,
             profileRepository = mobileStore,
@@ -114,6 +131,8 @@ class ErmaoLibraryApplication : Application() {
         downloadsObservation?.cancel()
         lifecycleHandler.removeCallbacksAndMessages(null)
         downloadsViewModelStore.clear()
+        audioPlaybackRuntime.close()
+        audioTransportRegistry.clear()
         mobileRuntime.close()
         super.onTerminate()
     }

@@ -7,6 +7,8 @@ import com.ermao.library.shared.core.network.ApiRequest
 import com.ermao.library.shared.core.network.ApiResult
 import com.ermao.library.shared.core.network.AppErrorKind
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrap
+import com.ermao.library.shared.modules.reader.application.ReaderBootstrapAsset
+import com.ermao.library.shared.modules.reader.application.ReaderBootstrapBook
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.application.ReaderPdfAccess
@@ -121,6 +123,7 @@ class KtorReaderBootstrapGateway internal constructor(
         val expectedResourcePath = "/api/resources/${encodePathSegment(request.resourceId)}"
         if (book.id.isBlank() || resource.id != request.resourceId || resource.bookId != book.id ||
             resource.sourceNodeId.isBlank() || resourceUrl != expectedResourcePath ||
+            (book.coverUrl != null && !book.coverUrl.isSafeReaderMetadataApiPath()) ||
             availableResources.any { it.id.isBlank() || it.bookId != book.id || it.sourceNodeId.isBlank() } ||
             availableResources.map(ReaderBootstrapResourceWire::id).distinct().size != availableResources.size ||
             assets.any { it.id.isBlank() || it.resourceId != resource.id || it.sourceNodeId.isBlank() } ||
@@ -264,7 +267,48 @@ class KtorReaderBootstrapGateway internal constructor(
                     bookId = book.id,
                     sourceFormat = exactSourceFormat,
                     assetId = primaryAsset.id.takeUnless { exactSourceFormat == ReaderSourceFormat.ImageDir },
+                    sortOrder = resource.sortOrder,
+                    durationMillis = resource.durationMs,
+                    trackCount = resource.trackCount,
+                    chapterCount = resource.chapterCount,
                 ),
+                book = ReaderBootstrapBook(
+                    bookId = book.id,
+                    title = book.title.ifBlank { displayTitle },
+                    author = book.author?.trim()?.takeIf(String::isNotEmpty),
+                    coverApiPath = book.coverUrl,
+                ),
+                availableResources = availableResources
+                    .sortedWith(compareBy<ReaderBootstrapResourceWire>({ it.sortOrder }, { it.id }))
+                    .map { available ->
+                        val availableFormat = requireNotNull(available.exactSourceFormat())
+                        ReaderBootstrapResource(
+                            resourceId = available.id,
+                            displayTitle = available.title.ifBlank { book.title },
+                            bookId = available.bookId,
+                            sourceFormat = availableFormat,
+                            assetId = null,
+                            sortOrder = available.sortOrder,
+                            durationMillis = available.durationMs,
+                            trackCount = available.trackCount,
+                            chapterCount = available.chapterCount,
+                        )
+                    },
+                assets = orderedAssets.map { asset ->
+                    ReaderBootstrapAsset(
+                        assetId = asset.id,
+                        resourceId = asset.resourceId,
+                        title = asset.title.ifBlank { displayTitle },
+                        apiPath = asset.url,
+                        mimeType = asset.mimeType.trim().lowercase().substringBefore(';'),
+                        sizeBytes = asset.sizeBytes,
+                        durationMillis = asset.durationMs,
+                        discNumber = asset.discNumber,
+                        trackNumber = asset.trackNumber,
+                        sortOrder = asset.sortOrder,
+                        codec = asset.codec?.trim()?.takeIf(String::isNotEmpty),
+                    )
+                },
                 pdfAccess = pdfAccess,
                 remoteSnapshot = remoteSnapshot,
                 units = orderedUnits.map { unit ->
@@ -326,10 +370,17 @@ private fun String.isSafeReaderMediaApiPath(): Boolean =
         (matches(Regex("^/api/assets/[^/?#]+$")) ||
             matches(Regex("^/api/resources/[^/?#]+/asset$")))
 
+private fun String.isSafeReaderMetadataApiPath(): Boolean =
+    startsWith("/api/") && !contains('#') && !contains('?') && !contains("//") &&
+        split('/').none { it == "." || it == ".." }
+
 private fun ReaderSourceFormat.readerTypeWire(): String = readerFormat.wireReaderType
 
 private fun ReaderBootstrapResourceWire.hasExactFormatAndMorphology(): Boolean =
-    ReaderSourceFormat.entries.any { sourceFormat ->
+    exactSourceFormat() != null
+
+private fun ReaderBootstrapResourceWire.exactSourceFormat(): ReaderSourceFormat? =
+    ReaderSourceFormat.entries.singleOrNull { sourceFormat ->
         format == sourceFormat.fileKind && readerType == sourceFormat.readerTypeWire()
     }
 

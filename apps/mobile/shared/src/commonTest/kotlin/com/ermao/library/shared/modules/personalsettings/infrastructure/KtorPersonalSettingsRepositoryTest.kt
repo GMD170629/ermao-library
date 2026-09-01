@@ -45,8 +45,26 @@ class KtorPersonalSettingsRepositoryTest {
         assertEquals("Reader", settings.account.displayName)
         assertEquals("/api/auth/avatar", settings.account.avatarUrl)
         assertEquals(PersonalSettingsLocale.EnUs, settings.preferences.locale)
+        assertEquals(1.25, settings.preferences.audioPlaybackRate)
         assertEquals(HttpMethod.Get, harness.requests.single().method)
         assertEquals("/base/api/auth/me", harness.requests.single().path)
+    }
+
+    @Test
+    fun updatesTheExistingAudioPlaybackRatePreferenceContract() = runBlocking {
+        val harness = Harness(Response(200, PREFERENCES_AUDIO_RATE))
+
+        val preferences = assertIs<PersonalSettingsResult.Content<*>>(
+            harness.repository.updateAudioPlaybackRate(context(), 2.5),
+        ).value
+
+        assertEquals(
+            2.5,
+            assertIs<com.ermao.library.shared.modules.personalsettings.domain.PersonalPreferences>(preferences)
+                .audioPlaybackRate,
+        )
+        assertEquals("/base/api/auth/preferences", harness.requests.single().path)
+        assertEquals("""{"preferences":{"audio.playbackRate":2.5}}""", harness.requests.single().body)
     }
 
     @Test
@@ -410,11 +428,13 @@ class KtorPersonalSettingsRepositoryTest {
         const val USER_WITHOUT_AVATAR =
             """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":null}}}"""
         const val SESSION =
-            """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"en-US"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"libraryIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"en-US"}}}"""
+            """{"ok":true,"data":{"user":{"id":"user-1","email":"reader@example.com","name":"Reader","role":"member","status":"active","canManageSystem":false,"canViewManualImports":false,"authzVersion":7,"avatarUrl":"/api/auth/avatar","locale":"en-US"},"authorization":{"isAdmin":false,"canManageSystem":false,"allLibraryScopes":true,"libraryIds":[],"canViewManualImports":false,"authzVersion":7},"preferences":{"locale":"en-US","audio.playbackRate":1.25}}}"""
         const val PASSWORD_CHANGED =
             """{"ok":true,"data":{"passwordChanged":true,"requiresLogin":true}}"""
         const val PREFERENCES_ZH =
             """{"ok":true,"data":{"preferences":{"locale":"zh-CN"}}}"""
+        const val PREFERENCES_AUDIO_RATE =
+            """{"ok":true,"data":{"preferences":{"locale":"en-US","audio.playbackRate":2.5}}}"""
         const val COMPATIBILITY =
             """{"ok":true,"data":{"service":"ermao-books","serverIdentity":"server-fixture","serverVersion":"2.4.0","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":4,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}"""
     }

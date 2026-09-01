@@ -177,6 +177,7 @@ struct WorkDetailView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.locale) private var locale
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
 
     init(
         context: ContentRequestContext,
@@ -734,10 +735,6 @@ struct WorkDetailView: View {
             .accessibilityIdentifier("work.detail.actions")
             if selected?.isReadable != true {
                 Text("work.reader.unavailable.action")
-                    .appTextStyle(.label)
-                    .foregroundStyle(theme.textSecondary)
-            } else if isAudio {
-                Text("work.audio.unavailable")
                     .appTextStyle(.label)
                     .foregroundStyle(theme.textSecondary)
             }
@@ -1976,7 +1973,20 @@ struct WorkDetailView: View {
     private func requestReaderAccess(detail: BookDetailContent, resource: BookResource, unit: BookResourceDetailUnit? = nil, chapterHref: String? = nil) {
         guard resource.bookID == detail.book.id, resource.isReadable != false else { return }
         if resource.readerType.lowercased() == "audio" {
-            unavailableFeature = .audio
+            guard let audioPlaybackRuntime else {
+                readerAccessErrorCode = "AUDIO_ENGINE_UNAVAILABLE"
+                return
+            }
+            audioPlaybackRuntime.launch(
+                AudioLaunchIntent(
+                    resourceID: resource.id,
+                    assetID: resource.primaryAssetID,
+                    chapterID: unit?.id,
+                    positionMillis: nil,
+                    autoplay: true
+                ),
+                namespace: context.namespaceKey
+            )
             return
         }
         guard let readerType = ManagedDownloadReaderType.fixtureValue(
@@ -2084,6 +2094,37 @@ struct WorkDetailView: View {
         guard record.isVerifiedOfflineCopy else {
             downloads.retry(record)
             showFeedback(String(localized: "downloads.error.invalid"), isError: true)
+            return
+        }
+        if record.readerType == .audio {
+            guard record.namespace == context.namespaceKey,
+                  record.verifiedSharedArtifact != nil,
+                  let expectedBytes = record.expectedBytes,
+                  expectedBytes == record.receivedBytes,
+                  let mimeType = record.mimeType,
+                  let audioPlaybackRuntime else {
+                showFeedback(String(localized: "downloads.error.invalid"), isError: true)
+                return
+            }
+            Task { @MainActor in
+                guard let fileURL = await downloads.localFileURL(for: record) else {
+                    showFeedback(String(localized: "downloads.error.invalid"), isError: true)
+                    return
+                }
+                audioPlaybackRuntime.launchVerifiedLocalArtifact(
+                    namespace: context.namespaceKey,
+                    userID: context.userID,
+                    bookID: record.bookID,
+                    bookTitle: record.bookTitle,
+                    author: record.bookAuthor,
+                    resourceID: record.resourceID,
+                    resourceTitle: record.resourceTitle,
+                    assetID: record.assetID,
+                    fileURL: fileURL,
+                    mimeType: mimeType,
+                    sizeBytes: expectedBytes
+                )
+            }
             return
         }
         openReader(
@@ -2262,7 +2303,6 @@ private struct FlowTags: View {
 }
 
 private enum UnavailableWorkFeature: Identifiable {
-    case audio
     case reader
     case editing
     case cover
@@ -2273,7 +2313,6 @@ private enum UnavailableWorkFeature: Identifiable {
 
     var message: LocalizedStringKey {
         switch self {
-        case .audio: "work.audio.unavailable"
         case .reader: "work.reader.unavailable.message"
         case .editing: "work.action.edit.unavailable"
         case .cover: "work.action.setCover.unavailable"

@@ -7,6 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A30000000000000000000001 /* IosAudioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* IosAudioModels.swift */; };
+		A30000000000000000000002 /* IosAudioAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000002 /* IosAudioAdapters.swift */; };
+		A30000000000000000000003 /* IosAudioResourceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000003 /* IosAudioResourceLoader.swift */; };
+		A30000000000000000000004 /* IosAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000004 /* IosAudioEngine.swift */; };
+		A30000000000000000000005 /* IosAudioSystemMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000005 /* IosAudioSystemMedia.swift */; };
+		A30000000000000000000006 /* IosAudioPlaybackRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000006 /* IosAudioPlaybackRuntime.swift */; };
+		A30000000000000000000007 /* IosAudioPlaybackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000007 /* IosAudioPlaybackViews.swift */; };
+		A30000000000000000000008 /* IosAudioComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000008 /* IosAudioComposition.swift */; };
 		B9A100000000000000000001 /* NativeBookManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A100000000000000000001 /* NativeBookManagement.swift */; };
 		C01100000000000000000004 /* IosReaderControlAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000004 /* IosReaderControlAdapters.swift */; };
 		C01100000000000000000003 /* IosReaderControlSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01200000000000000000003 /* IosReaderControlSheets.swift */; };
@@ -193,6 +201,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C30000000000000000000001 /* IosAudioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioModels.swift; sourceTree = "<group>"; };
+		C30000000000000000000002 /* IosAudioAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioAdapters.swift; sourceTree = "<group>"; };
+		C30000000000000000000003 /* IosAudioResourceLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioResourceLoader.swift; sourceTree = "<group>"; };
+		C30000000000000000000004 /* IosAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioEngine.swift; sourceTree = "<group>"; };
+		C30000000000000000000005 /* IosAudioSystemMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioSystemMedia.swift; sourceTree = "<group>"; };
+		C30000000000000000000006 /* IosAudioPlaybackRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioPlaybackRuntime.swift; sourceTree = "<group>"; };
+		C30000000000000000000007 /* IosAudioPlaybackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioPlaybackViews.swift; sourceTree = "<group>"; };
+		C30000000000000000000008 /* IosAudioComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosAudioComposition.swift; sourceTree = "<group>"; };
 		F9A100000000000000000001 /* NativeBookManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBookManagement.swift; sourceTree = "<group>"; };
 		C01200000000000000000004 /* IosReaderControlAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlAdapters.swift; sourceTree = "<group>"; };
 		C01200000000000000000003 /* IosReaderControlSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosReaderControlSheets.swift; sourceTree = "<group>"; };
@@ -543,6 +559,7 @@
 				G12200000000000000000122 /* AdministrativeSettings */,
 				G12300000000000000000123 /* Reader */,
 				C12300000000000000000123 /* Downloads */,
+				C30000000000000000000000 /* Audio */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -713,6 +730,21 @@
 				E17800000000000000000178 /* SharedManagedDownloadTransfer.swift */,
 			);
 			path = Downloads;
+			sourceTree = "<group>";
+		};
+		C30000000000000000000000 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				C30000000000000000000001 /* IosAudioModels.swift */,
+				C30000000000000000000002 /* IosAudioAdapters.swift */,
+				C30000000000000000000003 /* IosAudioResourceLoader.swift */,
+				C30000000000000000000004 /* IosAudioEngine.swift */,
+				C30000000000000000000005 /* IosAudioSystemMedia.swift */,
+				C30000000000000000000006 /* IosAudioPlaybackRuntime.swift */,
+				C30000000000000000000007 /* IosAudioPlaybackViews.swift */,
+				C30000000000000000000008 /* IosAudioComposition.swift */,
+			);
+			path = Audio;
 			sourceTree = "<group>";
 		};
 		G20000000000000000000200 /* Frameworks */ = {
@@ -1042,6 +1074,14 @@
 				A17600000000000000000176 /* DownloadCenterView.swift in Sources */,
 				A17700000000000000000177 /* ManagedDownloadStore.swift in Sources */,
 				A17800000000000000000178 /* SharedManagedDownloadTransfer.swift in Sources */,
+				A30000000000000000000001 /* IosAudioModels.swift in Sources */,
+				A30000000000000000000002 /* IosAudioAdapters.swift in Sources */,
+				A30000000000000000000003 /* IosAudioResourceLoader.swift in Sources */,
+				A30000000000000000000004 /* IosAudioEngine.swift in Sources */,
+				A30000000000000000000005 /* IosAudioSystemMedia.swift in Sources */,
+				A30000000000000000000006 /* IosAudioPlaybackRuntime.swift in Sources */,
+				A30000000000000000000007 /* IosAudioPlaybackViews.swift in Sources */,
+				A30000000000000000000008 /* IosAudioComposition.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

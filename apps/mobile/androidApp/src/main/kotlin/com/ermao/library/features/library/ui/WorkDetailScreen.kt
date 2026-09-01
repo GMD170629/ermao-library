@@ -227,10 +227,9 @@ fun WorkDetailScreen(
     canManageSystem: Boolean = managementViewModel != null,
     onBookDeleted: () -> Unit = {},
 ) {
-    var audioUnavailable by remember { mutableStateOf(false) }
-    val openResource: (ResourceContent) -> Unit = { resource ->
-        if (resource.readerType.equals("audio", true)) audioUnavailable = true else onOpenSelectedResource(resource)
-    }
+    // Audio is a first-class player destination. The shell owns the shared bootstrap/engine
+    // adapter; this detail surface only emits the same resource intent as other media types.
+    val openResource: (ResourceContent) -> Unit = onOpenSelectedResource
     val selectedResource = state.resolveReadingResource()
     val pageActionScope = state.detailActionScope()
     var pendingReadingStatusScope by remember(state.content?.book?.id) {
@@ -402,9 +401,7 @@ fun WorkDetailScreen(
                     },
                     onRequestRemoveDownload = { pendingDownloadRemoval = it },
                     onOpenSelectedResource = openResource,
-                    onOpenReadingUnit = { resource, unit ->
-                        if (resource.readerType.equals("audio", true)) audioUnavailable = true else onOpenReadingUnit(resource, unit)
-                    },
+                    onOpenReadingUnit = onOpenReadingUnit,
                     onOpenDownloadedResource = onOpenDownloadedResource,
                     coverRefreshToken = coverRefreshToken,
                     listState = detailListState,
@@ -414,12 +411,6 @@ fun WorkDetailScreen(
         }
     }
 
-    if (audioUnavailable) AlertDialog(
-        onDismissRequest = { audioUnavailable = false },
-        title = { Text(stringResource(R.string.work_open_player)) },
-        text = { Text(stringResource(R.string.work_audiobook_player_unavailable)) },
-        confirmButton = { TextButton(onClick = { audioUnavailable = false }) { Text(stringResource(R.string.cancel_action)) } },
-    )
     pendingDownloadRemoval?.let { download ->
         AlertDialog(
             onDismissRequest = { pendingDownloadRemoval = null },
@@ -825,7 +816,6 @@ private fun WorkDetailActionRow(
             }
         }
         val captionResource = when {
-            selectedResource?.readerType.equals("audio", ignoreCase = true) -> R.string.work_audiobook_player_unavailable
             selectedResource == null || !selectedResource.readable -> R.string.work_no_readable_resources
             ReaderFormatSupport.deliveryMode(selectedResource.readerType, selectedResource.format) ==
                 ReaderDeliveryMode.Unsupported ->

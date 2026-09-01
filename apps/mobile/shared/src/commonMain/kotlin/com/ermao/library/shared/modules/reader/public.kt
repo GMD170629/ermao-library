@@ -132,6 +132,7 @@ typealias ReaderSafetyFacade = com.ermao.library.shared.modules.reader.domain.Re
 typealias ReaderSafetyPolicy = com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 typealias ReaderSafetyAction = com.ermao.library.shared.modules.reader.domain.ReaderSafetyAction
 typealias ReaderSafetyRuleId = com.ermao.library.shared.modules.reader.domain.ReaderSafetyRuleId
+typealias ReaderSafetyBudgetName = com.ermao.library.shared.modules.reader.domain.ReaderSafetyBudgetName
 typealias ReaderSafetyFailure = com.ermao.library.shared.modules.reader.domain.ReaderSafetyFailure
 typealias ReaderSafetyException = com.ermao.library.shared.modules.reader.domain.ReaderSafetyException
 typealias ReaderSafetyImplementationFailure =
@@ -497,6 +498,10 @@ typealias ReaderBootstrapFailure =
 typealias ReaderBootstrapGateway = com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 typealias ReaderBootstrapResource =
     com.ermao.library.shared.modules.reader.application.ReaderBootstrapResource
+typealias ReaderBootstrapBook =
+    com.ermao.library.shared.modules.reader.application.ReaderBootstrapBook
+typealias ReaderBootstrapAsset =
+    com.ermao.library.shared.modules.reader.application.ReaderBootstrapAsset
 typealias ReaderComicPage = com.ermao.library.shared.modules.reader.application.ReaderComicPage
 typealias ReaderPdfPage = com.ermao.library.shared.modules.reader.application.ReaderPdfPage
 typealias ReaderPublicationBootstrapResult =

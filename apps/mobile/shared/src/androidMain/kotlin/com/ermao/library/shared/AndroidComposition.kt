@@ -21,6 +21,8 @@ import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
+import com.ermao.library.shared.modules.audio.AudioMediaTransport
+import com.ermao.library.shared.modules.audio.infrastructure.KtorAudioMediaTransport
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
@@ -91,6 +93,14 @@ fun createAndroidReaderBootstrapGateway(context: Context): ReaderBootstrapGatewa
     KtorReaderBootstrapGateway(
         ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
     )
+
+fun createAndroidAudioMediaTransport(
+    context: Context,
+    profile: ServerProfile,
+): AudioMediaTransport = KtorAudioMediaTransport(
+    profile,
+    ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
+)
 
 fun createAndroidPdfRangeServerPort(
     context: Context,

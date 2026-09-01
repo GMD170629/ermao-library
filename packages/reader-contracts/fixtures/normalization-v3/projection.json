@@ -2,8 +2,8 @@
   "schemaVersion": 3,
   "normalization": "shuku-epub-locator-dom-v3",
   "policyId": "shuku.reader-safety",
-  "policyVersion": 2,
-  "policyDigest": "d23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2",
+  "policyVersion": 3,
+  "policyDigest": "b01d103fa1b57035aa1c689326406a9099275ecd4196361eefed539f310f1619",
   "readingOrder": [
     {
       "href": "OPS/chapter.xhtml",

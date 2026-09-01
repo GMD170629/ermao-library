@@ -229,6 +229,32 @@ internal class KtorPersonalSettingsRepository(
                 ?: protocolFailure("UNSUPPORTED_LOCALE")
         }
 
+    override suspend fun updateAudioPlaybackRate(
+        context: PersonalSettingsContext,
+        playbackRate: Double,
+    ): PersonalSettingsResult<PersonalPreferences> {
+        if (!playbackRate.isFinite() || playbackRate !in 0.5..3.0) {
+            return validationFailure("INVALID_AUDIO_PLAYBACK_RATE", "audio.playbackRate")
+        }
+        return mapResult(
+            request(context) { client ->
+                client.execute(
+                    ApiRequest(
+                        method = ApiMethod.Patch,
+                        apiPath = "/api/auth/preferences",
+                        responseDeserializer = SettingsPreferencesPayloadWire.serializer(),
+                        requestBody = encoder.encodeToString(
+                            UpdateAudioPlaybackRateWire(AudioPlaybackRatePreferenceWire(playbackRate)),
+                        ),
+                    ),
+                )
+            },
+        ) { wire ->
+            wire.preferences.toDomain()?.let { preferences -> PersonalSettingsResult.Content(preferences) }
+                ?: protocolFailure("UNSUPPORTED_AUDIO_PLAYBACK_RATE")
+        }
+    }
+
     override suspend fun loadServerAbout(
         context: PersonalSettingsContext,
     ): PersonalSettingsResult<PersonalServerAbout> =

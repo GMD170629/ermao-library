@@ -153,6 +153,7 @@ struct MainTabView: View {
     @State private var readerLaunch: IosReaderLaunchRequest?
     @State private var didOpenUITestRoute = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
 
     @ViewBuilder private func managedTabs(_ context: ContentRequestContext) -> some View {
         if let repository = workManagementRepository {
@@ -413,6 +414,7 @@ struct MainTabView: View {
         case .downloads:
             DownloadCenterView(
                 store: downloads,
+                openAudio: { openAudioDownload($0, context: context) },
                 openReader: { openReader($0, context: context, fallbackTab: presentation) }
             )
         case .reader(let handoff):
@@ -511,6 +513,35 @@ struct MainTabView: View {
             managedDownloadRecordID: managedDownloadRecordID,
             initialTargetPayload: initialTargetPayload
         )
+    }
+
+    private func openAudioDownload(
+        _ record: ManagedDownloadRecord,
+        context: ContentRequestContext
+    ) {
+        guard record.namespace == context.namespaceKey,
+              record.readerType == .audio,
+              record.verifiedSharedArtifact != nil,
+              let expectedBytes = record.expectedBytes,
+              expectedBytes == record.receivedBytes,
+              let mimeType = record.mimeType,
+              let audioPlaybackRuntime else { return }
+        Task { @MainActor in
+            guard let fileURL = await downloads.localFileURL(for: record) else { return }
+            audioPlaybackRuntime.launchVerifiedLocalArtifact(
+                namespace: context.namespaceKey,
+                userID: context.userID,
+                bookID: record.bookID,
+                bookTitle: record.bookTitle,
+                author: record.bookAuthor,
+                resourceID: record.resourceID,
+                resourceTitle: record.resourceTitle,
+                assetID: record.assetID,
+                fileURL: fileURL,
+                mimeType: mimeType,
+                sizeBytes: expectedBytes
+            )
+        }
     }
 
     private func openReader(

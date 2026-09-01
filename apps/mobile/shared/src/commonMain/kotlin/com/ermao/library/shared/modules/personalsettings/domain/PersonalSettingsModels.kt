@@ -36,7 +36,12 @@ data class PersonalAccount(
 
 data class PersonalPreferences(
     val locale: PersonalSettingsLocale,
-)
+    val audioPlaybackRate: Double? = null,
+) {
+    init {
+        require(audioPlaybackRate == null || audioPlaybackRate.isFinite() && audioPlaybackRate in 0.5..3.0)
+    }
+}
 
 data class PersonalSettingsSnapshot(
     val account: PersonalAccount,

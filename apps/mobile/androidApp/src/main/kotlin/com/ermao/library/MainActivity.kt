@@ -6,6 +6,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ermao.library.bootstrap.ErmaoLibraryRoot
 import com.ermao.library.bootstrap.MainActions
@@ -15,6 +17,7 @@ import com.ermao.library.features.me.platform.AndroidXAppLocaleController
 
 class MainActivity : AppCompatActivity() {
     private var hasStarted = false
+    private var audioPlayerRequested by mutableStateOf(false)
     private val localeController = AndroidXAppLocaleController()
     private val mainViewModel: MainViewModel by viewModels {
         val app = application as ErmaoLibraryApplication
@@ -29,6 +32,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        audioPlayerRequested = savedInstanceState == null && intent?.action == ACTION_OPEN_AUDIO_PLAYER
         enableEdgeToEdge()
         setContent {
             WarmPageTheme {
@@ -67,13 +71,25 @@ class MainActivity : AppCompatActivity() {
                         onLogoutAwaiting = mainViewModel::logoutAwaitingCompletion,
                         onLogout = mainViewModel::logout,
                     ),
+                    audioPlayerRequested = audioPlayerRequested,
+                    onAudioPlayerRequestConsumed = { audioPlayerRequested = false },
                 )
             }
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == ACTION_OPEN_AUDIO_PLAYER) audioPlayerRequested = true
+    }
+
     override fun onStart() {
         super.onStart()
         if (hasStarted) mainViewModel.onForegrounded() else hasStarted = true
+    }
+
+    companion object {
+        const val ACTION_OPEN_AUDIO_PLAYER = "com.ermao.library.action.OPEN_AUDIO_PLAYER"
     }
 }

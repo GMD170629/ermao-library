@@ -31,6 +31,16 @@ internal data class UpdateLocaleWire(
 )
 
 @Serializable
+internal data class UpdateAudioPlaybackRateWire(
+    val preferences: AudioPlaybackRatePreferenceWire,
+)
+
+@Serializable
+internal data class AudioPlaybackRatePreferenceWire(
+    @SerialName("audio.playbackRate") val audioPlaybackRate: Double,
+)
+
+@Serializable
 internal data class LocalePreferenceWire(
     val locale: String,
 )
@@ -132,12 +142,14 @@ internal fun SettingsSessionWire.toDomain(): PersonalSettingsSnapshot? {
     val locale = PersonalSettingsLocale.fromWireValue(preferences.locale) ?: return null
     return PersonalSettingsSnapshot(
         account = user.toDomain(),
-        preferences = PersonalPreferences(locale),
+        preferences = PersonalPreferences(locale, preferences.audioPlaybackRate),
     )
 }
 
 internal fun SettingsPreferencesWire.toDomain(): PersonalPreferences? =
-    PersonalSettingsLocale.fromWireValue(locale)?.let(::PersonalPreferences)
+    PersonalSettingsLocale.fromWireValue(locale)?.let { resolvedLocale ->
+        runCatching { PersonalPreferences(resolvedLocale, audioPlaybackRate) }.getOrNull()
+    }
 
 internal fun PersonalCompatibilityWire.toDomain(): PersonalServerAbout =
     PersonalServerAbout(

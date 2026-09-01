@@ -8,6 +8,7 @@ struct ErmaoLibraryApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sessionStore: SessionStore
     @StateObject private var downloadCenter: DownloadCenterStore
+    @StateObject private var audioRuntime: AudioPlaybackRuntime
     private let contentClient: any ContentClient
     private let shelfClient: any ShelfClient
     private let coverCache: AuthenticatedCoverCache
@@ -24,6 +25,7 @@ struct ErmaoLibraryApp: App {
         let cookieStore = KeychainCookiePayloadStore()
         let managedDownloads = ManagedDownloadStore()
         let readerPrivateContentCache = IosReaderPrivateContentCache()
+        let audioRuntime = AudioCompositionRoot.makeRuntime()
         let runtime: any MobileRuntimeClient = usesContentFixture
             ? ContentUITestFixture.makeRuntime()
             : AppCompositionRoot.makeRuntimeClient(cookieStore: cookieStore)
@@ -69,17 +71,20 @@ struct ErmaoLibraryApp: App {
                     reader: usesContentFixture ? nil : readerPrivateContentCache
                 ),
                 preparePrivateNamespaceTransition: {
+                    await audioRuntime.prepareForNamespaceTransition()
                     await readerComposition?.closeActiveReader()
                     await downloadCenter.cancelAllTransfers()
                 }
             )
         )
+        _audioRuntime = StateObject(wrappedValue: audioRuntime)
     }
 
     var body: some Scene {
         WindowGroup {
             AppRootView(
                 store: sessionStore,
+                audioRuntime: audioRuntime,
                 contentClient: contentClient,
                 shelfClient: shelfClient,
                 coverCache: coverCache,
@@ -93,7 +98,8 @@ struct ErmaoLibraryApp: App {
                 .task {
                     sessionStore.start()
                 }
-                .onChange(of: scenePhase) { phase in
+                .onChange(of: scenePhase) { _, phase in
+                    audioRuntime.handleScenePhase(phase)
                     if phase == .active {
                         sessionStore.refreshForForeground()
                     }
@@ -101,6 +107,7 @@ struct ErmaoLibraryApp: App {
                 .onReceive(
                     NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)
                 ) { _ in
+                    audioRuntime.shutdown()
                     sessionStore.close()
                 }
         }

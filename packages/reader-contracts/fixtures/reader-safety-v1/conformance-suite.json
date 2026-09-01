@@ -2,8 +2,8 @@
   "$schema": "../../schemas/reader-safety-conformance-suite-v1.schema.json",
   "schemaVersion": 1,
   "policyId": "shuku.reader-safety",
-  "policyVersion": 2,
-  "policyDigest": "d23214da7b731136eb4ce6a69a295f4a7ed8a7280cee444a6325caa77825ade2",
+  "policyVersion": 3,
+  "policyDigest": "b01d103fa1b57035aa1c689326406a9099275ecd4196361eefed539f310f1619",
   "fixtureManifest": "manifest.json",
   "cases": [
     {"id": "safe-xhtml-11-http", "ruleId": "REFLOWABLE.SAFE_STANDARD_DOCTYPE", "evaluator": "REFLOWABLE_MARKUP", "semanticProjection": "ROOT_LOCAL_NAME", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
@@ -28,9 +28,9 @@
     {"id": "comic-page-count-over-limit", "ruleId": "COMIC.PAGE_MAX_COUNT", "evaluator": "COMIC_PAGE_COUNT", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
     {"id": "comic-page-decode-failure", "ruleId": "COMIC.PAGE_DECODE_FAILURE", "evaluator": "COMIC_PAGE_DECODE", "semanticProjection": "NONE", "consumers": ["WEB", "ANDROID"]},
     {"id": "comic-revision-mismatch", "ruleId": "COMIC.MANIFEST_REVISION", "evaluator": "COMIC_REVISION", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
-    {"id": "audio-mime-mismatch", "ruleId": "AUDIO.CONTAINER_MIME", "evaluator": "AUDIO_CONTAINER_MIME", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB"]},
-    {"id": "audio-codec-unsupported", "ruleId": "AUDIO.ENGINE_CODEC", "evaluator": "AUDIO_CODEC", "semanticProjection": "NONE", "consumers": ["WEB"]},
-    {"id": "audio-invalid-chapter", "ruleId": "AUDIO.TRACK_AND_CHAPTER_BOUNDS", "evaluator": "AUDIO_CHAPTER_BOUNDS", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB"]},
+    {"id": "audio-mime-mismatch", "ruleId": "AUDIO.CONTAINER_MIME", "evaluator": "AUDIO_CONTAINER_MIME", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    {"id": "audio-codec-unsupported", "ruleId": "AUDIO.ENGINE_CODEC", "evaluator": "AUDIO_CODEC", "semanticProjection": "NONE", "consumers": ["WEB", "ANDROID", "IOS"]},
+    {"id": "audio-invalid-chapter", "ruleId": "AUDIO.TRACK_AND_CHAPTER_BOUNDS", "evaluator": "AUDIO_CHAPTER_BOUNDS", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
     {"id": "epub-font-obfuscation", "ruleId": "COMMON.DRM_REJECTED", "evaluator": "DRM_ALGORITHM", "semanticProjection": "FONT_OBFUSCATION", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
     {"id": "epub-drm-rejected", "ruleId": "COMMON.DRM_REJECTED", "evaluator": "DRM_ALGORITHM", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
     {"id": "format-mime-mismatch", "ruleId": "COMMON.EXACT_FORMAT_MIME", "evaluator": "EXACT_FORMAT_MIME", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
@@ -51,8 +51,8 @@
     {"id": "comic-archive-budget-over-limit", "ruleId": "COMIC.ARCHIVE_BUDGET", "evaluator": "COMIC_ARCHIVE_BUDGET", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
     {"id": "comic-page-over-limit", "ruleId": "COMIC.PAGE_MAX_BYTES", "evaluator": "COMIC_PAGE_BYTES", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
     {"id": "comic-manifest-over-limit", "ruleId": "COMIC.MANIFEST_MAX_BYTES", "evaluator": "COMIC_MANIFEST_BYTES", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "KMP", "ANDROID"]},
-    {"id": "audio-original-over-limit", "ruleId": "AUDIO.ORIGINAL_MAX_BYTES", "evaluator": "AUDIO_ORIGINAL_BYTES", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB"]},
-    {"id": "audio-metadata-over-limit", "ruleId": "AUDIO.METADATA_BUDGET", "evaluator": "AUDIO_METADATA_BUDGET", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB"]},
-    {"id": "audio-blocked-redirect", "ruleId": "AUDIO.REDIRECT_POLICY", "evaluator": "AUDIO_REDIRECT_POLICY", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB"]}
+    {"id": "audio-original-over-limit", "ruleId": "AUDIO.ORIGINAL_MAX_BYTES", "evaluator": "AUDIO_ORIGINAL_BYTES", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    {"id": "audio-metadata-over-limit", "ruleId": "AUDIO.METADATA_BUDGET", "evaluator": "AUDIO_METADATA_BUDGET", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"]},
+    {"id": "audio-blocked-redirect", "ruleId": "AUDIO.REDIRECT_POLICY", "evaluator": "AUDIO_REDIRECT_POLICY", "semanticProjection": "NONE", "consumers": ["BACKEND", "WEB", "ANDROID", "IOS"]}
   ]
 }

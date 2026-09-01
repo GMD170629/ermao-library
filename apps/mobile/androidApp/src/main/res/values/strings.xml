@@ -30,6 +30,34 @@
     <string name="shelves_refresh">Refresh</string>
     <string name="app_name">Ermao Library</string>
 
+    <string name="audio_notification_channel_name">Audiobook playback</string>
+    <string name="audio_unknown_title">Audiobook</string>
+    <string name="audio_no_chapter">No chapter</string>
+    <string name="audio_play">Play</string>
+    <string name="audio_pause">Pause</string>
+    <string name="audio_progress">Playback progress</string>
+    <string name="audio_scrubber">Playback position</string>
+    <string name="audio_now_playing">Now Playing</string>
+    <string name="audio_collapse">Collapse player</string>
+    <string name="audio_more_actions">More playback actions</string>
+    <string name="audio_stop">Stop playback</string>
+    <string name="audio_retry">Retry playback</string>
+    <string name="audio_previous">Previous</string>
+    <string name="audio_next">Next</string>
+    <string name="audio_back_15">Back 15 seconds</string>
+    <string name="audio_forward_30">Forward 30 seconds</string>
+    <string name="audio_speed_value">%1$.2fx</string>
+    <string name="audio_chapters_queue">Chapters and tracks</string>
+    <string name="audio_track_current">Current track</string>
+    <string name="audio_cover_description">Audiobook cover for %1$s</string>
+    <string name="audio_status_loading">Loading</string>
+    <string name="audio_status_ready">Ready</string>
+    <string name="audio_status_playing">Playing</string>
+    <string name="audio_status_paused">Paused</string>
+    <string name="audio_status_buffering">Buffering</string>
+    <string name="audio_status_ended">Ended</string>
+    <string name="audio_status_error">Playback error</string>
+
     <string name="server_screen_description">Add a self-hosted server to start reading.</string>
     <string name="server_add_title">Add Server</string>
     <string name="server_display_name_label">Name</string>
@@ -475,7 +503,6 @@
     <string name="reader_not_implemented_title">Reader unavailable</string>
     <string name="reader_not_implemented_message">The download is complete, but the native reader for this format has not been delivered yet.</string>
     <string name="work_reader_renderer_pending">PDF and comics can stream online; the native renderer is not available in this build.</string>
-    <string name="work_audiobook_player_unavailable">Audiobook playback is not available in this build.</string>
     <string name="reader_resume_prompt">Another device read to %2$s · %1$s</string>
     <string name="reader_page_number">Page %1$d</string>
     <string name="reader_resume_return">Go to latest position</string>

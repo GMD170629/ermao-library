@@ -45,6 +45,8 @@ fun ErmaoLibraryRoot(
     downloadFiles: AtomicDownloadFileSink? = null,
     sharedDownloadCatalog: DownloadCatalogRepository? = null,
     localeController: AppLocaleController? = null,
+    audioPlayerRequested: Boolean = false,
+    onAudioPlayerRequestConsumed: () -> Unit = {},
 ) {
     val shellStateHolder = rememberSaveableStateHolder()
     val accountLocale = when (val session = state.session) {
@@ -208,6 +210,8 @@ fun ErmaoLibraryRoot(
                         onRefreshSession = actions.onRefreshSessionAwaiting,
                         onPurgeCurrentNamespace = actions.onPurgeCurrentNamespace,
                         onLogout = actions.onLogoutAwaiting,
+                        audioPlayerRequested = audioPlayerRequested,
+                        onAudioPlayerRequestConsumed = onAudioPlayerRequestConsumed,
                         modifier = modifier,
                     )
                 }

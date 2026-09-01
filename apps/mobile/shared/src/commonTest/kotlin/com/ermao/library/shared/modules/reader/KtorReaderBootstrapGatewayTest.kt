@@ -237,6 +237,33 @@ class KtorReaderBootstrapGatewayTest {
         .replace("\"pageCount\":null", "\"pageCount\":1")
         .replace("\"units\":[]", PDF_UNITS)
 
+    @Test
+    fun audioBootstrapRetainsOrderedAssetsChaptersAndSwitchableResources() = runBlocking {
+        val body = VALID_BOOTSTRAP
+            .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"audio\"")
+            .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"m4b\"")
+            .replace("\"format\":\"EPUB\"", "\"format\":\"M4B\"")
+            .replace("application/epub+zip", "audio/mp4")
+            .replace(
+                "\"availableResources\":[]",
+                "\"availableResources\":[{\"id\":\"resource-2\",\"bookId\":\"book-1\",\"sourceNodeId\":\"node-2\",\"title\":\"Volume 2\",\"resourceIndex\":2.0,\"sortOrder\":1,\"format\":\"M4B\",\"readerType\":\"audio\",\"pageCount\":null,\"chapterCount\":1,\"durationMs\":60000,\"trackCount\":1,\"progress\":0.0,\"resourceCompleted\":false,\"lastReadAt\":null}]",
+            )
+            .replace(
+                "\"assets\":[{\"id\":\"asset-1\",\"title\":\"Resource\",\"resourceId\":\"resource-1\",\"sourceNodeId\":\"node-1\",\"role\":\"PRIMARY\",\"mimeType\":\"audio/mp4\",\"sizeBytes\":1234,\"durationMs\":null,\"discNumber\":null,\"trackNumber\":null,\"sortOrder\":0,\"url\":\"/api/assets/asset-1\",\"codec\":null}]",
+                "\"assets\":[{\"id\":\"asset-2\",\"title\":\"Track 2\",\"resourceId\":\"resource-1\",\"sourceNodeId\":\"node-1\",\"role\":\"SUPPLEMENTARY\",\"mimeType\":\"audio/mp4\",\"sizeBytes\":1200,\"durationMs\":30000,\"discNumber\":1,\"trackNumber\":2,\"sortOrder\":1,\"url\":\"/api/assets/asset-2\",\"codec\":\"aac\"},{\"id\":\"asset-1\",\"title\":\"Track 1\",\"resourceId\":\"resource-1\",\"sourceNodeId\":\"node-1\",\"role\":\"PRIMARY\",\"mimeType\":\"audio/mp4\",\"sizeBytes\":1234,\"durationMs\":30000,\"discNumber\":1,\"trackNumber\":1,\"sortOrder\":0,\"url\":\"/api/assets/asset-1\",\"codec\":\"aac\"}]",
+            )
+            .replace(
+                "\"units\":[]",
+                "\"units\":[{\"id\":\"chapter-1\",\"index\":0,\"title\":\"Chapter 1\",\"href\":null,\"assetId\":\"asset-1\",\"startMs\":0,\"endMs\":30000,\"durationMs\":30000,\"metadata\":{}}]",
+            )
+        val content = assertIs<Content>(gateway(body).load(request()))
+
+        assertEquals(listOf("asset-1", "asset-2"), content.value.assets.map { it.assetId })
+        assertEquals("chapter-1", content.value.units.single().id)
+        assertEquals("resource-2", content.value.availableResources.single().resourceId)
+        assertEquals("Author", content.value.book.author)
+    }
+
     private fun comicBootstrap(): String = VALID_BOOTSTRAP
         .replace("\"readerType\":\"reflowable\"", "\"readerType\":\"comic\"")
         .replace("\"sourceFormat\":\"epub\"", "\"sourceFormat\":\"cbz\"")

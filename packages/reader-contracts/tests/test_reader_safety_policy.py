@@ -80,7 +80,10 @@ class ReaderSafetyPolicyContractTests(unittest.TestCase):
             "application/vnd.amazon.ebook", formats["AZW3"]["canonicalMimeType"]
         )
         self.assertEqual([], formats["IMAGE_DIR"]["acceptedMimeTypes"])
-        self.assertEqual(["BACKEND", "WEB"], formats["AUDIO"]["requiredConsumers"])
+        self.assertEqual(
+            ["BACKEND", "WEB", "ANDROID", "IOS"],
+            formats["AUDIO"]["requiredConsumers"],
+        )
         comic = self.policy["profiles"]["comic"]
         self.assertEqual(
             {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DownloadCenterView: View {
     @ObservedObject var store: DownloadCenterStore
+    let openAudio: (ManagedDownloadRecord) -> Void
     let openReader: (ReaderHandoff) -> Void
 
     @State private var pendingRemoval: ManagedDownloadRecord?
@@ -205,6 +206,10 @@ struct DownloadCenterView: View {
     }
 
     private func open(_ record: ManagedDownloadRecord) {
+        if record.readerType == .audio {
+            openAudio(record)
+            return
+        }
         openReader(
             ReaderHandoff(
                 bookID: record.bookID,

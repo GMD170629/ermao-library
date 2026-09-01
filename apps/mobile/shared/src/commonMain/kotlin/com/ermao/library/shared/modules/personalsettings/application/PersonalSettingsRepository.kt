@@ -48,5 +48,10 @@ interface PersonalSettingsRepository {
         locale: PersonalSettingsLocale,
     ): PersonalSettingsResult<PersonalPreferences>
 
+    suspend fun updateAudioPlaybackRate(
+        context: PersonalSettingsContext,
+        playbackRate: Double,
+    ): PersonalSettingsResult<PersonalPreferences>
+
     suspend fun loadServerAbout(context: PersonalSettingsContext): PersonalSettingsResult<PersonalServerAbout>
 }

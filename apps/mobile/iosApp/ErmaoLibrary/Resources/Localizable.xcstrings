@@ -1314,22 +1314,6 @@
         }
       }
     },
-    "work.audio.unavailable": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Audio playback is not supported in the mobile app yet."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "手机端暂不支持音频播放。"
-          }
-        }
-      }
-    },
     "work.multiDownload.cancelTask": {
       "localizations": {
         "en": {

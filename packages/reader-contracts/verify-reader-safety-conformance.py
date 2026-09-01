@@ -16,7 +16,7 @@ MANIFEST_PATH = FIXTURE_ROOT / "manifest.json"
 SUITE_PATH = FIXTURE_ROOT / "conformance-suite.json"
 POLICY_PATH = CONTRACT_ROOT / "reader-safety-policy.json"
 
-REPORT_CONSUMERS = frozenset({"BACKEND", "WEB", "KMP", "ANDROID"})
+REPORT_CONSUMERS = frozenset({"BACKEND", "WEB", "KMP", "ANDROID", "IOS"})
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 RULE_ID = re.compile(r"[A-Z][A-Z0-9_.]{2,95}\Z")
 ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]{2,95}\Z")
@@ -107,6 +107,16 @@ KMP_EXECUTABLE_EVALUATORS = frozenset(
         "COMIC_MANIFEST_BYTES",
     }
 )
+IOS_EXECUTABLE_EVALUATORS = frozenset(
+    {
+        "AUDIO_CONTAINER_MIME",
+        "AUDIO_CODEC",
+        "AUDIO_CHAPTER_BOUNDS",
+        "AUDIO_ORIGINAL_BYTES",
+        "AUDIO_METADATA_BUDGET",
+        "AUDIO_REDIRECT_POLICY",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -145,6 +155,7 @@ def _consumer_can_own_execution(
         "WEB": "WEB" in required,
         "KMP": bool(required & {"ANDROID", "IOS"}),
         "ANDROID": "ANDROID" in required,
+        "IOS": "IOS" in required,
     }[consumer]
 
 
@@ -286,6 +297,8 @@ def load_suite_and_expected(
             )
         if "KMP" in consumers and evaluator not in KMP_EXECUTABLE_EVALUATORS:
             raise ValueError(f"KMP cannot claim a native-only evaluator for {case_id}")
+        if "IOS" in consumers and evaluator not in IOS_EXECUTABLE_EVALUATORS:
+            raise ValueError(f"iOS cannot claim an unimplemented evaluator for {case_id}")
         suite_cases.append(
             SuiteCase(case_id, rule_id, evaluator, projection, consumers)
         )
@@ -367,6 +380,7 @@ def load_suite_and_expected(
             consumer
             for consumer in required_consumers
             if consumer in {"BACKEND", "WEB", "ANDROID"}
+            or (consumer == "IOS" and suite_case.evaluator in IOS_EXECUTABLE_EVALUATORS)
         )
         claimed_platform_owners = tuple(
             consumer for consumer in suite_case.consumers if consumer != "KMP"

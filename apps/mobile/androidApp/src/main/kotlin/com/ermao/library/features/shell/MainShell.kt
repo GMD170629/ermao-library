@@ -59,10 +59,13 @@ import com.ermao.library.features.library.application.WorkDetailViewModel
 import com.ermao.library.features.library.ui.FacetScreen
 import com.ermao.library.features.library.ui.LibraryScreen
 import com.ermao.library.features.library.ui.WorkDetailScreen
+import com.ermao.library.features.audio.ui.AudioMiniPlayer
+import com.ermao.library.features.audio.ui.AudioNowPlayingDialog
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.navigation.MobileNavigation
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
+import com.ermao.library.shared.modules.library.domain.ReadingUnit
 import com.ermao.library.shared.navigation.TabId
 import com.ermao.library.shared.modules.auth.domain.AppSession
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsRepository
@@ -110,6 +113,9 @@ import com.ermao.library.ui.components.WarmPageNavigationSuite
 import com.ermao.library.ui.components.WarmPageScaffold
 import com.ermao.library.ui.components.WarmPageTopBarRole
 import com.ermao.library.ui.theme.WarmPageThemeValues
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.shared.createAndroidAudioMediaTransport
+import com.ermao.library.shared.createAndroidReaderBootstrapGateway
 import kotlinx.serialization.Serializable
 
 private data class TabPresentation(
@@ -177,6 +183,8 @@ fun MainShell(
     onRefreshSession: suspend () -> Unit,
     onPurgeCurrentNamespace: suspend () -> Unit,
     onLogout: suspend (purgeNamespace: Boolean) -> Unit,
+    audioPlayerRequested: Boolean = false,
+    onAudioPlayerRequestConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val homeBackStack = rememberNavBackStack(HomeRoot)
@@ -198,6 +206,18 @@ fun MainShell(
         session.identity.namespace.authorizationVersion,
     )
     val appContext = LocalContext.current.applicationContext
+    val application = appContext as com.ermao.library.ErmaoLibraryApplication
+    val audioRuntime = application.audioPlaybackRuntime
+    val audioSnapshot by audioRuntime.snapshot.collectAsStateWithLifecycle()
+    val audioBootstrapGateway = remember(appContext) {
+        createAndroidReaderBootstrapGateway(appContext)
+    }
+    val audioMediaTransport = remember(
+        session.profile.id,
+        session.identity.namespace.authorizationVersion,
+    ) {
+        createAndroidAudioMediaTransport(appContext, session.profile)
+    }
     val shelfRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfRepository(appContext) }
     val shelfCatalogRepository = remember(appContext) { com.ermao.library.shared.createAndroidShelfCatalogRepository(appContext) }
     val sharedDownloadsRuntime = remember(sharedDownloadCatalog) { DownloadsRuntime(sharedDownloadCatalog) }
@@ -207,6 +227,53 @@ fun MainShell(
         session.identity.namespace.userId,
         session.identity.namespace.authorizationVersion,
     ).joinToString("-")
+    var audioNowPlayingVisible by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(audioPlayerRequested) {
+        if (audioPlayerRequested) {
+            audioNowPlayingVisible = true
+            onAudioPlayerRequestConsumed()
+        }
+    }
+    LaunchedEffect(audioSnapshot.error?.code, audioSnapshot.namespace?.key) {
+        val errorCode = audioSnapshot.error?.code
+        if (errorCode in setOf("UNAUTHORIZED", "AUTHENTICATION_REQUIRED")) {
+            audioRuntime.pause()
+            onSessionUnauthorized()
+        } else if (errorCode in setOf("AUDIO_NETWORK_UNAVAILABLE", "REQUEST_TIMEOUT", "NETWORK_UNAVAILABLE") ||
+            errorCode?.startsWith("ERROR_CODE_IO_") == true
+        ) {
+            val resourceId = audioSnapshot.resourceId
+            val assetId = audioSnapshot.assetId
+            val record = if (resourceId != null && assetId != null) {
+                downloadCatalog.records(downloadNamespace).singleOrNull {
+                    it.resourceId == resourceId && it.assetId == assetId && it.isReadable
+                }
+            } else {
+                null
+            }
+            val localFile = record?.localReference?.let(downloadFiles::resolveLocalReference)
+            if (record != null && localFile?.isFile == true && localFile.length() == record.expectedBytes) {
+                audioRuntime.launchLocal(
+                    namespace = com.ermao.library.features.audio.model.AndroidAudioNamespace(
+                        record.namespace.serverIdentity,
+                        record.namespace.userId,
+                        record.namespace.authorizationVersion,
+                    ),
+                    bookId = record.bookId,
+                    resourceId = record.resourceId,
+                    title = record.bookTitle,
+                    author = record.author.takeIf(String::isNotBlank),
+                    assetId = record.assetId,
+                    localFile = localFile,
+                    mimeType = record.sourceMimeType,
+                    positionMillis = audioSnapshot.positionMillis,
+                )
+            }
+        }
+    }
+    DisposableEffect(contentKey) {
+        onDispose { audioRuntime.stop() }
+    }
     val downloadActionsViewModel = remember(contentKey) {
         (appContext.applicationContext as com.ermao.library.ErmaoLibraryApplication).accountDownloads(session)
     }
@@ -220,17 +287,20 @@ fun MainShell(
             sideEffects = object : SettingsSideEffects {
                 override suspend fun refreshSession() = onRefreshSession()
                 override suspend fun purgeCurrentNamespace() {
+                    audioRuntime.stop()
                     downloadActionsViewModel.cancelAllAndJoin()
                     sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
                     onPurgeCurrentNamespace()
                 }
                 override suspend fun logoutAfterPasswordChange() {
+                    audioRuntime.stop()
                     downloadActionsViewModel.cancelAllAndJoin()
                     sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
                     onPurgeCurrentNamespace()
                     onLogout(false)
                 }
                 override suspend fun logout() {
+                    audioRuntime.stop()
                     downloadActionsViewModel.cancelAllAndJoin()
                     sharedDownloadCatalog.clearNamespace(session.identity.namespace.toDownloadNamespace())
                     onLogout(true)
@@ -346,6 +416,28 @@ fun MainShell(
             modifier = libraryModifier,
         )
     }
+    val openAudio: (ResourceContent, ReadingUnit?) -> Unit = { resource, unit ->
+        val artworkUri = resource.coverUrl
+            .takeIf(String::isNotBlank)
+            ?.let { cover ->
+                if (cover.startsWith("/api/")) session.profile.baseUrl.resolveApiPath(cover) else cover
+            }
+        audioRuntime.launchRemote(
+            profile = session.profile,
+            namespace = ReaderSyncNamespace(
+                session.identity.namespace.serverIdentity,
+                session.identity.namespace.userId,
+                session.identity.namespace.authorizationVersion,
+            ),
+            resourceId = resource.id,
+            chapterId = unit?.id,
+            titleHint = resource.title,
+            artworkUri = artworkUri,
+            bootstrapGateway = audioBootstrapGateway,
+            mediaTransport = audioMediaTransport,
+        )
+        audioNowPlayingVisible = true
+    }
     val navigationItems = MobileNavigation.orderedRootTabs.map { tab ->
         val presentation = tab.presentation
         WarmPageNavigationItem(
@@ -386,10 +478,12 @@ fun MainShell(
         },
         modifier = modifier,
     ) {
-        NavDisplay(
-            backStack = currentBackStack,
-            onBack = { currentBackStack.removeLastOrNull() },
-            entryProvider = entryProvider {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                NavDisplay(
+                    backStack = currentBackStack,
+                    onBack = { currentBackStack.removeLastOrNull() },
+                    entryProvider = entryProvider {
                 entry<HomeRoot> {
                     val homeViewModel: HomeViewModel = viewModel(
                         key = "home-$contentKey",
@@ -543,7 +637,33 @@ fun MainShell(
                         state = downloadedBookState,
                         onBack = { meBackStack.removeLastOrNull() },
                         onOpenResource = { record ->
-                            if (ReaderFormatSupport.canReadOriginal(record.readerType, record.format)) {
+                            if (record.readerType.equals("audio", ignoreCase = true)) {
+                                val localFile = record.localReference?.let(downloadFiles::resolveLocalReference)
+                                val exactNamespace = record.namespace.serverIdentity == session.identity.namespace.serverIdentity &&
+                                    record.namespace.userId == session.identity.namespace.userId &&
+                                    record.namespace.authorizationVersion == session.identity.namespace.authorizationVersion
+                                if (record.isReadable && exactNamespace && localFile?.isFile == true &&
+                                    localFile.length() == record.expectedBytes
+                                ) {
+                                    audioRuntime.launchLocal(
+                                        namespace = com.ermao.library.features.audio.model.AndroidAudioNamespace(
+                                            record.namespace.serverIdentity,
+                                            record.namespace.userId,
+                                            record.namespace.authorizationVersion,
+                                        ),
+                                        bookId = record.bookId,
+                                        resourceId = record.resourceId,
+                                        title = record.bookTitle,
+                                        author = record.author.takeIf(String::isNotBlank),
+                                        assetId = record.assetId,
+                                        localFile = localFile,
+                                        mimeType = record.sourceMimeType,
+                                    )
+                                    audioNowPlayingVisible = true
+                                } else {
+                                    meBackStack.add(ReaderUnavailableRoute(record.resourceId, record.readerType))
+                                }
+                            } else if (ReaderFormatSupport.canReadOriginal(record.readerType, record.format)) {
                                 appContext.startActivity(
                                     ReaderActivity.createManagedDownloadIntent(
                                         context = appContext,
@@ -665,10 +785,18 @@ fun MainShell(
                                     onViewShelves = onViewShelves,
                                     onOpenFacet = { kind, id -> currentBackStack.add(FacetRoute(kind.name, id)) },
                                     onOpenResource = { resource ->
-                                        openResource(appContext, session.profile.id, resource) { currentBackStack.add(it) }
+                                        if (resource.readerType.equals("audio", ignoreCase = true)) {
+                                            openAudio(resource, null)
+                                        } else {
+                                            openResource(appContext, session.profile.id, resource) { currentBackStack.add(it) }
+                                        }
                                     },
                                     onOpenReadingUnit = { resource, unit ->
-                                        openResource(appContext, session.profile.id, resource, unit) { currentBackStack.add(it) }
+                                        if (resource.readerType.equals("audio", ignoreCase = true)) {
+                                            openAudio(resource, unit)
+                                        } else {
+                                            openResource(appContext, session.profile.id, resource, unit) { currentBackStack.add(it) }
+                                        }
                                     },
                                     onOpenDownload = { record ->
                                         openDownloadedResource(appContext, session.profile.id, record) { currentBackStack.add(it) }
@@ -706,7 +834,26 @@ fun MainShell(
                         onLoadNextPage = facetViewModel::loadNextPage,
                     )
                 }
-            },
+                    },
+                )
+            }
+            AudioMiniPlayer(
+                snapshot = audioSnapshot,
+                onOpen = { audioNowPlayingVisible = true },
+                onPlayPause = {
+                    if (audioSnapshot.phase == com.ermao.library.features.audio.model.AndroidAudioPhase.Playing) {
+                        audioRuntime.pause()
+                    } else {
+                        audioRuntime.play()
+                    }
+                },
+            )
+        }
+        AudioNowPlayingDialog(
+            visible = audioNowPlayingVisible,
+            snapshot = audioSnapshot,
+            runtime = audioRuntime,
+            onDismiss = { audioNowPlayingVisible = false },
         )
     }
     }

@@ -35,6 +35,8 @@ import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGatewa
 import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
+import com.ermao.library.shared.modules.audio.AudioMediaTransport
+import com.ermao.library.shared.modules.audio.infrastructure.KtorAudioMediaTransport
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -111,6 +113,14 @@ fun createIosReaderBootstrapGateway(
     KtorReaderBootstrapGateway(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
     )
+
+fun createIosAudioMediaTransport(
+    cookieStore: SecureCookiePayloadStore,
+    profile: ServerProfile,
+): AudioMediaTransport = KtorAudioMediaTransport(
+    profile,
+    ApiClientFactory(SerializedCookieVault(cookieStore)),
+)
 
 fun createIosPdfRangeServerPort(
     cookieStore: SecureCookiePayloadStore,

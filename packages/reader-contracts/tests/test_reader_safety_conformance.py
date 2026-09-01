@@ -79,7 +79,7 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            {"WEB"},
+            {"WEB", "ANDROID", "IOS"},
             set(
                 next(
                     case
@@ -89,8 +89,21 @@ class ReaderSafetyConformanceContractTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            42,
+            48,
             sum("ANDROID" in case.consumers for case in self.suite_cases),
+        )
+        self.assertEqual(
+            6,
+            sum("IOS" in case.consumers for case in self.suite_cases),
+        )
+
+    def test_ios_report_is_a_first_class_native_execution_owner(self) -> None:
+        report = self.report("IOS")
+        self.verifier.validate_report(
+            report,
+            suite=self.suite,
+            suite_cases=self.suite_cases,
+            expected_cases=self.expected,
         )
 
     def test_suite_cannot_replace_android_obligation_with_kmp(self) -> None:

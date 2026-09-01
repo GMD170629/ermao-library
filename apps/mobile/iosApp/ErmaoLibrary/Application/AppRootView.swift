@@ -3,6 +3,7 @@ import SwiftUI
 
 struct AppRootView: View {
     @ObservedObject var store: SessionStore
+    @ObservedObject var audioRuntime: AudioPlaybackRuntime
     let contentClient: any ContentClient
     let shelfClient: any ShelfClient
     let coverCache: AuthenticatedCoverCache
@@ -16,6 +17,7 @@ struct AppRootView: View {
 
     init(
         store: SessionStore,
+        audioRuntime: AudioPlaybackRuntime = AudioCompositionRoot.makeRuntime(),
         contentClient: any ContentClient = ContentCompositionRoot.makeClient(),
         shelfClient: any ShelfClient = ShelfCompositionRoot.makeClient(),
         coverCache: AuthenticatedCoverCache = AuthenticatedCoverCache(),
@@ -27,6 +29,7 @@ struct AppRootView: View {
         readerComposition: IosReaderComposition? = nil
     ) {
         self.store = store
+        self.audioRuntime = audioRuntime
         self.contentClient = contentClient
         self.shelfClient = shelfClient
         self.coverCache = coverCache
@@ -39,7 +42,9 @@ struct AppRootView: View {
     }
 
     var body: some View {
-        rootContent
+        AudioApplicationHost(runtime: audioRuntime) {
+            rootContent
+        }
             .environment(\.appTheme, AppTheme.app(for: colorScheme))
             .environment(\.locale, activeLocale)
             .tint(AppTheme.app(for: colorScheme).actionAccent)
@@ -61,9 +66,33 @@ struct AppRootView: View {
             } message: {
                 Text(infrastructureErrorMessage)
             }
-            .onChange(of: store.snapshot.phase) { phase in
+            .onChange(of: store.snapshot.phase) { _, phase in
+                audioRuntime.sessionDidChange(
+                    isAuthenticated: phase == .authenticated,
+                    session: audioSessionContext
+                )
                 if phase != .authenticated {
                     Task { await downloads.cancelAllTransfers() }
+                }
+            }
+            .onChange(of: audioSessionContext) { _, session in
+                audioRuntime.sessionDidChange(
+                    isAuthenticated: store.snapshot.phase == .authenticated,
+                    session: session
+                )
+            }
+            .task {
+                audioRuntime.sessionDidChange(
+                    isAuthenticated: store.snapshot.phase == .authenticated,
+                    session: audioSessionContext
+                )
+            }
+            .onChange(of: audioRuntime.snapshot.recoverableError?.code) { _, code in
+                if code == .unauthorized {
+                    audioRuntime.pause()
+                    store.requireReauthentication()
+                } else if code == .networkRetryable {
+                    fallbackToVerifiedLocalAudio()
                 }
             }
     }
@@ -153,6 +182,52 @@ struct AppRootView: View {
             String(authorizationVersion),
             store.snapshot.userLocale ?? "",
         ].joined(separator: "|")
+    }
+
+    private var audioSessionContext: IosAudioSessionContext? {
+        guard
+            store.snapshot.phase == .authenticated,
+            let profile = store.snapshot.profile,
+            let userID = store.snapshot.userID,
+            let authorizationVersion = store.snapshot.authorization?.authorizationVersion
+        else { return nil }
+        return IosAudioSessionContext(
+            profile: profile,
+            userID: userID,
+            authorizationVersion: authorizationVersion
+        )
+    }
+
+    private func fallbackToVerifiedLocalAudio() {
+        guard let session = audioSessionContext,
+              let resourceID = audioRuntime.snapshot.resourceID,
+              let assetID = audioRuntime.snapshot.track?.assetID,
+              let record = downloads.record(for: resourceID, assetID: assetID),
+              record.namespace == session.namespaceKey,
+              record.verifiedSharedArtifact != nil,
+              let expectedBytes = record.expectedBytes,
+              expectedBytes == record.receivedBytes,
+              let mimeType = record.mimeType else { return }
+        let positionMillis = audioRuntime.snapshot.positionMillis
+        let durationMillis = audioRuntime.snapshot.durationMillis
+        Task { @MainActor in
+            guard let fileURL = await downloads.localFileURL(for: record) else { return }
+            audioRuntime.launchVerifiedLocalArtifact(
+                namespace: session.namespaceKey,
+                userID: session.userID,
+                bookID: record.bookID,
+                bookTitle: record.bookTitle,
+                author: record.bookAuthor,
+                resourceID: record.resourceID,
+                resourceTitle: record.resourceTitle,
+                assetID: record.assetID,
+                fileURL: fileURL,
+                mimeType: mimeType,
+                sizeBytes: expectedBytes,
+                positionMillis: positionMillis,
+                durationMillis: durationMillis
+            )
+        }
     }
 }
 
