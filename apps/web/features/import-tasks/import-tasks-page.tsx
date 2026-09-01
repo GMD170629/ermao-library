@@ -10,7 +10,7 @@ import { I18nText, useI18n } from '../../i18n/provider';
 import { PageTitle } from '../../components/ui/page-title';
 import { Select } from '../../components/ui/select';
 import {
-  continueSourceImport,
+  continueImportTask,
   fetchImportLibraries,
   fetchImportTasks,
   type ImportLibrary,
@@ -192,7 +192,7 @@ export function ImportTasksPage({ embedded = false }: { embedded?: boolean }) {
     if (task.state !== 'FAILED' || !task.sourceNodeId) return;
     setContinuingTaskId(task.id);
     try {
-      const result = await continueSourceImport(task.sourceNodeId);
+      const result = await continueImportTask(task.id);
       if (result.requeuedFailed > 0 || result.enqueued) {
         toast.success(t('已重新加入导入队列'));
       } else {

@@ -31,6 +31,7 @@ from app.modules.library.application.catalog import (
     ListCatalogBooks,
     ListCatalogFacets,
 )
+from app.modules.library.application.commands.manage_source_tree import DeleteSourceNode
 from app.modules.library.application.facet_references import (
     BookFacetReferences,
     LibraryFacetReference,
@@ -158,6 +159,7 @@ __all__ = [
     "CatalogFacetPage",
     "CatalogQueryPort",
     "CatalogResource",
+    "DeleteSourceNode",
     "FilterCondition",
     "FilterExpression",
     "GetCatalogBook",

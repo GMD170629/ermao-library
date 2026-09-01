@@ -244,6 +244,7 @@ def test_source_node_path_key_unique_and_ready_assets(tmp_path: Path) -> None:
                 "role",
                 "state",
                 "errorSummary",
+                "missingEntryPolicy",
                 "createdAt",
                 "startedAt",
                 "finishedAt",

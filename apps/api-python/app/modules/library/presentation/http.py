@@ -43,7 +43,7 @@ from app.bootstrap.library import (
 )
 from app.bootstrap.library_resource_actions import (
     bulk_covers,
-    regenerate_resource_cover,
+    regenerate_local_metadata_covers,
     upload_resource_cover,
 )
 from app.bootstrap.readable_resource_pipeline import build_readable_resource_pipeline
@@ -86,6 +86,11 @@ from app.modules.library.application.filter_ast import (
     InvalidFilterExpression,
     parse_filter_expression,
 )
+from app.modules.library.application.local_cover_regeneration import (
+    LocalCoverRegenerationResult,
+    LocalCoverUnavailableError,
+    SourceNodeNotFoundError,
+)
 from app.modules.library.application.management_commands import (
     InvalidLibraryOperationError,
     LibraryOperationAuthorizationError,
@@ -109,7 +114,6 @@ from app.modules.library.application.resource_commands import (
 )
 from app.modules.library.application.resource_cover import (
     MAX_RESOURCE_COVER_BYTES,
-    RegenerateResourceCoverCommand,
     UploadResourceCoverCommand,
 )
 from app.modules.library.application.resource_details import (
@@ -178,13 +182,14 @@ from app.modules.library.presentation.schemas import (
     LibraryGroupingView,
     LibraryOperationUndoPayload,
     LibraryOperationUndoResponse,
+    LocalCoverRegenerationPayload,
+    LocalCoverRegenerationResponse,
     ManagementBookListSummary,
     MergeLibraryFacetsRequest,
     ReadingUnitsResponse,
     RenameLibraryFacetRequest,
     ResourceAssetView,
     ResourceDeletedResponse,
-    ResourceImportAcceptedResponse,
     ResourcePayload,
     ResourceResponse,
     ResourceSourceDeleteRequest,
@@ -310,8 +315,14 @@ def _assets_response(value: object) -> AssetsResponse:
     return cast(AssetsResponse, value)
 
 
-def _import_response(value: object) -> ResourceImportAcceptedResponse:
-    return cast(ResourceImportAcceptedResponse, value)
+def _cover_response(value: object) -> LocalCoverRegenerationResponse:
+    return cast(LocalCoverRegenerationResponse, value)
+
+
+def _cover_payload(
+    result: LocalCoverRegenerationResult,
+) -> LocalCoverRegenerationPayload:
+    return LocalCoverRegenerationPayload.model_validate(asdict(result))
 
 
 def _deleted_response(value: object) -> ResourceDeletedResponse:
@@ -1687,8 +1698,7 @@ def update_library_resource(
 
 @router.post(
     "/books/{book_id}/resources/{resource_id}/cover/regenerate",
-    response_model=ResourceImportAcceptedResponse,
-    status_code=202,
+    response_model=LocalCoverRegenerationResponse,
 )
 def regenerate_library_resource_cover(
     book_id: str,
@@ -1696,41 +1706,73 @@ def regenerate_library_resource_cover(
     request: Request,
     db: DatabaseSession,
     settings: ApplicationSettings,
-) -> ResourceImportAcceptedResponse:
+) -> LocalCoverRegenerationResponse:
     user, auth_error = _auth(db, request, settings)
     if auth_error:
-        return _import_response(auth_error)
+        return _cover_response(auth_error)
     manager_error = _require_manager(user)
     if manager_error:
-        return _import_response(manager_error)
-    if not can_access_book(db, user, book_id) or not can_access_resource(
-        db, user, resource_id
-    ):
-        return _import_response(
+        return _cover_response(manager_error)
+    try:
+        result = regenerate_local_metadata_covers(db, settings).regenerate_resource(
+            actor=_actor(db, user),
+            book_id=book_id,
+            resource_id=resource_id,
+        )
+    except (BookNotFoundError, ResourceNotFoundError):
+        return _cover_response(
             fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
         )
-    try:
-        result = regenerate_resource_cover(db).execute(
-            RegenerateResourceCoverCommand(
-                book_id=book_id,
-                resource_id=resource_id,
-                now=datetime.now(UTC),
+    except LocalCoverUnavailableError as exc:
+        return _cover_response(
+            fail(
+                "未能从当前本地元数据中解析出可用封面",
+                status_code=422,
+                code=exc.code,
             )
         )
-    except ResourceNotFoundError:
-        return _import_response(
-            fail("资源不存在", status_code=404, code="RESOURCE_NOT_FOUND")
+    return LocalCoverRegenerationResponse(data=_cover_payload(result))
+
+
+@router.post(
+    "/books/{book_id}/source-nodes/{source_node_id}/cover/regenerate",
+    response_model=LocalCoverRegenerationResponse,
+)
+def regenerate_library_source_node_cover(
+    book_id: str,
+    source_node_id: str,
+    request: Request,
+    db: DatabaseSession,
+    settings: ApplicationSettings,
+) -> LocalCoverRegenerationResponse:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return _cover_response(auth_error)
+    manager_error = _require_manager(user)
+    if manager_error:
+        return _cover_response(manager_error)
+    try:
+        result = regenerate_local_metadata_covers(
+            db,
+            settings,
+        ).regenerate_source_node(
+            actor=_actor(db, user),
+            book_id=book_id,
+            source_node_id=source_node_id,
         )
-    return _import_response(
-        ok(
-            {
-                "resourceId": resource_id,
-                "accepted": True,
-                "taskId": result.task_id,
-            },
-            status_code=202,
+    except (BookNotFoundError, SourceNodeNotFoundError):
+        return _cover_response(
+            fail("来源目录不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
         )
-    )
+    except LocalCoverUnavailableError as exc:
+        return _cover_response(
+            fail(
+                "未能从当前目录的本地元数据中解析出可用封面",
+                status_code=422,
+                code=exc.code,
+            )
+        )
+    return LocalCoverRegenerationResponse(data=_cover_payload(result))
 
 
 @router.put(

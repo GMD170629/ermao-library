@@ -11,10 +11,12 @@ from sqlalchemy import select
 
 from app.core.auth import hash_password
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookFacet,
     LibraryBookMetadata,
     LibraryFacet,
+    LibraryImportTask,
     LibraryOperation,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
@@ -145,6 +147,41 @@ def _png_cover() -> bytes:
     output = BytesIO()
     Image.new("RGB", (80, 120), color=(202, 92, 48)).save(output, format="PNG")
     return output.getvalue()
+
+
+def _configure_local_covers(db_session, test_settings) -> dict[str, bytes]:
+    library = db_session.get(Library, "test-library")
+    assert library is not None
+    root = test_settings.resolved_library_root
+    root.mkdir(parents=True, exist_ok=True)
+    library.root_path = str(root)
+    covers: dict[str, bytes] = {}
+    for index in (1, 2):
+        book_id = f"bulk-book-{index}"
+        node = db_session.get(LibrarySourceNode, f"{book_id}-node")
+        resource = db_session.get(
+            LibraryReadableResource,
+            f"bulk-resource-{index}",
+        )
+        assert node is not None and resource is not None
+        source = root / node.relative_path
+        source.write_bytes(b"local publication")
+        cover = _png_cover()
+        cover_name = f"local-cover-{index}.png"
+        (root / cover_name).write_bytes(cover)
+        source.with_suffix(".opf").write_text(
+            f'''<package xmlns="http://www.idpf.org/2007/opf"
+ xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">
+ <metadata><dc:title>本地标题 {index}</dc:title></metadata>
+ <manifest><item id="cover" href="{cover_name}" media-type="image/png"
+ properties="cover-image"/></manifest>
+</package>''',
+            encoding="utf-8",
+        )
+        resource.adapter_id = "epub"
+        covers[book_id] = cover
+    db_session.commit()
+    return covers
 
 
 def test_bulk_metadata_updates_facets_and_writes_library_operation(
@@ -421,6 +458,8 @@ def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
         with Image.open(test_settings.resolved_storage_root / cover_path) as image:
             assert image.width == image.height
 
+    expected_covers = _configure_local_covers(db_session, test_settings)
+    before_tasks = tuple(db_session.scalars(select(LibraryImportTask.id)))
     regenerated = client.post(
         "/api/library/operations/books/covers",
         data={
@@ -433,6 +472,7 @@ def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
     )
     assert regenerated.status_code == 200, regenerated.text
     assert regenerated.json()["data"]["updated"] == 2
+    assert regenerated.json()["data"]["skipped"] == []
     db_session.expire_all()
     for index, book_id in enumerate(book_ids, start=1):
         book_metadata = db_session.get(LibraryBookMetadata, book_id)
@@ -442,11 +482,19 @@ def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
         source_metadata = db_session.get(
             LibrarySourceNodeMetadata, f"bulk-book-{index}-node"
         )
-        assert book_metadata is not None and book_metadata.cover_status == "PENDING"
-        assert resource_metadata is not None
-        assert resource_metadata.cover_path is None
-        assert resource_metadata.cover_status == "PENDING"
-        assert source_metadata is not None and source_metadata.cover_status == "PENDING"
+        assert book_metadata is not None and book_metadata.cover_status == "READY"
+        assert resource_metadata is not None and resource_metadata.cover_status == "READY"
+        assert source_metadata is not None and source_metadata.cover_status == "READY"
+        assert book_metadata.cover_path == source_metadata.cover_path
+        assert resource_metadata.cover_path is not None
+        assert source_metadata.cover_path is not None
+        assert (
+            test_settings.resolved_storage_root / resource_metadata.cover_path
+        ).read_bytes() == expected_covers[book_id]
+        assert (
+            test_settings.resolved_storage_root / source_metadata.cover_path
+        ).read_bytes() == expected_covers[book_id]
+    assert tuple(db_session.scalars(select(LibraryImportTask.id))) == before_tasks
 
 
 def test_operation_owner_is_enforced_for_non_manager(client, db_session) -> None:

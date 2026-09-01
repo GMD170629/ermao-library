@@ -201,3 +201,7 @@ async function continueImport(path: string, signal?: AbortSignal): Promise<Conti
 export function continueSourceImport(sourceNodeId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
   return continueImport(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, signal);
 }
+
+export function continueImportTask(taskId: string, signal?: AbortSignal): Promise<ContinueImportResult> {
+  return continueImport(`/api/library-import-tasks/${encodeURIComponent(taskId)}/continue`, signal);
+}

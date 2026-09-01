@@ -40,6 +40,10 @@ class LibraryImportTask(Base):
             name="LibraryImportTask_state_check",
         ),
         CheckConstraint(
+            column("missingEntryPolicy").in_(("PRESERVE", "PRUNE_MISSING")),
+            name="LibraryImportTask_missingEntryPolicy_check",
+        ),
+        CheckConstraint(
             or_(
                 column("role").is_(None),
                 column("role").in_(
@@ -93,6 +97,17 @@ class LibraryImportTask(Base):
             sqlite_where=column("kind") == "IMPORT_ASSET",
         ),
         Index("LibraryImportTask_queued_createdAt_idx", "state", "createdAt"),
+        Index("LibraryImportTask_sourceNodeId_idx", "sourceNodeId"),
+        Index(
+            "LibraryImportTask_sourceNodeId_libraryId_idx",
+            "sourceNodeId",
+            "libraryId",
+        ),
+        Index(
+            "LibraryImportTask_resourceId_libraryId_idx",
+            "resourceId",
+            "libraryId",
+        ),
         Index("LibraryImportTask_libraryId_kind_idx", "libraryId", "kind", "state"),
         Index(
             "LibraryImportTask_scan_queued_key",
@@ -137,6 +152,13 @@ class LibraryImportTask(Base):
     )
     error_summary: Mapped[str | None] = mapped_column(
         "errorSummary", Text, nullable=True
+    )
+    missing_entry_policy: Mapped[str] = mapped_column(
+        "missingEntryPolicy",
+        String(32),
+        nullable=False,
+        default="PRESERVE",
+        server_default="PRESERVE",
     )
     created_at: Mapped[datetime] = mapped_column(
         "createdAt",

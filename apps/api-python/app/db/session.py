@@ -3,25 +3,25 @@ from collections.abc import Generator
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
-from app.db.sqlite import create_sqlite_engine
+from app.db.sqlite import SHORT_WRITE_OPERATION_LIMIT_SECONDS, create_sqlite_engine
 
 settings = get_settings()
 
 engine = create_sqlite_engine(settings.database_path)
 background_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=0.25,
-    transaction_time_budget_seconds=0.25,
+    timeout_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
+    transaction_time_budget_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
 )
 heartbeat_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=0.25,
-    transaction_time_budget_seconds=0.25,
+    timeout_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
+    transaction_time_budget_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
 )
 metadata_maintenance_engine = create_sqlite_engine(
     settings.database_path,
-    timeout_seconds=0.25,
-    transaction_time_budget_seconds=0.25,
+    timeout_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
+    transaction_time_budget_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
 )
 SessionLocal = sessionmaker(
     bind=engine,

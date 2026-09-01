@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
+import { continueImportTask, parseContinueImportResult, parseImportLibraries, parseImportTaskDetail, parseImportTasksPage, parseLibraryImportTask } from './client';
 
 const task = {
   id: 'task-1',
@@ -62,4 +62,29 @@ test('parses ContinueImport result without queue-control fields', () => {
 
 test('rejects retired import task states', () => {
   assert.throws(() => parseLibraryImportTask({ ...task, state: 'COMPLETED' }), /无效状态/);
+});
+
+test('continues the exact failed task through the task-scoped endpoint', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(input, '/api/library-import-tasks/task-1/continue');
+    assert.equal(init?.method, 'POST');
+    return new Response(JSON.stringify({
+      ok: true,
+      data: {
+        taskId: 'task-1',
+        libraryId: 'library-1',
+        sourceNodeId: 'source-node-1',
+        requeuedFailed: 1,
+        enqueued: true
+      }
+    }), { status: 202, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await continueImportTask('task-1');
+    assert.equal(result.taskId, 'task-1');
+    assert.equal(result.requeuedFailed, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

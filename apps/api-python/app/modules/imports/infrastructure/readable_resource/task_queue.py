@@ -17,6 +17,7 @@ from app.modules.imports.application.readable_resource.ports import (
     ImportTaskState,
     LibraryImportTaskQueuePort,
     LibraryImportTaskRecord,
+    MissingEntryPolicy,
 )
 from app.modules.imports.infrastructure.readable_resource_import_schema import (
     LibraryImportTask,
@@ -34,7 +35,11 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             delete(LibraryImportTask).where(LibraryImportTask.library_id == library_id)
         )
         self._session.flush()
-        self.enqueue(kind="SCAN_LIBRARY", library_id=library_id)
+        self.enqueue(
+            kind="SCAN_LIBRARY",
+            library_id=library_id,
+            missing_entry_policy=MissingEntryPolicy.PRESERVE,
+        )
 
     def delete_tasks_for_source_nodes(self, source_node_ids: Sequence[str]) -> None:
         if not source_node_ids:
@@ -54,6 +59,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         resource_id: str | None = None,
         source_node_id: str | None = None,
         role: AssetRole | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
     ) -> LibraryImportTaskRecord:
         row = LibraryImportTask(
             id=cuid(),
@@ -63,15 +69,51 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             source_node_id=source_node_id,
             role=None if role is None else role.value,
             state="QUEUED",
+            missing_entry_policy=missing_entry_policy.value,
         )
         self._session.add(row)
         self._session.flush()
         return self._to_record(row)
 
     def request_library_scan(
-        self, library_id: str
+        self,
+        library_id: str,
+        *,
+        missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
-        """Atomically retain no more than one queued scan per library."""
+        """Merge an equivalent active scan and retain at most one follow-up."""
+
+        queued = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.kind == "SCAN_LIBRARY",
+                LibraryImportTask.state == "QUEUED",
+            )
+        )
+        if queued is not None:
+            if (
+                missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+                and queued.missing_entry_policy
+                != MissingEntryPolicy.PRUNE_MISSING.value
+            ):
+                queued.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
+                self._session.flush()
+            return self._to_record(queued), False
+
+        running = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.kind == "SCAN_LIBRARY",
+                LibraryImportTask.state == "RUNNING",
+            )
+        )
+        needs_follow_up = (
+            running is not None
+            and missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+            and running.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
+        )
+        if running is not None and not needs_follow_up:
+            return self._to_record(running), False
 
         task_id = cuid()
         statement = (
@@ -81,6 +123,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
                 kind="SCAN_LIBRARY",
                 library_id=library_id,
                 state="QUEUED",
+                missing_entry_policy=missing_entry_policy.value,
             )
             .on_conflict_do_nothing(
                 index_elements=[LibraryImportTask.library_id],
@@ -102,7 +145,62 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         if row is None:
             raise RuntimeError("queued library scan disappeared after request")
+        if (
+            missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+            and row.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
+        ):
+            row.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
+            self._session.flush()
         return self._to_record(row), inserted
+
+    def request_source_scan(
+        self,
+        *,
+        library_id: str,
+        source_node_id: str,
+        missing_entry_policy: MissingEntryPolicy,
+    ) -> tuple[LibraryImportTaskRecord, bool]:
+        queued = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "CONTINUE_SOURCE",
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.source_node_id == source_node_id,
+                LibraryImportTask.state == "QUEUED",
+            )
+        )
+        if queued is not None:
+            if (
+                missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+                and queued.missing_entry_policy
+                != MissingEntryPolicy.PRUNE_MISSING.value
+            ):
+                queued.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
+                self._session.flush()
+            return self._to_record(queued), False
+
+        running = self._session.scalar(
+            select(LibraryImportTask).where(
+                LibraryImportTask.kind == "CONTINUE_SOURCE",
+                LibraryImportTask.library_id == library_id,
+                LibraryImportTask.source_node_id == source_node_id,
+                LibraryImportTask.state == "RUNNING",
+            )
+        )
+        needs_follow_up = (
+            running is not None
+            and missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
+            and running.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
+        )
+        if running is not None and not needs_follow_up:
+            return self._to_record(running), False
+
+        task = self.enqueue(
+            kind="CONTINUE_SOURCE",
+            library_id=library_id,
+            source_node_id=source_node_id,
+            missing_entry_policy=missing_entry_policy,
+        )
+        return task, True
 
     def ensure_import_asset_task(
         self,
@@ -231,43 +329,18 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
 
-    def requeue_failed_for_library(self, library_id: str) -> int:
-        result = self._session.execute(
-            update(LibraryImportTask)
-            .where(
-                LibraryImportTask.library_id == library_id,
-                LibraryImportTask.state == "FAILED",
-                LibraryImportTask.kind != "SCAN_LIBRARY",
-            )
-            .values(
-                state="QUEUED",
-                error_summary=None,
-                started_at=None,
-                finished_at=None,
-            )
-        )
+    def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
+        row = self._session.get(LibraryImportTask, task_id)
+        if row is None:
+            raise LookupError(task_id)
+        if row.state != "FAILED":
+            return self._to_record(row), False
+        row.state = "QUEUED"
+        row.error_summary = None
+        row.started_at = None
+        row.finished_at = None
         self._session.flush()
-        return int(getattr(result, "rowcount", 0) or 0)
-
-    def requeue_failed_for_source(self, source_node_id: str) -> int:
-        result = self._session.execute(
-            update(LibraryImportTask)
-            .where(
-                LibraryImportTask.source_node_id == source_node_id,
-                LibraryImportTask.state == "FAILED",
-            )
-            .values(
-                state="QUEUED",
-                error_summary=None,
-                started_at=None,
-                finished_at=None,
-            )
-        )
-        # Also requeue IMPORT_ASSET tasks under resources anchored at this node
-        # is handled by CONTINUE_SOURCE scan; FAILED for this source_node covers
-        # CONTINUE_SOURCE and file PRIMARY tasks.
-        self._session.flush()
-        return int(getattr(result, "rowcount", 0) or 0)
+        return self._to_record(row), True
 
     def has_active_kind(
         self,
@@ -298,6 +371,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             source_node_id=row.source_node_id,
             role=role,
             error_summary=row.error_summary,
+            missing_entry_policy=MissingEntryPolicy(row.missing_entry_policy),
         )
 
 

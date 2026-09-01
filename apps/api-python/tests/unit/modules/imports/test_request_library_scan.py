@@ -16,6 +16,7 @@ from app.modules.imports.application.readable_resource.request_library_scan impo
     RequestLibraryScan,
     RequestLibraryScanCommand,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 
 
 class _Libraries:
@@ -27,16 +28,15 @@ class _Libraries:
 
 class _Queue:
     def __init__(self) -> None:
-        self.requeue_calls = 0
-
-    def requeue_failed_for_library(self, library_id: str) -> int:
-        assert library_id == "library"
-        self.requeue_calls += 1
-        return 3
+        self.requested_policies: list[MissingEntryPolicy] = []
 
     def request_library_scan(
-        self, library_id: str
+        self,
+        library_id: str,
+        *,
+        missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
+        self.requested_policies.append(missing_entry_policy)
         return (
             LibraryImportTaskRecord(
                 id="task",
@@ -47,6 +47,7 @@ class _Queue:
                 source_node_id=None,
                 role=None,
                 error_summary=None,
+                missing_entry_policy=missing_entry_policy,
             ),
             True,
         )
@@ -81,10 +82,10 @@ def test_automatic_scan_triggers_do_not_retry_historical_failures(
         RequestLibraryScanCommand(library_id="library", trigger=trigger)
     )
     assert result.requeued_failed == 0
-    assert queue.requeue_calls == 0
+    assert queue.requested_policies == [MissingEntryPolicy.PRESERVE]
 
 
-def test_manual_scan_retries_failed_resources_before_requesting_scan() -> None:
+def test_manual_scan_only_changes_the_missing_entry_policy() -> None:
     queue = _Queue()
     use_case = RequestLibraryScan(
         libraries=cast(LibraryConfigPort, _Libraries()),
@@ -95,5 +96,5 @@ def test_manual_scan_retries_failed_resources_before_requesting_scan() -> None:
     result = use_case.execute(
         RequestLibraryScanCommand(library_id="library", trigger="MANUAL")
     )
-    assert result.requeued_failed == 3
-    assert queue.requeue_calls == 1
+    assert result.requeued_failed == 0
+    assert queue.requested_policies == [MissingEntryPolicy.PRUNE_MISSING]

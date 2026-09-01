@@ -82,9 +82,10 @@ LibraryImportTask
 删除 `LibraryVersion`。原 `LibraryVolume` 的业务位置由 ReadableResource 取代，原
 `LibraryFile` 的物理输入关系由 ResourceAsset 取代。
 
-SourceNode 不是文件系统的实时镜像。系统不自动检测文件修改、移动、重命名、删除或
-不可读状态，不维护 `sourceRevision`、fingerprint、内容哈希、MISSING 或
-`lastSeenScanId`。打开路径时发现不存在或无法读取，只向调用方报告错误，不回写节点状态。
+SourceNode 不是文件系统的实时镜像。系统不维护 `sourceRevision`、fingerprint、内容哈希、
+MISSING 或 `lastSeenScanId`。扫描时会刷新同路径观察结果；自动扫描保留未出现节点，只有
+用户手动扫描正常完成的目录才清理差集。打开路径时发现不存在或无法读取，只向调用方报告
+错误，不回写节点状态。
 
 ## 3. LibrarySourceNode
 
@@ -98,7 +99,7 @@ SourceNode 不是文件系统的实时镜像。系统不自动检测文件修改
 - `observedSizeBytes`, `observedMtimeNs`, `observedAt`；
 - `createdAt`, `updatedAt`。
 
-`observed*` 只是首次发现时的快照。继续导入不更新已有 SourceNode 的 observed 字段。
+`observed*` 是最近一次同路径观察快照。继续导入保留 SourceNode 身份并刷新 observed 字段。
 目录的 size 为 `NULL`。
 
 SourceNode 主表不保存展示标题、封面、排序、文件角色、格式解释、导入状态或用户选择。
@@ -114,15 +115,16 @@ SourceNode 的身份是 Library 内的精确相对路径槽位：
 - `UNIQUE(libraryId, pathKey)`；
 - 摘要相同仍比较原始路径；原路径不同时以 `PATH_KEY_COLLISION` 拒绝整个写入。
 
-大小写或 Unicode 拼写变化、移动、重命名都会产生新 SourceNode。系统不自动迁移、合并或
-删除旧节点。
+大小写或 Unicode 拼写变化、移动、重命名都会产生新 SourceNode。系统不迁移或合并身份；
+自动扫描保留旧节点，手动扫描仍然存在的上级目录或书库时删除未出现的旧节点。
 
 ### 3.3 树约束
 
 - `parentId` 必须属于同一 Library，并指向 DIRECTORY；
 - SourceNode 树不得成环，节点路径必须与父路径一致；
 - Library 根目录本身不建 SourceNode；根下节点的 `parentId` 为 `NULL`；
-- 未被 ignore 规则排除的目录、常规文件、符号链接和特殊文件都建立节点；
+- 未被 ignore 规则排除的目录、符号链接和特殊文件建立节点；常规文件还必须被至少一个已注册
+  file 或 directory adapter 接纳；
 - SYMLINK 使用 `follow_symlinks=False`，只记录、不跟随、不导入；
 - socket、device、FIFO 等记为 OTHER，不参与资源识别。
 
@@ -156,9 +158,9 @@ SourceNode、Book、ReadableResource 和 ResourceAsset 分别使用自己的元�
 `RESOURCE` 表示该节点按当前规则建立了 ReadableResource，不等于文件已经成功解析。
 是否可打开由 Resource 导入状态决定。
 
-已有 RESOURCE 解释固定使用当前 adapter；继续导入只补充兼容 Asset，不切换 adapter。
-NODE_ONLY 节点在用户执行继续导入时允许再次探测并变成 Resource。空解释（崩溃留下）由
-继续导入补完首次判断。
+扫描到的节点始终按当前文件系统观察、书库配置和 adapter registry 重新得到解释；已有
+RESOURCE/NODE_ONLY 只用于同锚点身份复用和差异写入，不能阻止类型或归属收敛。空解释
+（崩溃留下）也由同一流程补完。
 
 ## 5. Book、ReadableResource 与 ResourceAsset
 
@@ -254,8 +256,10 @@ Library 已存在 SourceNode 时，不允许原地切换 FLAT/VOLUMES。切换�
 
 - `ContinueLibraryImport(library_id)`
 - `ContinueSourceImport(source_node_id)`
+- `ContinueImportTask(task_id)`（只继续该持久任务并保留其策略）
 
-两种入口共享同一套扫描、识别、补齐逻辑。不保留 Reimport / Retry / 重新识别作为别名。
+三种显式 target 共享同一套扫描、识别、补齐和队列实现。不保留 Reimport / Retry /
+重新识别作为别名。
 
 ### 7.1 统一语义
 
@@ -270,22 +274,23 @@ Library 已存在 SourceNode 时，不允许原地切换 FLAT/VOLUMES。切换�
 9. 已经 READY 的 Resource 不因其他文件失败而回滚；
 10. 用户再次执行继续导入时补齐失败项和新文件；
 11. 不承诺失败前完全保留旧快照；允许部分成功；
-12. 已识别的 Resource 固定使用当前 adapter，继续导入只补充兼容 Asset；
-13. NODE_ONLY 节点执行继续导入时允许再次探测并变成 Resource；
-14. 不自动删除未再次发现的 SourceNode/Asset；
-15. 不检测移动、重命名或同路径内容变化。
+12. 所有触发源对已扫描节点执行相同的 adapter、目录归属和 Asset 收敛规则；
+13. RESOURCE 与 NODE_ONLY 都按当前规则重新判断，兼容锚点复用 ID，错误归属直接替换；
+14. 自动、启动、监听和周期扫描保留未再次发现的 SourceNode/Asset；用户显式手动继续导入时，
+    仅对正常遍历结束的目录清理未出现的直接子节点；
+15. 不迁移移动或重命名后的身份；同路径内容变化按现有观察刷新和重新导入规则处理。
 
 ### 7.2 ContinueLibraryImport
 
 - 流式扫描 Library 根；
 - 插入新 SourceNode；
-- 已有 SourceNode 不更新 observed；
-- 识别尚未解释的新节点；
-- 对 NODE_ONLY 节点再次探测（用户明确执行继续导入）；
-- 已有 RESOURCE 解释不改变 adapter；
+- 已有 SourceNode 保留身份，并按同路径当前观察结果刷新 observed；
+- 对新旧节点执行同一套探测、识别和归属规则；
+- 先得到当前解释，再以已有数据进行 ID 复用和差异写入；
 - 为缺失或 FAILED 的兼容 Asset 创建/重置 IMPORT_ASSET 任务；
 - SUCCEEDED Asset 任务跳过；
-- 不删除旧节点、不做 missing 对账。
+- 自动触发使用 `PRESERVE`，不删除旧节点；用户手动触发使用 `PRUNE_MISSING`，只在目录迭代
+  正常到达末尾后通过统一来源树删除用例清理差集。目录打开或迭代读取失败时不清理该目录。
 
 ### 7.3 ContinueSourceImport
 
@@ -296,12 +301,15 @@ Library 已存在 SourceNode 时，不允许原地切换 FLAT/VOLUMES。切换�
 - 第 101 个及后续兼容文件同样补齐；
 - 不创建重复 Book/Resource/Asset；
 - 不生成针对 DIRECTORY/SYMLINK/OTHER 的 IMPORT_ASSET 任务。
+- 所选文件或目录不存在、不可访问时任务失败并保留数据；不扫描父目录。移动、重命名和删除
+  只能由用户扫描仍然存在的上级目录或整个书库发现。
 
 ### 7.4 首次识别规则（仍属继续导入）
 
-常规文件：只把物理类型和后缀交给 file adapter registry，不打开文件。
+常规文件：只把物理类型和后缀交给 adapter registry，不打开文件。
 
-- 无匹配或多个 adapter 匹配：保存 NODE_ONLY；
+- 没有任何已注册文件或目录 adapter 接纳其后缀的文件，不进入 SourceNode 树，也不参与目录探测；
+- 已通过通用准入、但没有唯一 file adapter 的文件保存 NODE_ONLY；
 - 唯一匹配：保存 RESOURCE 解释、必要的 Book、PENDING Resource，并创建 PRIMARY 的
   IMPORT_ASSET 任务。
 
@@ -318,7 +326,7 @@ Library 已存在 SourceNode 时，不允许原地切换 FLAT/VOLUMES。切换�
 
 - 整棵接纳子树仍递归建立 SourceNode；
 - 当前 adapter 接受的常规文件各自创建 IMPORT_ASSET；
-- 不兼容文件只建 SourceNode；
+- 被其他已注册 adapter 接纳、但不兼容当前目录 Resource 的文件只建 SourceNode；
 - 后代目录不再自动执行 Resource 识别；
 - 第 101 个及后续文件不改变父 Resource 的类型；
 - 重叠范围内普通新文件只归最外层目录 Resource。
@@ -336,6 +344,7 @@ LibraryImportTask 是唯一队列表，只表达：
 - `role`（仅 IMPORT_ASSET）
 - `state`: `QUEUED | RUNNING | SUCCEEDED | FAILED`
 - `errorSummary`
+- `missingEntryPolicy`: `PRESERVE | PRUNE_MISSING`（扫描任务使用；其他任务固定为 `PRESERVE`）
 - `createdAt` / `startedAt` / `finishedAt`
 
 不要增加：owner、lease、expiry、attempts/retry policy、priority、availableAt、
@@ -358,10 +367,10 @@ worker 启动时：
 - 所有遗留 RUNNING 任务直接改为 FAILED；
 - `errorSummary` 使用稳定代码 `WORKER_INTERRUPTED`；
 - 不自动重新入队；
-- 用户执行继续导入时才重新排队。
+- 不按扫描触发类型批量重新排队。
 
-用户再次 ContinueImport 时：对相关 FAILED 任务重置为 QUEUED（统一实现，不保留两套
-retry 语义）。
+扫描器再次遇到兼容 Asset 时，由统一 `ensure_import_asset_task` 规则补建或重置 FAILED 任务；
+重试指定失败任务只通过 task-scoped ContinueImport，并保留原任务 `missingEntryPolicy`。
 
 ### 8.3 IMPORT_ASSET 直接写稳定结果
 
@@ -470,8 +479,9 @@ Alembic 以 `0001_library_topology_baseline` 作为不可重写的 fresh-install
 - 绝对路径、空段、`.`、`..`、NUL、字面反斜杠、大小写和 Unicode 拼写；
 - pathKey 摘要碰撞保护；
 - SYMLINK 环、越根链接和特殊文件不被跟随或导入；
-- 不更新已有节点 observed，不做 missing 对账；
-- 移动/重命名产生新节点，旧节点保留；
+- 已有节点保留身份并刷新 observed；自动扫描不做 missing 对账，手动扫描只在相应目录
+  正常遍历结束时清理差集；
+- 自动扫描时移动/重命名产生新节点且旧节点保留；手动扫描上级目录或书库时清理旧节点；
 - 百万节点内存保持 `O(depth + probe budget)`。
 
 ## 13. 明确不做
@@ -479,7 +489,7 @@ Alembic 以 `0001_library_topology_baseline` 作为不可重写的 fresh-install
 - 旧数据库迁移、回填、双写和兼容层；
 - LibraryVersion、Edition 或固定中间目录业务层；
 - `AUDIOBOOK` 组织模式；
-- 自动文件变化检测、MISSING 对账、移动/重命名识别和自动删除；
+- 无需扫描触发的文件变化检测、自动 MISSING 对账、移动/重命名身份迁移和自动删除；
 - 自动重试失败路径、lease/CAS/多消费者保护；
 - 修改元数据优先级和旁车内容规则；
 - Reader/API/Web 等上层契约由 ADR 0019 决定；Mobile 仍不在本批范围；
@@ -491,9 +501,9 @@ Alembic 以 `0001_library_topology_baseline` 作为不可重写的 fresh-install
 该模型只保留一棵物理路径快照、一层可阅读语义，以及一张简单任务表。继续导入是发现、
 识别与补齐的唯一用户意图。部分成功被接受；失败由用户再次继续导入补齐。
 
-代价是旧路径可能长期保留，并在实际打开时才报告不存在或不可读；目录类型也受文件系统
-枚举顺序和有限样本影响。系统通过保存判断证据、固定已识别 adapter，以及提供统一的
-继续导入，让这些取舍保持简单且可解释。
+代价是普通自动扫描仍会保留旧路径；用户需要对仍然存在的上级目录或书库执行手动继续导入
+才能清理。目录类型也受文件系统枚举顺序和有限样本影响。系统通过保存判断证据、统一执行
+当前 adapter 规则，以及提供同一 ContinueImport 管线，让这些取舍保持简单且可解释。
 
 ## 实施进度
 

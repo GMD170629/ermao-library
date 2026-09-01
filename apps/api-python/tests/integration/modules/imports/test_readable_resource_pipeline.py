@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,13 +29,20 @@ from app.modules.imports.application.readable_resource.continue_import import (
 from app.modules.imports.application.readable_resource.ports import (
     AssetTechnicalMetadata,
     FileParseResult,
+    ObservedSourceEntry,
     ParsedAssetPayload,
     ResourceAdapterExecutorPort,
+    adapter_identity,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
-from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
+from app.modules.imports.domain.resource_adapters import (
+    ResourceAdapterSpec,
+    match_file_adapters,
+    unique_adapter_or_none,
+)
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
     OsSourceTreeFilesystem,
 )
@@ -65,6 +73,10 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibraryResourceAssetNavigation,
     LibrarySourceNode,
     LibrarySourceNodeInterpretation,
+)
+from app.modules.library.public import (
+    SourceNodePhysicalKind,
+    SourceNodeRelativePath,
 )
 
 
@@ -311,7 +323,9 @@ def test_startup_marks_running_as_worker_interrupted(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_failure_does_not_auto_retry_until_continue_import(tmp_path: Path) -> None:
+def test_failed_asset_is_requeued_by_the_shared_scan_not_the_request(
+    tmp_path: Path,
+) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -328,6 +342,8 @@ def test_failure_does_not_auto_retry_until_continue_import(tmp_path: Path) -> No
             assert len(failed) == 1
             assert _drain(pipeline) == []
             pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            worker = build_readable_resource_worker(pipeline)
+            assert worker.process_once() == "scan"
             requeued = db.scalars(
                 select(LibraryImportTask).where(LibraryImportTask.state == "QUEUED")
             ).all()
@@ -683,6 +699,133 @@ def test_node_only_then_compatible_files_become_resource(tmp_path: Path) -> None
         engine.dispose()
 
 
+@pytest.mark.parametrize(
+    "missing_entry_policy",
+    [MissingEntryPolicy.PRESERVE, MissingEntryPolicy.PRUNE_MISSING],
+)
+def test_shared_scan_converges_existing_audio_file_resources_to_one_directory(
+    tmp_path: Path,
+    missing_entry_policy: MissingEntryPolicy,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            album = root / "album"
+            album.mkdir()
+            source_nodes = SqlAlchemySourceNodeRepository(db)
+            books_resources = SqlAlchemyBookResourceRepository(db)
+            queue = SqlAlchemyLibraryImportTaskQueue(db)
+            observed_at = datetime(2026, 9, 2, tzinfo=UTC)
+            directory_node, _ = source_nodes.insert_if_absent(
+                library_id="lib-1",
+                parent_id=None,
+                entry=ObservedSourceEntry(
+                    relative_path=SourceNodeRelativePath("album"),
+                    physical_kind=SourceNodePhysicalKind.DIRECTORY,
+                    observed_size_bytes=None,
+                    observed_mtime_ns=1,
+                    observed_at=observed_at,
+                ),
+            )
+            book_id = books_resources.ensure_book(
+                library_id="lib-1",
+                source_node_id=directory_node.id,
+                title="album",
+            )
+            audio_adapter = unique_adapter_or_none(match_file_adapters("001.m4a"))
+            assert audio_adapter is not None
+            for index in range(1, 205):
+                name = f"{index:03}.m4a"
+                (album / name).write_bytes(b"audio")
+                relative = SourceNodeRelativePath(f"album/{name}")
+                file_node, _ = source_nodes.insert_if_absent(
+                    library_id="lib-1",
+                    parent_id=directory_node.id,
+                    entry=ObservedSourceEntry(
+                        relative_path=relative,
+                        physical_kind=SourceNodePhysicalKind.REGULAR_FILE,
+                        observed_size_bytes=5,
+                        observed_mtime_ns=index,
+                        observed_at=observed_at,
+                    ),
+                )
+                resource = books_resources.create_pending_resource(
+                    library_id="lib-1",
+                    book_id=book_id,
+                    source_node_id=file_node.id,
+                    adapter=adapter_identity(audio_adapter, source_name=name),
+                )
+                source_nodes.upsert_interpretation(
+                    source_node_id=file_node.id,
+                    result="RESOURCE",
+                    source="AUTO",
+                    adapter_id=audio_adapter.adapter_id.value,
+                    adapter_version=audio_adapter.adapter_version,
+                    reason_code="UNIQUE_ADAPTER",
+                    sample_relative_paths=None,
+                    sample_count=None,
+                    max_entries_visited=None,
+                    max_depth=None,
+                    time_budget_ms=None,
+                    termination_reason=None,
+                    recognized_at=observed_at,
+                )
+                queue.ensure_import_asset_task(
+                    library_id="lib-1",
+                    resource_id=resource.id,
+                    source_node_id=file_node.id,
+                    role=audio_adapter.asset_role,
+                )
+            (album / "metadata.json").write_text("{}", encoding="utf-8")
+            db.commit()
+
+            pipeline, _ = _pipeline(db)
+            pipeline.scan_library_source_tree.execute_source(
+                directory_node.id,
+                missing_entry_policy=missing_entry_policy,
+            )
+            assert _drain(pipeline, limit=500) == ["ok"] * 204
+
+            resources = db.scalars(select(LibraryReadableResource)).all()
+            assert len(resources) == 1
+            assert resources[0].source_node_id == directory_node.id
+            assert resources[0].adapter_id == "audiobook-directory"
+            assert (
+                db.scalar(select(func.count()).select_from(LibraryResourceAsset)) == 204
+            )
+            assert set(
+                db.scalars(
+                    select(LibrarySourceNodeInterpretation.result)
+                    .join(
+                        LibrarySourceNode,
+                        LibrarySourceNode.id
+                        == LibrarySourceNodeInterpretation.source_node_id,
+                    )
+                    .where(LibrarySourceNode.physical_kind == "REGULAR_FILE")
+                )
+            ) == {"NODE_ONLY"}
+            assert (
+                db.scalar(
+                    select(LibrarySourceNode.id).where(
+                        LibrarySourceNode.relative_path == "album/metadata.json"
+                    )
+                )
+                is None
+            )
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(LibraryImportTask)
+                    .where(LibraryImportTask.resource_id != resources[0].id)
+                )
+                == 0
+            )
+    finally:
+        engine.dispose()
+
+
 def test_volumes_audiobook_creates_one_book_and_eight_bounded_resources(
     tmp_path: Path,
 ) -> None:
@@ -804,7 +947,11 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
             db.commit()
             album = root / "album"
             album.mkdir()
-            (album / "01.mp3").write_bytes(b"audio")
+            (album / "01.m4a").write_bytes(b"audio")
+            (album / "metadata.json").write_text(
+                '{"title": "must not participate in source discovery"}',
+                encoding="utf-8",
+            )
             (album / "metadata.cover.png").write_bytes(
                 base64.b64decode(
                     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -837,7 +984,7 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
                     author=None,
                     narrator=None,
                     duration_ms=60_000,
-                    codec="mp3",
+                    codec="aac",
                     bitrate=128_000,
                     sample_rate=44_100,
                     channels=2,
@@ -862,10 +1009,10 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
                 )
             ).all()
             assert len(assets) == 1
-            assert assets[0].sort_key == "01.mp3"
+            assert assets[0].sort_key == "01.m4a"
             assert {
                 node.relative_path for node in db.scalars(select(LibrarySourceNode))
-            } == {"album", "album/01.mp3"}
+            } == {"album", "album/01.m4a"}
             metadata = db.get(LibraryReadableResourceMetadata, resource.id)
             assert metadata is not None
             assert metadata.title == "Sidecar audiobook"
@@ -876,9 +1023,9 @@ def test_audiobook_directory_ignores_sidecar_nodes_but_reads_their_metadata(
             asset_metadata = db.get(LibraryResourceAssetMetadata, assets[0].id)
             assert asset_metadata is not None
             assert asset_metadata.title == "第一集"
-            assert asset_metadata.mime_type == "audio/mpeg"
+            assert asset_metadata.mime_type == "audio/mp4"
             assert asset_metadata.duration_ms == 60_000
-            assert asset_metadata.codec == "mp3"
+            assert asset_metadata.codec == "aac"
             assert asset_metadata.bitrate == 128_000
             assert asset_metadata.sample_rate == 44_100
             assert asset_metadata.channels == 2

@@ -20,6 +20,7 @@ from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
     source_format_for_filename,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.library.public import (
     AdapterIdentity,
     AssetRole,
@@ -53,19 +54,23 @@ __all__ = [
     "LibrarySourceTreeConfig",
     "LocalCoverPublicationPort",
     "LocalMetadataPriorityPort",
+    "MissingEntryPolicy",
     "ObservedSourceEntry",
     "ParsedAssetPayload",
     "PipelineLogPort",
     "PreparedLocalCover",
     "ReadableResourceRecord",
+    "RegularFileObservation",
     "ResourceAdapterExecutorPort",
     "ResourceAdapterSpec",
     "ResourceNavigationUnitInput",
     "SidecarWritebackPort",
+    "SourceNodeDeletionPort",
     "SourceNodeRecord",
     "SourceNodeRepositoryPort",
     "SourceTreeFilesystemPort",
     "UnitOfWorkPort",
+    "UnreadableDirectoryEntry",
     "adapter_identity",
 ]
 
@@ -100,6 +105,7 @@ class LibraryImportTaskRecord:
     source_node_id: str | None
     role: AssetRole | None
     error_summary: str | None
+    missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +153,19 @@ class PreparedLocalCover:
 DirectoryEntry = tuple[str, SourceNodePhysicalKind, int | None, int]
 
 
+@dataclass(frozen=True, slots=True)
+class UnreadableDirectoryEntry:
+    """A visible directory entry whose type or stat facts could not be read."""
+
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class RegularFileObservation:
+    observed_size_bytes: int
+    observed_mtime_ns: int
+
+
 class ClockPort(Protocol):
     def now(self) -> datetime: ...
 
@@ -167,7 +186,7 @@ class SourceTreeFilesystemPort(Protocol):
     def iter_directory_entries(
         self,
         absolute_directory: Path,
-    ) -> Iterator[DirectoryEntry]: ...
+    ) -> Iterator[DirectoryEntry | UnreadableDirectoryEntry]: ...
 
     def probe_directory(
         self,
@@ -185,12 +204,30 @@ class SourceTreeFilesystemPort(Protocol):
 
     def path_is_readable_directory(self, path: Path) -> bool: ...
 
+    def observe_readable_file(self, path: Path) -> RegularFileObservation | None: ...
+
+
+class SourceNodeDeletionPort(Protocol):
+    def delete_source_node(self, source_node_id: str) -> None: ...
+
 
 class LibraryImportTaskQueuePort(Protocol):
     def request_library_scan(
-        self, library_id: str
+        self,
+        library_id: str,
+        *,
+        missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         """Return the one queued scan, creating it when absent."""
+
+    def request_source_scan(
+        self,
+        *,
+        library_id: str,
+        source_node_id: str,
+        missing_entry_policy: MissingEntryPolicy,
+    ) -> tuple[LibraryImportTaskRecord, bool]:
+        """Return one active source scan, preserving stronger queued intent."""
 
     def enqueue(
         self,
@@ -200,6 +237,7 @@ class LibraryImportTaskQueuePort(Protocol):
         resource_id: str | None = None,
         source_node_id: str | None = None,
         role: AssetRole | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
     ) -> LibraryImportTaskRecord: ...
 
     def ensure_import_asset_task(
@@ -240,9 +278,9 @@ class LibraryImportTaskQueuePort(Protocol):
 
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int: ...
 
-    def requeue_failed_for_library(self, library_id: str) -> int: ...
-
-    def requeue_failed_for_source(self, source_node_id: str) -> int: ...
+    def requeue_failed_task(
+        self, task_id: str
+    ) -> tuple[LibraryImportTaskRecord, bool]: ...
 
     def has_active_kind(
         self,

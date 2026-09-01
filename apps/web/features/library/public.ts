@@ -32,6 +32,10 @@ export type {
 } from './api/books';
 export { fetchLibraryNavigationSources } from './api/library-sources';
 export {
+  updateBulkBookCovers,
+  type BulkBookCoverResult
+} from './api/bulk-operations';
+export {
   librarySourceHref,
   type LibraryNavigationSource
 } from './model/library-source-navigation';

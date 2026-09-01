@@ -199,11 +199,8 @@ class _Queue(LibraryImportTaskQueuePort):
     def fail_interrupted_tasks_on_startup(self, *, finished_at):
         return 0
 
-    def requeue_failed_for_library(self, library_id):
-        return 0
-
-    def requeue_failed_for_source(self, source_node_id):
-        return 0
+    def requeue_failed_task(self, task_id):
+        raise NotImplementedError(task_id)
 
     def has_active_kind(self, **kwargs):
         return False

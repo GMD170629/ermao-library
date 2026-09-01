@@ -246,6 +246,7 @@ class MetadataLookupTask(Base):
         Index("MetadataLookupTask_bookId_createdAt_idx", "bookId", "createdAt"),
         Index("MetadataLookupTask_resourceId_idx", "resourceId"),
         Index("MetadataLookupTask_assetId_idx", "assetId"),
+        Index("MetadataLookupTask_organizeJobId_idx", "organizeJobId"),
         UniqueConstraint("importTaskId", name="MetadataLookupTask_importTaskId_key"),
     )
 
@@ -340,6 +341,7 @@ class MetadataWritebackOperation(Base):
         Index("MetadataWritebackOperation_sourceNodeId_idx", "sourceNodeId"),
         Index("MetadataWritebackOperation_resourceId_idx", "resourceId"),
         Index("MetadataWritebackOperation_assetId_idx", "assetId"),
+        Index("MetadataWritebackOperation_lookupTaskId_idx", "lookupTaskId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -438,6 +440,10 @@ class MetadataWritebackPreparation(Base):
         Index(
             "MetadataWritebackPreparation_assetId_idx",
             "assetId",
+        ),
+        Index(
+            "MetadataWritebackPreparation_lookupTaskId_idx",
+            "lookupTaskId",
         ),
         UniqueConstraint(
             "idempotencyKey",
@@ -552,6 +558,7 @@ class MetadataWritebackTarget(Base):
             "createdAt",
         ),
         Index("MetadataWritebackTarget_operationId_idx", "operationId"),
+        Index("MetadataWritebackTarget_assetId_idx", "assetId"),
         UniqueConstraint(
             "operationId",
             "targetKey",

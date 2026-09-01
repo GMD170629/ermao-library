@@ -14,6 +14,7 @@ from app.modules.imports.application.readable_resource.process_import_task impor
 )
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
+    SourceScanStartUnavailableError,
 )
 
 logger = logging.getLogger("ermao.readable_resource_pipeline")
@@ -58,10 +59,15 @@ class ReadableResourceWorkerProcessor:
             kind = task.kind
             library_id = task.library_id
             source_node_id = task.source_node_id
+            missing_entry_policy = task.missing_entry_policy
 
         try:
             if kind == "SCAN_LIBRARY":
-                self._scan.execute_library(library_id, task_id=task_id)
+                self._scan.execute_library(
+                    library_id,
+                    task_id=task_id,
+                    missing_entry_policy=missing_entry_policy,
+                )
                 with self._uow.transaction():
                     if self._queue.get_task(task_id) is None:
                         return "cancelled"
@@ -70,7 +76,11 @@ class ReadableResourceWorkerProcessor:
             if kind == "CONTINUE_SOURCE":
                 if source_node_id is None:
                     raise RuntimeError("CONTINUE_SOURCE missing source_node_id")
-                self._scan.execute_source(source_node_id, task_id=task_id)
+                self._scan.execute_source(
+                    source_node_id,
+                    task_id=task_id,
+                    missing_entry_policy=missing_entry_policy,
+                )
                 with self._uow.transaction():
                     if self._queue.get_task(task_id) is None:
                         return "cancelled"
@@ -86,7 +96,7 @@ class ReadableResourceWorkerProcessor:
                     finished_at=self._clock.now(),
                 )
             return "unknown_kind"
-        except Exception:
+        except Exception as error:
             self._uow.rollback()
             logger.exception(
                 "readable_resource.worker.containment_failure",
@@ -101,7 +111,11 @@ class ReadableResourceWorkerProcessor:
                 if current is not None and current.state == "RUNNING":
                     self._queue.mark_failed(
                         task_id,
-                        error_summary="WORKER_ERROR",
+                        error_summary=(
+                            error.code
+                            if isinstance(error, SourceScanStartUnavailableError)
+                            else "WORKER_ERROR"
+                        ),
                         finished_at=self._clock.now(),
                     )
             return "error"

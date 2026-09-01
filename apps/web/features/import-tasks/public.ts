@@ -1,4 +1,5 @@
 export {
+  continueImportTask,
   continueSourceImport,
   fetchImportLibraries,
   fetchImportTask,
@@ -17,3 +18,4 @@ export {
   type ImportTaskState,
   type LibraryImportTask
 } from './api/client';
+export { waitForImportTask } from './application/wait-for-import-task';

@@ -12,6 +12,8 @@ from app.db.maintenance import (
 
 logger = logging.getLogger(__name__)
 
+SHORT_WRITE_OPERATION_LIMIT_SECONDS = 0.5
+
 
 class SQLiteWalModeRequiredError(RuntimeError):
     """The persistent database could not enter the required WAL mode."""

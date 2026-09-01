@@ -4,14 +4,19 @@ import hashlib
 from base64 import b64decode
 from datetime import UTC, datetime
 
+from sqlalchemy import select
+
 from app.core.auth import hash_password
 from app.models import (
+    Library,
     LibraryBook,
     LibraryBookMetadata,
+    LibraryImportTask,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
+    LibrarySourceNodeMetadata,
 )
 from app.models.auth import User
 
@@ -108,6 +113,47 @@ def _login(client, db_session) -> None:
     assert response.status_code == 200, response.text
 
 
+def _configure_local_epub_cover(
+    db_session,
+    test_settings,
+    *,
+    resource_id: str,
+) -> bytes:
+    library = db_session.get(Library, "test-library")
+    resource = db_session.get(LibraryReadableResource, resource_id)
+    assert library is not None and resource is not None
+    node = db_session.get(LibrarySourceNode, resource.source_node_id)
+    assert node is not None
+    root = test_settings.resolved_library_root
+    root.mkdir(parents=True, exist_ok=True)
+    relative_path = f"{resource.book_id}/{resource_id}.epub"
+    source = root / relative_path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"local publication")
+    cover = b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+        "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    (source.parent / "cover.png").write_bytes(cover)
+    source.with_suffix(".opf").write_text(
+        """<package xmlns="http://www.idpf.org/2007/opf"
+ xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">
+ <metadata><dc:title>本地标题</dc:title></metadata>
+ <manifest><item id="cover" href="cover.png" media-type="image/png"
+ properties="cover-image"/></manifest>
+</package>""",
+        encoding="utf-8",
+    )
+    library.root_path = str(root)
+    node.relative_path = relative_path
+    node.path_key = _path_key(relative_path)
+    node.name = source.name
+    resource.adapter_id = "epub"
+    resource.format = "EPUB"
+    db_session.commit()
+    return cover
+
+
 def test_resource_metadata_update_uses_resource_identity(client, db_session) -> None:
     _login(client, db_session)
     _add_graph(db_session, "metadata-book", "metadata-resource")
@@ -163,8 +209,8 @@ def test_book_update_uses_book_mutation_transaction(client, db_session) -> None:
     )
 
 
-def test_resource_cover_regeneration_commits_pending_state_before_enqueue(
-    client, db_session
+def test_resource_cover_regeneration_reparses_local_metadata_without_import_task(
+    client, db_session, test_settings
 ) -> None:
     _login(client, db_session)
     _add_graph(db_session, "cover-book", "cover-resource")
@@ -173,16 +219,132 @@ def test_resource_cover_regeneration_commits_pending_state_before_enqueue(
     metadata.cover_path = "/covers/old.jpg"
     metadata.cover_status = "READY"
     db_session.commit()
+    expected_cover = _configure_local_epub_cover(
+        db_session,
+        test_settings,
+        resource_id="cover-resource",
+    )
+    before_tasks = tuple(db_session.scalars(select(LibraryImportTask.id)))
+    before_asset = db_session.get(LibraryResourceAsset, "cover-resource-asset")
+    assert before_asset is not None
+    before_asset_state = (
+        before_asset.id,
+        before_asset.resource_id,
+        before_asset.source_node_id,
+        before_asset.import_state,
+    )
 
     response = client.post(
         "/api/books/cover-book/resources/cover-resource/cover/regenerate"
     )
 
-    assert response.status_code == 202, response.text
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == {
+        "targetType": "RESOURCE",
+        "targetId": "cover-resource",
+        "updatedResourceIds": ["cover-resource"],
+        "skipped": [],
+        "sourceNodeUpdated": False,
+        "bookUpdated": False,
+    }
     db_session.expire_all()
     metadata = db_session.get(LibraryReadableResourceMetadata, "cover-resource")
     assert metadata is not None
-    assert (metadata.cover_path, metadata.cover_status) == (None, "PENDING")
+    assert metadata.cover_path is not None
+    assert metadata.cover_status == "READY"
+    assert (test_settings.resolved_storage_root / metadata.cover_path).read_bytes() == (
+        expected_cover
+    )
+    resource = db_session.get(LibraryReadableResource, "cover-resource")
+    asset = db_session.get(LibraryResourceAsset, "cover-resource-asset")
+    assert resource is not None and resource.import_state == "READY"
+    assert asset is not None
+    assert (
+        asset.id,
+        asset.resource_id,
+        asset.source_node_id,
+        asset.import_state,
+    ) == before_asset_state
+    assert tuple(db_session.scalars(select(LibraryImportTask.id))) == before_tasks
+
+
+def test_resource_cover_regeneration_failure_preserves_existing_cover(
+    client, db_session, test_settings
+) -> None:
+    _login(client, db_session)
+    _add_graph(db_session, "missing-cover-book", "missing-cover-resource")
+    metadata = db_session.get(
+        LibraryReadableResourceMetadata,
+        "missing-cover-resource",
+    )
+    assert metadata is not None
+    metadata.cover_path = "covers/resources/existing.png"
+    metadata.cover_status = "READY"
+    existing = test_settings.resolved_storage_root / metadata.cover_path
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_bytes(b"existing")
+    db_session.commit()
+
+    response = client.post(
+        "/api/books/missing-cover-book/resources/missing-cover-resource/cover/regenerate"
+    )
+
+    assert response.status_code == 422, response.text
+    db_session.expire_all()
+    metadata = db_session.get(
+        LibraryReadableResourceMetadata,
+        "missing-cover-resource",
+    )
+    assert metadata is not None
+    assert (metadata.cover_path, metadata.cover_status) == (
+        "covers/resources/existing.png",
+        "READY",
+    )
+    assert existing.read_bytes() == b"existing"
+
+
+def test_source_node_cover_regeneration_updates_resource_node_and_root_book(
+    client, db_session, test_settings
+) -> None:
+    _login(client, db_session)
+    _add_graph(db_session, "source-cover-book", "source-cover-resource")
+    expected_cover = _configure_local_epub_cover(
+        db_session,
+        test_settings,
+        resource_id="source-cover-resource",
+    )
+
+    response = client.post(
+        "/api/books/source-cover-book/source-nodes/source-cover-book-node/cover/regenerate"
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()["data"]
+    assert payload["updatedResourceIds"] == ["source-cover-resource"]
+    assert payload["sourceNodeUpdated"] is True
+    assert payload["bookUpdated"] is True
+    db_session.expire_all()
+    resource_metadata = db_session.get(
+        LibraryReadableResourceMetadata,
+        "source-cover-resource",
+    )
+    source_metadata = db_session.get(
+        LibrarySourceNodeMetadata,
+        "source-cover-book-node",
+    )
+    book_metadata = db_session.get(LibraryBookMetadata, "source-cover-book")
+    assert resource_metadata is not None
+    assert source_metadata is not None
+    assert book_metadata is not None
+    assert source_metadata.cover_path == book_metadata.cover_path
+    assert source_metadata.cover_status == book_metadata.cover_status == "READY"
+    assert resource_metadata.cover_path is not None
+    assert (
+        test_settings.resolved_storage_root / resource_metadata.cover_path
+    ).read_bytes() == expected_cover
+    assert (
+        test_settings.resolved_storage_root / source_metadata.cover_path
+    ).read_bytes() == expected_cover
 
 
 def test_resource_cover_upload_publishes_validated_resource_cover(
@@ -281,7 +443,7 @@ def test_resource_actions_use_canonical_routes_and_do_not_restore_legacy_paths(
         client.post(
             "/api/books/route-book/resources/route-resource/cover/regenerate"
         ).status_code
-        == 202
+        == 422
     )
     assert (
         client.post("/api/books/route-book/resources/route-resource/rescan").status_code

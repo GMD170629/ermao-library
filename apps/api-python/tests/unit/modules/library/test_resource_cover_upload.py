@@ -11,7 +11,6 @@ from app.modules.library.application.resource_commands import (
 from app.modules.library.application.resource_cover import (
     PreparedResourceCover,
     PublishedResourceCover,
-    ResourceCoverContext,
     UploadResourceCover,
     UploadResourceCoverCommand,
 )
@@ -68,17 +67,6 @@ class FakeCoverState:
         del now
         assert resource_id == "resource-1"
         self.ready_path = cover_path
-
-    def get_context(
-        self, *, book_id: str, resource_id: str
-    ) -> ResourceCoverContext | None:
-        del book_id, resource_id
-        return None
-
-    def mark_pending(self, *, resource_id: str, now: datetime) -> None:
-        del resource_id, now
-        raise AssertionError("regeneration is not part of cover upload")
-
 
 class FakePublication:
     reverted = False

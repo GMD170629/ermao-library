@@ -14,12 +14,16 @@ import type { ReaderType, ReadableResourceView, BookView } from '../../types/boo
 import { I18nText, useI18n } from '@/i18n/provider';
 import { useAudioPlayback } from '../audio/public';
 import {
+  continueSourceImport,
+  waitForImportTask
+} from '../import-tasks/public';
+import {
   deleteResourceSource,
-  continueSourceNode,
   fetchBook,
   fetchBookContents,
   fetchResourceDetail,
   regenerateResourceCover,
+  regenerateSourceNodeCover,
   updateResource,
   updateBookReadingStatus,
   uploadResourceCover
@@ -429,7 +433,13 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setResourceActionBusy(action);
     try {
       if (action === 'regenerate-cover') {
-        await regenerateResourceCover(book.id, target.resourceId);
+        const result = await regenerateResourceCover(book.id, target.resourceId);
+        if (!result.updatedResourceIds.includes(target.resourceId)) {
+          const skipped = result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；');
+          feedback.error(t('封面更新失败，请稍后重试'), skipped || undefined);
+          return;
+        }
+        setCoverRevision(Date.now());
         feedback.success(t('封面已重新生成'));
       } else if (action === 'delete') {
         await deleteResourceSource(book.id, target.resourceId, target.title);
@@ -460,13 +470,33 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     setSourceNodeActionBusy(action);
     try {
       if (action === 'regenerate-cover') {
-        if (!target.representativeResourceId) throw new Error(t('该来源目录还没有可用于生成封面的可读资源'));
-        await regenerateResourceCover(book.id, target.representativeResourceId);
+        const result = await regenerateSourceNodeCover(book.id, target.sourceNodeId);
+        if (!result.sourceNodeUpdated || result.updatedResourceIds.length === 0) {
+          const skipped = result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；');
+          feedback.error(t('封面更新失败，请稍后重试'), skipped || t('该来源目录还没有可用于生成封面的可读资源'));
+          return;
+        }
         setCoverRevision(Date.now());
-        feedback.success(t('封面已重新生成'));
+        if (result.skipped.length > 0) {
+          feedback.info(
+            t('已处理 {value0} 本图书的封面{value1}', {
+              value0: result.updatedResourceIds.length,
+              value1: t('，跳过 {value0} 本', { value0: result.skipped.length })
+            }),
+            result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；')
+          );
+        } else {
+          feedback.success(t('封面已重新生成'));
+        }
       } else {
-        await continueSourceNode(target.sourceNodeId);
+        const requestResult = await continueSourceImport(target.sourceNodeId);
         feedback.success(t('已加入重新扫描队列'));
+        if (requestResult.taskId) {
+          const task = await waitForImportTask(requestResult.taskId);
+          if (task?.state === 'FAILED') {
+            throw new Error(task.errorSummary ?? t('重新扫描失败'));
+          }
+        }
       }
       await refresh();
       setContentsRevision((value) => value + 1);
@@ -580,7 +610,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         label: t(details.label),
         description: t(details.description),
         icon: details.icon,
-        disabled: sourceNodeActionBusy !== null || (action === 'regenerate-cover' && !sourceNodeActionTarget.representativeResourceId)
+        disabled: sourceNodeActionBusy !== null
       }))}
       returnFocusTo={sourceNodeMenuAnchor}
       onClose={() => { setSourceNodeMenuPosition(null); setSourceNodeActionTarget(null); }}

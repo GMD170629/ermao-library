@@ -4,26 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
+from app.modules.imports.domain.resource_adapters import ADAPTER_SPECS, file_extension
 
 SUPPORTED_IMPORT_FILE_EXTENSIONS = frozenset(
-    {
-        ".azw",
-        ".azw3",
-        ".cbz",
-        ".cbr",
-        ".epub",
-        ".fb2",
-        ".mobi",
-        ".pdf",
-        ".prc",
-        ".rar",
-        ".txt",
-        ".zip",
-        *SUPPORTED_AUDIO_EXTS,
-    }
+    extension
+    for spec in ADAPTER_SPECS
+    if not spec.is_directory_adapter
+    for extension in spec.file_extensions
 )
 
 
 def is_supported_import_filename(value: str | Path) -> bool:
-    return Path(value).suffix.lower() in SUPPORTED_IMPORT_FILE_EXTENSIONS
+    return file_extension(Path(value).name) in SUPPORTED_IMPORT_FILE_EXTENSIONS

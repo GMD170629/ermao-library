@@ -6,11 +6,34 @@ from app.modules.imports.application.audio_types import SUPPORTED_AUDIO_EXTS
 from app.modules.imports.application.readable_resource.ports import adapter_identity
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
+    is_supported_source_tree_filename,
     match_directory_adapters_for_samples,
     match_file_adapters,
     source_format_for_filename,
     unique_adapter_or_none,
 )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        "book.epub",
+        "chapter.m4a",
+        "issue.cbz",
+        "page.png",
+        "page.jpg",
+        "page.webp",
+    ),
+)
+def test_source_tree_eligibility_includes_file_and_directory_adapters(
+    filename: str,
+) -> None:
+    assert is_supported_source_tree_filename(filename) is True
+
+
+@pytest.mark.parametrize("filename", ("metadata.json", "readme.md", "file"))
+def test_source_tree_eligibility_rejects_unknown_extensions(filename: str) -> None:
+    assert is_supported_source_tree_filename(filename) is False
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from app.bootstrap.readable_resource_pipeline import (
     ReadableResourcePipeline,
     build_readable_resource_pipeline,
     build_readable_resource_worker,
+    continue_import_task,
     continue_library_import,
     continue_source_import,
 )
@@ -129,6 +130,7 @@ __all__ = [
     "ReadableResourceWorkerProcessor",
     "build_readable_resource_pipeline",
     "build_readable_resource_worker",
+    "continue_import_task",
     "continue_library_import",
     "continue_source_import",
     "get_import_task",

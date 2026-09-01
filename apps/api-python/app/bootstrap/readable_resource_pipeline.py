@@ -16,6 +16,7 @@ from app.infrastructure.local_metadata_policy import SqlAlchemyLocalMetadataPrio
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
     ContinueImportResult,
+    ContinueImportTask,
     ContinueSourceImport,
 )
 from app.modules.imports.application.readable_resource.process_import_task import (
@@ -30,6 +31,7 @@ from app.modules.imports.application.readable_resource.request_library_scan impo
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.audio_metadata_inspector import (
     MutagenFfprobeAudioMetadataInspector,
 )
@@ -44,6 +46,9 @@ from app.modules.imports.infrastructure.readable_resource.filesystem import (
 )
 from app.modules.imports.infrastructure.readable_resource.global_ignore_patterns import (
     load_global_ignore_patterns,
+)
+from app.modules.imports.infrastructure.readable_resource.source_node_deletion import (
+    LibrarySourceNodeDeletionAdapter,
 )
 from app.modules.imports.infrastructure.readable_resource.support import (
     BestEffortSidecarWriteback,
@@ -76,6 +81,7 @@ __all__ = [
     "ReadableResourceWorkerProcessor",
     "build_readable_resource_pipeline",
     "build_readable_resource_worker",
+    "continue_import_task",
     "continue_library_import",
     "continue_source_import",
     "request_library_scan",
@@ -123,6 +129,14 @@ def build_readable_resource_pipeline(
     # Best-effort sidecar: no durable fake queue; failures never roll back import.
     sidecar = BestEffortSidecarWriteback(None)
 
+    delete_source_node = DeleteSourceNode(
+        source_nodes=source_nodes,
+        books_resources=books_resources,
+        import_tasks=queue,
+        uow=uow,
+        log=log,
+    )
+
     scan = ScanLibrarySourceTree(
         libraries=libraries,
         filesystem=filesystem,
@@ -132,6 +146,7 @@ def build_readable_resource_pipeline(
         uow=uow,
         clock=clock,
         log=log,
+        source_node_deletion=LibrarySourceNodeDeletionAdapter(delete_source_node),
     )
     process_import = ProcessReadableResourceImportTask(
         libraries=libraries,
@@ -161,13 +176,6 @@ def build_readable_resource_pipeline(
         request_library_scan=request_scan,
     )
 
-    delete_source_node = DeleteSourceNode(
-        source_nodes=source_nodes,
-        books_resources=books_resources,
-        import_tasks=queue,
-        uow=uow,
-        log=log,
-    )
     return ReadableResourcePipeline(
         continue_import=continue_import,
         request_library_scan=request_scan,
@@ -253,12 +261,27 @@ def request_library_scan(
 
 
 def continue_source_import(
-    session: Session, source_node_id: str
+    session: Session,
+    source_node_id: str,
+    *,
+    missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
 ) -> ContinueImportResult:
     """Enqueue one source-node ContinueImport command in the caller session."""
 
     pipeline = build_readable_resource_pipeline(session)
-    return pipeline.continue_import.execute(ContinueSourceImport(source_node_id))
+    return pipeline.continue_import.execute(
+        ContinueSourceImport(
+            source_node_id,
+            missing_entry_policy=missing_entry_policy,
+        )
+    )
+
+
+def continue_import_task(session: Session, task_id: str) -> ContinueImportResult:
+    """Continue one exact failed task without changing its persisted policy."""
+
+    pipeline = build_readable_resource_pipeline(session)
+    return pipeline.continue_import.execute(ContinueImportTask(task_id))
 
 
 def build_readable_resource_worker(

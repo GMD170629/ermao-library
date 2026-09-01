@@ -54,8 +54,8 @@ audiobooks/
 所有模式均直接读取原始文件，不生成派生出版物。文件元数据可以补充作者、封面、简介和
 音轨标签，但不能改变路径确定的作品、版本、卷、名称或来源键。实时监听和定时扫描由系统
 设置控制；仅在尚未保存扫描间隔时使用 `LIBRARY_SCAN_INTERVAL_MS` 作为兼容回退。所有触发
-使用相同的有界队列。新规则不自动迁移、合并
-或删除已经导入的旧拓扑。
+使用相同的有界队列。每次扫描都让本次观察到的节点按当前规则收敛；自动扫描只保留本次未
+观察到的历史节点，用户手动扫描才清理这些缺失项。
 
 ## English
 
@@ -76,5 +76,6 @@ sibling entries, scan batches, database state, and embedded metadata are not inp
 
 Every mode reads original files without producing a derived publication. Metadata may enrich
 authors, covers, descriptions, and track tags, but it cannot change path-owned topology,
-names, or keys. Periodic and manual scans use the same bounded queue. These rules apply to
-newly discovered sources and do not automatically migrate existing imported topology.
+names, or keys. Periodic and manual scans use the same bounded queue and the same recognition
+pipeline. Every observed node converges to the current rules; automatic scans preserve only
+historical nodes not observed in that run, while manual scans prune those missing entries.

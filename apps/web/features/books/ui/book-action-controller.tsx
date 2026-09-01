@@ -11,7 +11,10 @@ import { useToast } from '../../../components/ui/feedback';
 import type { BookView } from '../../../types/book';
 import { useI18n } from '@/i18n/provider';
 import {
-  continueSourceNode,
+  continueSourceImport,
+  waitForImportTask
+} from '@/features/import-tasks/public';
+import {
   deleteBookSources,
   fetchBook,
   regenerateBookImage,
@@ -39,6 +42,11 @@ export type BookActionMenuRequest = Readonly<{
   anchor: HTMLElement | null;
   book?: BookView;
 }>;
+
+function skippedCoverDetails(skipped: ReadonlyArray<{ bookId: string; reason: string }>): string | undefined {
+  if (skipped.length === 0) return undefined;
+  return skipped.map((item) => `${item.bookId}: ${item.reason}`).join('；');
+}
 
 const actionDetails: Record<Exclude<BookActionId, 'reading-status'>, { label: string; icon: LucideIcon; destructive?: boolean }> = {
   edit: { label: '编辑', icon: Edit3 },
@@ -100,8 +108,23 @@ export function BookActionController({
         return;
       }
       if (action === 'regenerate-image') {
-        await regenerateBookImage(currentRequest.target.id);
-        feedback.success(t('已开始重新生成图书图片'));
+        const result = await regenerateBookImage(currentRequest.target.id);
+        const skipped = skippedCoverDetails(result.skipped);
+        if (result.updated <= 0) {
+          feedback.error(t('封面更新失败，请稍后重试'), skipped);
+          return;
+        }
+        if (result.skipped.length > 0) {
+          feedback.info(
+            t('已处理 {value0} 本图书的封面{value1}', {
+              value0: result.updated,
+              value1: t('，跳过 {value0} 本', { value0: result.skipped.length })
+            }),
+            skipped
+          );
+        } else {
+          feedback.success(t('封面已重新生成'));
+        }
         await onChanged();
         return;
       }
@@ -114,8 +137,14 @@ export function BookActionController({
       }
       if (action === 'rescan') {
         const targetBook = await resolveBook(currentRequest);
-        await continueSourceNode(targetBook.sourceNodeId);
+        const requestResult = await continueSourceImport(targetBook.sourceNodeId);
         feedback.success(t('已加入重新扫描队列'));
+        if (requestResult.taskId) {
+          const task = await waitForImportTask(requestResult.taskId);
+          if (task?.state === 'FAILED') {
+            throw new Error(task.errorSummary ?? t('重新扫描失败'));
+          }
+        }
         await onChanged();
         return;
       }

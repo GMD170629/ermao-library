@@ -52,6 +52,31 @@ test('uploads covers through the canonical Book operation endpoint', async () =>
   }
 });
 
+test('returns completed cover regeneration counts and skip reasons without task fields', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    data: {
+      updated: 1,
+      skipped: [{ bookId: 'book-2', reason: 'NO_LOCAL_COVER' }],
+      operation: { id: 'op-cover' }
+    }
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  try {
+    const result = await updateBulkBookCovers({
+      ids: ['book-1', 'book-2'],
+      action: 'regenerate',
+      ratio: '2:3',
+      quality: 82,
+      maxDimension: 1600
+    });
+    assert.equal(result.updated, 1);
+    assert.deepEqual(result.skipped, [{ bookId: 'book-2', reason: 'NO_LOCAL_COVER' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('uses only canonical auditable bulk operation endpoints', async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; body: unknown }> = [];

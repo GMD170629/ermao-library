@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from app.modules.imports.application.readable_resource.ports import (
+    DirectoryEntry,
+    UnreadableDirectoryEntry,
+)
 from app.modules.imports.domain.directory_probe import ProbeTerminationReason
 from app.modules.imports.domain.resource_adapters import ResourceAdapterId
 from app.modules.imports.infrastructure.readable_resource.filesystem import (
@@ -24,7 +28,7 @@ class BudgetedFilesystem(OsSourceTreeFilesystem):
 
     def iter_directory_entries(
         self, absolute_directory: Path
-    ) -> Iterator[tuple[str, SourceNodePhysicalKind, int | None, int]]:
+    ) -> Iterator[DirectoryEntry | UnreadableDirectoryEntry]:
         try:
             for name in self._names:
                 self.yielded += 1
@@ -119,6 +123,7 @@ def test_probe_ignores_cover_and_opf_sidecars_before_adapter_matching(
     (target / "01.cover.jpg").write_bytes(b"cover")
     (target / "cover.webp").write_bytes(b"cover")
     (target / "download.tmp").write_bytes(b"temporary")
+    (target / "metadata.json").write_text("{}", encoding="utf-8")
     cache = target / "cache"
     cache.mkdir()
     (cache / "bonus.mp3").write_bytes(b"ignored audio")
@@ -139,6 +144,43 @@ def test_probe_ignores_cover_and_opf_sidecars_before_adapter_matching(
     assert decision.adapter is not None
     assert decision.adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
     assert decision.evidence.sample_relative_paths == ("audiobook/01.mp3",)
+
+
+def test_visible_entry_with_unreadable_stat_returns_protection_marker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class UnreadableEntry:
+        name = "keep.epub"
+
+        def is_symlink(self) -> bool:
+            return False
+
+        def is_dir(self, *, follow_symlinks: bool) -> bool:
+            del follow_symlinks
+            return False
+
+        def is_file(self, *, follow_symlinks: bool) -> bool:
+            del follow_symlinks
+            return True
+
+        def stat(self, *, follow_symlinks: bool) -> object:
+            del follow_symlinks
+            raise OSError("temporarily unavailable")
+
+    class ScandirIterator:
+        def __iter__(self) -> Iterator[UnreadableEntry]:
+            yield UnreadableEntry()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "app.modules.imports.infrastructure.readable_resource.filesystem.os.scandir",
+        lambda _path: ScandirIterator(),
+    )
+    observed = list(OsSourceTreeFilesystem().iter_directory_entries(tmp_path))
+    assert observed == [UnreadableDirectoryEntry(name="keep.epub")]
 
 
 def test_path_traversal_raises(tmp_path: Path) -> None:

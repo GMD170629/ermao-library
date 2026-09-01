@@ -11,6 +11,7 @@ from app.modules.imports.application.readable_resource.ports import (
     PipelineLogPort,
     UnitOfWorkPort,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 
 LibraryScanTrigger = Literal[
     "STARTUP",
@@ -56,12 +57,14 @@ class RequestLibraryScan:
     def execute(self, command: RequestLibraryScanCommand) -> RequestLibraryScanResult:
         with self._uow.transaction():
             self._libraries.get_library(command.library_id)
-            requeued = (
-                self._queue.requeue_failed_for_library(command.library_id)
-                if command.trigger == "MANUAL"
-                else 0
+            task, enqueued = self._queue.request_library_scan(
+                command.library_id,
+                missing_entry_policy=(
+                    MissingEntryPolicy.PRUNE_MISSING
+                    if command.trigger == "MANUAL"
+                    else MissingEntryPolicy.PRESERVE
+                ),
             )
-            task, enqueued = self._queue.request_library_scan(command.library_id)
 
         self._log.emit(
             "library_scan.requested",
@@ -73,7 +76,7 @@ class RequestLibraryScan:
         return RequestLibraryScanResult(
             library_id=command.library_id,
             trigger=command.trigger,
-            requeued_failed=requeued,
+            requeued_failed=0,
             enqueued=enqueued,
             task_id=task.id,
         )

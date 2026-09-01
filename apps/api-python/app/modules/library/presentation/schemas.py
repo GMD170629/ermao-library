@@ -495,10 +495,20 @@ class AssetsPayload(HttpContractModel):
     total_pages: int = Field(default=1, alias="totalPages")
 
 
-class ResourceImportAcceptedPayload(HttpContractModel):
+class LocalCoverSkippedView(HttpContractModel):
     resource_id: str = Field(alias="resourceId")
-    accepted: Literal[True] = True
-    task_id: str = Field(alias="taskId")
+    reason: str
+
+
+class LocalCoverRegenerationPayload(HttpContractModel):
+    target_type: Literal["RESOURCE", "SOURCE_NODE", "BOOK"] = Field(
+        alias="targetType"
+    )
+    target_id: str = Field(alias="targetId")
+    updated_resource_ids: list[str] = Field(alias="updatedResourceIds")
+    skipped: list[LocalCoverSkippedView]
+    source_node_updated: bool = Field(alias="sourceNodeUpdated")
+    book_updated: bool = Field(alias="bookUpdated")
 
 
 class ResourceDeletedPayload(HttpContractModel):
@@ -610,7 +620,9 @@ class AssetsResponse(SuccessEnvelope[AssetsPayload]):
     pass
 
 
-class ResourceImportAcceptedResponse(SuccessEnvelope[ResourceImportAcceptedPayload]):
+class LocalCoverRegenerationResponse(
+    SuccessEnvelope[LocalCoverRegenerationPayload]
+):
     pass
 
 

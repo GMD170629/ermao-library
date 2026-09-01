@@ -67,7 +67,7 @@ def test_image_directory_unique_match() -> None:
 def test_conflict_or_unmatched_samples_are_node_only() -> None:
     mixed = decide_directory_probe(
         directory_relative_path="a",
-        sample_relative_paths=("a/01.mp3", "a/cover.png"),
+        sample_relative_paths=("a/01.mp3", "a/page.png"),
         entries_visited=2,
         max_depth_reached=0,
         termination_reason=ProbeTerminationReason.COMPLETE_SUBTREE,
@@ -84,7 +84,32 @@ def test_conflict_or_unmatched_samples_are_node_only() -> None:
         termination_reason=ProbeTerminationReason.COMPLETE_SUBTREE,
     )
     assert unknown.result is ProbeInterpretationResult.NODE_ONLY
-    assert unknown.reason_code == "ADAPTER_CONFLICT_OR_UNMATCHED"
+    assert unknown.reason_code == "NO_SAMPLES"
+    assert unknown.evidence.sample_relative_paths == ()
+
+
+def test_unsupported_metadata_does_not_vote_against_audiobook() -> None:
+    decision = decide_directory_probe(
+        directory_relative_path="album",
+        sample_relative_paths=(
+            "album/metadata.json",
+            "album/metadata.opf",
+            "album/cover.png",
+            "album/01.cover.jpg",
+            "album/01.m4a",
+            "album/02.m4a",
+        ),
+        entries_visited=6,
+        max_depth_reached=0,
+        termination_reason=ProbeTerminationReason.COMPLETE_SUBTREE,
+    )
+    assert decision.result is ProbeInterpretationResult.RESOURCE
+    assert decision.adapter is not None
+    assert decision.adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+    assert decision.evidence.sample_relative_paths == (
+        "album/01.m4a",
+        "album/02.m4a",
+    )
 
 
 def test_no_samples_is_node_only() -> None:

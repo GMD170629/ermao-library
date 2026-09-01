@@ -13,6 +13,7 @@ import pytest
 
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueImport,
+    ContinueImportTask,
 )
 from app.modules.imports.application.readable_resource.ports import (
     FileParseResult,
@@ -25,6 +26,7 @@ from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
 from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.readable_resource.worker import (
     ReadableResourceWorkerProcessor,
 )
@@ -91,6 +93,7 @@ class FakeQueue:
             source_node_id=self._base.source_node_id,
             role=self._base.role,
             error_summary=self._error_summary,
+            missing_entry_policy=self._base.missing_entry_policy,
         )
 
     def next_queued(self) -> LibraryImportTaskRecord | None:
@@ -131,13 +134,14 @@ class FakeQueue:
         del finished_at
         return 0
 
-    def requeue_failed_for_library(self, library_id: str) -> int:
-        del library_id
-        return 0
-
-    def requeue_failed_for_source(self, source_node_id: str) -> int:
-        del source_node_id
-        return 0
+    def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
+        if task_id != self._base.id:
+            raise LookupError(task_id)
+        if self._state != "FAILED":
+            return self._snapshot(), False
+        self._state = "QUEUED"
+        self._error_summary = None
+        return self._snapshot(), True
 
     def has_active_kind(self, **kwargs: object) -> bool:
         return False
@@ -339,26 +343,52 @@ class FakeBooks:
 
 
 class UnusedScan:
-    def execute_library(self, library_id: str) -> None:
+    def execute_library(
+        self,
+        library_id: str,
+        *,
+        task_id: str | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+    ) -> None:
+        del task_id, missing_entry_policy
         raise AssertionError(library_id)
 
-    def execute_source(self, source_node_id: str) -> None:
+    def execute_source(
+        self,
+        source_node_id: str,
+        *,
+        task_id: str | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+    ) -> None:
+        del task_id, missing_entry_policy
         raise AssertionError(source_node_id)
 
 
 class CancelDuringScan:
     def __init__(self, queue: FakeQueue) -> None:
         self._queue = queue
+        self.received_policy: MissingEntryPolicy | None = None
 
-    def execute_library(self, library_id: str, *, task_id: str | None = None) -> None:
+    def execute_library(
+        self,
+        library_id: str,
+        *,
+        task_id: str | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+    ) -> None:
         assert library_id == "lib-1"
         assert task_id == "task-1"
+        self.received_policy = missing_entry_policy
         self._queue.cancel()
 
     def execute_source(
-        self, source_node_id: str, *, task_id: str | None = None
+        self,
+        source_node_id: str,
+        *,
+        task_id: str | None = None,
+        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
     ) -> None:
-        del source_node_id, task_id
+        del source_node_id, task_id, missing_entry_policy
         raise AssertionError("unexpected source scan")
 
 
@@ -375,7 +405,9 @@ def _import_task() -> LibraryImportTaskRecord:
     )
 
 
-def _scan_task() -> LibraryImportTaskRecord:
+def _scan_task(
+    missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
+) -> LibraryImportTaskRecord:
     return LibraryImportTaskRecord(
         id="task-1",
         kind="SCAN_LIBRARY",
@@ -385,6 +417,7 @@ def _scan_task() -> LibraryImportTaskRecord:
         source_node_id=None,
         role=None,
         error_summary=None,
+        missing_entry_policy=missing_entry_policy,
     )
 
 
@@ -428,6 +461,34 @@ def test_continue_import_constructs_without_clock() -> None:
         uow=RecordingUoW(),
         log=FakeLog(),
     )
+
+
+def test_continue_exact_failed_task_preserves_missing_entry_policy() -> None:
+    task = LibraryImportTaskRecord(
+        id="task-1",
+        kind="CONTINUE_SOURCE",
+        library_id="lib-1",
+        state="FAILED",
+        resource_id=None,
+        source_node_id="node-1",
+        role=None,
+        error_summary="SOURCE_SCAN_START_UNAVAILABLE",
+        missing_entry_policy=MissingEntryPolicy.PRESERVE,
+    )
+    queue = FakeQueue(task)
+    result = ContinueImport(
+        source_nodes=FakeSourceNodes(),
+        queue=queue,
+        uow=RecordingUoW(),
+        log=FakeLog(),
+    ).execute(ContinueImportTask(task.id))
+
+    assert result.requeued_failed == 1
+    assert result.enqueued_scan is True
+    assert result.task_id == task.id
+    retried = queue.get_task(task.id)
+    assert retried is not None
+    assert retried.missing_entry_policy is MissingEntryPolicy.PRESERVE
 
 
 def test_worker_exposes_explicit_process_loop_recovery() -> None:
@@ -483,10 +544,11 @@ def test_import_task_cancelled_during_parse_does_not_commit_failure() -> None:
 
 
 def test_scan_task_deleted_while_running_is_not_acknowledged() -> None:
-    queue = FakeQueue(_scan_task())
+    queue = FakeQueue(_scan_task(MissingEntryPolicy.PRUNE_MISSING))
+    scan = CancelDuringScan(queue)
     worker = ReadableResourceWorkerProcessor(
         queue=queue,
-        scan=cast(ScanLibrarySourceTree, CancelDuringScan(queue)),
+        scan=cast(ScanLibrarySourceTree, scan),
         process_import=_process(adapters=ParseFailAdapters(), queue=queue),
         uow=RecordingUoW(),
         clock=FixedClock(),
@@ -494,3 +556,4 @@ def test_scan_task_deleted_while_running_is_not_acknowledged() -> None:
 
     assert worker.process_once() == "cancelled"
     assert queue.failed == []
+    assert scan.received_policy is MissingEntryPolicy.PRUNE_MISSING

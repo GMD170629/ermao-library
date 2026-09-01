@@ -24,11 +24,6 @@ from app.modules.imports.application.audio_types import (
     audio_mime_type,
 )
 from app.modules.imports.application.errors import AudioInspectionError
-from app.modules.imports.application.local_metadata import (
-    LocalCoverPayload,
-    LocalMetadataCandidate,
-    resolve_local_metadata,
-)
 from app.modules.imports.application.readable_resource.ports import (
     AssetTechnicalMetadata,
     AudioMetadataInspectorPort,
@@ -50,7 +45,13 @@ from app.modules.library.public import (
     AssetRole,
     is_transparent_audiobook_directory_name,
 )
-from app.modules.metadata.public import parse_opf_metadata
+from app.modules.metadata.public import (
+    FilesystemLocalMetadataInspector,
+    LocalAudioMetadata,
+    LocalCoverPayload,
+    LocalMetadataCandidate,
+    parse_opf_metadata,
+)
 
 _MAX_COVER_BYTES = 20 * 1024 * 1024
 
@@ -68,6 +69,76 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
 
             audio_metadata = MutagenFfprobeAudioMetadataInspector()
         self._audio_metadata = audio_metadata
+        self._local_metadata_inspector = FilesystemLocalMetadataInspector(
+            embedded_reader=self.inspect_embedded_local_metadata,
+            audio_reader=self.inspect_audio_local_metadata,
+            sidecar_reader=self.inspect_sidecar_local_metadata,
+        )
+
+    @property
+    def local_metadata_inspector(self) -> FilesystemLocalMetadataInspector:
+        """Return the shared local metadata inspector used by import parsing."""
+
+        return self._local_metadata_inspector
+
+    def inspect_audio_local_metadata(self, source: Path) -> LocalAudioMetadata:
+        """Map the imports audio inspection DTO to the metadata DTO."""
+
+        return self._map_audio_metadata(self._audio_metadata.inspect(source))
+
+    @staticmethod
+    def _map_audio_metadata(audio: AudioFileMetadata) -> LocalAudioMetadata:
+        return LocalAudioMetadata(
+            title=audio.title,
+            album=audio.album,
+            author=audio.author,
+            narrator=audio.narrator,
+            series_name=audio.series_name,
+            volume_index=audio.volume_index,
+            cover_data=audio.cover_data,
+        )
+
+    def inspect_sidecar_local_metadata(
+        self,
+        metadata_source: Path,
+        *,
+        directory: bool,
+    ) -> LocalMetadataCandidate | None:
+        """Discover one safe sidecar and map it to a metadata candidate."""
+
+        result = (
+            discover_directory_sidecar_opf(metadata_source)
+            if directory
+            else discover_sidecar_opf(metadata_source)
+        )
+        if result is None:
+            return None
+        return LocalMetadataCandidate(
+            source="SIDECAR_OPF",
+            metadata=result.metadata,
+            cover=(
+                LocalCoverPayload(result.cover_content)
+                if result.cover_content is not None
+                else None
+            ),
+        )
+
+    def inspect_embedded_local_metadata(
+        self,
+        source: Path,
+        source_format: str,
+    ) -> LocalMetadataCandidate | None:
+        """Inspect format-owned metadata without composing source priority."""
+
+        normalized_format = source_format.strip().upper()
+        if normalized_format == "EPUB":
+            return self._inspect_epub(source)
+        if normalized_format == "PDF":
+            inspection = self._inspect_pdf(source)
+            return inspection[0] if inspection is not None else None
+        if normalized_format in {"TXT", "FB2", "MOBI", "AZW", "AZW3", "PRC"}:
+            return self._inspect_reflowable(source, normalized_format)
+        return None
 
     def parse_file(
         self,
@@ -91,6 +162,8 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             )
         pdf_page_count: int | None = None
         audio_metadata: AudioFileMetadata | None = None
+        local_audio_metadata: LocalAudioMetadata | None = None
+        embedded: LocalMetadataCandidate | None = None
         if adapter.adapter_id is ResourceAdapterId.PDF:
             pdf_inspection = self._inspect_pdf(absolute_path)
             embedded = pdf_inspection[0] if pdf_inspection is not None else None
@@ -119,72 +192,24 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                     error_code="AUDIO_METADATA_INVALID",
                     error_summary=str(exc),
                 )
-            embedded = LocalMetadataCandidate(
-                source="EMBEDDED",
-                metadata=PublicationMetadata(
-                    title=(
-                        audio_metadata.album
-                        if adapter.adapter_id is ResourceAdapterId.AUDIO_FILE
-                        else None
-                    ),
-                    authors=(audio_metadata.author,) if audio_metadata.author else (),
-                    narrators=(audio_metadata.narrator,)
-                    if audio_metadata.narrator
-                    else (),
-                    series_name=audio_metadata.series_name,
-                    volume_index=audio_metadata.volume_index,
-                ),
-                cover=(
-                    LocalCoverPayload(audio_metadata.cover_data)
-                    if audio_metadata.cover_data is not None
-                    else None
-                ),
-            )
-        else:
-            embedded = self._inspect_embedded(absolute_path, adapter)
+            local_audio_metadata = self._map_audio_metadata(audio_metadata)
         effective_resource_path = resource_absolute_path or (
             absolute_path.parent
             if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
             else absolute_path
         )
-        metadata_source = (
-            effective_resource_path
-            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
-            else absolute_path
+        resolved = self._local_metadata_inspector.inspect(
+            absolute_path,
+            source_format=(
+                "AUDIOBOOK_DIRECTORY"
+                if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
+                else source_format_for_filename(adapter, absolute_path.name)
+            ),
+            resource_path=effective_resource_path,
+            embedded=embedded,
+            audio=local_audio_metadata,
+            source_order=local_metadata_priority,
         )
-        sidecar = (
-            discover_directory_sidecar_opf(metadata_source)
-            if adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
-            else discover_sidecar_opf(metadata_source)
-        )
-        path_titles = titles_from_local_source(
-            metadata_source.name if metadata_source.is_dir() else metadata_source.stem
-        )
-        candidates = [
-            LocalMetadataCandidate(
-                source="PATH",
-                metadata=PublicationMetadata(
-                    title=path_titles.work_title,
-                    volume_title=path_titles.volume_title,
-                    volume_index=path_titles.volume_index,
-                ),
-            )
-        ]
-        if embedded is not None:
-            candidates.append(embedded)
-        if sidecar is not None:
-            candidates.append(
-                LocalMetadataCandidate(
-                    source="SIDECAR_OPF",
-                    metadata=sidecar.metadata,
-                    cover=(
-                        LocalCoverPayload(sidecar.cover_content)
-                        if sidecar.cover_content is not None
-                        else None
-                    ),
-                )
-            )
-        resolved = resolve_local_metadata(tuple(candidates), local_metadata_priority)
         title = (
             resolved.metadata.volume_title
             or resolved.metadata.title
@@ -277,18 +302,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
             error_summary=None,
             local_metadata=resolved,
         )
-
-    def _inspect_embedded(
-        self, path: Path, adapter: ResourceAdapterSpec
-    ) -> LocalMetadataCandidate | None:
-        if adapter.adapter_id is ResourceAdapterId.EPUB:
-            return self._inspect_epub(path)
-        if adapter.adapter_id in {
-            ResourceAdapterId.TXT,
-            ResourceAdapterId.MOBI_FAMILY,
-        }:
-            return self._inspect_reflowable(path, adapter.format_label)
-        return None
 
     def _inspect_epub(self, path: Path) -> LocalMetadataCandidate | None:
         try:

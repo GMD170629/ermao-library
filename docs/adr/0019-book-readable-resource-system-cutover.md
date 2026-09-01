@@ -183,8 +183,9 @@ SourceNode 规则完全沿用 ADR 0018：
 - Library 根目录本身不建立 SourceNode；
 - SYMLINK 只记录，不跟随、不导入；
 - socket、device、FIFO 等 OTHER 只记录，不建立资源；
-- 已有节点的 observed 字段不因 ContinueImport 更新；
-- 不自动检测移动、重命名、删除、内容变化或 missing 状态。
+- 已有节点保留身份，observed 字段按同路径当前观察结果刷新；
+- 自动扫描不清理移动、重命名、删除产生的 missing 状态；用户手动 ContinueImport 对正常
+  遍历完成的目录清理未出现的直接子节点。同路径内容变化仍由现有刷新逻辑处理。
 
 Library 只允许 FLAT 和 VOLUMES：
 
@@ -212,15 +213,17 @@ SqlAlchemyReadableResourceWorkQueue
 target adapter registry
 ~~~
 
-应用入口使用显式命令 ContinueLibraryImport(library_id) 和
-ContinueSourceImport(source_node_id)。首次导入、重新发现、继续补齐和用户再次执行都
-统一称为 ContinueImport。不得保留 Reimport、Retry、Rescan 或重新识别作为兼容入口。
+应用入口使用显式命令 ContinueLibraryImport(library_id)、ContinueSourceImport(source_node_id)
+和 ContinueImportTask(task_id)。任务 target 只重新排入该持久任务并保留 missingEntryPolicy。
+首次导入、重新发现、继续补齐和用户再次执行都统一称为 ContinueImport。不得保留 Reimport、
+Retry、Rescan 或重新识别作为兼容入口。
 
 ### 5.2 任务与消费语义
 
 LibraryImportTask 只允许 kind、libraryId、resourceId、sourceNodeId、role、state、
-errorSummary、createdAt、startedAt、finishedAt。kind 只允许 SCAN_LIBRARY、CONTINUE_SOURCE、
-IMPORT_ASSET；state 只允许 QUEUED、RUNNING、SUCCEEDED、FAILED。
+missingEntryPolicy、errorSummary、createdAt、startedAt、finishedAt。kind 只允许 SCAN_LIBRARY、
+CONTINUE_SOURCE、IMPORT_ASSET；state 只允许 QUEUED、RUNNING、SUCCEEDED、FAILED；
+missingEntryPolicy 只允许 PRESERVE、PRUNE_MISSING。
 
 禁止 lease、owner、expiry、attempts、priority、availableAt、heartbeat、claim version、
 fencing token、CAS、Run、candidate、published set、discovery barrier、WorkItem bridge、
@@ -236,18 +239,23 @@ fencing token、CAS、Run、candidate、published set、discovery barrier、Work
 6. 继续消费下一条任务。
 
 启动时将遗留 RUNNING 任务改为 FAILED，使用稳定错误码 WORKER_INTERRUPTED，不自动重排。
-用户再次 ContinueImport 时才将相关 FAILED 任务重新置为 QUEUED。未预期 worker 异常使用
-WORKER_ERROR 终止当前任务，不自动重试。
+用户再次 ContinueImport 时才将相关 FAILED 任务重新置为 QUEUED，并保留任务原有的
+missingEntryPolicy。未预期 worker 异常使用 WORKER_ERROR 终止当前任务，不自动重试。
 
 ### 5.3 扫描、识别和 Asset 写入
 
 ContinueLibraryImport 流式扫描根目录，插入新 SourceNode，识别没有解释的节点，为缺失或
-FAILED 的兼容 Asset 建立 IMPORT_ASSET，跳过 SUCCEEDED 任务，不删除未再次发现的节点。
-NODE_ONLY 节点只在用户再次 ContinueImport 时允许重新探测；已有 RESOURCE 固定 adapter。
+FAILED 的兼容 Asset 建立 IMPORT_ASSET，跳过 SUCCEEDED 任务。自动触发使用 PRESERVE；
+用户显式触发使用 PRUNE_MISSING，且只在目录正常遍历结束时清理差集。所有触发源对已扫描
+节点执行相同的探测、识别、adapter 和目录归属规则；已有状态只参与兼容 ID 复用。
 
 ContinueSourceImport 处理文件节点及其 PRIMARY Asset，流式遍历目录并补齐 TRACK/PAGE 等
 Asset。不得建立重复 Book、Resource、Asset；不得为 DIRECTORY、SYMLINK、OTHER 建立
 IMPORT_ASSET。
+
+所选起点不存在或不可访问时任务失败并保留数据，不扫描父目录。可见但属性暂时不可读的
+目录项作为已存在项保护，不能因本次扫描被删除。没有任何已注册 adapter 接纳的文件既不
+建立 SourceNode，也不参与目录类型判断。
 
 IMPORT_ASSET 在事务外解析真实原始文件，成功后直接 upsert ResourceAsset，并按
 resourceId + sourceNodeId 保留关系 ID。Resource 至少有一个 READY Asset 后置为 READY。
@@ -521,7 +529,7 @@ SqlAlchemyReadableResourceWorkQueue、LibraryImportTask 和 target adapter regis
 | --- | --- | --- |
 | Fresh baseline | 空库创建、baseline 表清单、重复初始化 | 只有目标新表；无 upgrade/backfill；重复初始化幂等 |
 | ORM 对齐 | runtime metadata 与 baseline 对比 | 表、列、FK、索引、约束、默认值完全一致 |
-| SourceNode | pathKey、父子、类型、环、symlink、traversal、百万节点 | 规则符合 ADR0018；已有节点 observed 不更新；内存为 O(depth + probe budget) |
+| SourceNode | pathKey、父子、类型、环、symlink、traversal、百万节点 | 规则符合 ADR0018；已有节点保留身份并刷新 observed；内存为 O(depth + probe budget) |
 | Import queue | FIFO、单消费者、成功、失败、重启、再次 ContinueImport | RUNNING → FAILED/WORKER_INTERRUPTED；无自动 retry/lease/heartbeat/fencing |
 | Import 结果 | ContinueImport 后 Library/Reader 立即可查询 | Asset 直接写稳定结果；READY 资源不因后续单项失败回滚 |
 | Library | catalog/detail/dashboard/recent/filter/facet/shelf/empty Book | 查询只用 Book/Resource/Asset，排序稳定，授权在 SQL 阶段生效 |

@@ -192,6 +192,8 @@ class KindleSendTask(Base):
         ),
         Index("KindleSendTask_bookId_createdAt_idx", "bookId", "createdAt"),
         Index("KindleSendTask_userId_createdAt_idx", "userId", "createdAt"),
+        Index("KindleSendTask_resourceId_idx", "resourceId"),
+        Index("KindleSendTask_assetId_idx", "assetId"),
         Index(
             "KindleSendTask_active_asset_recipient_key",
             "assetId",

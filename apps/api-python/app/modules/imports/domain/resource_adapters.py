@@ -165,6 +165,15 @@ def file_extension(name: str) -> str:
     return "." + name.rsplit(".", 1)[-1].lower()
 
 
+def is_supported_source_tree_filename(filename: str) -> bool:
+    """Return whether any enabled file or directory adapter consumes the suffix."""
+
+    extension = file_extension(filename)
+    return bool(extension) and any(
+        extension in spec.file_extensions for spec in ADAPTER_SPECS
+    )
+
+
 def match_file_adapters(filename: str) -> tuple[ResourceAdapterSpec, ...]:
     extension = file_extension(filename)
     if not extension:

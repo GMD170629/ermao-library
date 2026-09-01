@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
@@ -105,7 +104,6 @@ class _PublishedBookCover:
 @dataclass(frozen=True, slots=True)
 class _CoverCompletion:
     publications: tuple[_PublishedBookCover, ...]
-    regenerate_source_node_ids: tuple[str, ...]
 
 
 def _now() -> datetime:
@@ -204,7 +202,6 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
         db: Session,
         *,
         storage_root: Path | None = None,
-        enqueue_source_import: Callable[[str], object] | None = None,
     ) -> None:
         self._db = db
         self._storage_root = (
@@ -215,7 +212,6 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             if self._storage_root is not None
             else None
         )
-        self._enqueue_source_import = enqueue_source_import
 
     def accessible_book_ids(
         self,
@@ -881,11 +877,9 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
         by_id = {str(book.id): (book, metadata) for book, metadata in rows}
         now = _now()
         publications: list[_PublishedBookCover] = []
-        regenerate_source_node_ids: list[str] = []
         skipped: list[BulkCoverSkipped] = []
         inverse_books: list[dict[str, object]] = []
         inverse_source_nodes: list[dict[str, object]] = []
-        inverse_resources: list[dict[str, object]] = []
         source_metadata_port = SqlAlchemySourceNodeMetadata(self._db)
         try:
             for book_id in command.book_ids:
@@ -907,44 +901,6 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 )
                 if source_metadata is not None:
                     inverse_source_nodes.append(entity_record(source_metadata))
-
-                if command.action == "regenerate":
-                    resource = self._db.scalar(
-                        select(LibraryReadableResource).where(
-                            LibraryReadableResource.book_id == book.id,
-                            LibraryReadableResource.source_node_id
-                            == book.source_node_id,
-                            LibraryReadableResource.enablement_state == "ENABLED",
-                            LibraryReadableResource.import_state == "READY",
-                        )
-                    )
-                    if resource is None:
-                        skipped.append(
-                            BulkCoverSkipped(book.id, "BOOK_ANCHOR_RESOURCE_REQUIRED")
-                        )
-                        continue
-                    resource_metadata = self._db.get(
-                        LibraryReadableResourceMetadata, resource.id
-                    )
-                    if resource_metadata is not None:
-                        inverse_resources.append(
-                            {
-                                "id": resource.id,
-                                "coverPath": resource_metadata.cover_path,
-                                "coverStatus": resource_metadata.cover_status,
-                                "updatedAt": resource_metadata.updated_at,
-                            }
-                        )
-                        resource_metadata.cover_path = None
-                        resource_metadata.cover_status = "PENDING"
-                        resource_metadata.updated_at = now
-                    metadata.cover_status = "PENDING"
-                    metadata.updated_at = now
-                    if source_metadata is not None:
-                        source_metadata.cover_status = "PENDING"
-                        source_metadata.updated_at = now
-                    regenerate_source_node_ids.append(book.source_node_id)
-                    continue
 
                 source_image: Image.Image
                 if uploaded_image is not None:
@@ -1013,7 +969,7 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 self._cover_publication.revert(item.published)
             raise
 
-        updated_count = len(publications) + len(regenerate_source_node_ids)
+        updated_count = len(publications)
         operation = operation_store.create_operation(
             self._db,
             user_id=command.context.user_id,
@@ -1034,14 +990,12 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             inverse={
                 "books": inverse_books,
                 "sourceNodes": inverse_source_nodes,
-                "resources": inverse_resources,
             },
             now=now,
             undoable=False,
         )
         completion = _CoverCompletion(
             publications=tuple(publications),
-            regenerate_source_node_ids=tuple(regenerate_source_node_ids),
         )
         return PreparedBulkCoverResult(
             outcome=BulkCoverResult(
@@ -1063,11 +1017,6 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
                 item.published,
                 previous_stored_path=item.previous_stored_path,
             )
-        if completion.regenerate_source_node_ids:
-            if self._enqueue_source_import is None:
-                raise RuntimeError("bulk cover regeneration is not configured")
-            for source_node_id in completion.regenerate_source_node_ids:
-                self._enqueue_source_import(source_node_id)
 
     def revert_covers(self, prepared: PreparedBulkCoverResult) -> None:
         completion = prepared.completion_token

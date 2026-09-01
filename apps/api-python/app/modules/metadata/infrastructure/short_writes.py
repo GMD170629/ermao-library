@@ -9,12 +9,12 @@ from pathlib import Path
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session
 
-from app.db.sqlite import create_sqlite_engine
+from app.db.sqlite import SHORT_WRITE_OPERATION_LIMIT_SECONDS, create_sqlite_engine
 
 
 @contextmanager
 def metadata_short_write_session(source: Session) -> Iterator[Session]:
-    """End the source read scope and yield a 250ms SQLite writer."""
+    """End the source read scope and yield a 500ms SQLite writer."""
 
     bind = source.get_bind()
     source_engine = bind.engine if isinstance(bind, Connection) else bind
@@ -43,8 +43,8 @@ def _short_writer_engine(source_engine: Engine) -> tuple[Engine, bool]:
     return (
         create_sqlite_engine(
             Path(database),
-            timeout_seconds=0.25,
-            transaction_time_budget_seconds=0.25,
+            timeout_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
+            transaction_time_budget_seconds=SHORT_WRITE_OPERATION_LIMIT_SECONDS,
         ),
         True,
     )

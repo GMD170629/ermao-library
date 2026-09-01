@@ -10,7 +10,9 @@ from pathlib import Path
 
 from app.modules.imports.application.readable_resource.ports import (
     DirectoryEntry,
+    RegularFileObservation,
     SourceTreeFilesystemPort,
+    UnreadableDirectoryEntry,
 )
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
@@ -18,6 +20,9 @@ from app.modules.imports.domain.directory_probe import (
     decide_directory_probe,
 )
 from app.modules.imports.domain.ignore_rules import should_ignore_source_entry
+from app.modules.imports.domain.resource_adapters import (
+    is_supported_source_tree_filename,
+)
 from app.modules.library.public import SourceNodePhysicalKind
 
 
@@ -40,12 +45,12 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
     def iter_directory_entries(
         self,
         absolute_directory: Path,
-    ) -> Iterator[DirectoryEntry]:
+    ) -> Iterator[DirectoryEntry | UnreadableDirectoryEntry]:
         iterator = os.scandir(absolute_directory)
         try:
             for entry in iterator:
-                kind = self._physical_kind(entry)
                 try:
+                    kind = self._physical_kind(entry)
                     stat = entry.stat(follow_symlinks=False)
                     mtime_ns = int(stat.st_mtime_ns)
                     size = (
@@ -54,6 +59,7 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                         else int(stat.st_size)
                     )
                 except OSError:
+                    yield UnreadableDirectoryEntry(name=entry.name)
                     continue
                 yield (entry.name, kind, size, mtime_ns)
         finally:
@@ -99,7 +105,10 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
             try:
-                for name, kind, _size, _mtime in entries:
+                for observed in entries:
+                    if isinstance(observed, UnreadableDirectoryEntry):
+                        continue
+                    name, kind, _size, _mtime = observed
                     if (time.monotonic() - started) * 1000 >= time_budget_ms:
                         termination = ProbeTerminationReason.TIME_BUDGET
                         stop = True
@@ -122,6 +131,8 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                     ):
                         continue
                     if kind is SourceNodePhysicalKind.REGULAR_FILE:
+                        if not is_supported_source_tree_filename(name):
+                            continue
                         samples.append(child_rel)
                         if len(samples) >= sample_limit:
                             termination = ProbeTerminationReason.SAMPLE_LIMIT
@@ -145,10 +156,28 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
 
     def path_is_readable_directory(self, path: Path) -> bool:
         try:
-            resolved = path.resolve()
-            return resolved.is_dir() and os.access(resolved, os.R_OK | os.X_OK)
+            resolved = path.resolve(strict=True)
+            if not resolved.is_dir():
+                return False
+            iterator = os.scandir(resolved)
+            iterator.close()
+            return True
         except OSError:
             return False
+
+    def observe_readable_file(self, path: Path) -> RegularFileObservation | None:
+        try:
+            resolved = path.resolve(strict=True)
+            if not resolved.is_file():
+                return None
+            with resolved.open("rb") as readable:
+                observed = os.fstat(readable.fileno())
+            return RegularFileObservation(
+                observed_size_bytes=int(observed.st_size),
+                observed_mtime_ns=int(observed.st_mtime_ns),
+            )
+        except OSError:
+            return None
 
     def delete_source(
         self,
@@ -183,15 +212,12 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         raise ValueError("unsupported_source_kind")
 
     def _physical_kind(self, entry: os.DirEntry[str]) -> SourceNodePhysicalKind:
-        try:
-            if entry.is_symlink():
-                return SourceNodePhysicalKind.SYMLINK
-            if entry.is_dir(follow_symlinks=False):
-                return SourceNodePhysicalKind.DIRECTORY
-            if entry.is_file(follow_symlinks=False):
-                return SourceNodePhysicalKind.REGULAR_FILE
-        except OSError:
-            return SourceNodePhysicalKind.OTHER
+        if entry.is_symlink():
+            return SourceNodePhysicalKind.SYMLINK
+        if entry.is_dir(follow_symlinks=False):
+            return SourceNodePhysicalKind.DIRECTORY
+        if entry.is_file(follow_symlinks=False):
+            return SourceNodePhysicalKind.REGULAR_FILE
         return SourceNodePhysicalKind.OTHER
 
     def _matches_ignore(

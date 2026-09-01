@@ -1,5 +1,6 @@
 import type { ReaderType, ReadableResourceView, ResourceFormat, ResourceImportSummary, BookView } from '../../../types/book';
 import { withBasePath } from '../../../lib/base-path';
+import { updateBulkBookCovers, type BulkBookCoverResult } from '../../library/public';
 import type {
   ResourceChapterDetailUnit,
   ResourceDetailPage,
@@ -347,10 +348,6 @@ export async function updateSourceNodePresentation(
   });
 }
 
-export async function continueSourceNode(sourceNodeId: string): Promise<void> {
-  await apiJson(`/api/source-nodes/${encodeURIComponent(sourceNodeId)}/continue`, { method: 'POST' });
-}
-
 export async function searchSourceNodeMetadata(bookId: string, sourceNodeId: string, providerId: string, query: string, signal?: AbortSignal): Promise<Readonly<{ message: string | null; candidates: SourceNodeMetadataCandidate[] }>> {
   const data = record(await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/metadata/search`, {
     method: 'POST',
@@ -548,14 +545,73 @@ export async function updateResource(bookId: string, resourceId: string, body: R
   });
 }
 
-async function runResourceAction(bookId: string, resourceId: string, action: 'cover/regenerate'): Promise<void> {
-  await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/${action}`, {
-    method: 'POST'
+export type CoverRegenerationTargetType = 'RESOURCE' | 'SOURCE_NODE' | 'BOOK';
+
+export type CoverRegenerationSkipped = Readonly<{
+  resourceId: string;
+  reason: string;
+}>;
+
+export type CoverRegenerationResult = Readonly<{
+  targetType: CoverRegenerationTargetType;
+  targetId: string;
+  updatedResourceIds: ReadonlyArray<string>;
+  skipped: ReadonlyArray<CoverRegenerationSkipped>;
+  sourceNodeUpdated: boolean;
+  bookUpdated: boolean;
+}>;
+
+function parseCoverRegenerationResult(
+  value: unknown,
+  expectedTargetType: CoverRegenerationTargetType,
+  expectedTargetId: string
+): CoverRegenerationResult {
+  const data = record(value);
+  const targetType = data.targetType;
+  if (targetType !== 'RESOURCE' && targetType !== 'SOURCE_NODE' && targetType !== 'BOOK') {
+    throw new Error('封面重生成响应格式不正确');
+  }
+  const targetId = stringValue(data.targetId).trim();
+  if (!targetId || targetType !== expectedTargetType || targetId !== expectedTargetId) {
+    throw new Error('封面重生成响应与请求不匹配');
+  }
+  if (!Array.isArray(data.updatedResourceIds) || !Array.isArray(data.skipped)
+    || typeof data.sourceNodeUpdated !== 'boolean' || typeof data.bookUpdated !== 'boolean') {
+    throw new Error('封面重生成响应格式不正确');
+  }
+  const updatedResourceIds = data.updatedResourceIds.flatMap((value) => {
+    const resourceId = stringValue(value).trim();
+    return resourceId ? [resourceId] : [];
   });
+  const skipped = data.skipped.map((value) => {
+    const item = record(value);
+    const resourceId = stringValue(item.resourceId).trim();
+    const reason = stringValue(item.reason).trim();
+    if (!resourceId || !reason) throw new Error('封面重生成跳过项格式不正确');
+    return { resourceId, reason } satisfies CoverRegenerationSkipped;
+  });
+  return {
+    targetType,
+    targetId,
+    updatedResourceIds,
+    skipped,
+    sourceNodeUpdated: data.sourceNodeUpdated,
+    bookUpdated: data.bookUpdated
+  };
 }
 
-export async function regenerateResourceCover(bookId: string, resourceId: string): Promise<void> {
-  await runResourceAction(bookId, resourceId, 'cover/regenerate');
+export async function regenerateResourceCover(bookId: string, resourceId: string): Promise<CoverRegenerationResult> {
+  const data = await apiJson(`/api/books/${encodeURIComponent(bookId)}/resources/${encodeURIComponent(resourceId)}/cover/regenerate`, {
+    method: 'POST'
+  });
+  return parseCoverRegenerationResult(data, 'RESOURCE', resourceId);
+}
+
+export async function regenerateSourceNodeCover(bookId: string, sourceNodeId: string): Promise<CoverRegenerationResult> {
+  const data = await apiJson(`/api/books/${encodeURIComponent(bookId)}/source-nodes/${encodeURIComponent(sourceNodeId)}/cover/regenerate`, {
+    method: 'POST'
+  });
+  return parseCoverRegenerationResult(data, 'SOURCE_NODE', sourceNodeId);
 }
 
 export async function uploadResourceCover(bookId: string, resourceId: string, cover: File): Promise<void> {
@@ -635,14 +691,14 @@ export async function replaceBookTags(bookId: string, currentTags: readonly stri
   });
 }
 
-export async function regenerateBookImage(bookId: string): Promise<void> {
-  const form = new FormData();
-  form.set('ids', JSON.stringify([bookId]));
-  form.set('action', 'regenerate');
-  form.set('ratio', '2:3');
-  form.set('quality', '82');
-  form.set('maxDimension', '1600');
-  await apiJson('/api/library/operations/books/covers', { method: 'POST', body: form });
+export async function regenerateBookImage(bookId: string): Promise<BulkBookCoverResult> {
+  return updateBulkBookCovers({
+    ids: [bookId],
+    action: 'regenerate',
+    ratio: '2:3',
+    quality: 82,
+    maxDimension: 1600
+  });
 }
 
 export async function updateBookReadingStatus(bookId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
@@ -661,6 +717,6 @@ export async function deleteBookSources(bookId: string): Promise<void> {
   });
 }
 
-export async function regenerateBookCover(bookId: string, anchoredResourceId: string): Promise<void> {
-  await regenerateResourceCover(bookId, anchoredResourceId);
+export async function regenerateBookCover(bookId: string): Promise<BulkBookCoverResult> {
+  return regenerateBookImage(bookId);
 }

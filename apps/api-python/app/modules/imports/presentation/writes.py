@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_user
 from app.api.typed_route import TypedContractRoute
 from app.bootstrap.imports import (
+    continue_import_task,
     continue_library_import,
     continue_source_import,
+    get_import_task,
     get_library,
     save_uploaded_files,
     source_node_library_id,
@@ -24,7 +26,7 @@ from app.bootstrap.system import (
     prepare_system_setting_values,
 )
 from app.contracts.http_errors import ErrorResponses
-from app.core.authorization import can_access_library
+from app.core.authorization import authorization_context, can_access_library
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.auth import User
@@ -45,6 +47,7 @@ from app.modules.imports.presentation.schemas import (
     ImportUploadResponse,
 )
 from app.modules.imports.public import (
+    MissingEntryPolicy,
     SaveUploadedFilesCommand,
     UploadFileTooLargeError,
     UploadPublicationError,
@@ -290,6 +293,39 @@ def continue_library(
 
 
 @router.post(
+    "/library-import-tasks/{task_id}/continue",
+    status_code=202,
+    response_model=ContinueImportResponse,
+)
+def continue_library_import_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Annotated[
+    ContinueImportResponse | Response,
+    ErrorResponses(ImportForbiddenError, ImportNotFoundError),
+]:
+    user, auth_error = _auth(db, request, settings)
+    if auth_error:
+        return auth_error
+    if user is None:
+        _raise_import_error("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+    task = get_import_task(db, task_id, authorization_context(db, user))
+    library_id = None if task is None else task.get("libraryId")
+    library = get_library(db, library_id) if isinstance(library_id, str) else None
+    if library is None or not bool(library.get("enabled")):
+        _raise_import_error("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+    try:
+        result = continue_import_task(db, task_id)
+    except LookupError:
+        _raise_import_error("任务不存在", status_code=404, code="IMPORT_TASK_NOT_FOUND")
+    return ContinueImportResponse(
+        data=ContinueImportPayload.model_validate(_continue_payload(result))
+    )
+
+
+@router.post(
     "/source-nodes/{source_node_id}/continue",
     status_code=202,
     response_model=ContinueImportResponse,
@@ -318,7 +354,11 @@ def continue_source_node(
     ):
         _raise_import_error("目录不存在或无权访问", status_code=404)
     try:
-        result = continue_source_import(db, source_node_id)
+        result = continue_source_import(
+            db,
+            source_node_id,
+            missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+        )
     except LookupError:
         _raise_import_error("目录不存在", status_code=404, code="SOURCE_NODE_NOT_FOUND")
     return ContinueImportResponse(

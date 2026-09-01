@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from app.modules.imports.domain.ignore_rules import is_builtin_ignored_file
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterId,
     ResourceAdapterSpec,
+    is_supported_source_tree_filename,
     match_directory_adapters_for_samples,
     unique_adapter_or_none,
 )
@@ -57,9 +59,15 @@ def decide_directory_probe(
     max_depth_reached: int,
     termination_reason: ProbeTerminationReason,
 ) -> DirectoryProbeDecision:
+    eligible_sample_paths = tuple(
+        path
+        for path in sample_relative_paths
+        if not is_builtin_ignored_file(path.rsplit("/", 1)[-1])
+        and is_supported_source_tree_filename(path.rsplit("/", 1)[-1])
+    )
     evidence = DirectoryProbeEvidence(
-        sample_relative_paths=sample_relative_paths,
-        sample_count=len(sample_relative_paths),
+        sample_relative_paths=eligible_sample_paths,
+        sample_count=len(eligible_sample_paths),
         entries_visited=entries_visited,
         max_depth_reached=max_depth_reached,
         termination_reason=termination_reason,
@@ -71,7 +79,9 @@ def decide_directory_probe(
             reason_code="NO_SAMPLES",
             evidence=evidence,
         )
-    sample_names = tuple(path.rsplit("/", 1)[-1] for path in sample_relative_paths)
+    sample_names = tuple(
+        path.rsplit("/", 1)[-1] for path in evidence.sample_relative_paths
+    )
     matches = match_directory_adapters_for_samples(sample_names)
     adapter = unique_adapter_or_none(matches)
     if (
@@ -81,7 +91,7 @@ def decide_directory_probe(
         anchor = SourceNodeRelativePath(directory_relative_path)
         owned_samples = tuple(
             sample
-            for sample in sample_relative_paths
+            for sample in evidence.sample_relative_paths
             if audiobook_resource_owns_path(
                 resource_anchor=anchor,
                 candidate_path=SourceNodeRelativePath(sample),

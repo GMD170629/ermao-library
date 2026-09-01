@@ -52,6 +52,7 @@ class RecordingUoW:
 class FakeSourceNodes:
     def __init__(self) -> None:
         self.deleted: list[str] = []
+        self.deleted_batches: list[tuple[str, ...]] = []
         self.nodes = {"node-1": NodeView(library_id="lib-1")}
 
     def get(self, source_node_id: str) -> NodeView | None:
@@ -62,6 +63,9 @@ class FakeSourceNodes:
 
     def delete_subtree(self, source_node_id: str) -> None:
         self.deleted.append(source_node_id)
+
+    def delete_nodes(self, source_node_ids: object) -> None:
+        self.deleted_batches.append(tuple(source_node_ids))  # type: ignore[arg-type]
 
 
 class FakeBooks:
@@ -154,12 +158,91 @@ def test_delete_source_node_cleans_subtree_and_assets() -> None:
         log=log,
     ).execute("node-1")
     assert result.ok is True
-    assert nodes.deleted == ["node-1"]
+    assert nodes.deleted == []
+    assert nodes.deleted_batches == [("node-1-child",), ("node-1",)]
     assert books.deleted_assets == [("node-1", "node-1-child")]
     assert import_tasks.deleted_for_nodes == [("node-1", "node-1-child")]
     assert books.reevaluated == [("res-1",)]
     assert "source_tree.delete.completed" in log.events
-    assert uow.events == ["begin", "commit"]
+    assert uow.events == [
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+    ]
+
+
+def test_delete_source_node_commits_cleanup_in_bounded_batches() -> None:
+    nodes = FakeSourceNodes()
+    books = FakeBooks()
+    import_tasks = FakeImportTasks()
+    uow = RecordingUoW()
+
+    result = DeleteSourceNode(
+        source_nodes=nodes,
+        books_resources=books,
+        import_tasks=import_tasks,
+        uow=uow,
+        log=FakeLog(),
+        asset_cleanup_batch_size=1,
+        task_batch_size=1,
+        source_node_batch_size=1,
+    ).execute("node-1")
+
+    assert result.ok is True
+    assert books.deleted_assets == [("node-1",), ("node-1-child",)]
+    assert import_tasks.deleted_for_nodes == [("node-1",), ("node-1-child",)]
+    assert books.reevaluated == [("res-1",), ("res-1",)]
+    assert nodes.deleted == []
+    assert nodes.deleted_batches == [("node-1-child",), ("node-1",)]
+    assert uow.events == [
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+        "begin",
+        "commit",
+    ]
+
+
+def test_delete_source_node_uses_measured_bounded_default_batches() -> None:
+    class LargeSourceTree(FakeSourceNodes):
+        def list_subtree_ids(self, source_node_id: str) -> tuple[str, ...]:
+            return (source_node_id,) + tuple(
+                f"{source_node_id}-child-{index}" for index in range(1_200)
+            )
+
+    nodes = LargeSourceTree()
+    books = FakeBooks()
+    import_tasks = FakeImportTasks()
+
+    result = DeleteSourceNode(
+        source_nodes=nodes,
+        books_resources=books,
+        import_tasks=import_tasks,
+        uow=RecordingUoW(),
+        log=FakeLog(),
+    ).execute("node-1")
+
+    assert result.ok is True
+    assert [len(batch) for batch in books.deleted_assets] == [200] * 6 + [1]
+    assert [len(batch) for batch in import_tasks.deleted_for_nodes] == [500, 500, 201]
+    assert [len(batch) for batch in nodes.deleted_batches[:-1]] == [500, 500, 200]
+    assert nodes.deleted_batches[-1] == ("node-1",)
 
 
 def test_delete_missing_source_node() -> None:

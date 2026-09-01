@@ -150,6 +150,10 @@ class BulkBookOperationUnitOfWork(Protocol):
     def rollback(self) -> None: ...
 
 
+class BulkCoverRegenerator(Protocol):
+    def execute(self, command: BulkCoverCommand) -> BulkCoverResult: ...
+
+
 class InvalidBulkBookOperationError(Exception):
     """The requested batch action is malformed or violates a domain policy."""
 
@@ -282,10 +286,14 @@ class ExecuteBulkReadingStatus:
 
 class ExecuteBulkCovers:
     def __init__(
-        self, port: BulkBookOperationPort, unit_of_work: BulkBookOperationUnitOfWork
+        self,
+        port: BulkBookOperationPort,
+        unit_of_work: BulkBookOperationUnitOfWork,
+        regenerator: BulkCoverRegenerator | None = None,
     ) -> None:
         self._port = port
         self._unit_of_work = unit_of_work
+        self._regenerator = regenerator
 
     def execute(self, command: BulkCoverCommand) -> BulkCoverResult:
         _validate_selection(
@@ -299,6 +307,10 @@ class ExecuteBulkCovers:
             raise InvalidBulkBookOperationError("COVER_FILE_REQUIRED")
         if command.action != "replace" and command.cover_content is not None:
             raise InvalidBulkBookOperationError("UNEXPECTED_COVER_FILE")
+        if command.action == "regenerate":
+            if self._regenerator is None:
+                raise RuntimeError("local metadata cover regeneration is not configured")
+            return self._regenerator.execute(command)
         prepared: PreparedBulkCoverResult | None = None
         try:
             prepared = self._port.prepare_covers(command)
@@ -319,6 +331,7 @@ __all__ = [
     "BulkBookOperationResult",
     "BulkCoverAction",
     "BulkCoverCommand",
+    "BulkCoverRegenerator",
     "BulkCoverResult",
     "BulkCoverSkipped",
     "BulkFindReplaceCommand",

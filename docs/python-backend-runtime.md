@@ -29,8 +29,10 @@ See [Library Root Layout](library-root-layout.md).
 ## Schema revisions
 
 Alembic uses a linear revision chain. The current head is
-`0002_library_scan_queue_uniqueness`; it follows `0001_library_topology_baseline` and adds
-the active library-scan uniqueness constraints. Startup behavior is intentionally narrow:
+`0008_foreign_key_lookup_indexes`; it follows the immutable revisions from
+`0001_library_topology_baseline` through the active scan queue, media cleanup, audio title,
+asset navigation, missing-entry policy, source-node lookup indexes, and complete foreign-key
+lookup index coverage. Startup behavior is intentionally narrow:
 
 - an empty database is created at the current head;
 - a database already stamped at the current head is accepted;

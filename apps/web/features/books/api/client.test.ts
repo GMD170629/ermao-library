@@ -7,6 +7,8 @@ import {
   fetchBook,
   fetchResourceDetail,
   mapBookView,
+  regenerateResourceCover,
+  regenerateSourceNodeCover,
   regenerateBookImage,
   removeBookCover,
   replaceBookTags,
@@ -153,6 +155,56 @@ test('uploads a custom cover to the selected readable resource', async () => {
   assert.equal(requestedMethod, 'PUT');
 });
 
+test('regenerates a Resource cover synchronously and returns the actual update result', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  let requestedMethod = '';
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedMethod = init?.method ?? '';
+    return new Response(JSON.stringify({ ok: true, data: {
+      targetType: 'RESOURCE', targetId: 'resource/3', updatedResourceIds: ['resource/3'],
+      skipped: [], sourceNodeUpdated: false, bookUpdated: false
+    } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    const result = await regenerateResourceCover('book/1', 'resource/3');
+    assert.deepEqual(result.updatedResourceIds, ['resource/3']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestedUrl, '/api/books/book%2F1/resources/resource%2F3/cover/regenerate');
+  assert.equal(requestedMethod, 'POST');
+});
+
+test('regenerates a SourceNode cover through the SourceNode endpoint without a representative Resource', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify({ ok: true, data: {
+      targetType: 'SOURCE_NODE', targetId: 'source/1', updatedResourceIds: ['resource/1'],
+      skipped: [{ resourceId: 'resource/2', reason: 'LOCAL_COVER_NOT_FOUND' }],
+      sourceNodeUpdated: true, bookUpdated: false
+    } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    const result = await regenerateSourceNodeCover('book/1', 'source/1');
+    assert.equal(result.sourceNodeUpdated, true);
+    assert.deepEqual(result.updatedResourceIds, ['resource/1']);
+    assert.deepEqual(result.skipped, [{ resourceId: 'resource/2', reason: 'LOCAL_COVER_NOT_FOUND' }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requestedUrl, '/api/books/book%2F1/source-nodes/source%2F1/cover/regenerate');
+});
+
 test('replaces Book tags through a one-book metadata operation', async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: unknown = null;
@@ -193,10 +245,11 @@ test('regenerates the Book image through a one-book cover operation', async () =
   globalThis.fetch = async (_input, init) => {
     assert.ok(init?.body instanceof FormData);
     init.body.forEach((value, key) => { requestedFields[key] = String(value); });
-    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: true, data: { updated: 1, skipped: [], operation: { id: 'op-cover' } } }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
-    await regenerateBookImage('book-1');
+    const result = await regenerateBookImage('book-1');
+    assert.equal(result.updated, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

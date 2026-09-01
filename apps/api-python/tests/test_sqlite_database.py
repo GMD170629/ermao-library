@@ -127,6 +127,40 @@ def _sqlite_journal_mode(engine) -> str:
     return str(row[0]).lower()
 
 
+def _assert_all_foreign_keys_have_lookup_indexes(engine) -> None:
+    inspector = inspect(engine)
+    for table_name in Base.metadata.tables:
+        indexed_columns: list[tuple[tuple[str, ...], bool]] = []
+        primary_key = inspector.get_pk_constraint(table_name).get("constrained_columns")
+        if primary_key:
+            indexed_columns.append((tuple(primary_key), True))
+        for constraint in inspector.get_unique_constraints(table_name):
+            columns = constraint.get("column_names")
+            if columns:
+                indexed_columns.append((tuple(columns), True))
+        for index in inspector.get_indexes(table_name):
+            sqlite_where = index.get("dialect_options", {}).get("sqlite_where")
+            columns = index.get("column_names")
+            if sqlite_where is None and columns:
+                indexed_columns.append((tuple(columns), bool(index.get("unique"))))
+        for foreign_key in inspector.get_foreign_keys(table_name):
+            columns = foreign_key.get("constrained_columns")
+            assert columns
+            foreign_key_columns = tuple(columns)
+            assert any(
+                indexed[: len(foreign_key_columns)] == foreign_key_columns
+                or (
+                    unique
+                    and len(indexed) <= len(foreign_key_columns)
+                    and foreign_key_columns[: len(indexed)] == indexed
+                )
+                for indexed, unique in indexed_columns
+            ), (
+                table_name,
+                foreign_key,
+            )
+
+
 def test_sqlite_engine_enables_persistent_wal_mode(tmp_path) -> None:
     database_path = tmp_path / "wal-mode.sqlite3"
     metadata = MetaData()
@@ -240,11 +274,20 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             for constraint in inspector.get_check_constraints("LibrarySourceNode")
         }
         assert "LibrarySourceNode_pathKey_format_check" in source_node_checks
+        source_node_indexes = {
+            index["name"]: tuple(index["column_names"])
+            for index in inspector.get_indexes("LibrarySourceNode")
+        }
+        assert source_node_indexes["LibrarySourceNode_parentId_idx"] == ("parentId",)
         import_task_indexes = {
-            index["name"] for index in inspector.get_indexes("LibraryImportTask")
+            index["name"]: tuple(index["column_names"])
+            for index in inspector.get_indexes("LibraryImportTask")
         }
         assert "LibraryImportTask_import_asset_key" in import_task_indexes
         assert "LibraryImportTask_queued_createdAt_idx" in import_task_indexes
+        assert import_task_indexes["LibraryImportTask_sourceNodeId_idx"] == (
+            "sourceNodeId",
+        )
 
         import_task_columns = {
             column["name"] for column in inspector.get_columns("LibraryImportTask")
@@ -258,6 +301,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
             "role",
             "state",
             "errorSummary",
+            "missingEntryPolicy",
             "createdAt",
             "startedAt",
             "finishedAt",
@@ -278,6 +322,7 @@ def test_empty_storage_bootstraps_current_directory_topology_schema(tmp_path) ->
                     table_name,
                     foreign_key,
                 )
+        _assert_all_foreign_keys_have_lookup_indexes(engine)
 
         for table_name in Base.metadata.tables:
             created_at = next(
@@ -330,21 +375,27 @@ def test_alembic_script_directory_has_one_linear_head() -> None:
     config = alembic_config_for_engine(create_engine("sqlite+pysqlite:///:memory:"))
     script = ScriptDirectory.from_config(config)
     revisions = list(script.walk_revisions())
-    assert len(revisions) == 5
-    assert script.get_heads() == ["0005_asset_navigation_marker"]
-    assert head_revision() == "0005_asset_navigation_marker"
+    assert len(revisions) == 8
+    assert script.get_heads() == ["0008_foreign_key_lookup_indexes"]
+    assert head_revision() == "0008_foreign_key_lookup_indexes"
     assert [revision.revision for revision in revisions] == [
+        "0008_foreign_key_lookup_indexes",
+        "0007_source_node_lookup_indexes",
+        "0006_import_task_missing_entry_policy",
         "0005_asset_navigation_marker",
         "0004_remove_media_kind",
         "0003_audio_asset_title",
         "0002_library_scan_queue_uniqueness",
         "0001_library_topology_baseline",
     ]
-    assert revisions[0].down_revision == "0004_remove_media_kind"
-    assert revisions[1].down_revision == "0003_audio_asset_title"
-    assert revisions[2].down_revision == "0002_library_scan_queue_uniqueness"
-    assert revisions[3].down_revision == "0001_library_topology_baseline"
-    assert revisions[4].down_revision is None
+    assert revisions[0].down_revision == "0007_source_node_lookup_indexes"
+    assert revisions[1].down_revision == "0006_import_task_missing_entry_policy"
+    assert revisions[2].down_revision == "0005_asset_navigation_marker"
+    assert revisions[3].down_revision == "0004_remove_media_kind"
+    assert revisions[4].down_revision == "0003_audio_asset_title"
+    assert revisions[5].down_revision == "0002_library_scan_queue_uniqueness"
+    assert revisions[6].down_revision == "0001_library_topology_baseline"
+    assert revisions[7].down_revision is None
 
 
 def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
@@ -353,7 +404,7 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
     engine = create_sqlite_engine(settings.database_path)
     try:
         runner_module.apply_schema(engine, settings)
-        assert _current_revision(engine) == "0005_asset_navigation_marker"
+        assert _current_revision(engine) == "0008_foreign_key_lookup_indexes"
         operation_columns = {
             column["name"]: column
             for column in inspect(engine).get_columns("MetadataWritebackOperation")
@@ -370,6 +421,99 @@ def test_fresh_baseline_contains_source_node_writeback_schema(tmp_path) -> None:
             for column in inspect(engine).get_columns("LibraryResourceAssetMetadata")
         }
         assert asset_metadata_columns["title"]["nullable"] is True
+    finally:
+        engine.dispose()
+
+
+def test_source_node_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None:
+    from alembic import command
+
+    from app.db.runner import alembic_config_for_engine
+
+    engine = create_sqlite_engine(tmp_path / "source-node-index-upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0006_import_task_missing_entry_policy")
+
+        assert "LibrarySourceNode_parentId_idx" not in {
+            index["name"] for index in inspect(engine).get_indexes("LibrarySourceNode")
+        }
+        assert "LibraryImportTask_sourceNodeId_idx" not in {
+            index["name"] for index in inspect(engine).get_indexes("LibraryImportTask")
+        }
+
+        runner_module.apply_schema(engine)
+        assert _current_revision(engine) == "0008_foreign_key_lookup_indexes"
+        source_node_indexes = {
+            index["name"]: tuple(index["column_names"])
+            for index in inspect(engine).get_indexes("LibrarySourceNode")
+        }
+        import_task_indexes = {
+            index["name"]: tuple(index["column_names"])
+            for index in inspect(engine).get_indexes("LibraryImportTask")
+        }
+        assert source_node_indexes["LibrarySourceNode_parentId_idx"] == ("parentId",)
+        assert import_task_indexes["LibraryImportTask_sourceNodeId_idx"] == (
+            "sourceNodeId",
+        )
+    finally:
+        engine.dispose()
+
+
+def test_foreign_key_lookup_indexes_upgrade_from_previous_head(tmp_path) -> None:
+    from alembic import command
+
+    from app.db.runner import alembic_config_for_engine
+
+    expected_indexes = {
+        "BookDetailPreference": "BookDetailPreference_bookId_idx",
+        "KindleSendTask": "KindleSendTask_resourceId_idx",
+        "LibraryImportTask": "LibraryImportTask_resourceId_libraryId_idx",
+        "LibraryOperation": "LibraryOperation_userId_idx",
+        "LibraryResourceAsset": "LibraryResourceAsset_libraryId_idx",
+        "MetadataLookupTask": "MetadataLookupTask_organizeJobId_idx",
+        "MetadataWritebackOperation": ("MetadataWritebackOperation_lookupTaskId_idx"),
+        "MetadataWritebackPreparation": (
+            "MetadataWritebackPreparation_lookupTaskId_idx"
+        ),
+        "MetadataWritebackTarget": "MetadataWritebackTarget_assetId_idx",
+        "ReaderBookmark": "ReaderBookmark_resourceId_idx",
+        "ReaderProgressMutation": "ReaderProgressMutation_resourceId_idx",
+        "Session": "Session_userId_idx",
+    }
+    engine = create_sqlite_engine(tmp_path / "foreign-key-index-upgrade.sqlite3")
+    config = alembic_config_for_engine(engine)
+    try:
+        with engine.connect() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "0007_source_node_lookup_indexes")
+
+        for table_name, index_name in expected_indexes.items():
+            assert index_name not in {
+                index["name"] for index in inspect(engine).get_indexes(table_name)
+            }
+
+        runner_module.apply_schema(engine)
+        assert _current_revision(engine) == "0008_foreign_key_lookup_indexes"
+        for table_name, index_name in expected_indexes.items():
+            assert index_name in {
+                index["name"] for index in inspect(engine).get_indexes(table_name)
+            }
+        kindle_indexes = {
+            index["name"] for index in inspect(engine).get_indexes("KindleSendTask")
+        }
+        assert "KindleSendTask_assetId_idx" in kindle_indexes
+        import_task_indexes = {
+            index["name"]: tuple(index["column_names"])
+            for index in inspect(engine).get_indexes("LibraryImportTask")
+        }
+        assert import_task_indexes["LibraryImportTask_resourceId_libraryId_idx"] == (
+            "resourceId",
+            "libraryId",
+        )
+        _assert_all_foreign_keys_have_lookup_indexes(engine)
     finally:
         engine.dispose()
 
@@ -394,23 +538,30 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
                     organization_mode="FLAT",
                 )
             )
-            session.add_all(
-                [
-                    LibraryImportTask(
-                        id="queued-1",
-                        kind="SCAN_LIBRARY",
-                        library_id="scan-library",
-                        state="QUEUED",
-                    ),
-                    LibraryImportTask(
-                        id="queued-2",
-                        kind="SCAN_LIBRARY",
-                        library_id="scan-library",
-                        state="QUEUED",
-                    ),
-                ]
-            )
             session.commit()
+        legacy_tasks = Table(
+            "LibraryImportTask",
+            MetaData(),
+            autoload_with=engine,
+        )
+        with engine.begin() as connection:
+            connection.execute(
+                legacy_tasks.insert(),
+                [
+                    {
+                        "id": "queued-1",
+                        "kind": "SCAN_LIBRARY",
+                        "libraryId": "scan-library",
+                        "state": "QUEUED",
+                    },
+                    {
+                        "id": "queued-2",
+                        "kind": "SCAN_LIBRARY",
+                        "libraryId": "scan-library",
+                        "state": "QUEUED",
+                    },
+                ],
+            )
 
         runner_module.apply_schema(engine)
         runner_module.apply_schema(engine)
@@ -428,11 +579,23 @@ def test_scan_queue_migration_coalesces_existing_queued_tasks(tmp_path) -> None:
                 )
                 == 1
             )
+            migrated = session.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.library_id == "scan-library"
+                )
+            )
+            assert migrated is not None
+            assert migrated.missing_entry_policy == "PRESERVE"
         index_names = {
             index["name"] for index in inspect(engine).get_indexes("LibraryImportTask")
         }
         assert "LibraryImportTask_scan_queued_key" in index_names
         assert "LibraryImportTask_scan_running_key" in index_names
+        assert "LibraryImportTask_sourceNodeId_idx" in index_names
+        source_node_index_names = {
+            index["name"] for index in inspect(engine).get_indexes("LibrarySourceNode")
+        }
+        assert "LibrarySourceNode_parentId_idx" in source_node_index_names
     finally:
         engine.dispose()
 

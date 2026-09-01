@@ -13,6 +13,8 @@ import pytest
 from app.modules.imports.application.readable_resource.ports import (
     DirectoryEntry,
     LibraryImportTaskRecord,
+    RegularFileObservation,
+    UnreadableDirectoryEntry,
 )
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
@@ -23,6 +25,7 @@ from app.modules.imports.domain.directory_probe import (
     ProbeInterpretationResult,
     ProbeTerminationReason,
 )
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.library.application.source_tree_ports import (
     InterpretationRecord,
     LibrarySourceTreeConfig,
@@ -61,7 +64,9 @@ class RecordingUoW:
 
 class RecordingFilesystem:
     def __init__(
-        self, uow: RecordingUoW, entries: dict[str, list[DirectoryEntry]]
+        self,
+        uow: RecordingUoW,
+        entries: dict[str, list[DirectoryEntry | UnreadableDirectoryEntry]],
     ) -> None:
         self._uow = uow
         self._entries = entries
@@ -75,7 +80,7 @@ class RecordingFilesystem:
 
     def iter_directory_entries(
         self, absolute_directory: Path
-    ) -> Iterator[DirectoryEntry]:
+    ) -> Iterator[DirectoryEntry | UnreadableDirectoryEntry]:
         if self._uow.in_transaction:
             self.io_while_in_txn.append(f"scandir:{absolute_directory}")
         for stored, items in self._entries.items():
@@ -118,6 +123,10 @@ class RecordingFilesystem:
     def path_is_readable_directory(self, path: Path) -> bool:
         return True
 
+    def observe_readable_file(self, path: Path) -> RegularFileObservation | None:
+        del path
+        return RegularFileObservation(observed_size_bytes=1, observed_mtime_ns=1)
+
 
 class FakeLibraries:
     def __init__(self, config: LibrarySourceTreeConfig) -> None:
@@ -153,6 +162,15 @@ class FakeSourceNodes:
 
     def get(self, source_node_id: str) -> SourceNodeRecord | None:
         return self._by_id.get(source_node_id)
+
+    def list_direct_children(
+        self, *, library_id: str, parent_id: str | None
+    ) -> tuple[SourceNodeRecord, ...]:
+        return tuple(
+            node
+            for node in self._by_id.values()
+            if node.library_id == library_id and node.parent_id == parent_id
+        )
 
     def insert_if_absent(
         self,
@@ -271,11 +289,8 @@ class FakeQueue:
     def fail_interrupted_tasks_on_startup(self, *, finished_at: datetime) -> int:
         return 0
 
-    def requeue_failed_for_library(self, library_id: str) -> int:
-        return 0
-
-    def requeue_failed_for_source(self, source_node_id: str) -> int:
-        return 0
+    def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
+        raise NotImplementedError(task_id)
 
     def has_active_kind(self, **kwargs: object) -> bool:
         return False
@@ -292,6 +307,14 @@ class FakeLog:
 
     def emit(self, event: str, **kwargs: object) -> None:
         self.events.append(event)
+
+
+class FakeSourceNodeDeletion:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    def delete_source_node(self, source_node_id: str) -> None:
+        self.deleted.append(source_node_id)
 
 
 class DemandDrivenDirectoryFilesystem:
@@ -356,7 +379,7 @@ class DemandDrivenDirectoryFilesystem:
             outstanding = self.yielded - self._source_nodes.inserts
             self.max_outstanding = max(self.max_outstanding, outstanding)
             yield (
-                f"note-{index:07d}.md",
+                f"note-{index:07d}.png",
                 SourceNodePhysicalKind.REGULAR_FILE,
                 1,
                 index,
@@ -408,6 +431,10 @@ class DemandDrivenDirectoryFilesystem:
         del path
         return True
 
+    def observe_readable_file(self, path: Path) -> RegularFileObservation | None:
+        del path
+        return RegularFileObservation(observed_size_bytes=1, observed_mtime_ns=1)
+
 
 def _config(root: Path) -> LibrarySourceTreeConfig:
     return LibrarySourceTreeConfig(
@@ -428,7 +455,7 @@ def test_scan_performs_io_only_outside_transactions(tmp_path: Path) -> None:
     root = tmp_path / "books"
     root.mkdir()
     file_entries: list[DirectoryEntry] = [
-        (f"note-{i:02d}.md", SourceNodePhysicalKind.REGULAR_FILE, 1, i)
+        (f"note-{i:02d}.png", SourceNodePhysicalKind.REGULAR_FILE, 1, i)
         for i in range(40)
     ]
     uow = RecordingUoW()
@@ -461,8 +488,10 @@ def test_scan_skips_builtin_library_and_global_ignore_rules(tmp_path: Path) -> N
         ("01.cover.jpg", SourceNodePhysicalKind.REGULAR_FILE, 1, 1),
         ("01.OPF", SourceNodePhysicalKind.REGULAR_FILE, 1, 2),
         ("download.tmp", SourceNodePhysicalKind.REGULAR_FILE, 1, 3),
-        ("cache-note.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 4),
-        ("keep.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 5),
+        ("cache-note.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 4),
+        ("keep.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 5),
+        ("metadata.json", SourceNodePhysicalKind.REGULAR_FILE, 1, 6),
+        ("readme.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 7),
     ]
     uow = RecordingUoW()
     filesystem = RecordingFilesystem(uow, {})
@@ -487,7 +516,7 @@ def test_scan_skips_builtin_library_and_global_ignore_rules(tmp_path: Path) -> N
     ).execute_library("lib-1")
 
     assert result.nodes_inserted == 1
-    assert {node.name for node in source_nodes._by_id.values()} == {"keep.md"}
+    assert {node.name for node in source_nodes._by_id.values()} == {"keep.png"}
 
 
 def test_scan_releases_before_directory_probe(tmp_path: Path) -> None:
@@ -585,6 +614,55 @@ def test_full_source_scan_tolerates_oserror_mid_directory_iteration(
     assert filesystem.io_while_in_txn == []
 
 
+def test_prune_does_not_delete_when_directory_iteration_stops_with_oserror(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "books"
+    root.mkdir()
+    uow = RecordingUoW()
+    source_nodes = FakeSourceNodes()
+    initial = RecordingFilesystem(uow, {})
+    initial_entries: list[DirectoryEntry] = [
+        ("keep-0.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 0),
+        ("keep-1.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 1),
+        ("unseen.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 2),
+    ]
+    initial._entries[str(root)] = initial_entries
+    initial._entries[str(root.resolve())] = initial_entries
+    ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=initial,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+    ).execute_library("lib-1")
+
+    deletion = FakeSourceNodeDeletion()
+    interrupted = DemandDrivenDirectoryFilesystem(
+        uow=uow,
+        source_nodes=source_nodes,
+        conceptual_size=1_000_000,
+        process_limit=8,
+        fail_after_yields=2,
+    )
+    ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=interrupted,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+        source_node_deletion=deletion,
+    ).execute_library("lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING)
+
+    assert deletion.deleted == []
+
+
 class _InsertRaisesOSErrorSourceNodes(FakeSourceNodes):
     """Raises OSError during first SourceNode write (entry processing, not scandir)."""
 
@@ -604,8 +682,8 @@ def test_entry_processing_oserror_is_not_swallowed_as_unreadable_directory(
     root = tmp_path / "books"
     root.mkdir()
     file_entries: list[DirectoryEntry] = [
-        ("note-00.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 0),
-        ("note-01.md", SourceNodePhysicalKind.REGULAR_FILE, 1, 1),
+        ("note-00.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 0),
+        ("note-01.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 1),
     ]
     uow = RecordingUoW()
     log = FakeLog()
@@ -627,3 +705,82 @@ def test_entry_processing_oserror_is_not_swallowed_as_unreadable_directory(
         scan.execute_library("lib-1")
     assert "source_tree.scan.directory_unreadable" not in log.events
     assert filesystem.io_while_in_txn == []
+
+
+def test_prune_deletes_only_children_missing_from_normal_iteration(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "books"
+    root.mkdir()
+    uow = RecordingUoW()
+    source_nodes = FakeSourceNodes()
+    initial = RecordingFilesystem(uow, {})
+    initial._entries[str(root)] = [
+        ("gone.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 1)
+    ]
+    initial._entries[str(root.resolve())] = initial._entries[str(root)]
+    base = ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=initial,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+    )
+    base.execute_library("lib-1")
+    deletion = FakeSourceNodeDeletion()
+    empty = RecordingFilesystem(uow, {})
+    empty._entries[str(root)] = []
+    empty._entries[str(root.resolve())] = []
+    ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=empty,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+        source_node_deletion=deletion,
+    ).execute_library("lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING)
+    assert deletion.deleted == ["node-1"]
+
+
+def test_unreadable_visible_entry_is_protected_from_prune(tmp_path: Path) -> None:
+    root = tmp_path / "books"
+    root.mkdir()
+    uow = RecordingUoW()
+    source_nodes = FakeSourceNodes()
+    initial = RecordingFilesystem(uow, {})
+    initial._entries[str(root)] = [
+        ("keep.png", SourceNodePhysicalKind.REGULAR_FILE, 1, 1)
+    ]
+    initial._entries[str(root.resolve())] = initial._entries[str(root)]
+    ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=initial,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+    ).execute_library("lib-1")
+    deletion = FakeSourceNodeDeletion()
+    unreadable = RecordingFilesystem(uow, {})
+    unreadable._entries[str(root)] = [UnreadableDirectoryEntry(name="keep.png")]
+    unreadable._entries[str(root.resolve())] = unreadable._entries[str(root)]
+    ScanLibrarySourceTree(
+        libraries=FakeLibraries(_config(root)),
+        filesystem=unreadable,
+        source_nodes=source_nodes,
+        books_resources=FakeBooks(),
+        queue=FakeQueue(),
+        uow=uow,
+        clock=FakeClock(),
+        log=FakeLog(),
+        source_node_deletion=deletion,
+    ).execute_library("lib-1", missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING)
+    assert deletion.deleted == []

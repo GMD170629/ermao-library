@@ -110,6 +110,17 @@ class LibrarySourceNode(Base):
             name="fk_LibrarySourceNode_parent_directory",
         ),
         Index("LibrarySourceNode_libraryId_parentId_idx", "libraryId", "parentId"),
+        Index("LibrarySourceNode_parentId_idx", "parentId"),
+        Index(
+            "LibrarySourceNode_parentId_libraryId_idx",
+            "parentId",
+            "libraryId",
+        ),
+        Index(
+            "LibrarySourceNode_parentId_parentPhysicalKind_idx",
+            "parentId",
+            "parentPhysicalKind",
+        ),
         Index("LibrarySourceNode_libraryId_name_idx", "libraryId", "name"),
     )
 
@@ -462,6 +473,11 @@ class LibraryReadableResource(Base):
             name="fk_LibraryReadableResource_sourceNode_library",
         ),
         Index("LibraryReadableResource_bookId_idx", "bookId"),
+        Index(
+            "LibraryReadableResource_bookId_libraryId_idx",
+            "bookId",
+            "libraryId",
+        ),
         Index("LibraryReadableResource_libraryId_idx", "libraryId"),
     )
 
@@ -643,6 +659,22 @@ class LibraryResourceAsset(Base):
             "importState",
         ),
         Index("LibraryResourceAsset_sourceNodeId_idx", "sourceNodeId"),
+        Index(
+            "LibraryResourceAsset_sourceNodeId_libraryId_idx",
+            "sourceNodeId",
+            "libraryId",
+        ),
+        Index(
+            "LibraryResourceAsset_sourceNodeId_sourceNodePhysicalKind_idx",
+            "sourceNodeId",
+            "sourceNodePhysicalKind",
+        ),
+        Index(
+            "LibraryResourceAsset_resourceId_libraryId_idx",
+            "resourceId",
+            "libraryId",
+        ),
+        Index("LibraryResourceAsset_libraryId_idx", "libraryId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

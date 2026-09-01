@@ -109,6 +109,7 @@ class User(Base):
 
 class Session(Base):
     __tablename__ = "Session"
+    __table_args__ = (Index("Session_userId_idx", "userId"),)
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
     token_hash: Mapped[str] = mapped_column(
@@ -238,6 +239,7 @@ class ReaderBookmark(Base):
             name="ReaderBookmark_user_resource_bookmark_key",
         ),
         Index("ReaderBookmark_user_resource_idx", "userId", "resourceId"),
+        Index("ReaderBookmark_resourceId_idx", "resourceId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

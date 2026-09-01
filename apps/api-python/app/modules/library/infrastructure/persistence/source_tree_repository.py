@@ -166,6 +166,27 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
         row = self._session.get(LibrarySourceNode, source_node_id)
         return None if row is None else self._to_record(row)
 
+    def list_direct_children(
+        self, *, library_id: str, parent_id: str | None
+    ) -> tuple[SourceNodeRecord, ...]:
+        parent_filter = (
+            LibrarySourceNode.parent_id.is_(None)
+            if parent_id is None
+            else LibrarySourceNode.parent_id == parent_id
+        )
+        rows = self._session.scalars(
+            select(LibrarySourceNode)
+            .where(
+                LibrarySourceNode.library_id == library_id,
+                parent_filter,
+            )
+            .order_by(
+                LibrarySourceNode.path_key.asc(),
+                LibrarySourceNode.id.asc(),
+            )
+        ).all()
+        return tuple(self._to_record(row) for row in rows)
+
     def insert_if_absent(
         self,
         *,
@@ -278,10 +299,15 @@ class SqlAlchemySourceNodeRepository(SourceNodeRepositoryPort):
 
     def delete_subtree(self, source_node_id: str) -> None:
         ids = self.list_subtree_ids(source_node_id)
-        if not ids:
+        self.delete_nodes(ids)
+
+    def delete_nodes(self, source_node_ids: Sequence[str]) -> None:
+        if not source_node_ids:
             return
         self._session.execute(
-            delete(LibrarySourceNode).where(LibrarySourceNode.id.in_(ids))
+            delete(LibrarySourceNode).where(
+                LibrarySourceNode.id.in_(tuple(source_node_ids))
+            )
         )
         self._session.flush()
 
@@ -526,6 +552,13 @@ class SqlAlchemyBookResourceRepository(BookResourceRepositoryPort):
         row.import_state = ResourceImportState.PENDING.value
         self._session.flush()
         return self._to_resource(row)
+
+    def delete_resource(self, resource_id: str) -> None:
+        row = self._session.get(LibraryReadableResource, resource_id)
+        if row is None:
+            return
+        self._session.delete(row)
+        self._session.flush()
 
     def invalidate_asset_for_reimport(
         self,

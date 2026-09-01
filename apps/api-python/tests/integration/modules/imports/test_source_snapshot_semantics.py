@@ -24,6 +24,7 @@ from app.db.sqlite import create_sqlite_engine
 from app.models.library import Library
 from app.modules.imports.application.readable_resource.continue_import import (
     ContinueLibraryImport,
+    ContinueSourceImport,
 )
 from app.modules.imports.application.readable_resource.ports import (
     AssetTechnicalMetadata,
@@ -35,6 +36,9 @@ from app.modules.imports.application.readable_resource.ports import (
 from app.modules.imports.application.readable_resource.process_import_task import (
     ProcessReadableResourceImportTask,
 )
+from app.modules.imports.application.readable_resource.request_library_scan import (
+    RequestLibraryScanCommand,
+)
 from app.modules.imports.application.readable_resource.scan_source_tree import (
     ScanLibrarySourceTree,
 )
@@ -45,6 +49,7 @@ from app.modules.imports.domain.directory_probe import (
     ProbeTerminationReason,
 )
 from app.modules.imports.domain.resource_adapters import ResourceAdapterSpec
+from app.modules.imports.domain.scan_policy import MissingEntryPolicy
 from app.modules.imports.infrastructure.readable_resource.support import (
     InMemorySidecarWriteback,
     StructuredPipelineLog,
@@ -157,6 +162,13 @@ def _continue_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
     return _drain(pipeline)
 
 
+def _automatic_scan_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
+    requester = pipeline.request_library_scan
+    assert requester is not None
+    requester.execute(RequestLibraryScanCommand(library_id="lib-1", trigger="WATCHER"))
+    return _drain(pipeline)
+
+
 def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
@@ -169,7 +181,7 @@ def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
             os.utime(path, ns=(1_000_000_000, 1_000_000_000))
 
             pipeline = _pipeline(db)
-            _continue_and_drain(pipeline)
+            _automatic_scan_and_drain(pipeline)
             db.commit()
 
             node = db.scalar(
@@ -229,7 +241,62 @@ def test_observed_snapshot_refreshes_on_content_change(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_missing_disk_file_is_not_reconciled(tmp_path: Path) -> None:
+def test_direct_file_rescan_refreshes_observation_and_reimports_asset(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            source = root / "book.epub"
+            source.write_bytes(b"v1")
+            os.utime(source, ns=(1_000_000_000, 1_000_000_000))
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            node = db.scalar(select(LibrarySourceNode))
+            asset = db.scalar(select(LibraryResourceAsset))
+            asset_task = db.scalar(
+                select(LibraryImportTask).where(
+                    LibraryImportTask.kind == "IMPORT_ASSET"
+                )
+            )
+            assert node is not None and asset is not None and asset_task is not None
+            original_ids = (node.id, asset.id, asset_task.id)
+
+            source.write_bytes(b"v2-longer")
+            os.utime(source, ns=(2_000_000_000, 2_000_000_000))
+            result = pipeline.continue_import.execute(
+                ContinueSourceImport(
+                    node.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                )
+            )
+            assert result.enqueued_scan is True
+            coalesced = pipeline.continue_import.execute(
+                ContinueSourceImport(
+                    node.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                )
+            )
+            assert coalesced.enqueued_scan is False
+            assert coalesced.task_id == result.task_id
+            outcomes = _drain(pipeline)
+            db.commit()
+            db.refresh(node)
+            db.refresh(asset_task)
+
+            assert outcomes == ["continue_source", "ok"]
+            assert (node.id, asset.id, asset_task.id) == original_ids
+            assert node.observed_size_bytes == len(b"v2-longer")
+            assert node.observed_mtime_ns == 2_000_000_000
+            assert asset_task.state == "SUCCEEDED"
+    finally:
+        engine.dispose()
+
+
+def test_automatic_scan_preserves_missing_disk_file(tmp_path: Path) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -255,7 +322,7 @@ def test_missing_disk_file_is_not_reconciled(tmp_path: Path) -> None:
             assert task.state == "SUCCEEDED"
             path.unlink()
 
-            outcomes = _continue_and_drain(pipeline)
+            outcomes = _automatic_scan_and_drain(pipeline)
             db.commit()
             assert db.get(LibrarySourceNode, node.id) is not None
             refreshed = db.get(LibraryReadableResource, resource.id)
@@ -273,7 +340,9 @@ def test_missing_disk_file_is_not_reconciled(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_rename_creates_new_node_without_merging_old(tmp_path: Path) -> None:
+def test_automatic_scan_creates_renamed_node_without_removing_old(
+    tmp_path: Path,
+) -> None:
     engine = _bootstrap(tmp_path)
     root = tmp_path / "books"
     try:
@@ -283,7 +352,7 @@ def test_rename_creates_new_node_without_merging_old(tmp_path: Path) -> None:
             old_path = root / "old.epub"
             old_path.write_bytes(b"epub")
             pipeline = _pipeline(db)
-            _continue_and_drain(pipeline)
+            _automatic_scan_and_drain(pipeline)
             db.commit()
             old_node = db.scalar(
                 select(LibrarySourceNode).where(
@@ -296,7 +365,7 @@ def test_rename_creates_new_node_without_merging_old(tmp_path: Path) -> None:
             old_ids = (old_node.id, old_resource.id, old_asset.id)
 
             old_path.rename(root / "new.epub")
-            _continue_and_drain(pipeline)
+            _automatic_scan_and_drain(pipeline)
             db.commit()
 
             assert db.get(LibrarySourceNode, old_ids[0]) is not None
@@ -326,6 +395,160 @@ def test_rename_creates_new_node_without_merging_old(tmp_path: Path) -> None:
             assert new_asset.id != old_ids[2]
             assert db.scalar(select(func.count()).select_from(LibrarySourceNode)) == 2
             assert db.scalar(select(func.count()).select_from(LibraryBook)) == 2
+    finally:
+        engine.dispose()
+
+
+def test_manual_library_scan_prunes_missing_source_topology(tmp_path: Path) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            source = root / "gone.epub"
+            source.write_bytes(b"epub")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            db.commit()
+            node = db.scalar(select(LibrarySourceNode))
+            resource = db.scalar(select(LibraryReadableResource))
+            asset = db.scalar(select(LibraryResourceAsset))
+            assert node is not None and resource is not None and asset is not None
+            node_id, resource_id, asset_id = node.id, resource.id, asset.id
+
+            source.unlink()
+            outcomes = _continue_and_drain(pipeline)
+            db.commit()
+
+            assert "scan" in outcomes
+            assert db.get(LibrarySourceNode, node_id) is None
+            assert db.get(LibraryReadableResource, resource_id) is None
+            assert db.get(LibraryResourceAsset, asset_id) is None
+            assert db.scalar(select(func.count()).select_from(LibraryBook)) == 0
+    finally:
+        engine.dispose()
+
+
+def test_direct_rescan_of_missing_file_fails_without_deleting_data(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            source = root / "gone.epub"
+            source.write_bytes(b"epub")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            node = db.scalar(select(LibrarySourceNode))
+            resource = db.scalar(select(LibraryReadableResource))
+            asset = db.scalar(select(LibraryResourceAsset))
+            assert node is not None and resource is not None and asset is not None
+            source.unlink()
+
+            result = pipeline.continue_import.execute(
+                ContinueSourceImport(
+                    node.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                )
+            )
+            assert result.enqueued_scan is True
+            assert _drain(pipeline) == ["error"]
+            db.commit()
+
+            assert db.get(LibrarySourceNode, node.id) is not None
+            assert db.get(LibraryReadableResource, resource.id) is not None
+            assert db.get(LibraryResourceAsset, asset.id) is not None
+            failed = db.get(LibraryImportTask, result.task_id)
+            assert failed is not None
+            assert failed.state == "FAILED"
+            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
+    finally:
+        engine.dispose()
+
+
+def test_direct_rescan_of_missing_directory_fails_without_deleting_subtree(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            folder = root / "collection"
+            folder.mkdir()
+            publication = folder / "book.epub"
+            publication.write_bytes(b"epub")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            directory_node = db.scalar(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.relative_path == "collection"
+                )
+            )
+            child_node = db.scalar(
+                select(LibrarySourceNode).where(
+                    LibrarySourceNode.relative_path == "collection/book.epub"
+                )
+            )
+            assert directory_node is not None and child_node is not None
+            publication.unlink()
+            folder.rmdir()
+
+            result = pipeline.continue_import.execute(
+                ContinueSourceImport(
+                    directory_node.id,
+                    missing_entry_policy=MissingEntryPolicy.PRUNE_MISSING,
+                )
+            )
+            assert result.enqueued_scan is True
+            assert _drain(pipeline) == ["error"]
+            db.commit()
+
+            assert db.get(LibrarySourceNode, directory_node.id) is not None
+            assert db.get(LibrarySourceNode, child_node.id) is not None
+            failed = db.get(LibraryImportTask, result.task_id)
+            assert failed is not None
+            assert failed.state == "FAILED"
+            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
+    finally:
+        engine.dispose()
+
+
+def test_manual_scan_of_missing_library_root_fails_without_deleting_data(
+    tmp_path: Path,
+) -> None:
+    engine = _bootstrap(tmp_path)
+    root = tmp_path / "books"
+    try:
+        with Session(engine) as db:
+            _add_library(db, root)
+            db.commit()
+            publication = root / "book.epub"
+            publication.write_bytes(b"epub")
+            pipeline = _pipeline(db)
+            _continue_and_drain(pipeline)
+            node = db.scalar(select(LibrarySourceNode))
+            resource = db.scalar(select(LibraryReadableResource))
+            assert node is not None and resource is not None
+            publication.unlink()
+            root.rmdir()
+
+            result = pipeline.continue_import.execute(ContinueLibraryImport("lib-1"))
+            assert result.enqueued_scan is True
+            assert _drain(pipeline) == ["error"]
+            db.commit()
+
+            assert db.get(LibrarySourceNode, node.id) is not None
+            assert db.get(LibraryReadableResource, resource.id) is not None
+            failed = db.get(LibraryImportTask, result.task_id)
+            assert failed is not None
+            assert failed.state == "FAILED"
+            assert failed.error_summary == "SOURCE_SCAN_START_UNAVAILABLE"
     finally:
         engine.dispose()
 

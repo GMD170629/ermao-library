@@ -148,6 +148,10 @@ class SourceNodeRepositoryPort(Protocol):
 
     def get(self, source_node_id: str) -> SourceNodeRecord | None: ...
 
+    def list_direct_children(
+        self, *, library_id: str, parent_id: str | None
+    ) -> tuple[SourceNodeRecord, ...]: ...
+
     def insert_if_absent(
         self,
         *,
@@ -223,6 +227,9 @@ class BookResourceRepositoryPort(Protocol):
         resource_id: str,
         adapter: AdapterIdentity,
     ) -> ReadableResourceRecord: ...
+
+    def delete_resource(self, resource_id: str) -> None:
+        """Delete one obsolete Resource while preserving its SourceNode and Book."""
 
     def invalidate_asset_for_reimport(
         self,

@@ -165,6 +165,7 @@ class LibraryOperation(Base):
     __table_args__ = (
         Index("LibraryOperation_action_createdAt_idx", "action", "createdAt"),
         Index("LibraryOperation_status_expiresAt_idx", "status", "expiresAt"),
+        Index("LibraryOperation_userId_idx", "userId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -398,6 +399,7 @@ class ReaderProgressMutation(Base):
             "resourceId",
             "revision",
         ),
+        Index("ReaderProgressMutation_resourceId_idx", "resourceId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)
@@ -434,6 +436,7 @@ class BookDetailPreference(Base):
     __tablename__ = "BookDetailPreference"
     __table_args__ = (
         Index("BookDetailPreference_user_book_key", "userId", "bookId", unique=True),
+        Index("BookDetailPreference_bookId_idx", "bookId"),
     )
 
     id: Mapped[str] = mapped_column(String(191), primary_key=True, default=cuid)

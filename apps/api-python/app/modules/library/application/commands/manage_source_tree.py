@@ -47,6 +47,10 @@ class SourceFileDeletionError(RuntimeError):
 
 
 class DeleteSourceNode:
+    _DEFAULT_ASSET_CLEANUP_BATCH_SIZE = 200
+    _DEFAULT_TASK_BATCH_SIZE = 500
+    _DEFAULT_SOURCE_NODE_BATCH_SIZE = 500
+
     def __init__(
         self,
         *,
@@ -55,12 +59,24 @@ class DeleteSourceNode:
         import_tasks: ManageLibraryImportTasksPort,
         uow: ManageUnitOfWorkPort,
         log: ManagePipelineLogPort,
+        asset_cleanup_batch_size: int = _DEFAULT_ASSET_CLEANUP_BATCH_SIZE,
+        task_batch_size: int = _DEFAULT_TASK_BATCH_SIZE,
+        source_node_batch_size: int = _DEFAULT_SOURCE_NODE_BATCH_SIZE,
     ) -> None:
+        if asset_cleanup_batch_size < 1:
+            raise ValueError("asset_cleanup_batch_size must be positive")
+        if task_batch_size < 1:
+            raise ValueError("task_batch_size must be positive")
+        if source_node_batch_size < 1:
+            raise ValueError("source_node_batch_size must be positive")
         self._source_nodes = source_nodes
         self._books_resources = books_resources
         self._import_tasks = import_tasks
         self._uow = uow
         self._log = log
+        self._asset_cleanup_batch_size = asset_cleanup_batch_size
+        self._task_batch_size = task_batch_size
+        self._source_node_batch_size = source_node_batch_size
 
     def execute(self, source_node_id: str) -> ManagementResult:
         try:
@@ -70,14 +86,32 @@ class DeleteSourceNode:
                     return ManagementResult(ok=False, code="SOURCE_NODE_NOT_FOUND")
                 library_id = node.library_id
                 subtree = self._source_nodes.list_subtree_ids(source_node_id)
-                affected_resources = (
-                    self._books_resources.delete_assets_for_source_nodes(subtree)
-                )
-                self._import_tasks.delete_tasks_for_source_nodes(subtree)
-                self._source_nodes.delete_subtree(source_node_id)
-                self._books_resources.reevaluate_ready_after_asset_loss(
-                    affected_resources
-                )
+
+            for offset in range(0, len(subtree), self._asset_cleanup_batch_size):
+                batch = subtree[offset : offset + self._asset_cleanup_batch_size]
+                with self._uow.transaction():
+                    affected_resources = (
+                        self._books_resources.delete_assets_for_source_nodes(batch)
+                    )
+                    self._books_resources.reevaluate_ready_after_asset_loss(
+                        affected_resources
+                    )
+
+            for offset in range(0, len(subtree), self._task_batch_size):
+                batch = subtree[offset : offset + self._task_batch_size]
+                with self._uow.transaction():
+                    self._import_tasks.delete_tasks_for_source_nodes(batch)
+
+            descendants = tuple(reversed(subtree[1:]))
+            for offset in range(0, len(descendants), self._source_node_batch_size):
+                batch = descendants[offset : offset + self._source_node_batch_size]
+                with self._uow.transaction():
+                    self._source_nodes.delete_nodes(batch)
+
+            with self._uow.transaction():
+                if self._source_nodes.get(source_node_id) is None:
+                    return ManagementResult(ok=False, code="SOURCE_NODE_NOT_FOUND")
+                self._source_nodes.delete_nodes((source_node_id,))
             self._log.emit(
                 "source_tree.delete.completed",
                 library_id=library_id,

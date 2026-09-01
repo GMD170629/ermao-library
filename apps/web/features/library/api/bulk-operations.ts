@@ -4,11 +4,11 @@ export type BulkBookOperationResult = {
   operationId: string;
 };
 
-export type BulkBookCoverResult = {
+export type BulkBookCoverResult = Readonly<{
   updated: number;
-  skipped: Array<{ bookId: string; reason: string }>;
+  skipped: ReadonlyArray<{ bookId: string; reason: string }>;
   operationId: string;
-};
+}>;
 
 export type BulkBookSourceDeleteResult = {
   deleted: number;

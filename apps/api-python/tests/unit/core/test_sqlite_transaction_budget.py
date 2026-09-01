@@ -8,7 +8,11 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
 
-from app.db.sqlite import create_sqlite_engine
+from app.db.sqlite import SHORT_WRITE_OPERATION_LIMIT_SECONDS, create_sqlite_engine
+
+
+def test_short_write_operation_limit_is_500ms() -> None:
+    assert SHORT_WRITE_OPERATION_LIMIT_SECONDS == 0.5
 
 
 def _budget_table(engine: sa.Engine) -> sa.Table:
