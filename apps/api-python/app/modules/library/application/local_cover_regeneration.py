@@ -22,6 +22,7 @@ from app.modules.library.application.resource_commands import (
 )
 from app.modules.library.application.resource_cover import (
     ResourceCoverPublicationPort,
+    ResourceCoverUnitOfWork,
 )
 from app.modules.library.application.source_node_commands import (
     SourceNodeCoverPublicationPort,
@@ -37,21 +38,12 @@ LocalCoverFailureCode = Literal[
 
 @dataclass(frozen=True, slots=True)
 class ResourceLocalMetadataSource:
-    resource_id: str
-    book_id: str
-    source_node_id: str
     adapter_id: str
     source_format: str
     root_path: Path
     resource_relative_path: str
     asset_relative_paths: tuple[str, ...]
     local_metadata_priority: tuple[LocalMetadataSource, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class LocalCoverExtraction:
-    content: bytes | None
-    failure_code: LocalCoverFailureCode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +68,6 @@ class LocalCoverRegenerationResult:
     skipped: tuple[LocalCoverSkipped, ...]
     source_node_updated: bool
     book_updated: bool
-
-
-@dataclass(frozen=True, slots=True)
-class _ResourceCoverAttempt:
-    content: bytes | None
-    failure: LocalCoverSkipped | None
 
 
 class LocalCoverSourcePort(Protocol):
@@ -114,13 +100,7 @@ class LocalCoverSourcePort(Protocol):
 class LocalMetadataCoverParserPort(Protocol):
     def extract_cover(
         self, source: ResourceLocalMetadataSource
-    ) -> LocalCoverExtraction: ...
-
-
-class LocalCoverUnitOfWork(Protocol):
-    def commit(self) -> None: ...
-
-    def rollback(self) -> None: ...
+    ) -> bytes | LocalCoverFailureCode: ...
 
 
 class BulkCoverRegenerationOperationPort(Protocol):
@@ -155,7 +135,7 @@ class RegenerateLocalMetadataCovers:
         parser: LocalMetadataCoverParserPort,
         resource_covers: ResourceCoverPublicationPort,
         source_covers: SourceNodeCoverPublicationPort,
-        unit_of_work: LocalCoverUnitOfWork,
+        unit_of_work: ResourceCoverUnitOfWork,
     ) -> None:
         self._access = access
         self._sources = sources
@@ -182,13 +162,8 @@ class RegenerateLocalMetadataCovers:
             book_id=book_id,
             resource_id=resource_id,
         )
-        if attempt.content is None:
-            reason: LocalCoverFailureCode = (
-                attempt.failure.reason
-                if attempt.failure is not None
-                else "LOCAL_COVER_NOT_FOUND"
-            )
-            raise LocalCoverUnavailableError(reason)
+        if isinstance(attempt, LocalCoverSkipped):
+            raise LocalCoverUnavailableError(attempt.reason)
         return LocalCoverRegenerationResult(
             target_type="RESOURCE",
             target_id=resource_id,
@@ -244,18 +219,12 @@ class RegenerateLocalMetadataCovers:
                 book_id=scope.book_id,
                 resource_id=resource_id,
             )
-            if attempt.content is None:
-                skipped.append(
-                    attempt.failure
-                    or LocalCoverSkipped(
-                        resource_id=resource_id,
-                        reason="LOCAL_COVER_NOT_FOUND",
-                    )
-                )
+            if isinstance(attempt, LocalCoverSkipped):
+                skipped.append(attempt)
                 continue
             updated.append(resource_id)
             if first_cover is None:
-                first_cover = attempt.content
+                first_cover = attempt
 
         if first_cover is None:
             reason: LocalCoverFailureCode = (
@@ -275,40 +244,37 @@ class RegenerateLocalMetadataCovers:
 
     def _regenerate_one(
         self, *, book_id: str, resource_id: str
-    ) -> _ResourceCoverAttempt:
+    ) -> bytes | LocalCoverSkipped:
         source = self._sources.load_resource_source(
             book_id=book_id,
             resource_id=resource_id,
         )
         if source is None:
             self._release_read_transaction()
-            failure = LocalCoverSkipped(
+            return LocalCoverSkipped(
                 resource_id=resource_id,
                 reason="LOCAL_METADATA_SOURCE_UNAVAILABLE",
             )
-            return _ResourceCoverAttempt(content=None, failure=failure)
         self._release_read_transaction()
         extraction = self._parser.extract_cover(source)
-        if extraction.content is None:
-            failure = LocalCoverSkipped(
+        if isinstance(extraction, str):
+            return LocalCoverSkipped(
                 resource_id=resource_id,
-                reason=extraction.failure_code or "LOCAL_COVER_NOT_FOUND",
+                reason=extraction,
             )
-            return _ResourceCoverAttempt(content=None, failure=failure)
 
         previous_path = self._sources.current_resource_cover_path(resource_id)
         self._release_read_transaction()
         try:
             prepared = self._resource_covers.prepare(
                 resource_id=resource_id,
-                content=extraction.content,
+                content=extraction,
             )
         except ValueError:
-            failure = LocalCoverSkipped(
+            return LocalCoverSkipped(
                 resource_id=resource_id,
                 reason="LOCAL_COVER_INVALID",
             )
-            return _ResourceCoverAttempt(content=None, failure=failure)
         published = self._resource_covers.publish(
             prepared,
             previous_stored_path=previous_path,
@@ -327,14 +293,9 @@ class RegenerateLocalMetadataCovers:
             published,
             previous_stored_path=previous_path,
         )
-        return _ResourceCoverAttempt(
-            content=extraction.content,
-            failure=None,
-        )
+        return extraction
 
-    def _replace_source_cover(
-        self, *, scope: LocalCoverScope, content: bytes
-    ) -> None:
+    def _replace_source_cover(self, *, scope: LocalCoverScope, content: bytes) -> None:
         previous_path = self._sources.current_source_cover_path(scope.source_node_id)
         self._release_read_transaction()
         prepared = self._source_covers.prepare(
@@ -378,7 +339,7 @@ class RegenerateBulkBookCovers:
         *,
         covers: RegenerateLocalMetadataCovers,
         operations: BulkCoverRegenerationOperationPort,
-        unit_of_work: LocalCoverUnitOfWork,
+        unit_of_work: ResourceCoverUnitOfWork,
     ) -> None:
         self._covers = covers
         self._operations = operations
@@ -427,7 +388,6 @@ class RegenerateBulkBookCovers:
 
 __all__ = [
     "BulkCoverRegenerationOperationPort",
-    "LocalCoverExtraction",
     "LocalCoverFailureCode",
     "LocalCoverRegenerationResult",
     "LocalCoverScope",

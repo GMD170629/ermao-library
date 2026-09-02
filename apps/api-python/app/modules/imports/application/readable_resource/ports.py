@@ -11,10 +11,8 @@ from typing import Literal, Protocol
 
 from app.contracts.local_metadata import LocalMetadataSource
 from app.modules.imports.application.audio_types import AudioFileMetadata
-from app.modules.imports.application.local_metadata import ResolvedLocalMetadata
 from app.modules.imports.domain.directory_probe import (
     DirectoryProbeDecision,
-    ProbeTerminationReason,
 )
 from app.modules.imports.domain.resource_adapters import (
     ResourceAdapterSpec,
@@ -35,6 +33,7 @@ from app.modules.library.public import (
     SourceNodeRecord,
     SourceNodeRepositoryPort,
 )
+from app.modules.metadata.public import ResolvedLocalMetadata
 
 __all__ = [
     "WORKER_INTERRUPTED",
@@ -200,7 +199,7 @@ class SourceTreeFilesystemPort(Protocol):
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
-    ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]: ...
+    ) -> DirectoryProbeDecision: ...
 
     def path_is_readable_directory(self, path: Path) -> bool: ...
 
@@ -228,17 +227,6 @@ class LibraryImportTaskQueuePort(Protocol):
         missing_entry_policy: MissingEntryPolicy,
     ) -> tuple[LibraryImportTaskRecord, bool]:
         """Return one active source scan, preserving stronger queued intent."""
-
-    def enqueue(
-        self,
-        *,
-        kind: ImportTaskKind,
-        library_id: str,
-        resource_id: str | None = None,
-        source_node_id: str | None = None,
-        role: AssetRole | None = None,
-        missing_entry_policy: MissingEntryPolicy = MissingEntryPolicy.PRESERVE,
-    ) -> LibraryImportTaskRecord: ...
 
     def ensure_import_asset_task(
         self,
@@ -281,14 +269,6 @@ class LibraryImportTaskQueuePort(Protocol):
     def requeue_failed_task(
         self, task_id: str
     ) -> tuple[LibraryImportTaskRecord, bool]: ...
-
-    def has_active_kind(
-        self,
-        *,
-        kind: ImportTaskKind,
-        library_id: str,
-        source_node_id: str | None = None,
-    ) -> bool: ...
 
 
 class ResourceAdapterExecutorPort(Protocol):

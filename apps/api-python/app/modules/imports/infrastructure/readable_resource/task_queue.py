@@ -91,13 +91,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         if queued is not None:
-            if (
-                missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
-                and queued.missing_entry_policy
-                != MissingEntryPolicy.PRUNE_MISSING.value
-            ):
-                queued.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
-                self._session.flush()
+            self._promote_missing_entry_policy(queued, missing_entry_policy)
             return self._to_record(queued), False
 
         running = self._session.scalar(
@@ -145,12 +139,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         )
         if row is None:
             raise RuntimeError("queued library scan disappeared after request")
-        if (
-            missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
-            and row.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
-        ):
-            row.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
-            self._session.flush()
+        self._promote_missing_entry_policy(row, missing_entry_policy)
         return self._to_record(row), inserted
 
     def request_source_scan(
@@ -169,13 +158,7 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             )
         )
         if queued is not None:
-            if (
-                missing_entry_policy is MissingEntryPolicy.PRUNE_MISSING
-                and queued.missing_entry_policy
-                != MissingEntryPolicy.PRUNE_MISSING.value
-            ):
-                queued.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
-                self._session.flush()
+            self._promote_missing_entry_policy(queued, missing_entry_policy)
             return self._to_record(queued), False
 
         running = self._session.scalar(
@@ -201,6 +184,18 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
             missing_entry_policy=missing_entry_policy,
         )
         return task, True
+
+    def _promote_missing_entry_policy(
+        self,
+        task: LibraryImportTask,
+        requested: MissingEntryPolicy,
+    ) -> None:
+        if (
+            requested is MissingEntryPolicy.PRUNE_MISSING
+            and task.missing_entry_policy != MissingEntryPolicy.PRUNE_MISSING.value
+        ):
+            task.missing_entry_policy = MissingEntryPolicy.PRUNE_MISSING.value
+            self._session.flush()
 
     def ensure_import_asset_task(
         self,
@@ -341,22 +336,6 @@ class SqlAlchemyLibraryImportTaskQueue(LibraryImportTaskQueuePort):
         row.finished_at = None
         self._session.flush()
         return self._to_record(row), True
-
-    def has_active_kind(
-        self,
-        *,
-        kind: ImportTaskKind,
-        library_id: str,
-        source_node_id: str | None = None,
-    ) -> bool:
-        stmt = select(LibraryImportTask.id).where(
-            LibraryImportTask.kind == kind,
-            LibraryImportTask.library_id == library_id,
-            LibraryImportTask.state.in_(("QUEUED", "RUNNING")),
-        )
-        if source_node_id is not None:
-            stmt = stmt.where(LibraryImportTask.source_node_id == source_node_id)
-        return self._session.scalar(stmt.limit(1)) is not None
 
     def _to_record(self, row: LibraryImportTask) -> LibraryImportTaskRecord:
         role: AssetRole | None = None

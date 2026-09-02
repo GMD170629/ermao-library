@@ -51,13 +51,6 @@ export type { LibraryBatchAction } from './model/library-batch-action';
 
 type ContextPosition = { x: number; y: number };
 type ShelfOption = { id: string; name: string; kind?: 'STATIC' | 'SMART' };
-type CoverBatchOutcome = Readonly<{
-  updated: number;
-  skipped: ReadonlyArray<{ bookId: string; reason: string }>;
-  message: string;
-  details?: string;
-}>;
-
 const actions: Array<{ value: LibraryBatchAction; label: string; shortLabel: string; description: string; icon: LucideIcon }> = [
   { value: 'metadata', label: '批量更新元数据', shortLabel: '元数据', description: '作者、标签和系列', icon: Tags },
   { value: 'find_replace', label: '查找替换', shortLabel: '查找替换', description: '支持安全 Jinja 变量和递增序列', icon: Replace },
@@ -300,8 +293,8 @@ export function LibraryBatchDialog({
       : `已将 ${result.updated} 本图书设为已读`;
   }
 
-  async function applyCovers(): Promise<CoverBatchOutcome> {
-    const result = await updateBulkBookCovers({
+  async function applyCovers() {
+    return updateBulkBookCovers({
       ids: selectedIds,
       action: coverAction,
       ratio: coverRatio,
@@ -309,14 +302,6 @@ export function LibraryBatchDialog({
       maxDimension: Number(coverMaxDimension),
       ...(coverFile ? { cover: coverFile } : {})
     });
-    return {
-      updated: result.updated,
-      skipped: result.skipped,
-      message: `已处理 ${result.updated} 本图书的封面${result.skipped.length ? `，跳过 ${result.skipped.length} 本` : ''}`,
-      details: result.skipped.length > 0
-        ? result.skipped.map((item) => `${item.bookId}: ${item.reason}`).join('；')
-        : undefined
-    };
   }
 
   async function applyDelete() {
@@ -332,13 +317,17 @@ export function LibraryBatchDialog({
     try {
       if (action === 'covers') {
         const result = await applyCovers();
+        const message = `已处理 ${result.updated} 本图书的封面${result.skipped.length ? `，跳过 ${result.skipped.length} 本` : ''}`;
+        const details = result.skipped.length > 0
+          ? result.skipped.map((item) => `${item.bookId}: ${item.reason}`).join('；')
+          : undefined;
         if (result.updated <= 0) {
-          toast.error('封面更新失败，请稍后重试', result.details ?? '批量处理封面失败');
+          toast.error('封面更新失败，请稍后重试', details ?? '批量处理封面失败');
           return;
         }
-        if (result.skipped.length > 0) toast.info(result.message, result.details);
-        else toast.success(result.message);
-        onApplied(result.message);
+        if (result.skipped.length > 0) toast.info(message, details);
+        else toast.success(message);
+        onApplied(message);
         return;
       }
       const message = action === 'metadata'

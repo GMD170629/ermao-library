@@ -289,7 +289,7 @@ class ExecuteBulkCovers:
         self,
         port: BulkBookOperationPort,
         unit_of_work: BulkBookOperationUnitOfWork,
-        regenerator: BulkCoverRegenerator | None = None,
+        regenerator: BulkCoverRegenerator,
     ) -> None:
         self._port = port
         self._unit_of_work = unit_of_work
@@ -308,8 +308,6 @@ class ExecuteBulkCovers:
         if command.action != "replace" and command.cover_content is not None:
             raise InvalidBulkBookOperationError("UNEXPECTED_COVER_FILE")
         if command.action == "regenerate":
-            if self._regenerator is None:
-                raise RuntimeError("local metadata cover regeneration is not configured")
             return self._regenerator.execute(command)
         prepared: PreparedBulkCoverResult | None = None
         try:

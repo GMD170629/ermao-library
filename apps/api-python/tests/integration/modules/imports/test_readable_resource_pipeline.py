@@ -235,6 +235,7 @@ def _pipeline(
         relocate_library_root=base.relocate_library_root,
         enable_readable_resource=base.enable_readable_resource,
         disable_readable_resource=base.disable_readable_resource,
+        request_library_scan=base.request_library_scan,
         queue=queue,
         filesystem=filesystem,
         adapters=base.adapters,

@@ -50,8 +50,6 @@ def main() -> None:
     pipeline = build_readable_resource_pipeline(import_session)
     readable_worker = build_readable_resource_worker(pipeline)
     readable_worker.startup()
-    if pipeline.request_library_scan is None:
-        raise RuntimeError("library scan requester is not configured")
     scan_coordinator = LibraryScanCoordinator(
         session=import_session,
         settings=settings,

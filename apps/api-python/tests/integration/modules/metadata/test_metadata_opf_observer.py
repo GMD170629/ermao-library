@@ -184,9 +184,6 @@ class _Queue(LibraryImportTaskQueuePort):
     def mark_failed(self, task_id, *, error_summary, finished_at):
         self.failed = error_summary
 
-    def enqueue(self, **kwargs):
-        raise AssertionError("not used by asset import")
-
     def ensure_import_asset_task(self, **kwargs):
         raise AssertionError("not used by asset import")
 
@@ -201,9 +198,6 @@ class _Queue(LibraryImportTaskQueuePort):
 
     def requeue_failed_task(self, task_id):
         raise NotImplementedError(task_id)
-
-    def has_active_kind(self, **kwargs):
-        return False
 
 
 class _Filesystem(SourceTreeFilesystemPort):

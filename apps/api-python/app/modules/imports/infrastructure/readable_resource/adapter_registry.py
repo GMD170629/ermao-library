@@ -48,7 +48,6 @@ from app.modules.library.public import (
 from app.modules.metadata.public import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
-    LocalCoverPayload,
     LocalMetadataCandidate,
     parse_opf_metadata,
 )
@@ -89,7 +88,6 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
     @staticmethod
     def _map_audio_metadata(audio: AudioFileMetadata) -> LocalAudioMetadata:
         return LocalAudioMetadata(
-            title=audio.title,
             album=audio.album,
             author=audio.author,
             narrator=audio.narrator,
@@ -116,11 +114,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         return LocalMetadataCandidate(
             source="SIDECAR_OPF",
             metadata=result.metadata,
-            cover=(
-                LocalCoverPayload(result.cover_content)
-                if result.cover_content is not None
-                else None
-            ),
+            cover=result.cover_content,
         )
 
     def inspect_embedded_local_metadata(
@@ -323,7 +317,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
         return LocalMetadataCandidate(
             source="EMBEDDED",
             metadata=metadata,
-            cover=LocalCoverPayload(cover) if cover is not None else None,
+            cover=cover,
         )
 
     def _inspect_pdf(self, path: Path) -> tuple[LocalMetadataCandidate, int] | None:
@@ -381,11 +375,7 @@ class RegistryResourceAdapterExecutor(ResourceAdapterExecutorPort):
                 identifier=inspection.identifier,
                 isbn=inspection.isbn,
             ),
-            cover=(
-                LocalCoverPayload(inspection.cover.content)
-                if inspection.cover is not None
-                else None
-            ),
+            cover=(inspection.cover.content if inspection.cover is not None else None),
         )
 
     def _epub_cover(

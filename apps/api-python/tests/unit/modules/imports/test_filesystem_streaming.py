@@ -58,7 +58,7 @@ def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> No
         raise AssertionError("generator fully exhausted unexpectedly")
 
     fs = BudgetedFilesystem(budget=150, names=names())
-    decision, termination = fs.probe_directory(
+    decision = fs.probe_directory(
         root=root,
         directory_relative_path="book",
         ignore_hidden=True,
@@ -69,7 +69,7 @@ def test_probe_does_not_materialize_full_directory_listing(tmp_path: Path) -> No
         max_depth=4,
         time_budget_ms=60_000,
     )
-    assert termination is ProbeTerminationReason.SAMPLE_LIMIT
+    assert decision.evidence.termination_reason is ProbeTerminationReason.SAMPLE_LIMIT
     assert decision.evidence.sample_count == 100
     assert fs.yielded == 100
     assert fs.exhausted is False
@@ -95,7 +95,7 @@ def test_million_entry_generator_stops_at_sample_limit(tmp_path: Path) -> None:
 
     counter = CountingNames()
     fs = BudgetedFilesystem(budget=200, names=iter(counter))
-    decision, termination = fs.probe_directory(
+    decision = fs.probe_directory(
         root=root,
         directory_relative_path="huge",
         ignore_hidden=True,
@@ -106,7 +106,7 @@ def test_million_entry_generator_stops_at_sample_limit(tmp_path: Path) -> None:
         max_depth=2,
         time_budget_ms=60_000,
     )
-    assert termination is ProbeTerminationReason.SAMPLE_LIMIT
+    assert decision.evidence.termination_reason is ProbeTerminationReason.SAMPLE_LIMIT
     assert decision.evidence.sample_count == 100
     assert counter.count == 100
     assert counter.count < 1_000_000
@@ -128,7 +128,7 @@ def test_probe_ignores_cover_and_opf_sidecars_before_adapter_matching(
     cache.mkdir()
     (cache / "bonus.mp3").write_bytes(b"ignored audio")
 
-    decision, termination = OsSourceTreeFilesystem().probe_directory(
+    decision = OsSourceTreeFilesystem().probe_directory(
         root=root,
         directory_relative_path="audiobook",
         ignore_hidden=True,
@@ -140,7 +140,9 @@ def test_probe_ignores_cover_and_opf_sidecars_before_adapter_matching(
         time_budget_ms=60_000,
     )
 
-    assert termination is ProbeTerminationReason.COMPLETE_SUBTREE
+    assert (
+        decision.evidence.termination_reason is ProbeTerminationReason.COMPLETE_SUBTREE
+    )
     assert decision.adapter is not None
     assert decision.adapter.adapter_id is ResourceAdapterId.AUDIOBOOK_DIRECTORY
     assert decision.evidence.sample_relative_paths == ("audiobook/01.mp3",)

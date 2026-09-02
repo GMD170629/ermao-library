@@ -101,7 +101,7 @@ class RecordingFilesystem:
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
-    ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]:
+    ) -> DirectoryProbeDecision:
         if self._uow.in_transaction:
             self.io_while_in_txn.append(f"probe:{directory_relative_path}")
         self.probe_calls += 1
@@ -118,7 +118,7 @@ class RecordingFilesystem:
             reason_code="NO_SAMPLES",
             evidence=evidence,
         )
-        return decision, ProbeTerminationReason.COMPLETE_SUBTREE
+        return decision
 
     def path_is_readable_directory(self, path: Path) -> bool:
         return True
@@ -263,9 +263,6 @@ class FakeBooks:
 
 
 class FakeQueue:
-    def enqueue(self, **kwargs: object) -> LibraryImportTaskRecord:
-        raise NotImplementedError
-
     def ensure_import_asset_task(self, **kwargs: object) -> None:
         return None
 
@@ -291,9 +288,6 @@ class FakeQueue:
 
     def requeue_failed_task(self, task_id: str) -> tuple[LibraryImportTaskRecord, bool]:
         raise NotImplementedError(task_id)
-
-    def has_active_kind(self, **kwargs: object) -> bool:
-        return False
 
 
 class FakeClock:
@@ -397,7 +391,7 @@ class DemandDrivenDirectoryFilesystem:
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
-    ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]:
+    ) -> DirectoryProbeDecision:
         del (
             root,
             directory_relative_path,
@@ -425,7 +419,7 @@ class DemandDrivenDirectoryFilesystem:
             reason_code="NO_SAMPLES",
             evidence=evidence,
         )
-        return decision, ProbeTerminationReason.COMPLETE_SUBTREE
+        return decision
 
     def path_is_readable_directory(self, path: Path) -> bool:
         del path

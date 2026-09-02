@@ -34,19 +34,12 @@ _AUDIO_FORMATS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class LocalCoverPayload:
-    """Validated image bytes extracted from one local metadata source."""
-
-    content: bytes
-
-
-@dataclass(frozen=True, slots=True)
 class LocalMetadataCandidate:
     """One metadata observation, identified by its local source."""
 
     source: LocalMetadataSource
     metadata: PublicationMetadata
-    cover: LocalCoverPayload | None = None
+    cover: bytes | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,22 +47,15 @@ class ResolvedLocalMetadata:
     """Metadata and cover selected from the configured local source order."""
 
     metadata: PublicationMetadata
-    cover: LocalCoverPayload | None
+    cover: bytes | None
     field_sources: tuple[tuple[str, LocalMetadataSource | Literal["REQUESTED"]], ...]
     source_order: tuple[LocalMetadataSource, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class LocalAudioMetadata:
-    """Metadata needed by local resolution for an inspected audio asset.
+    """Metadata needed by local resolution for an inspected audio asset."""
 
-    ``AudioFileMetadata`` is an imports-owned inspection DTO.  This smaller
-    value object is deliberately defined by metadata so callers can map their
-    format-specific DTO without creating a reverse dependency from metadata to
-    imports.
-    """
-
-    title: str | None = None
     album: str | None = None
     author: str | None = None
     narrator: str | None = None
@@ -78,15 +64,7 @@ class LocalAudioMetadata:
     cover_data: bytes | None = None
 
 
-class LocalSidecarCandidateReader(Protocol):
-    """Port used by callers that want this function to discover a sidecar.
-
-    The default import adapter already performs safe sidecar discovery and can
-    pass the resulting candidate directly.  The protocol also makes the
-    public function usable by another synchronous caller without importing an
-    imports implementation module.
-    """
-
+class _LocalSidecarCandidateReader(Protocol):
     def __call__(
         self,
         metadata_source: Path,
@@ -95,9 +73,7 @@ class LocalSidecarCandidateReader(Protocol):
     ) -> LocalMetadataCandidate | None: ...
 
 
-class LocalEmbeddedCandidateReader(Protocol):
-    """Port for one format adapter's embedded metadata byte inspection."""
-
+class _LocalEmbeddedCandidateReader(Protocol):
     def __call__(
         self,
         source: Path,
@@ -105,9 +81,7 @@ class LocalEmbeddedCandidateReader(Protocol):
     ) -> LocalMetadataCandidate | None: ...
 
 
-class LocalAudioMetadataReader(Protocol):
-    """Port for converting an audio asset into the neutral metadata DTO."""
-
+class _LocalAudioMetadataReader(Protocol):
     def __call__(self, source: Path) -> LocalAudioMetadata: ...
 
 
@@ -123,9 +97,9 @@ class FilesystemLocalMetadataInspector:
     def __init__(
         self,
         *,
-        embedded_reader: LocalEmbeddedCandidateReader | None = None,
-        audio_reader: LocalAudioMetadataReader | None = None,
-        sidecar_reader: LocalSidecarCandidateReader | None = None,
+        embedded_reader: _LocalEmbeddedCandidateReader | None = None,
+        audio_reader: _LocalAudioMetadataReader | None = None,
+        sidecar_reader: _LocalSidecarCandidateReader | None = None,
     ) -> None:
         self._embedded_reader = embedded_reader
         self._audio_reader = audio_reader
@@ -165,7 +139,7 @@ class FilesystemLocalMetadataInspector:
         ):
             resolved_embedded = self._embedded_reader(source, normalized_format)
 
-        return parse_local_metadata(
+        return _parse_local_metadata(
             source,
             source_format=normalized_format,
             resource_path=resource_path,
@@ -177,7 +151,7 @@ class FilesystemLocalMetadataInspector:
         )
 
 
-def parse_local_metadata(
+def _parse_local_metadata(
     source: Path,
     *,
     source_format: str,
@@ -185,7 +159,7 @@ def parse_local_metadata(
     embedded: LocalMetadataCandidate | None = None,
     audio: LocalAudioMetadata | None = None,
     sidecar: LocalMetadataCandidate | None = None,
-    sidecar_reader: LocalSidecarCandidateReader | None = None,
+    sidecar_reader: _LocalSidecarCandidateReader | None = None,
     source_order: tuple[LocalMetadataSource, ...] = DEFAULT_LOCAL_METADATA_PRIORITY,
 ) -> ResolvedLocalMetadata:
     """Compose and resolve local metadata for one existing source.
@@ -212,8 +186,9 @@ def parse_local_metadata(
 
     normalized_format = source_format.strip().upper()
     is_directory_resource = normalized_format in _AUDIOBOOK_DIRECTORY_FORMATS
+    has_directory_path = is_directory_resource and resource_path is not None
     metadata_source = (
-        resource_path if is_directory_resource and resource_path else source
+        resource_path if is_directory_resource and resource_path is not None else source
     )
 
     resolved_sidecar = sidecar
@@ -234,15 +209,11 @@ def parse_local_metadata(
                 series_name=audio.series_name,
                 volume_index=audio.volume_index,
             ),
-            cover=(
-                LocalCoverPayload(audio.cover_data)
-                if audio.cover_data is not None
-                else None
-            ),
+            cover=audio.cover_data,
         )
 
     path_titles = titles_from_local_source(
-        metadata_source.name if metadata_source.is_dir() else metadata_source.stem
+        metadata_source.name if has_directory_path else metadata_source.stem
     )
     candidates: list[LocalMetadataCandidate] = [
         LocalMetadataCandidate(
@@ -258,10 +229,10 @@ def parse_local_metadata(
         candidates.append(resolved_embedded)
     if resolved_sidecar is not None:
         candidates.append(resolved_sidecar)
-    return resolve_local_metadata(tuple(candidates), source_order)
+    return _resolve_local_metadata(tuple(candidates), source_order)
 
 
-def resolve_local_metadata(
+def _resolve_local_metadata(
     candidates: tuple[LocalMetadataCandidate, ...],
     source_order: tuple[LocalMetadataSource, ...] = DEFAULT_LOCAL_METADATA_PRIORITY,
 ) -> ResolvedLocalMetadata:
@@ -298,7 +269,7 @@ def resolve_local_metadata(
                 sources[_public_field_name(field)] = source
                 break
 
-    cover: LocalCoverPayload | None = None
+    cover: bytes | None = None
     for source in order:
         candidate = by_source.get(source)
         if candidate is not None and candidate.cover is not None:
@@ -369,12 +340,6 @@ def _public_field_name(field: str) -> str:
 __all__ = [
     "FilesystemLocalMetadataInspector",
     "LocalAudioMetadata",
-    "LocalAudioMetadataReader",
-    "LocalCoverPayload",
-    "LocalEmbeddedCandidateReader",
     "LocalMetadataCandidate",
-    "LocalSidecarCandidateReader",
     "ResolvedLocalMetadata",
-    "parse_local_metadata",
-    "resolve_local_metadata",
 ]

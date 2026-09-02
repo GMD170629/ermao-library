@@ -545,14 +545,14 @@ export async function updateResource(bookId: string, resourceId: string, body: R
   });
 }
 
-export type CoverRegenerationTargetType = 'RESOURCE' | 'SOURCE_NODE' | 'BOOK';
+type CoverRegenerationTargetType = 'RESOURCE' | 'SOURCE_NODE' | 'BOOK';
 
-export type CoverRegenerationSkipped = Readonly<{
+type CoverRegenerationSkipped = Readonly<{
   resourceId: string;
   reason: string;
 }>;
 
-export type CoverRegenerationResult = Readonly<{
+type CoverRegenerationResult = Readonly<{
   targetType: CoverRegenerationTargetType;
   targetId: string;
   updatedResourceIds: ReadonlyArray<string>;
@@ -715,8 +715,4 @@ export async function deleteBookSources(bookId: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids: [bookId], confirmation: 'DELETE_SOURCE_FILES' })
   });
-}
-
-export async function regenerateBookCover(bookId: string): Promise<BulkBookCoverResult> {
-  return regenerateBookImage(bookId);
 }

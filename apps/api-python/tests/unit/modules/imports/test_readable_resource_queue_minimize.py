@@ -124,9 +124,6 @@ class FakeQueue:
         self._state = "FAILED"
         self._error_summary = error_summary
 
-    def enqueue(self, **kwargs: object) -> LibraryImportTaskRecord:
-        raise NotImplementedError
-
     def ensure_import_asset_task(self, **kwargs: object) -> None:
         return None
 
@@ -142,9 +139,6 @@ class FakeQueue:
         self._state = "QUEUED"
         self._error_summary = None
         return self._snapshot(), True
-
-    def has_active_kind(self, **kwargs: object) -> bool:
-        return False
 
 
 class BoomAdapters:
@@ -451,15 +445,6 @@ def _worker(
         process_import=_process(adapters=adapters, queue=queue),
         uow=RecordingUoW(),
         clock=FixedClock(),
-    )
-
-
-def test_continue_import_constructs_without_clock() -> None:
-    ContinueImport(
-        source_nodes=FakeSourceNodes(),
-        queue=FakeQueue(_import_task()),
-        uow=RecordingUoW(),
-        log=FakeLog(),
     )
 
 

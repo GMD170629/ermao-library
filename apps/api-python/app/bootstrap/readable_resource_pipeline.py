@@ -101,12 +101,12 @@ class ReadableResourcePipeline:
     relocate_library_root: RelocateLibraryRoot
     enable_readable_resource: EnableReadableResource
     disable_readable_resource: DisableReadableResource
+    request_library_scan: RequestLibraryScan
     queue: SqlAlchemyLibraryImportTaskQueue
     filesystem: OsSourceTreeFilesystem
     adapters: RegistryResourceAdapterExecutor
     uow: SqlAlchemyUnitOfWork
     clock: UtcClock
-    request_library_scan: RequestLibraryScan | None = None
 
 
 def build_readable_resource_pipeline(
@@ -230,16 +230,13 @@ def continue_library_import(
     """Enqueue one library ContinueImport command in the caller session."""
 
     pipeline = build_readable_resource_pipeline(session)
-    requester = pipeline.request_library_scan
-    if requester is None:
-        raise RuntimeError("library scan requester is not configured")
-    result = requester.execute(
+    result = pipeline.request_library_scan.execute(
         RequestLibraryScanCommand(library_id=library_id, trigger=trigger)
     )
     return ContinueImportResult(
         library_id=result.library_id,
         source_node_id=None,
-        requeued_failed=result.requeued_failed,
+        requeued_failed=0,
         enqueued_scan=result.enqueued,
         task_id=result.task_id,
     )
@@ -252,10 +249,7 @@ def request_library_scan(
     trigger: LibraryScanTrigger,
 ) -> RequestLibraryScanResult:
     pipeline = build_readable_resource_pipeline(session)
-    requester = pipeline.request_library_scan
-    if requester is None:
-        raise RuntimeError("library scan requester is not configured")
-    return requester.execute(
+    return pipeline.request_library_scan.execute(
         RequestLibraryScanCommand(library_id=library_id, trigger=trigger)
     )
 

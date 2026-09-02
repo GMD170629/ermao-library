@@ -413,7 +413,7 @@ class ScanLibrarySourceTree:
         task_id: str | None,
     ) -> tuple[int, int]:
         self._uow.release_before_io()
-        decision, _termination = self._filesystem.probe_directory(
+        decision = self._filesystem.probe_directory(
             root=config.root_path,
             directory_relative_path=relative.value,
             ignore_hidden=config.ignore_hidden,

@@ -163,9 +163,9 @@ def _continue_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
 
 
 def _automatic_scan_and_drain(pipeline: ReadableResourcePipeline) -> list[str]:
-    requester = pipeline.request_library_scan
-    assert requester is not None
-    requester.execute(RequestLibraryScanCommand(library_id="lib-1", trigger="WATCHER"))
+    pipeline.request_library_scan.execute(
+        RequestLibraryScanCommand(library_id="lib-1", trigger="WATCHER")
+    )
     return _drain(pipeline)
 
 
@@ -659,7 +659,7 @@ class _LiteralNameFilesystem:
     def probe_directory(
         self,
         **kwargs: object,
-    ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]:
+    ) -> DirectoryProbeDecision:
         del kwargs
         evidence = DirectoryProbeEvidence(
             sample_relative_paths=(),
@@ -668,14 +668,11 @@ class _LiteralNameFilesystem:
             max_depth_reached=0,
             termination_reason=ProbeTerminationReason.COMPLETE_SUBTREE,
         )
-        return (
-            DirectoryProbeDecision(
-                result=ProbeInterpretationResult.NODE_ONLY,
-                adapter=None,
-                reason_code="NO_SAMPLES",
-                evidence=evidence,
-            ),
-            ProbeTerminationReason.COMPLETE_SUBTREE,
+        return DirectoryProbeDecision(
+            result=ProbeInterpretationResult.NODE_ONLY,
+            adapter=None,
+            reason_code="NO_SAMPLES",
+            evidence=evidence,
         )
 
     def path_is_readable_directory(self, path: Path) -> bool:

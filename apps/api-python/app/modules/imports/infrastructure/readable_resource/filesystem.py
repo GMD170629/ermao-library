@@ -77,7 +77,7 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
         max_entries: int,
         max_depth: int,
         time_budget_ms: int,
-    ) -> tuple[DirectoryProbeDecision, ProbeTerminationReason]:
+    ) -> DirectoryProbeDecision:
         started = time.monotonic()
         samples: list[str] = []
         entries_visited = 0
@@ -145,14 +145,13 @@ class OsSourceTreeFilesystem(SourceTreeFilesystemPort):
                 termination = ProbeTerminationReason.LOCAL_IO_ERROR
                 break
 
-        decision = decide_directory_probe(
+        return decide_directory_probe(
             directory_relative_path=directory_relative_path,
             sample_relative_paths=tuple(samples),
             entries_visited=entries_visited,
             max_depth_reached=max_depth_reached,
             termination_reason=termination,
         )
-        return decision, termination
 
     def path_is_readable_directory(self, path: Path) -> bool:
         try:

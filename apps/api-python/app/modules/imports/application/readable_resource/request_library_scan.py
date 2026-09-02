@@ -33,7 +33,6 @@ class RequestLibraryScanCommand:
 class RequestLibraryScanResult:
     library_id: str
     trigger: LibraryScanTrigger
-    requeued_failed: int
     enqueued: bool
     task_id: str | None
 
@@ -76,7 +75,6 @@ class RequestLibraryScan:
         return RequestLibraryScanResult(
             library_id=command.library_id,
             trigger=command.trigger,
-            requeued_failed=0,
             enqueued=enqueued,
             task_id=task.id,
         )

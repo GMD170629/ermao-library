@@ -12,7 +12,6 @@ from app.modules.library.infrastructure.local_cover_regeneration import (
 from app.modules.metadata.public import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
-    LocalCoverPayload,
     LocalMetadataCandidate,
 )
 
@@ -41,7 +40,7 @@ def test_audiobook_directory_uses_shared_priority_and_first_ordered_asset(
         return LocalMetadataCandidate(
             source="SIDECAR_OPF",
             metadata=PublicationMetadata(title="旁车标题"),
-            cover=LocalCoverPayload(b"sidecar-cover"),
+            cover=b"sidecar-cover",
         )
 
     parser = FilesystemLocalMetadataCoverParser(
@@ -53,9 +52,6 @@ def test_audiobook_directory_uses_shared_priority_and_first_ordered_asset(
 
     result = parser.extract_cover(
         ResourceLocalMetadataSource(
-            resource_id="resource",
-            book_id="book",
-            source_node_id="node",
             adapter_id="audiobook-directory",
             source_format="AUDIOBOOK",
             root_path=tmp_path,
@@ -65,7 +61,7 @@ def test_audiobook_directory_uses_shared_priority_and_first_ordered_asset(
         )
     )
 
-    assert result.content == b"sidecar-cover"
+    assert result == b"sidecar-cover"
     assert inspected == [first.name]
 
 
@@ -74,9 +70,6 @@ def test_missing_resource_root_returns_stable_failure(tmp_path: Path) -> None:
 
     result = parser.extract_cover(
         ResourceLocalMetadataSource(
-            resource_id="resource",
-            book_id="book",
-            source_node_id="node",
             adapter_id="epub",
             source_format="EPUB",
             root_path=tmp_path / "missing",
@@ -86,5 +79,4 @@ def test_missing_resource_root_returns_stable_failure(tmp_path: Path) -> None:
         )
     )
 
-    assert result.content is None
-    assert result.failure_code == "LOCAL_METADATA_SOURCE_UNAVAILABLE"
+    assert result == "LOCAL_METADATA_SOURCE_UNAVAILABLE"

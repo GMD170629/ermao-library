@@ -79,7 +79,7 @@ class ContinueImport:
         return ContinueImportResult(
             library_id=result.library_id,
             source_node_id=None,
-            requeued_failed=result.requeued_failed,
+            requeued_failed=0,
             enqueued_scan=result.enqueued,
             task_id=result.task_id,
         )

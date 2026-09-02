@@ -501,9 +501,7 @@ class LocalCoverSkippedView(HttpContractModel):
 
 
 class LocalCoverRegenerationPayload(HttpContractModel):
-    target_type: Literal["RESOURCE", "SOURCE_NODE", "BOOK"] = Field(
-        alias="targetType"
-    )
+    target_type: Literal["RESOURCE", "SOURCE_NODE", "BOOK"] = Field(alias="targetType")
     target_id: str = Field(alias="targetId")
     updated_resource_ids: list[str] = Field(alias="updatedResourceIds")
     skipped: list[LocalCoverSkippedView]
@@ -620,9 +618,7 @@ class AssetsResponse(SuccessEnvelope[AssetsPayload]):
     pass
 
 
-class LocalCoverRegenerationResponse(
-    SuccessEnvelope[LocalCoverRegenerationPayload]
-):
+class LocalCoverRegenerationResponse(SuccessEnvelope[LocalCoverRegenerationPayload]):
     pass
 
 

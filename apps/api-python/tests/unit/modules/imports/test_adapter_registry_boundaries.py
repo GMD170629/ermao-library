@@ -7,7 +7,6 @@ from zipfile import ZipFile
 
 import pytest
 
-from app.modules.imports.application.local_metadata import LocalCoverPayload
 from app.modules.imports.application.pdf_types import PdfInspection
 from app.modules.imports.domain.pdf_content import PdfContentKind, PdfTextEvidence
 from app.modules.imports.domain.resource_adapters import (
@@ -160,4 +159,4 @@ def test_registry_epub_merges_sidecar_embedded_path_and_cover(tmp_path: Path) ->
     assert result.local_metadata is not None
     assert result.local_metadata.metadata.title == "旁车标题"
     assert result.local_metadata.metadata.author == "内嵌作者"
-    assert result.local_metadata.cover == LocalCoverPayload(cover)
+    assert result.local_metadata.cover == cover

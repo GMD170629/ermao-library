@@ -3,33 +3,22 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.contracts.publication_metadata import PublicationMetadata
-from app.modules.imports.application.local_metadata import (
-    resolve_local_metadata as import_resolve_local_metadata,
-)
 from app.modules.metadata.public import (
     FilesystemLocalMetadataInspector,
     LocalAudioMetadata,
-    LocalCoverPayload,
     LocalMetadataCandidate,
-    parse_local_metadata,
 )
 
 
-def test_import_compatibility_surface_uses_metadata_resolver() -> None:
-    from app.modules.metadata.public import resolve_local_metadata
-
-    assert import_resolve_local_metadata is resolve_local_metadata
-
-
-def test_parse_local_metadata_uses_one_priority_for_path_embedded_and_sidecar(
+def test_inspector_uses_one_priority_for_path_embedded_and_sidecar(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "路径标题.epub"
     source.write_bytes(b"epub")
-    embedded_cover = LocalCoverPayload(b"embedded")
-    sidecar_cover = LocalCoverPayload(b"sidecar")
+    embedded_cover = b"embedded"
+    sidecar_cover = b"sidecar"
 
-    resolved = parse_local_metadata(
+    resolved = FilesystemLocalMetadataInspector().inspect(
         source,
         source_format="EPUB",
         embedded=LocalMetadataCandidate(
@@ -50,12 +39,12 @@ def test_parse_local_metadata_uses_one_priority_for_path_embedded_and_sidecar(
     assert dict(resolved.field_sources)["title"] == "SIDECAR_OPF"
 
 
-def test_parse_local_metadata_maps_audio_dto_to_embedded_candidate(
+def test_inspector_maps_audio_dto_to_embedded_candidate(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "book.m4b"
     source.write_bytes(b"audio")
-    resolved = parse_local_metadata(
+    resolved = FilesystemLocalMetadataInspector().inspect(
         source,
         source_format="AUDIO",
         audio=LocalAudioMetadata(
@@ -69,7 +58,7 @@ def test_parse_local_metadata_maps_audio_dto_to_embedded_candidate(
     assert resolved.metadata.title == "专辑标题"
     assert resolved.metadata.authors == ("作者",)
     assert resolved.metadata.narrators == ("旁白",)
-    assert resolved.cover == LocalCoverPayload(b"cover")
+    assert resolved.cover == b"cover"
 
 
 def test_directory_inspector_passes_resource_directory_to_sidecar_reader(

@@ -78,10 +78,7 @@ def test_automatic_scan_triggers_do_not_retry_historical_failures(
         uow=cast(UnitOfWorkPort, _UnitOfWork()),
         log=cast(PipelineLogPort, _Log()),
     )
-    result = use_case.execute(
-        RequestLibraryScanCommand(library_id="library", trigger=trigger)
-    )
-    assert result.requeued_failed == 0
+    use_case.execute(RequestLibraryScanCommand(library_id="library", trigger=trigger))
     assert queue.requested_policies == [MissingEntryPolicy.PRESERVE]
 
 
@@ -93,8 +90,5 @@ def test_manual_scan_only_changes_the_missing_entry_policy() -> None:
         uow=cast(UnitOfWorkPort, _UnitOfWork()),
         log=cast(PipelineLogPort, _Log()),
     )
-    result = use_case.execute(
-        RequestLibraryScanCommand(library_id="library", trigger="MANUAL")
-    )
-    assert result.requeued_failed == 0
+    use_case.execute(RequestLibraryScanCommand(library_id="library", trigger="MANUAL"))
     assert queue.requested_policies == [MissingEntryPolicy.PRUNE_MISSING]

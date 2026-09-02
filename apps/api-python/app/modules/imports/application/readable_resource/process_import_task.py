@@ -141,7 +141,7 @@ class ProcessReadableResourceImportTask:
             try:
                 prepared_cover = self._covers.prepare(
                     resource_id=resource.id,
-                    content=parsed.local_metadata.cover.content,
+                    content=parsed.local_metadata.cover,
                 )
             except ValueError:
                 self._log.emit(

@@ -471,8 +471,8 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     try {
       if (action === 'regenerate-cover') {
         const result = await regenerateSourceNodeCover(book.id, target.sourceNodeId);
+        const skipped = result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；');
         if (!result.sourceNodeUpdated || result.updatedResourceIds.length === 0) {
-          const skipped = result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；');
           feedback.error(t('封面更新失败，请稍后重试'), skipped || t('该来源目录还没有可用于生成封面的可读资源'));
           return;
         }
@@ -483,7 +483,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
               value0: result.updatedResourceIds.length,
               value1: t('，跳过 {value0} 本', { value0: result.skipped.length })
             }),
-            result.skipped.map((item) => `${item.resourceId}: ${item.reason}`).join('；')
+            skipped
           );
         } else {
           feedback.success(t('封面已重新生成'));

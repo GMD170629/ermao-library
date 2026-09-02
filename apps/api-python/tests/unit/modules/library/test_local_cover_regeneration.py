@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.modules.library.application.local_cover_regeneration import (
-    LocalCoverExtraction,
+    LocalCoverFailureCode,
     LocalCoverScope,
     LocalCoverUnavailableError,
     RegenerateLocalMetadataCovers,
@@ -53,9 +53,6 @@ class _Sources:
         if book_id != "book" or resource_id not in {"r1", "r2", "r3"}:
             return None
         return ResourceLocalMetadataSource(
-            resource_id=resource_id,
-            book_id=book_id,
-            source_node_id=f"{resource_id}-node",
             adapter_id="epub",
             source_format="EPUB",
             root_path=Path("/library"),
@@ -86,9 +83,7 @@ class _Sources:
         assert source_node_id == "node"
         return self.source_path
 
-    def mark_resource_cover_ready(
-        self, *, resource_id: str, cover_path: str
-    ) -> None:
+    def mark_resource_cover_ready(self, *, resource_id: str, cover_path: str) -> None:
         self.resource_paths[resource_id] = cover_path
         self.marked_resources.append((resource_id, cover_path))
 
@@ -100,15 +95,16 @@ class _Sources:
 
 
 class _Parser:
-    def __init__(self, results: dict[str, LocalCoverExtraction]) -> None:
+    def __init__(self, results: dict[str, bytes | LocalCoverFailureCode]) -> None:
         self.results = results
         self.calls: list[str] = []
 
     def extract_cover(
         self, source: ResourceLocalMetadataSource
-    ) -> LocalCoverExtraction:
-        self.calls.append(source.resource_id)
-        return self.results[source.resource_id]
+    ) -> bytes | LocalCoverFailureCode:
+        resource_id = Path(source.resource_relative_path).stem
+        self.calls.append(resource_id)
+        return self.results[resource_id]
 
 
 class _ResourceCovers:
@@ -242,7 +238,7 @@ def test_resource_regeneration_updates_only_the_selected_resource() -> None:
     sources = _Sources()
     use_case, resource_covers, source_covers, unit_of_work = _use_case(
         sources,
-        _Parser({"r1": LocalCoverExtraction(content=b"new-cover")}),
+        _Parser({"r1": b"new-cover"}),
     )
 
     result = use_case.regenerate_resource(
@@ -261,20 +257,11 @@ def test_resource_failure_preserves_the_existing_cover() -> None:
     sources = _Sources()
     use_case, resource_covers, _source_covers, unit_of_work = _use_case(
         sources,
-        _Parser(
-            {
-                "r1": LocalCoverExtraction(
-                    content=None,
-                    failure_code="LOCAL_COVER_NOT_FOUND",
-                )
-            }
-        ),
+        _Parser({"r1": "LOCAL_COVER_NOT_FOUND"}),
     )
 
     with pytest.raises(LocalCoverUnavailableError) as raised:
-        use_case.regenerate_resource(
-            actor=_actor(), book_id="book", resource_id="r1"
-        )
+        use_case.regenerate_resource(actor=_actor(), book_id="book", resource_id="r1")
 
     assert raised.value.code == "LOCAL_COVER_NOT_FOUND"
     assert sources.resource_paths["r1"] == "old-r1"
@@ -285,7 +272,7 @@ def test_resource_failure_preserves_the_existing_cover() -> None:
 
 def test_resource_commit_failure_reverts_the_published_cover() -> None:
     sources = _Sources()
-    parser = _Parser({"r1": LocalCoverExtraction(content=b"new-cover")})
+    parser = _Parser({"r1": b"new-cover"})
     resource_covers = _ResourceCovers()
     source_covers = _SourceCovers()
     unit_of_work = _FailingCommitUnitOfWork()
@@ -314,17 +301,12 @@ def test_directory_updates_every_successful_resource_and_uses_first_cover() -> N
     sources = _Sources(root=True)
     parser = _Parser(
         {
-            "r1": LocalCoverExtraction(content=b"first"),
-            "r2": LocalCoverExtraction(
-                content=None,
-                failure_code="LOCAL_METADATA_SOURCE_UNAVAILABLE",
-            ),
-            "r3": LocalCoverExtraction(content=b"third"),
+            "r1": b"first",
+            "r2": "LOCAL_METADATA_SOURCE_UNAVAILABLE",
+            "r3": b"third",
         }
     )
-    use_case, _resource_covers, source_covers, unit_of_work = _use_case(
-        sources, parser
-    )
+    use_case, _resource_covers, source_covers, unit_of_work = _use_case(sources, parser)
 
     result = use_case.regenerate_source_node(
         actor=_actor(), book_id="book", source_node_id="node"
@@ -348,9 +330,9 @@ def test_non_root_directory_does_not_report_a_book_cover_update() -> None:
         sources,
         _Parser(
             {
-                "r1": LocalCoverExtraction(content=b"one"),
-                "r2": LocalCoverExtraction(content=b"two"),
-                "r3": LocalCoverExtraction(content=b"three"),
+                "r1": b"one",
+                "r2": b"two",
+                "r3": b"three",
             }
         ),
     )

@@ -25,7 +25,6 @@ from app.modules.library.application.bulk_operations import (
 )
 from app.modules.library.application.local_cover_regeneration import (
     BulkCoverRegenerationOperationPort,
-    LocalCoverExtraction,
     LocalCoverFailureCode,
     LocalCoverRegenerationResult,
     LocalCoverScope,
@@ -45,16 +44,13 @@ class FilesystemLocalMetadataCoverParser:
 
     def extract_cover(
         self, source: ResourceLocalMetadataSource
-    ) -> LocalCoverExtraction:
+    ) -> bytes | LocalCoverFailureCode:
         try:
             root = source.root_path.expanduser().resolve(strict=True)
             resource_path = (root / source.resource_relative_path).resolve(strict=True)
             resource_path.relative_to(root)
         except (OSError, ValueError):
-            return LocalCoverExtraction(
-                content=None,
-                failure_code="LOCAL_METADATA_SOURCE_UNAVAILABLE",
-            )
+            return "LOCAL_METADATA_SOURCE_UNAVAILABLE"
 
         saw_readable_source = False
         saw_parse_failure = False
@@ -78,7 +74,7 @@ class FilesystemLocalMetadataCoverParser:
                 saw_parse_failure = True
                 continue
             if resolved.cover is not None:
-                return LocalCoverExtraction(content=resolved.cover.content)
+                return resolved.cover
 
         failure: LocalCoverFailureCode
         if not saw_readable_source:
@@ -87,7 +83,7 @@ class FilesystemLocalMetadataCoverParser:
             failure = "LOCAL_METADATA_PARSE_FAILED"
         else:
             failure = "LOCAL_COVER_NOT_FOUND"
-        return LocalCoverExtraction(content=None, failure_code=failure)
+        return failure
 
     @staticmethod
     def _metadata_source_format(source: ResourceLocalMetadataSource) -> str:
@@ -153,9 +149,6 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
         if not asset_paths and anchor.physical_kind == "REGULAR_FILE":
             asset_paths = (str(anchor.relative_path),)
         return ResourceLocalMetadataSource(
-            resource_id=str(resource.id),
-            book_id=str(resource.book_id),
-            source_node_id=str(resource.source_node_id),
             adapter_id=str(resource.adapter_id),
             source_format=str(resource.format),
             root_path=Path(str(library.root_path)),
@@ -216,9 +209,7 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
         metadata = self._db.get(LibrarySourceNodeMetadata, source_node_id)
         return metadata.cover_path if metadata is not None else None
 
-    def mark_resource_cover_ready(
-        self, *, resource_id: str, cover_path: str
-    ) -> None:
+    def mark_resource_cover_ready(self, *, resource_id: str, cover_path: str) -> None:
         metadata = self._db.get(LibraryReadableResourceMetadata, resource_id)
         if metadata is None:
             raise LookupError(resource_id)
@@ -309,9 +300,7 @@ class SqlAlchemyLocalCoverSources(LocalCoverSourcePort):
         )
 
 
-class SqlAlchemyBulkCoverRegenerationOperations(
-    BulkCoverRegenerationOperationPort
-):
+class SqlAlchemyBulkCoverRegenerationOperations(BulkCoverRegenerationOperationPort):
     def __init__(self, db: Session) -> None:
         self._db = db
 
@@ -349,8 +338,7 @@ class SqlAlchemyBulkCoverRegenerationOperations(
                     for result in results
                 ],
                 "skipped": [
-                    {"bookId": item.book_id, "reason": item.reason}
-                    for item in skipped
+                    {"bookId": item.book_id, "reason": item.reason} for item in skipped
                 ],
             },
             inverse={},

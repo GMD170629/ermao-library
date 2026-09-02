@@ -68,6 +68,7 @@ class FakeCoverState:
         assert resource_id == "resource-1"
         self.ready_path = cover_path
 
+
 class FakePublication:
     reverted = False
     completed = False

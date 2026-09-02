@@ -46,16 +46,6 @@ from app.modules.imports.application.save_uploaded_files import (
 )
 from app.modules.imports.domain.library_scan_schedule import LibraryScanSettings
 from app.modules.imports.domain.scan_policy import MissingEntryPolicy
-from app.modules.metadata.public import (
-    FilesystemLocalMetadataInspector,
-    LocalAudioMetadata,
-    LocalAudioMetadataReader,
-    LocalCoverPayload,
-    LocalEmbeddedCandidateReader,
-    LocalMetadataCandidate,
-    LocalSidecarCandidateReader,
-    ResolvedLocalMetadata,
-)
 
 __all__ = [
     "SUPPORTED_AUDIO_EXTS",
@@ -64,23 +54,15 @@ __all__ = [
     "ContinueImportResult",
     "ContinueLibraryImport",
     "ContinueSourceImport",
-    "FilesystemLocalMetadataInspector",
     "LibraryPathError",
     "LibraryScanSettings",
     "LibraryScanTrigger",
-    "LocalAudioMetadata",
-    "LocalAudioMetadataReader",
-    "LocalCoverPayload",
-    "LocalEmbeddedCandidateReader",
-    "LocalMetadataCandidate",
-    "LocalSidecarCandidateReader",
     "MissingEntryPolicy",
     "ParsedReleaseTitle",
     "ProcessReadableResourceImportTask",
     "RequestLibraryScan",
     "RequestLibraryScanCommand",
     "RequestLibraryScanResult",
-    "ResolvedLocalMetadata",
     "SaveUploadedFiles",
     "SaveUploadedFilesCommand",
     "SavedUploadFile",

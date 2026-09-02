@@ -483,7 +483,9 @@ def test_bulk_cover_replace_publishes_each_book_anchor_and_records_operation(
             LibrarySourceNodeMetadata, f"bulk-book-{index}-node"
         )
         assert book_metadata is not None and book_metadata.cover_status == "READY"
-        assert resource_metadata is not None and resource_metadata.cover_status == "READY"
+        assert (
+            resource_metadata is not None and resource_metadata.cover_status == "READY"
+        )
         assert source_metadata is not None and source_metadata.cover_status == "READY"
         assert book_metadata.cover_path == source_metadata.cover_path
         assert resource_metadata.cover_path is not None
