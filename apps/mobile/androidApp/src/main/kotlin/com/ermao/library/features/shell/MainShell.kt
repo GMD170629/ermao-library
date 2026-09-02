@@ -266,6 +266,7 @@ fun MainShell(
                     assetId = record.assetId,
                     localFile = localFile,
                     mimeType = record.sourceMimeType,
+                    artworkApiPath = record.coverUrl.takeIf(String::isNotBlank),
                     positionMillis = audioSnapshot.positionMillis,
                 )
             }
@@ -417,11 +418,7 @@ fun MainShell(
         )
     }
     val openAudio: (ResourceContent, ReadingUnit?) -> Unit = { resource, unit ->
-        val artworkUri = resource.coverUrl
-            .takeIf(String::isNotBlank)
-            ?.let { cover ->
-                if (cover.startsWith("/api/")) session.profile.baseUrl.resolveApiPath(cover) else cover
-            }
+        val artworkUri = resource.coverUrl.takeIf(String::isNotBlank)
         audioRuntime.launchRemote(
             profile = session.profile,
             namespace = ReaderSyncNamespace(
@@ -658,6 +655,7 @@ fun MainShell(
                                         assetId = record.assetId,
                                         localFile = localFile,
                                         mimeType = record.sourceMimeType,
+                                        artworkApiPath = record.coverUrl.takeIf(String::isNotBlank),
                                     )
                                     audioNowPlayingVisible = true
                                 } else {
@@ -839,6 +837,8 @@ fun MainShell(
             }
             AudioMiniPlayer(
                 snapshot = audioSnapshot,
+                repository = contentRepository,
+                context = contentContext,
                 onOpen = { audioNowPlayingVisible = true },
                 onPlayPause = {
                     if (audioSnapshot.phase == com.ermao.library.features.audio.model.AndroidAudioPhase.Playing) {
@@ -853,6 +853,8 @@ fun MainShell(
             visible = audioNowPlayingVisible,
             snapshot = audioSnapshot,
             runtime = audioRuntime,
+            repository = contentRepository,
+            context = contentContext,
             onDismiss = { audioNowPlayingVisible = false },
         )
     }

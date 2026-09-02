@@ -170,6 +170,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         assetId: String,
         localFile: File,
         mimeType: String,
+        artworkApiPath: String? = null,
         positionMillis: Long = 0,
     ) {
         requireNotNull(appContext) { "AUDIO_ANDROID_CONTEXT_REQUIRED" }
@@ -181,6 +182,7 @@ class AndroidAudioPlaybackRuntime private constructor(
                 resourceId = resourceId,
                 title = title,
                 author = author,
+                artworkUri = artworkApiPath,
                 tracks = listOf(
                     AndroidAudioTrack(
                         assetId = assetId,
@@ -240,6 +242,7 @@ class AndroidAudioPlaybackRuntime private constructor(
                 ),
                 resourceId = resourceId,
                 title = titleHint,
+                artworkApiPath = artworkUri,
             )
         }
         scope.launch {
@@ -270,7 +273,7 @@ class AndroidAudioPlaybackRuntime private constructor(
                         publication = publication,
                         intent = intent,
                         sourceUriForAsset = { asset -> profile.baseUrl.resolveApiPath(asset.apiPath) },
-                        artworkUri = artworkUri,
+                        artworkUri = artworkUri ?: publication.coverApiPath,
                     )
                     activePublication = publication
                     commitSharedPublication(publication, intent)
@@ -288,6 +291,7 @@ class AndroidAudioPlaybackRuntime private constructor(
                             ),
                             resourceId = resourceId,
                             title = titleHint,
+                            artworkApiPath = artworkUri,
                             error = AndroidAudioError(result.code, result.recoverable),
                         )
                     }
@@ -792,6 +796,7 @@ class AndroidAudioPlaybackRuntime private constructor(
             chapterId = chapter?.id ?: intent.chapterId,
             title = intent.title,
             author = intent.author,
+            artworkApiPath = intent.artworkUri,
             chapterTitle = chapter?.title,
             positionMillis = position,
             durationMillis = duration,
@@ -926,6 +931,7 @@ class AndroidAudioPlaybackRuntime private constructor(
             chapterId = chapter?.id,
             title = title,
             author = author,
+            artworkApiPath = artworkUri,
             chapterTitle = chapter?.title,
             positionMillis = positionMillis,
             durationMillis = track.durationMillis ?: 0,

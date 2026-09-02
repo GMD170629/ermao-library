@@ -142,15 +142,6 @@ fun ContentCover(
     cacheRevision: Int = 0,
 ) {
     val theme = WarmPageThemeValues
-    val appContext = LocalContext.current.applicationContext
-    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
-    val image by produceState<ImageBitmap?>(null, contentId, coverUrl, role, context.namespace, cacheRevision, managementRevision) {
-        value = AndroidCoverCache.load(appContext, context, coverUrl, repository)?.let { bytes ->
-            withContext(Dispatchers.Default) {
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-            }
-        }
-    }
     Box(
         modifier = modifier
             .aspectRatio(
@@ -164,9 +155,52 @@ fun ContentCover(
                 RoundedCornerShape(
                     if (role == CoverRole.Hero) theme.radii.coverHero else theme.radii.coverCompact,
                 ),
-            ),
+        ),
         contentAlignment = Alignment.Center,
     ) {
+        AuthenticatedCoverArtwork(
+            contentId = contentId,
+            title = title,
+            coverUrl = coverUrl,
+            repository = repository,
+            context = context,
+            modifier = Modifier.fillMaxSize(),
+            cacheRevision = cacheRevision,
+        )
+    }
+}
+
+/** Authenticated cover bytes without prescribing the consumer's aspect ratio or surface. */
+@Composable
+internal fun AuthenticatedCoverArtwork(
+    contentId: String,
+    title: String,
+    coverUrl: String,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    modifier: Modifier = Modifier,
+    cacheRevision: Int = 0,
+) {
+    val theme = WarmPageThemeValues
+    val appContext = LocalContext.current.applicationContext
+    val managementRevision = com.ermao.library.features.workmanagement.managementRevision()
+    val image by produceState<ImageBitmap?>(
+        null,
+        contentId,
+        coverUrl,
+        context.namespace,
+        cacheRevision,
+        managementRevision,
+    ) {
+        value = coverUrl.takeIf(String::isNotBlank)?.let { authenticatedPath ->
+            AndroidCoverCache.load(appContext, context, authenticatedPath, repository)
+        }?.let { bytes ->
+            withContext(Dispatchers.Default) {
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            }
+        }
+    }
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (image != null) {
             Image(
                 bitmap = image!!,

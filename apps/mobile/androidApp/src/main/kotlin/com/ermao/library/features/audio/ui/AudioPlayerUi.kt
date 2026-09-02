@@ -1,7 +1,6 @@
 package com.ermao.library.features.audio.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,8 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Forward30
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -48,7 +47,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -69,8 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -78,14 +75,13 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.audio.application.AndroidAudioPlaybackRuntime
@@ -93,6 +89,9 @@ import com.ermao.library.features.audio.model.AndroidAudioPhase
 import com.ermao.library.features.audio.model.AndroidAudioPlaybackSnapshot
 import com.ermao.library.features.audio.model.AndroidAudioTrack
 import com.ermao.library.features.audio.model.SUPPORTED_PLAYBACK_RATES
+import com.ermao.library.features.content.AuthenticatedBookArtwork
+import com.ermao.library.shared.modules.library.ContentRepository
+import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
 import java.util.Locale
@@ -106,6 +105,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @Composable
 fun AudioMiniPlayer(
     snapshot: AndroidAudioPlaybackSnapshot,
+    repository: ContentRepository,
+    context: ContentRequestContext,
     onOpen: () -> Unit,
     onPlayPause: () -> Unit,
     modifier: Modifier = Modifier,
@@ -142,9 +143,12 @@ fun AudioMiniPlayer(
                 horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
             ) {
                 AudioArtwork(
+                    contentId = snapshot.bookId ?: snapshot.resourceId ?: title,
                     title = title,
+                    coverUrl = snapshot.artworkApiPath.orEmpty(),
+                    repository = repository,
+                    context = context,
                     modifier = Modifier.size(48.dp),
-                    iconSize = 24.dp,
                 )
                 Column(
                     modifier = Modifier.weight(1f),
@@ -212,6 +216,8 @@ fun AudioMiniPlayer(
 fun AudioNowPlayingScreen(
     snapshot: AndroidAudioPlaybackSnapshot,
     runtime: AndroidAudioPlaybackRuntime,
+    repository: ContentRepository,
+    context: ContentRequestContext,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -237,7 +243,7 @@ fun AudioNowPlayingScreen(
         AndroidAudioPhase.Buffering,
         AndroidAudioPhase.Error,
     )
-    val chaptersEnabled = controlsEnabled && runtime.currentTracks().isNotEmpty()
+    val chaptersEnabled = runtime.currentTracks().isNotEmpty()
     val speedEnabled = controlsEnabled
 
     Scaffold(
@@ -292,16 +298,18 @@ fun AudioNowPlayingScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    // Keep this slot square regardless of the source ratio. An authenticated
-                    // artwork bitmap can be passed to AudioArtwork in a future media adapter and
-                    // is always Fit.
+                    // Keep the established square player slot; the authenticated content cover
+                    // is fitted inside without cropping.
                     AudioArtwork(
+                        contentId = snapshot.bookId ?: snapshot.resourceId ?: title,
                         title = title,
+                        coverUrl = snapshot.artworkApiPath.orEmpty(),
+                        repository = repository,
+                        context = context,
                         modifier = Modifier
                             .widthIn(min = 180.dp, max = 260.dp)
                             .fillMaxWidth()
                             .aspectRatio(1f),
-                        iconSize = 48.dp,
                     )
                     Spacer(Modifier.height(theme.spacing.three))
                     Text(
@@ -419,45 +427,54 @@ fun AudioNowPlayingScreen(
                     Spacer(Modifier.height(theme.spacing.one))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AudioIconButton(
-                            icon = Icons.Filled.SkipPrevious,
-                            label = stringResource(R.string.audio_previous),
-                            onClick = runtime::previous,
-                            enabled = controlsEnabled,
-                        )
-                        AudioSkipButton(
-                            icon = Icons.Filled.Replay,
-                            seconds = "15",
-                            label = stringResource(R.string.audio_back_15),
-                            onClick = runtime::skipBack,
-                            enabled = controlsEnabled,
-                        )
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            AudioIconButton(
+                                icon = Icons.Filled.SkipPrevious,
+                                label = stringResource(R.string.audio_previous),
+                                onClick = runtime::previous,
+                                enabled = controlsEnabled,
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            AudioSkipButton(
+                                seconds = "15",
+                                label = stringResource(R.string.audio_back_15),
+                                onClick = runtime::skipBack,
+                                enabled = controlsEnabled,
+                            )
+                        }
                         val isLoading = snapshot.phase == AndroidAudioPhase.Loading ||
                             snapshot.phase == AndroidAudioPhase.Buffering
-                        AudioPlaybackButton(
-                            label = if (isLoading) status else playPauseLabel,
-                            enabled = controlsEnabled,
-                            isPlaying = snapshot.phase == AndroidAudioPhase.Playing,
-                            isLoading = isLoading,
-                            onClick = {
-                                if (snapshot.phase == AndroidAudioPhase.Playing) runtime.pause() else runtime.play()
-                            },
-                        )
-                        AudioIconButton(
-                            icon = Icons.Filled.Forward30,
-                            label = stringResource(R.string.audio_forward_30),
-                            onClick = runtime::skipForward,
-                            enabled = controlsEnabled,
-                        )
-                        AudioIconButton(
-                            icon = Icons.Filled.SkipNext,
-                            label = stringResource(R.string.audio_next),
-                            onClick = runtime::next,
-                            enabled = controlsEnabled,
-                        )
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            AudioPlaybackButton(
+                                label = if (isLoading) status else playPauseLabel,
+                                enabled = controlsEnabled,
+                                isPlaying = snapshot.phase == AndroidAudioPhase.Playing,
+                                isLoading = isLoading,
+                                onClick = {
+                                    if (snapshot.phase == AndroidAudioPhase.Playing) runtime.pause() else runtime.play()
+                                },
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            AudioSkipButton(
+                                seconds = "30",
+                                label = stringResource(R.string.audio_forward_30),
+                                onClick = runtime::skipForward,
+                                enabled = controlsEnabled,
+                                forward = true,
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            AudioIconButton(
+                                icon = Icons.Filled.SkipNext,
+                                label = stringResource(R.string.audio_next),
+                                onClick = runtime::next,
+                                enabled = controlsEnabled,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(theme.spacing.two))
                     HorizontalDivider(color = theme.colors.divider)
@@ -509,8 +526,8 @@ fun AudioNowPlayingScreen(
                             }
                         }
                         AudioToolButton(
-                            label = stringResource(R.string.audio_chapters),
-                            contentDescription = stringResource(R.string.audio_chapters),
+                            label = stringResource(R.string.audio_queue_title),
+                            contentDescription = stringResource(R.string.audio_queue_title),
                             enabled = chaptersEnabled,
                             onClick = { queueVisible = true },
                             modifier = Modifier.weight(1f),
@@ -565,10 +582,6 @@ fun AudioNowPlayingScreen(
             onSelectAsset = { assetId ->
                 queueVisible = false
                 runtime.selectAsset(assetId)
-            },
-            onSelectChapter = { assetId, chapterId ->
-                queueVisible = false
-                runtime.selectChapter(assetId, chapterId)
             },
             onDismiss = { queueVisible = false },
         )
@@ -681,11 +694,11 @@ private fun AudioIconButton(
 
 @Composable
 private fun AudioSkipButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
     seconds: String,
     label: String,
     onClick: () -> Unit,
     enabled: Boolean,
+    forward: Boolean = false,
 ) {
     val theme = WarmPageThemeValues
     IconButton(
@@ -698,12 +711,17 @@ private fun AudioSkipButton(
                 if (!enabled) disabled()
             },
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.size(34.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                imageVector = icon,
+                imageVector = Icons.Filled.Replay,
                 contentDescription = null,
                 tint = if (enabled) theme.colors.textPrimary else theme.colors.textTertiary,
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { scaleX = if (forward) -1f else 1f },
             )
             Text(
                 text = seconds,
@@ -764,6 +782,8 @@ fun AudioNowPlayingDialog(
     visible: Boolean,
     snapshot: AndroidAudioPlaybackSnapshot,
     runtime: AndroidAudioPlaybackRuntime,
+    repository: ContentRepository,
+    context: ContentRequestContext,
     onDismiss: () -> Unit,
 ) {
     if (!visible) return
@@ -782,7 +802,13 @@ fun AudioNowPlayingDialog(
             color = WarmPageThemeValues.colors.surfaceRaised,
         ) {
             BackHandler(onBack = dismissPlayer)
-            AudioNowPlayingScreen(snapshot = snapshot, runtime = runtime, onClose = dismissPlayer)
+            AudioNowPlayingScreen(
+                snapshot = snapshot,
+                runtime = runtime,
+                repository = repository,
+                context = context,
+                onClose = dismissPlayer,
+            )
         }
     }
 }
@@ -793,46 +819,12 @@ private fun AudioQueueSheet(
     snapshot: AndroidAudioPlaybackSnapshot,
     intentTracks: List<AndroidAudioTrack>,
     onSelectAsset: (String) -> Unit,
-    onSelectChapter: (assetId: String, chapterId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val theme = WarmPageThemeValues
     val currentTrackLabel = stringResource(R.string.audio_track_current)
-    val currentChapterLabel = stringResource(R.string.audio_chapter_current)
-    val entries = remember(intentTracks) {
-        intentTracks.flatMap { track ->
-            if (track.chapters.isNotEmpty()) {
-                track.chapters.map { chapter ->
-                    AudioQueueEntry(
-                        key = "chapter:${track.assetId}:${chapter.id}",
-                        assetId = track.assetId,
-                        chapterId = chapter.id,
-                        title = chapter.title,
-                        supportingText = "${track.title} · ${formatMillis(chapter.startMillis)}",
-                    )
-                }
-            } else {
-                listOf(
-                    AudioQueueEntry(
-                        key = "track:${track.assetId}",
-                        assetId = track.assetId,
-                        chapterId = null,
-                        title = track.title,
-                        supportingText = formatMillis(track.durationMillis ?: 0),
-                    ),
-                )
-            }
-        }
-    }
-    val exactCurrentEntryIndex = entries.indexOfFirst { entry ->
-        entry.assetId == snapshot.assetId &&
-            (
-                entry.chapterId == snapshot.chapterId ||
-                    (entry.chapterId == null && snapshot.chapterId == null)
-                )
-    }
-    val currentEntryIndex = exactCurrentEntryIndex.takeIf { it >= 0 }
-        ?: entries.indexOfFirst { it.assetId == snapshot.assetId }
+    val entries = remember(intentTracks) { audioQueueEntries(intentTracks) }
+    val currentEntryIndex = entries.indexOfFirst { it.assetId == snapshot.assetId }
     val anchorIndex = currentEntryIndex.coerceAtLeast(0)
     var windowStart by remember(entries, currentEntryIndex) {
         mutableIntStateOf((anchorIndex - AUDIO_QUEUE_PAGE_SIZE).coerceAtLeast(0))
@@ -890,31 +882,63 @@ private fun AudioQueueSheet(
                 .navigationBarsPaddingCompat(),
         ) {
             items(visibleEntries, key = { entry -> entry.key }) { entry ->
-                val isCurrent = entry.key == entries.getOrNull(currentEntryIndex)?.key
-                val supportingText = when {
-                    entry.chapterId != null && isCurrent ->
-                        "${entry.supportingText} · $currentChapterLabel"
-                    entry.chapterId == null && isCurrent -> currentTrackLabel
-                    else -> entry.supportingText
-                }
-                ListItem(
-                    headlineContent = {
-                        Text(entry.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    },
-                    supportingContent = {
-                        Text(supportingText, color = theme.colors.textSecondary)
-                    },
+                val isCurrent = entry.assetId == snapshot.assetId
+                Row(
                     modifier = Modifier
                         .heightIn(min = theme.components.controls.minimumTouchTarget)
+                        .fillMaxWidth()
+                        .background(if (isCurrent) theme.colors.accentSoft else theme.colors.surfaceRaised)
                         .clickable(role = Role.Button) {
-                            val chapterId = entry.chapterId
-                            if (chapterId == null) {
-                                onSelectAsset(entry.assetId)
-                            } else {
-                                onSelectChapter(entry.assetId, chapterId)
-                            }
-                        },
-                )
+                            onSelectAsset(entry.assetId)
+                        }
+                        .semantics {
+                            selected = isCurrent
+                            if (isCurrent) stateDescription = currentTrackLabel
+                        }
+                        .padding(horizontal = theme.spacing.two, vertical = theme.spacing.oneAndHalf),
+                    horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = entry.index.toString(),
+                        style = theme.typography.caption.copy(fontWeight = FontWeight.Medium),
+                        color = if (isCurrent) theme.colors.brandAccent else theme.colors.textTertiary,
+                        modifier = Modifier.widthIn(min = 24.dp),
+                        textAlign = TextAlign.End,
+                    )
+                    Text(
+                        text = entry.title,
+                        style = theme.typography.body.copy(
+                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                        ),
+                        color = if (isCurrent) theme.colors.brandAccent else theme.colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = formatMillis(entry.durationMillis),
+                        style = theme.typography.caption,
+                        color = if (isCurrent) theme.colors.brandAccent else theme.colors.textSecondary,
+                        maxLines = 1,
+                    )
+                    Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                        if (isCurrent) {
+                            Icon(
+                                imageVector = Icons.Filled.GraphicEq,
+                                contentDescription = currentTrackLabel,
+                                tint = theme.colors.brandAccent,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+                if (entry.index < entries.size) {
+                    HorizontalDivider(
+                        color = theme.colors.textTertiary.copy(alpha = 0.38f),
+                        thickness = 1.dp,
+                    )
+                }
             }
         }
     }
@@ -922,55 +946,56 @@ private fun AudioQueueSheet(
 
 private const val AUDIO_QUEUE_PAGE_SIZE = 20
 
-private data class AudioQueueEntry(
+internal data class AudioQueueEntry(
     val key: String,
+    val index: Int,
     val assetId: String,
-    val chapterId: String?,
     val title: String,
-    val supportingText: String,
+    val durationMillis: Long,
 )
 
+internal fun audioQueueEntries(tracks: List<AndroidAudioTrack>): List<AudioQueueEntry> =
+    tracks.mapIndexed { index, track ->
+        AudioQueueEntry(
+            key = "track:${track.assetId}",
+            index = index + 1,
+            assetId = track.assetId,
+            title = track.title,
+            durationMillis = track.durationMillis ?: 0,
+        )
+    }
+
 /**
- * The runtime intentionally supplies no unauthenticated remote image path to this surface. The
- * optional bitmap branch documents the media slot contract for a future authenticated adapter;
- * every ratio is rendered with ContentScale.Fit and the fallback remains a real brand affordance.
+ * Cover loading delegates to the content capability's authenticated cache and repository path.
+ * This surface only owns the square player composition and its visual treatment.
  */
 @Composable
 private fun AudioArtwork(
+    contentId: String,
     title: String,
+    coverUrl: String,
+    repository: ContentRepository,
+    context: ContentRequestContext,
     modifier: Modifier = Modifier,
-    artwork: ImageBitmap? = null,
-    iconSize: Dp = 48.dp,
 ) {
     val theme = WarmPageThemeValues
     val shape = RoundedCornerShape(theme.radii.coverHero)
-    val coverDescription = stringResource(R.string.audio_cover_description, title)
     Box(
         modifier = modifier
             .aspectRatio(1f)
             .shadow(4.dp, shape)
             .clip(shape)
-            .background(theme.colors.surfaceRaised)
-            .semantics { contentDescription = coverDescription },
+            .background(theme.colors.surfaceRaised),
         contentAlignment = Alignment.Center,
     ) {
-        if (artwork != null) {
-            Image(
-                bitmap = artwork,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Image(
-                painter = painterResource(R.drawable.ermao_library_brand),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(if (iconSize > 24.dp) theme.spacing.three else theme.spacing.half),
-            )
-        }
+        AuthenticatedBookArtwork(
+            id = contentId,
+            title = title,
+            coverUrl = coverUrl,
+            repository = repository,
+            context = context,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

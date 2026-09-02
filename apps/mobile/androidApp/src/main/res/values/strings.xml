@@ -46,14 +46,11 @@
     <string name="audio_forward_30">Forward 30 seconds</string>
     <string name="audio_speed_value">%1$s×</string>
     <string name="audio_speed">Speed</string>
-    <string name="audio_chapters">Chapters</string>
     <string name="audio_sleep_timer">Sleep</string>
     <string name="audio_work">Work</string>
     <string name="audio_sleep_unavailable">Sleep timer unavailable</string>
     <string name="audio_queue_title">Queue</string>
-    <string name="audio_chapter_current">Current chapter</string>
     <string name="audio_track_current">Current track</string>
-    <string name="audio_cover_description">Audiobook cover for %1$s</string>
     <string name="audio_status_loading">Loading</string>
     <string name="audio_status_ready">Ready</string>
     <string name="audio_status_playing">Playing</string>

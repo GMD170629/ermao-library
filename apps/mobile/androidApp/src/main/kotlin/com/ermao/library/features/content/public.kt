@@ -25,3 +25,25 @@ fun CatalogBookCover(
         if (managementEnabled) com.ermao.library.features.workmanagement.ManageableBookCover(id, title, modifier, content = artwork) else artwork()
     }
 }
+
+/** Public authenticated artwork boundary for feature-owned cover surfaces. */
+@Composable
+fun AuthenticatedBookArtwork(
+    id: String,
+    title: String,
+    coverUrl: String,
+    repository: ContentRepository,
+    context: ContentRequestContext,
+    modifier: Modifier = Modifier,
+) {
+    key(context.namespace, id, coverUrl) {
+        com.ermao.library.features.content.ui.AuthenticatedCoverArtwork(
+            contentId = id,
+            title = title,
+            coverUrl = coverUrl,
+            repository = repository,
+            context = context,
+            modifier = modifier,
+        )
+    }
+}
