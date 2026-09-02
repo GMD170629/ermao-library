@@ -63,9 +63,13 @@ final class KmpAudioBootstrapGateway: AudioBootstrapGateway, AudioSessionConfigu
     }
 
     func loadAudioBootstrap(resourceID: String, namespace: String) async throws -> AudioBootstrapEnvelope {
-        guard let session, session.namespaceKey == namespace else {
+        guard let session else {
             throw AudioCompositionError.unauthenticated
         }
+        _ = try Self.presentationNamespace(
+            session: session,
+            requestedNamespace: namespace
+        )
         let request = ErmaoShared.ReaderBootstrapRequest(
             profile: session.sharedProfile,
             namespace: session.sharedNamespace,
@@ -86,97 +90,22 @@ final class KmpAudioBootstrapGateway: AudioBootstrapGateway, AudioSessionConfigu
             throw AudioCompositionError.staleNamespace
         }
         return AudioBootstrapEnvelope(
-            presentation: Self.presentation(
-                publication: publication,
-                readerBootstrap: content.bootstrap
-            ),
             publication: publication,
-            readerBootstrap: content.bootstrap
+            remoteSnapshot: content.bootstrap.remoteSnapshot
         )
     }
 
-    private static func presentation(
-        publication: ErmaoShared.AudioPublication,
-        readerBootstrap: ErmaoShared.ReaderBootstrap
-    ) -> AudioBootstrap {
-        let tracks = publication.assets.map { asset in
-            AudioTrack(
-                assetID: asset.assetId,
-                title: asset.title,
-                mediaReference: asset.apiPath,
-                mimeType: asset.mimeType,
-                codec: asset.codec,
-                sizeBytes: asset.sizeBytes,
-                durationMillis: asset.durationMillis?.int64Value ?? 0,
-                discNumber: asset.discNumber?.intValue,
-                trackNumber: asset.trackNumber?.intValue,
-                sortOrder: Int(asset.sortOrder)
-            )
+    static func presentationNamespace(
+        session: IosAudioSessionContext,
+        requestedNamespace: String
+    ) throws -> String {
+        guard session.namespaceKey == requestedNamespace else {
+            throw AudioCompositionError.staleNamespace
         }
-        let resources = publication.availableResources.map(Self.presentationResource)
-        let resource = Self.presentationResource(publication.resource)
-        let chapters = publication.chapters.map { chapter in
-            let trackDuration = tracks.first(where: { $0.assetID == chapter.assetId })?.durationMillis ?? 0
-            return AudioChapter(
-                id: chapter.chapterId,
-                title: chapter.title,
-                assetID: chapter.assetId,
-                startMillis: chapter.startMillis,
-                endMillis: chapter.endMillis?.int64Value ?? trackDuration,
-                sortOrder: Int(chapter.index)
-            )
-        }
-        let resumeLocation: AudioLocation? = if
-            let remote = readerBootstrap.remoteSnapshot?.locator as? ErmaoShared.AudioPublicationLocation
-        {
-            AudioLocation(
-                resourceID: publication.resource.resourceId,
-                assetID: remote.assetId,
-                chapterID: remote.chapterId,
-                positionMillis: remote.positionMillis
-            )
-        } else {
-            nil
-        }
-        let duration = publication.assets.reduce(into: Int64(0)) { result, asset in
-            result += max(0, asset.durationMillis?.int64Value ?? 0)
-        }
-        let progress = readerBootstrap.remoteSnapshot
-        return AudioBootstrap(
-            namespace: publication.namespace_.stableKey,
-            userID: publication.namespace_.userId,
-            book: AudioBookSummary(
-                id: publication.bookId,
-                title: publication.bookTitle,
-                author: publication.author,
-                coverReference: publication.coverApiPath
-            ),
-            resource: resource,
-            availableResources: resources,
-            tracks: tracks,
-            chapters: chapters,
-            totalDurationMillis: max(duration, publication.resource.durationMillis?.int64Value ?? 0),
-            resumeLocation: resumeLocation,
-            progressRevision: progress?.revision ?? 0,
-            progressPercent: progress?.displayPercent ?? 0,
-            playbackRate: 1,
-            skipBackwardSeconds: 15,
-            skipForwardSeconds: 30
-        )
-    }
-
-    private static func presentationResource(
-        _ resource: ErmaoShared.AudioResource
-    ) -> AudioResourceSummary {
-        AudioResourceSummary(
-            id: resource.resourceId,
-            bookID: "",
-            title: resource.title,
-            sortOrder: Int(resource.sortOrder),
-            durationMillis: resource.durationMillis?.int64Value ?? 0,
-            chapterCount: resource.chapterCount?.intValue ?? 0,
-            resourceCompleted: false
-        )
+        // Native persistence, downloads and adapters already use this key.
+        // ReaderSyncNamespace.stableKey is a KMP storage identity and must not
+        // replace the active native session namespace at this boundary.
+        return requestedNamespace
     }
 }
 
@@ -225,36 +154,111 @@ final class SwitchingKmpAudioMediaStreamAdapter: AudioMediaStreamAdapter, AudioS
 /// outbox. Native code only maps projections; cadence, conflict and retry
 /// policy remain owned by KMP.
 @MainActor
-final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguring, AudioProgressSessionConfiguring, AudioLocalProgressSessionConfiguring {
+final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguring {
+    private final class ProgressContext {
+        let namespace: String
+        let resourceID: String
+        let runtime: ErmaoShared.ReaderProgressSyncRuntime
+        let progressSession: ErmaoShared.AudioProgressSession
+
+        init(
+            namespace: String,
+            resourceID: String,
+            runtime: ErmaoShared.ReaderProgressSyncRuntime,
+            progressSession: ErmaoShared.AudioProgressSession
+        ) {
+            self.namespace = namespace
+            self.resourceID = resourceID
+            self.runtime = runtime
+            self.progressSession = progressSession
+        }
+    }
+
     private let cookieStore: KeychainCookiePayloadStore
     private let deviceIdentity = IosReaderDeviceIdentity()
     private var session: IosAudioSessionContext?
-    private var progressRuntime: ErmaoShared.ReaderProgressSyncRuntime?
-    private var writer: ErmaoShared.AudioProgressWriter?
-    private var resourceID: String?
+    private var activeContext: ProgressContext?
+    private var preparedContext: ProgressContext?
 
     init(cookieStore: KeychainCookiePayloadStore) {
         self.cookieStore = cookieStore
     }
 
     func configure(session: IosAudioSessionContext?) {
+        guard self.session != session else { return }
         self.session = session
-        writer = nil
-        progressRuntime?.close()
-        progressRuntime = nil
-        resourceID = nil
+        closeAllContexts()
     }
 
-    func configure(bootstrap: AudioBootstrapEnvelope) async {
-        await configureLocal(
+    func configure(bootstrap: AudioBootstrapEnvelope) async -> ErmaoShared.AudioReaderLocation? {
+        guard let context = prepareProgress(
             bookID: bootstrap.publication.bookId,
-            resourceID: bootstrap.publication.resource.resourceId
+            resourceID: bootstrap.publication.resource.resourceId,
+            remoteSnapshot: bootstrap.remoteSnapshot
+        ) else { return nil }
+        let restored = try? await context.progressSession.restore(
+            publication: bootstrap.publication,
+            remoteSnapshot: bootstrap.remoteSnapshot
         )
+        guard preparedContext === context || activeContext === context else { return nil }
+        return restored
     }
 
-    func configureLocal(bookID: String, resourceID: String) async {
-        guard let retainedSession = session else { return }
-        configure(session: retainedSession)
+    func configureLocal(publication: ErmaoShared.AudioPublication) async -> ErmaoShared.AudioReaderLocation? {
+        guard let context = prepareProgress(
+            bookID: publication.bookId,
+            resourceID: publication.resource.resourceId,
+            remoteSnapshot: nil
+        ) else { return nil }
+        let restored = try? await context.progressSession.restore(
+            publication: publication,
+            remoteSnapshot: nil
+        )
+        guard preparedContext === context || activeContext === context else { return nil }
+        return restored
+    }
+
+    func commitPrepared(resourceID: String, namespace: String) {
+        guard let preparedContext,
+              preparedContext.resourceID == resourceID,
+              preparedContext.namespace == namespace else { return }
+        if let activeContext, activeContext !== preparedContext {
+            activeContext.runtime.close()
+        }
+        activeContext = preparedContext
+        self.preparedContext = nil
+    }
+
+    func discardPrepared(resourceID: String, namespace: String) {
+        guard let preparedContext,
+              preparedContext.resourceID == resourceID,
+              preparedContext.namespace == namespace else { return }
+        if preparedContext !== activeContext {
+            preparedContext.runtime.close()
+        }
+        self.preparedContext = nil
+    }
+
+    private func prepareProgress(
+        bookID: String,
+        resourceID: String,
+        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    ) -> ProgressContext? {
+        guard let retainedSession = session else { return nil }
+        if let activeContext,
+           activeContext.namespace == retainedSession.namespaceKey,
+           activeContext.resourceID == resourceID {
+            replacePreparedContext(with: activeContext)
+            activeContext.runtime.coordinator.beginSession(snapshot: remoteSnapshot)
+            return activeContext
+        }
+        if let preparedContext,
+           preparedContext.namespace == retainedSession.namespaceKey,
+           preparedContext.resourceID == resourceID {
+            preparedContext.runtime.coordinator.beginSession(snapshot: remoteSnapshot)
+            return preparedContext
+        }
+        replacePreparedContext(with: nil)
         let namespace = retainedSession.sharedNamespace
         let target = ErmaoShared.ReaderProgressSyncTarget(
             namespace: namespace,
@@ -279,9 +283,8 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
                 target: target,
                 server: server
             )
-            progressRuntime = runtime
-            self.resourceID = resourceID
-            writer = ErmaoShared.AudioProgressWriter(
+            runtime.coordinator.beginSession(snapshot: remoteSnapshot)
+            let writer = ErmaoShared.AudioProgressWriter(
                 store: runtime.store,
                 resourceId: resourceID,
                 deviceId: deviceIdentity.stableDeviceId(),
@@ -289,59 +292,90 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
                     KotlinLong(longLong: Int64(Date().timeIntervalSince1970 * 1_000))
                 }
             )
+            let progressSession = ErmaoShared.AudioProgressSession(
+                writer: writer,
+                syncRuntime: runtime,
+                syncTarget: target
+            )
+            let context = ProgressContext(
+                namespace: retainedSession.namespaceKey,
+                resourceID: resourceID,
+                runtime: runtime,
+                progressSession: progressSession
+            )
+            preparedContext = context
+            return context
         } catch {
-            progressRuntime = nil
-            writer = nil
-            self.resourceID = nil
+            return nil
         }
     }
 
-    func loadLocation(namespace: String, resourceID: String) async throws -> AudioLocation? {
-        guard session?.namespaceKey == namespace, self.resourceID == resourceID,
-              let writer else { return nil }
-        guard let value = try await writer.restore() else { return nil }
-        return AudioLocation(
-            resourceID: resourceID,
-            assetID: value.assetId,
-            chapterID: value.chapterId,
-            positionMillis: value.positionMillis
-        )
-    }
-
-    func saveLocation(
-        _ location: AudioLocation,
-        namespace: String,
-        completed: Bool,
-        reason: IosAudioProgressSaveReason
-    ) async throws -> AudioProgressSaveResult {
-        guard session?.namespaceKey == namespace, self.resourceID == location.resourceID,
-              let writer else { return .pending }
-        let sharedReason: ErmaoShared.AudioProgressSaveReason = switch reason {
-        case .tick: .tick
-        case .seek: .seek
-        case .pause: .pause
-        case .chapterChange: .chapterchange
-        case .trackChange: .trackchange
-        case .stop: .stop
-        case .background: .background
-        case .completed: .completed
+    func save(_ effect: ErmaoShared.AudioPlaybackEffect) async throws {
+        guard effect.type == .saveprogress,
+              let asset = effect.asset,
+              let reason = effect.progressReason else {
+            throw AudioCompositionError.invalidBootstrap
         }
-        _ = completed
-        _ = try await writer.save(
-            assetId: location.assetID,
-            chapterId: location.chapterID,
-            positionMillis: location.positionMillis,
-            durationMillis: nil,
-            reason: sharedReason
+        guard let namespace = effect.namespaceKey,
+              session?.namespaceKey == namespace,
+              let resourceID = effect.resourceId else {
+            throw AudioCompositionError.staleNamespace
+        }
+        let context = matchingContext(namespace: namespace, resourceID: resourceID)
+        guard let context else {
+            throw AudioCompositionError.unauthenticated
+        }
+        _ = try await context.progressSession.save(
+            assetId: asset.assetId,
+            chapterId: effect.chapterId,
+            positionMillis: effect.positionMillis,
+            durationMillis: effect.durationMillis,
+            reason: reason
         )
-        // The local-first store accepted the mutation; network acknowledgement
-        // is asynchronous and remains pending by design.
-        return .pending
     }
 
     func flush(namespace: String) async {
-        guard session?.namespaceKey == namespace, let progressRuntime else { return }
-        try? await progressRuntime.store.awaitPendingUpload()
+        guard session?.namespaceKey == namespace else { return }
+        if let activeContext, activeContext.namespace == namespace {
+            try? await activeContext.runtime.store.awaitPendingUpload()
+        }
+        if let preparedContext,
+           preparedContext !== activeContext,
+           preparedContext.namespace == namespace {
+            try? await preparedContext.runtime.store.awaitPendingUpload()
+        }
+    }
+
+    private func matchingContext(namespace: String, resourceID: String) -> ProgressContext? {
+        if let activeContext,
+           activeContext.namespace == namespace,
+           activeContext.resourceID == resourceID {
+            return activeContext
+        }
+        if let preparedContext,
+           preparedContext.namespace == namespace,
+           preparedContext.resourceID == resourceID {
+            return preparedContext
+        }
+        return nil
+    }
+
+    private func replacePreparedContext(with replacement: ProgressContext?) {
+        if let preparedContext,
+           preparedContext !== activeContext,
+           preparedContext !== replacement {
+            preparedContext.runtime.close()
+        }
+        preparedContext = replacement
+    }
+
+    private func closeAllContexts() {
+        if let preparedContext, preparedContext !== activeContext {
+            preparedContext.runtime.close()
+        }
+        activeContext?.runtime.close()
+        preparedContext = nil
+        activeContext = nil
     }
 }
 
@@ -361,7 +395,6 @@ enum AudioCompositionRoot {
             bootstrapGateway: bootstrap,
             mediaAdapter: media,
             progressAdapter: progress,
-            coverAdapter: EmptyAudioCoverAdapter(),
             backgroundPlaybackEnabled: backgroundPlaybackEnabled
         )
     }

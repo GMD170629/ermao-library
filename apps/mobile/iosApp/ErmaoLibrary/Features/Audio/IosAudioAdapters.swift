@@ -2,6 +2,42 @@ import Foundation
 import UniformTypeIdentifiers
 @preconcurrency import ErmaoShared
 
+enum IosAudioMediaType {
+    static func uniformTypeIdentifier(for mimeType: String) -> String {
+        switch normalized(mimeType) {
+        case "audio/mp4", "audio/x-m4a", "audio/m4a":
+            UTType(filenameExtension: "m4a")?.identifier ?? "com.apple.m4a-audio"
+        case "audio/mpeg", "audio/mp3":
+            UTType.mp3.identifier
+        default:
+            UTType(mimeType: mimeType)?.identifier ?? mimeType
+        }
+    }
+
+    static func preferredFilenameExtension(for mimeType: String) -> String? {
+        switch normalized(mimeType) {
+        case "audio/mp4", "audio/x-m4a", "audio/m4a": "m4a"
+        case "audio/mpeg", "audio/mp3": "mp3"
+        default: UTType(uniformTypeIdentifier(for: mimeType))?.preferredFilenameExtension
+        }
+    }
+
+    static func avFoundationMIMEType(for mimeType: String) -> String {
+        switch normalized(mimeType) {
+        case "audio/mp4", "audio/x-m4a", "audio/m4a": "audio/x-m4a"
+        default: normalized(mimeType)
+        }
+    }
+
+    private static func normalized(_ mimeType: String) -> String {
+        mimeType.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(separator: ";", maxSplits: 1)
+            .first
+            .map(String.init) ?? mimeType
+    }
+}
+
 enum AudioAdapterError: Error, Equatable, Sendable {
     case unavailable
     case unauthorized
@@ -53,20 +89,8 @@ struct AudioMediaProbe: Equatable, Sendable {
 }
 
 struct AudioBootstrapEnvelope {
-    let presentation: AudioBootstrap
     let publication: ErmaoShared.AudioPublication
-    let readerBootstrap: ErmaoShared.ReaderBootstrap
-}
-
-enum IosAudioProgressSaveReason: Sendable {
-    case tick
-    case seek
-    case pause
-    case chapterChange
-    case trackChange
-    case stop
-    case background
-    case completed
+    let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
 }
 
 /// The shared/KMP media owner supplies an incremental stream. It owns Cookie
@@ -93,52 +117,20 @@ protocol AudioBootstrapGateway: AnyObject {
     func loadAudioBootstrap(resourceID: String, namespace: String) async throws -> AudioBootstrapEnvelope
 }
 
-enum AudioProgressSaveResult: Equatable, Sendable {
-    case synced
-    case pending
-    case failed
-}
-
-/// The shared progress outbox is the authoritative implementation. Native UI
-/// never talks to the server directly; this port only carries the normalized
-/// audio location and ordering hints.
+/// Platform composition for the KMP-owned restore/save use case.
 @MainActor
 protocol AudioProgressAdapter: AnyObject {
-    func loadLocation(namespace: String, resourceID: String) async throws -> AudioLocation?
-    func saveLocation(
-    _ location: AudioLocation,
-        namespace: String,
-        completed: Bool,
-        reason: IosAudioProgressSaveReason
-    ) async throws -> AudioProgressSaveResult
+    func configure(bootstrap: AudioBootstrapEnvelope) async -> ErmaoShared.AudioReaderLocation?
+    func configureLocal(publication: ErmaoShared.AudioPublication) async -> ErmaoShared.AudioReaderLocation?
+    func commitPrepared(resourceID: String, namespace: String)
+    func discardPrepared(resourceID: String, namespace: String)
+    func save(_ effect: ErmaoShared.AudioPlaybackEffect) async throws
     func flush(namespace: String) async
 }
 
 @MainActor
 protocol AudioSessionConfiguring: AnyObject {
     func configure(session: IosAudioSessionContext?)
-}
-
-@MainActor
-protocol AudioProgressSessionConfiguring: AnyObject {
-    func configure(bootstrap: AudioBootstrapEnvelope) async
-}
-
-@MainActor
-protocol AudioLocalProgressSessionConfiguring: AnyObject {
-    func configureLocal(bookID: String, resourceID: String) async
-}
-
-@MainActor
-protocol AudioCoverAdapter: AnyObject {
-    /// Returns a locally cached image only. Network retrieval stays in the
-    /// shared authenticated cover adapter.
-    func cachedArtwork(for reference: String?, namespace: String) -> Data?
-}
-
-@MainActor
-final class EmptyAudioCoverAdapter: AudioCoverAdapter {
-    func cachedArtwork(for reference: String?, namespace: String) -> Data? { nil }
 }
 
 /// Native AVFoundation code consumes this adapter only. The KMP transport
@@ -162,8 +154,9 @@ final class KmpAudioMediaStreamAdapter: AudioMediaStreamAdapter {
             throw AudioAdapterError.invalidResponse
         }
         return AudioMediaProbe(
-            uniformTypeIdentifier: UTType(mimeType: available.metadata.mimeType)?.identifier
-                ?? available.metadata.mimeType,
+            uniformTypeIdentifier: IosAudioMediaType.uniformTypeIdentifier(
+                for: available.metadata.mimeType
+            ),
             contentLength: available.metadata.totalLength?.int64Value
                 ?? available.metadata.contentLength?.int64Value,
             supportsByteRanges: available.metadata.acceptsByteRanges
@@ -222,7 +215,7 @@ private final class KmpAudioMediaStream: AudioMediaStream {
     }
 
     var uniformTypeIdentifier: String {
-        UTType(mimeType: stream.metadata.mimeType)?.identifier ?? stream.metadata.mimeType
+        IosAudioMediaType.uniformTypeIdentifier(for: stream.metadata.mimeType)
     }
 
     var contentLength: Int64? { stream.metadata.contentLength?.int64Value }

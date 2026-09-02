@@ -1,6 +1,282 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "audio.action.chapters": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Chapters" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "章节" } }
+      }
+    },
+    "audio.action.collapse": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Collapse player" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "收起播放器" } }
+      }
+    },
+    "audio.action.next": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Next chapter" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "下一章" } }
+      }
+    },
+    "audio.action.pause": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Pause" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "暂停" } }
+      }
+    },
+    "audio.action.play": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Play" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "播放" } }
+      }
+    },
+    "audio.action.previous": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Previous chapter" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "上一章" } }
+      }
+    },
+    "audio.action.retry": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Retry playback" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重试播放" } }
+      }
+    },
+    "audio.action.seekBackward": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Back 15 seconds" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "后退 15 秒" } }
+      }
+    },
+    "audio.action.seekForward": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Forward 30 seconds" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "前进 30 秒" } }
+      }
+    },
+    "audio.action.sleepTimer": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sleep timer" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "定时" } }
+      }
+    },
+    "audio.action.speed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Speed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "倍速" } }
+      }
+    },
+    "audio.action.works": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Works" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "作品" } }
+      }
+    },
+    "audio.action.works.hint": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Returns to the host screen." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "返回宿主页面。" } }
+      }
+    },
+    "audio.artwork": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Audiobook cover" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "有声书封面" } }
+      }
+    },
+    "audio.error.bootstrap": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unable to prepare this audiobook" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法准备有声书" } }
+      }
+    },
+    "audio.error.codecUnsupported": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This audio format is not supported" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此音频格式不受支持" } }
+      }
+    },
+    "audio.error.generic": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Playback failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "播放失败" } }
+      }
+    },
+    "audio.error.interrupted": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Playback was interrupted" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "播放被中断" } }
+      }
+    },
+    "audio.error.network": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unable to load audio. Check your connection and try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法加载音频，请检查网络后重试。" } }
+      }
+    },
+    "audio.error.reauthenticate": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sign in again to resume playback" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "请重新登录后继续播放" } }
+      }
+    },
+    "audio.error.unavailable": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Audio is unavailable" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "音频资源不可用" } }
+      }
+    },
+    "audio.nowPlaying.loading": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Loading audiobook…" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在加载有声书…" } }
+      }
+    },
+    "audio.nowPlaying.open": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open Now Playing" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "打开正在播放" } }
+      }
+    },
+    "audio.nowPlaying.open.hint": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Double-tap to open the full player." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "轻点两次打开完整播放器。" } }
+      }
+    },
+    "audio.nowPlaying.title": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Now Playing" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在播放" } }
+      }
+    },
+    "audio.sheet.chapters": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Chapters" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "章节" } }
+      }
+    },
+    "audio.sheet.chapters.title": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Select audio" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择音频" } }
+      }
+    },
+    "audio.sheet.empty.message": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This audiobook has no playable tracks or chapters." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "此有声书没有可播放的音轨或章节。" } }
+      }
+    },
+    "audio.sheet.empty.title": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No audio available" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "暂无音频" } }
+      }
+    },
+    "audio.sheet.tracks": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tracks" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "音轨" } }
+      }
+    },
+    "audio.state.buffering": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Buffering" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在缓冲" } }
+      }
+    },
+    "audio.state.ended": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Finished" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "播放完毕" } }
+      }
+    },
+    "audio.state.loading": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Loading" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在加载" } }
+      }
+    },
+    "audio.state.paused": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Paused" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已暂停" } }
+      }
+    },
+    "audio.state.ready": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已就绪" } }
+      }
+    },
+    "audio.state.syncFailed": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Progress sync failed" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "进度同步失败" } }
+      }
+    },
+    "audio.state.syncPending": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Saving progress" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "正在同步进度" } }
+      }
+    },
+    "audio.timeline": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Playback position" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "播放进度" } }
+      }
+    },
+    "audio.sleep.15": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "15 minutes" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "15 分钟" } }
+      }
+    },
+    "audio.sleep.30": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "30 minutes" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "30 分钟" } }
+      }
+    },
+    "audio.sleep.45": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "45 minutes" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "45 分钟" } }
+      }
+    },
+    "audio.sleep.60": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "60 minutes" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "60 分钟" } }
+      }
+    },
+    "audio.sleep.chapter": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "End of chapter" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "本章结束" } }
+      }
+    },
+    "audio.sleep.off": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Off" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "关闭" } }
+      }
+    },
+    "audio.sleep.title": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sleep Timer" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "睡眠定时" } }
+      }
+    },
+    "audio.sleep.track": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "End of current track" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "当前音轨结束" } }
+      }
+    },
     "nativeManagement.readingStatus": {
       "localizations": {
         "en": {

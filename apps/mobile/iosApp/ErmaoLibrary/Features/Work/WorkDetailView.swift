@@ -712,20 +712,20 @@ struct WorkDetailView: View {
             .frame(minHeight: 52)
             .accessibilityIdentifier("work.reader.action")
             HStack(spacing: 0) {
-                quickAction(store.isBookRoot ? bookDownloadTitle(bookDownload) : downloadActionTitle(selected), systemImage: store.isBookRoot ? bookDownloadImage(bookDownload) : (selected.map { downloadSystemImage(resourceID: $0.id) } ?? "arrow.down")) {
+                quickAction(store.isBookRoot ? bookDownloadTitle(bookDownload) : downloadActionTitle(selected), systemImage: store.isBookRoot ? bookDownloadImage(bookDownload) : (selected.map { downloadSystemImage(resourceID: $0.id) } ?? "arrow.down.circle")) {
                     if store.isBookRoot { activeSheet = .downloads; return }
                     guard let selected else { return }
                     handlePrimaryDownload(selected, detail: detail)
                 }
                 .disabled(!store.isBookRoot && (selected == nil || (selected?.isReadable != true && selected.flatMap { downloads.record(for: $0.id) } == nil)))
                 .accessibilityIdentifier("work.download.action")
-                quickAction(readingStatus.title, systemImage: readingStatus == .finished ? "checkmark.circle.fill" : "checkmark") {
+                quickAction(readingStatus.title, systemImage: readingStatusImage(readingStatus)) {
                     togglePageReadingStatus(detail)
                 }
                 .disabled((!store.isBookRoot && selected == nil) || managementStore == nil || managementStore?.isBusy == true)
                 .accessibilityIdentifier("work.readingStatus.action")
                 if store.isBookRoot {
-                    quickAction("work.action.add", systemImage: "bookmark") { openShelfPicker() }
+                    quickAction("work.action.add", systemImage: "books.vertical") { openShelfPicker() }
                         .accessibilityIdentifier("work.shelf.action")
                     bookControlMenu(detail)
                 } else if let selected {
@@ -775,14 +775,24 @@ struct WorkDetailView: View {
         case .downloading: "arrow.down.circle"
         case .paused: "pause.circle"
         case .failed: "arrow.clockwise.circle"
-        case .downloaded: "checkmark.circle.fill"
-        default: "arrow.down"
+        case .downloaded: "checkmark.circle"
+        default: "arrow.down.circle"
+        }
+    }
+
+    private func readingStatusImage(_ status: LibraryReadingStatus) -> String {
+        switch status {
+        case .unread: "book.closed"
+        case .reading: "book"
+        case .finished: "checkmark.circle"
         }
     }
 
     private func bookControlMenu(_ detail: BookDetailContent, target: WorkControlTarget = .book) -> some View {
-        NativeManagementMore(target: pageManagementTarget(detail))
-            .accessibilityIdentifier(target == .book ? "work.book.moreMenu" : "work.resource.moreMenu")
+        NativeManagementMore(target: pageManagementTarget(detail)) {
+            quickActionLabel("work.action.more", systemImage: "ellipsis.circle")
+        }
+        .accessibilityIdentifier(target == .book ? "work.book.moreMenu" : "work.resource.moreMenu")
     }
 
     private func directoryControlMenu() -> some View {
@@ -829,6 +839,7 @@ struct WorkDetailView: View {
             Image(systemName: systemImage)
                 .font(.system(size: 24, weight: .regular))
                 .frame(width: 28, height: 28)
+                .accessibilityHidden(true)
             Text(title)
                 .appTextStyle(.caption)
                 .lineLimit(1)
@@ -1798,7 +1809,6 @@ struct WorkDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func handleManagementCompletion(_ action: WorkManagementStore.Action?) {
         guard action != nil, let managementStore else { return }
         if action == .bookDeleted {
@@ -2075,12 +2085,12 @@ struct WorkDetailView: View {
     }
 
     private func downloadSystemImage(resourceID: String) -> String {
-        guard let record = downloads.record(for: resourceID) else { return "icloud.and.arrow.down" }
+        guard let record = downloads.record(for: resourceID) else { return "arrow.down.circle" }
         switch record.state {
         case .queued, .downloading: return "pause.circle"
         case .paused, .failedRetryable, .failedTerminal: return "arrow.clockwise.circle"
         case .completed:
-            return record.isVerifiedOfflineCopy ? "checkmark.circle.fill" : "exclamationmark.circle"
+            return record.isVerifiedOfflineCopy ? "checkmark.circle" : "exclamationmark.circle"
         }
     }
 

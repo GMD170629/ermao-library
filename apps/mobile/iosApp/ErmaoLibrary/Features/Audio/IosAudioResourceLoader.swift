@@ -9,6 +9,8 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
     private let adapter: any AudioMediaStreamAdapter
     private let request: AudioMediaStreamRequest
     private var activeTasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    // AVFoundation requires delegates to retain accepted loading requests until async completion.
+    private var activeRequests: [ObjectIdentifier: AVAssetResourceLoadingRequest] = [:]
     private var activeStreams: [ObjectIdentifier: any AudioMediaStream] = [:]
 
     init(adapter: any AudioMediaStreamAdapter, request: AudioMediaStreamRequest) {
@@ -17,11 +19,15 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
         super.init()
     }
 
-    static func url(assetID: String) -> URL {
+    static func url(assetID: String, mimeType: String, sourceID: Int64) -> URL {
         var components = URLComponents()
         components.scheme = "ermao-audio"
         components.host = "asset"
-        components.path = "/(Self.escapedComponent(assetID))"
+        let filenameExtension = IosAudioMediaType.preferredFilenameExtension(for: mimeType)
+        let filename = filenameExtension.map {
+            "\(Self.escapedComponent(assetID)).\($0)"
+        } ?? Self.escapedComponent(assetID)
+        components.path = "/\(sourceID)/\(filename)"
         return components.url ?? URL(string: "ermao-audio://asset/audio")!
     }
 
@@ -31,8 +37,9 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
     ) -> Bool {
         let key = ObjectIdentifier(loadingRequest)
         activeTasks[key]?.cancel()
-        activeTasks[key] = Task { @MainActor [weak self, weak loadingRequest] in
-            guard let self, let loadingRequest else { return }
+        activeRequests[key] = loadingRequest
+        activeTasks[key] = Task { @MainActor [weak self] in
+            guard let self, let loadingRequest = self.activeRequests[key] else { return }
             await self.serve(loadingRequest, key: key)
         }
         return true
@@ -48,6 +55,7 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
     func cancelAllRequests() {
         activeTasks.values.forEach { $0.cancel() }
         activeTasks.removeAll()
+        activeRequests.removeAll()
         activeStreams.values.forEach { $0.cancel() }
         activeStreams.removeAll()
     }
@@ -59,6 +67,7 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
     private func serve(_ loadingRequest: AVAssetResourceLoadingRequest, key: ObjectIdentifier) async {
         defer {
             activeTasks[key] = nil
+            activeRequests[key] = nil
             activeStreams[key]?.cancel()
             activeStreams[key] = nil
         }
@@ -90,6 +99,14 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
                 probe: probe,
                 from: stream
             )
+            if let responseURL = loadingRequest.request.url {
+                loadingRequest.response = URLResponse(
+                    url: responseURL,
+                    mimeType: request.mimeType,
+                    expectedContentLength: Int(request.sizeBytes),
+                    textEncodingName: nil
+                )
+            }
             guard let dataRequest = loadingRequest.dataRequest else {
                 loadingRequest.finishLoading(with: AudioAdapterError.invalidResponse)
                 return
@@ -117,18 +134,34 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
         let key = ObjectIdentifier(loadingRequest)
         activeTasks[key]?.cancel()
         activeTasks[key] = nil
+        activeRequests[key] = nil
         activeStreams[key]?.cancel()
         activeStreams[key] = nil
     }
 
     private func requestedRange(_ dataRequest: AVAssetResourceLoadingDataRequest?) -> AudioMediaByteRange? {
         guard let dataRequest else { return nil }
-        let start = max(0, dataRequest.requestedOffset)
-        guard dataRequest.requestedLength > 0 else { return AudioMediaByteRange(start: start) }
-        return AudioMediaByteRange(
-            start: start,
-            end: start.addingReportingOverflow(Int64(dataRequest.requestedLength)).partialValue
+        return Self.requestedRange(
+            offset: dataRequest.requestedOffset,
+            length: dataRequest.requestedLength,
+            requestsAllDataToEnd: dataRequest.requestsAllDataToEndOfResource,
+            assetSize: request.sizeBytes
         )
+    }
+
+    static func requestedRange(
+        offset: Int64,
+        length: Int,
+        requestsAllDataToEnd: Bool,
+        assetSize: Int64
+    ) -> AudioMediaByteRange {
+        let start = max(0, offset)
+        guard !requestsAllDataToEnd, length > 0 else {
+            return AudioMediaByteRange(start: start)
+        }
+        let requestedEnd = start.addingReportingOverflow(Int64(length))
+        let end = requestedEnd.overflow ? assetSize : min(assetSize, requestedEnd.partialValue)
+        return AudioMediaByteRange(start: start, end: end)
     }
 
     private func fillContentInformation(
@@ -140,6 +173,7 @@ final class IosAudioResourceLoader: NSObject, @preconcurrency AVAssetResourceLoa
         information.contentType = probe.uniformTypeIdentifier
         information.contentLength = probe.contentLength ?? stream.contentLength ?? 0
         information.isByteRangeAccessSupported = probe.supportsByteRanges && stream.supportsByteRanges
+        information.isEntireLengthAvailableOnDemand = information.isByteRangeAccessSupported
     }
 
     private static func escapedComponent(_ value: String) -> String {

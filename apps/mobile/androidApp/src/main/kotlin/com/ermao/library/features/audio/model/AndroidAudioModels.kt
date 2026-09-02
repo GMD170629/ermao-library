@@ -187,6 +187,7 @@ data class AndroidAudioPlaybackSnapshot(
     val assetId: String? = null,
     val chapterId: String? = null,
     val title: String? = null,
+    val author: String? = null,
     val chapterTitle: String? = null,
     val positionMillis: Long = 0,
     val durationMillis: Long = 0,

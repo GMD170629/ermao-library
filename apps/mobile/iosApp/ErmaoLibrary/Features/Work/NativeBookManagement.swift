@@ -187,10 +187,13 @@ extension View {
     }
 }
 
-struct NativeManagementMore: View {
+struct NativeManagementMore<Label: View>: View {
     let target: NativeManagementTarget
+    @ViewBuilder let label: () -> Label
+
     var body: some View {
-        Menu { NativeManagementMenu(target: target) } label: { Label("work.action.more", systemImage: "ellipsis") }
+        Menu { NativeManagementMenu(target: target) } label: { label() }
+            .buttonStyle(.plain)
             .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
     }
 }

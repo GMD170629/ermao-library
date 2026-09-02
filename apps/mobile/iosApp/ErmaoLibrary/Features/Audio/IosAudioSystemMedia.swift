@@ -49,7 +49,7 @@ final class IosAudioSystemMediaController: NSObject, AudioSystemMediaControlling
         try audioSession.setCategory(
             .playback,
             mode: .spokenAudio,
-            options: [.allowBluetoothA2DP, .allowAirPlay]
+            options: []
         )
         try audioSession.setActive(true, options: [])
     }

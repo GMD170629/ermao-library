@@ -1,19 +1,31 @@
 package com.ermao.library.shared.modules.audio.domain
 
-import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 
 val AUDIO_PLAYBACK_RATES: List<Double> = listOf(0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0)
 
 enum class AudioPlaybackStage {
     Idle,
-    Loading,
+    Preparing,
     Ready,
     Playing,
     Paused,
     Buffering,
     Ended,
     Error,
+}
+
+enum class AudioSourcePreparationStage {
+    None,
+    Preparing,
+    EngineReady,
+}
+
+enum class AudioSeekStage {
+    None,
+    Scrubbing,
+    WaitingForEngine,
 }
 
 enum class AudioSleepTimerMode {
@@ -24,6 +36,23 @@ enum class AudioSleepTimerMode {
     Minutes60,
     EndOfChapter,
     EndOfTrack,
+}
+
+enum class AudioProgressSyncState {
+    Synced,
+    Pending,
+    Failed,
+}
+
+data class AudioPlaybackError(
+    val code: String,
+    val recoverable: Boolean,
+    val requiresReauthentication: Boolean = false,
+) {
+    init {
+        require(code.isNotBlank())
+        require(!requiresReauthentication || recoverable)
+    }
 }
 
 data class AudioLaunchIntent(
@@ -125,47 +154,89 @@ data class AudioPublication(
     }
 }
 
-data class AudioPlaybackError(
-    val code: String,
-    val recoverable: Boolean,
-    val requiresReauthentication: Boolean = false,
-) {
-    init {
-        require(code.isNotBlank())
-        require(!requiresReauthentication || recoverable)
-    }
-}
-
+/**
+ * Immutable presentation state owned by the shared audio application.
+ *
+ * Native clients render this value and bind the referenced source to their media SDK. They must
+ * not recalculate chapter, track, timer, completion, or absolute-position rules.
+ */
 data class AudioPlaybackSnapshot(
     val stage: AudioPlaybackStage,
     val sessionId: Long,
+    val sourceId: Long? = null,
+    val namespaceKey: String? = null,
     val namespace: ReaderSyncNamespace? = null,
     val publication: AudioPublication? = null,
+    val currentAssetIndex: Int = -1,
     val currentAssetId: String? = null,
     val currentChapterId: String? = null,
     val positionMillis: Long = 0,
     val durationMillis: Long? = null,
+    val absolutePositionMillis: Long = 0,
+    val totalDurationMillis: Long = 0,
     val playbackRate: Double = 1.0,
+    val supportedPlaybackRates: List<Double> = AUDIO_PLAYBACK_RATES,
+    val skipBackwardSeconds: Int = 15,
+    val skipForwardSeconds: Int = 30,
     val sleepTimerMode: AudioSleepTimerMode = AudioSleepTimerMode.Off,
-    val syncPending: Boolean = false,
+    val sleepTimerEndsAtEpochMillis: Long? = null,
+    val syncState: AudioProgressSyncState = AudioProgressSyncState.Synced,
+    val pendingResourceId: String? = null,
+    val pendingSourceId: Long? = null,
+    val preparationStage: AudioSourcePreparationStage = AudioSourcePreparationStage.None,
+    val seekStage: AudioSeekStage = AudioSeekStage.None,
+    val pendingSeekAbsolutePositionMillis: Long? = null,
     val error: AudioPlaybackError? = null,
 ) {
     init {
-        require(sessionId >= 0 && positionMillis >= 0)
-        require(playbackRate in AUDIO_PLAYBACK_RATES)
+        require(sessionId >= 0)
+        require(sourceId == null || sourceId >= 0)
+        require(positionMillis >= 0 && absolutePositionMillis >= 0 && totalDurationMillis >= 0)
         require(durationMillis == null || durationMillis >= 0)
+        require(playbackRate in AUDIO_PLAYBACK_RATES)
+        require(supportedPlaybackRates == AUDIO_PLAYBACK_RATES)
+        require(skipBackwardSeconds > 0 && skipForwardSeconds > 0)
+        require(sleepTimerEndsAtEpochMillis == null || sleepTimerEndsAtEpochMillis >= 0)
+        require(pendingSourceId == null || pendingSourceId >= 0)
+        require(pendingSeekAbsolutePositionMillis == null || pendingSeekAbsolutePositionMillis >= 0)
         require(stage != AudioPlaybackStage.Idle || publication == null)
         require(publication == null || namespace == publication.namespace)
         require(publication != null || currentAssetId == null)
-        require(publication == null || publication.assets.any { it.assetId == currentAssetId })
-        require(currentChapterId == null || publication?.chapters?.any { it.chapterId == currentChapterId } == true)
-        require((stage == AudioPlaybackStage.Error) == (error != null))
+        require(publication == null || currentAssetIndex in publication.assets.indices)
+        require(publication == null || publication.assets[currentAssetIndex].assetId == currentAssetId)
+        require(currentChapterId == null || publication?.chapters?.any {
+            it.chapterId == currentChapterId && it.assetId == currentAssetId
+        } == true)
+        require(stage != AudioPlaybackStage.Error || error != null)
+        require((preparationStage == AudioSourcePreparationStage.None) == (pendingSourceId == null))
+        require((seekStage == AudioSeekStage.None) == (pendingSeekAbsolutePositionMillis == null))
     }
 
+    val hasSession: Boolean
+        get() = publication != null && sourceId != null
+
+    val isPlaying: Boolean
+        get() = stage == AudioPlaybackStage.Playing || stage == AudioPlaybackStage.Buffering
+
+    /** Native presentations use this shared fact to render and lock the loading state. */
+    val isPreparing: Boolean
+        get() = pendingResourceId != null && error == null
+
+    val isSeeking: Boolean
+        get() = seekStage == AudioSeekStage.WaitingForEngine && error == null
+
+    val hasPendingSeekInteraction: Boolean
+        get() = seekStage != AudioSeekStage.None
+
+    val displayedAbsolutePositionMillis: Long
+        get() = pendingSeekAbsolutePositionMillis ?: absolutePositionMillis
+
     companion object {
-        fun idle(sessionId: Long = 0): AudioPlaybackSnapshot = AudioPlaybackSnapshot(
-            stage = AudioPlaybackStage.Idle,
-            sessionId = sessionId,
-        )
+        fun idle(sessionId: Long = 0, namespaceKey: String? = null): AudioPlaybackSnapshot =
+            AudioPlaybackSnapshot(
+                stage = AudioPlaybackStage.Idle,
+                sessionId = sessionId,
+                namespaceKey = namespaceKey,
+            )
     }
 }
