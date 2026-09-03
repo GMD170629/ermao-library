@@ -12,7 +12,7 @@ final class ShelfCatalogUITests: XCTestCase {
             app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         }
         app.launch()
-        let shelves = app.tabBars.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Shelves", "书架")).firstMatch
+        let shelves = app.buttons["tab-select-shelves"]
         XCTAssertTrue(shelves.waitForExistence(timeout: 15))
         shelves.tap()
         XCTAssertTrue(app.segmentedControls["shelves.scope"].waitForExistence(timeout: 15))
@@ -31,7 +31,7 @@ final class ShelfCatalogUITests: XCTestCase {
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        let tab = app.tabBars.buttons["Shelves"]
+        let tab = app.buttons["tab-select-shelves"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10)); tab.tap()
         let plan = app.buttons["shelf.row.plan"]
         XCTAssertTrue(plan.waitForExistence(timeout: 10)); plan.tap()

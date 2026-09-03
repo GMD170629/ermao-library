@@ -375,6 +375,7 @@
     <string name="me_avatar_delete_confirm_message">Your account will return to the default avatar on this server.</string>
     <string name="me_display_name_label">Display name</string>
     <string name="me_save">Save</string>
+    <string name="me_save_display_name">Save display name</string>
     <string name="me_saving">Saving…</string>
     <string name="me_email_section">Login email</string>
     <string name="me_email_label">Email</string>

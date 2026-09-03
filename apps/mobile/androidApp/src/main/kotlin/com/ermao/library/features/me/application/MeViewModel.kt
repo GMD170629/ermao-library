@@ -49,11 +49,16 @@ class MeViewModel(
     val rootState: StateFlow<MeRootViewState> = mutableRootState.asStateFlow()
 
     private val mutableProfileState = MutableStateFlow(
-        ProfileEditorState(displayName = initialAccount.displayName),
+        ProfileEditorState(
+            displayName = initialAccount.displayName,
+            savedDisplayName = initialAccount.displayName,
+        ),
     )
     val profileState: StateFlow<ProfileEditorState> = mutableProfileState.asStateFlow()
 
-    private val mutableSecurityState = MutableStateFlow(SecurityEditorState(email = initialAccount.email))
+    private val mutableSecurityState = MutableStateFlow(
+        SecurityEditorState(email = initialAccount.email, savedEmail = initialAccount.email),
+    )
     val securityState: StateFlow<SecurityEditorState> = mutableSecurityState.asStateFlow()
 
     private val mutableAboutState = MutableStateFlow(AboutViewState(appVersion = appVersion))
@@ -91,7 +96,12 @@ class MeViewModel(
                     is PersonalSettingsContent -> {
                         val account = result.value.toViewState()
                         mutableSecurityState.update {
-                            it.copy(email = account.email, emailCurrentPassword = "", isSaving = false)
+                            it.copy(
+                                email = account.email,
+                                savedEmail = account.email,
+                                emailCurrentPassword = "",
+                                isSaving = false,
+                            )
                         }
                         mutableRootState.update { it.copy(account = account, failure = null) }
                         sideEffects.refreshSession()
@@ -220,21 +230,27 @@ class MeViewModel(
                 when (val result = client.load()) {
                     is PersonalSettingsContent -> {
                         val account = result.value.account.toViewState()
-                        val avatarBytes = when (val avatar = client.loadAvatar()) {
-                            is PersonalSettingsContent -> avatar.value.bytes.takeUnless { avatar.value.notModified }
-                            is PersonalSettingsFailure -> {
-                                if (avatar.error.kind == PersonalSettingsErrorKind.Unauthorized) {
-                                    sideEffects.requireReauthentication()
+                        val avatarBytes = account.avatarUrl?.let { avatarUrl ->
+                            when (val avatar = client.loadAvatar(avatarUrl)) {
+                                is PersonalSettingsContent -> avatar.value.bytes.takeUnless { avatar.value.notModified }
+                                is PersonalSettingsFailure -> {
+                                    if (avatar.error.kind == PersonalSettingsErrorKind.Unauthorized) {
+                                        sideEffects.requireReauthentication()
+                                    }
+                                    null
                                 }
-                                null
                             }
                         }
                         mutableRootState.update {
                             it.copy(isLoading = false, account = account, locale = result.value.preferences.locale)
                                 .copy(avatarBytes = avatarBytes)
                         }
-                        mutableProfileState.update { it.copy(displayName = account.displayName) }
-                        mutableSecurityState.update { it.copy(email = account.email) }
+                        mutableProfileState.update {
+                            it.copy(displayName = account.displayName, savedDisplayName = account.displayName)
+                        }
+                        mutableSecurityState.update {
+                            it.copy(email = account.email, savedEmail = account.email)
+                        }
                     }
                     is PersonalSettingsFailure -> handleRootFailure(MeOperation.Load, result.error)
                 }
@@ -264,12 +280,15 @@ class MeViewModel(
                         mutableProfileState.update {
                             it.copy(
                                 displayName = account.displayName,
+                                savedDisplayName = account.displayName,
                                 pendingAvatar = null,
                                 avatarRevision = it.avatarRevision + 1,
                                 isSaving = false,
                             )
                         }
-                        mutableSecurityState.update { it.copy(email = account.email) }
+                        mutableSecurityState.update {
+                            it.copy(email = account.email, savedEmail = account.email)
+                        }
                         val avatarBytes = when (operation) {
                             MeOperation.UploadAvatar -> state.pendingAvatar?.bytes
                             MeOperation.DeleteAvatar -> null

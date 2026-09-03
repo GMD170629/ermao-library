@@ -15,12 +15,11 @@ struct ProfileSettingsView: View {
     }
 
     var body: some View {
-        List {
+        SettingsScreen("settings.profile.title") {
             Section {
                 VStack(spacing: .space2) {
                     SettingsAvatarView(
                         data: viewModel.avatarData,
-                        displayName: viewModel.snapshot.account.displayName,
                         size: 88
                     )
                     avatarActions
@@ -30,51 +29,37 @@ struct ProfileSettingsView: View {
             } footer: {
                 Text("settings.avatar.footer")
             }
-            .listRowBackground(theme.surface)
 
-            Section("settings.profile.name.section") {
-                TextField("me.name", text: $displayName)
-                    .textContentType(.name)
-                    .submitLabel(.done)
-                    .onSubmit(saveName)
-                    .accessibilityHint(Text("settings.profile.name.hint"))
-
-                Button(action: saveName) {
-                    workingLabel(
-                        titleKey: "settings.profile.name.save",
-                        operation: .savingName
-                    )
+            SettingsSection("settings.profile.name.section") {
+                SettingsTextInputRow("me.name") {
+                    TextField("me.name", text: $displayName)
+                        .labelsHidden()
+                        .textContentType(.name)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            guard !nameSaveIsDisabled else { return }
+                            saveName()
+                        }
+                        .accessibilityHint(Text("settings.profile.name.hint"))
                 }
-                .disabled(
-                    viewModel.isBusy ||
-                        displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                        displayName.trimmingCharacters(in: .whitespacesAndNewlines) ==
-                        viewModel.snapshot.account.displayName
-                )
+                SettingsValueRow("me.email", value: viewModel.snapshot.account.email)
             }
-            .listRowBackground(theme.surface)
 
         }
-        .listStyle(.insetGrouped)
-        .settingsListSurface()
         .settingsAlert(viewModel: viewModel)
-        .navigationTitle("settings.profile.title")
-        .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
-            "settings.avatar.remove.confirm.title",
-            isPresented: $confirmsAvatarRemoval,
-            titleVisibility: .visible
-        ) {
-            Button("settings.avatar.remove.action", role: .destructive) {
-                Task { await viewModel.deleteAvatar() }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text("settings.avatar.remove.confirm.message")
-        }
-        .onChange(of: selectedPhoto) { item in
+        .onChange(of: selectedPhoto) { _, item in
             guard let item else { return }
             loadPhoto(item)
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                SettingsToolbarAction(
+                    "settings.profile.name.save",
+                    working: viewModel.isWorking(.savingName),
+                    disabled: nameSaveIsDisabled,
+                    action: saveName
+                )
+            }
         }
     }
 
@@ -83,11 +68,11 @@ struct ProfileSettingsView: View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: .space2) {
                 photoPicker
-                removeAvatarButton
+                if viewModel.snapshot.account.avatarURL != nil { removeAvatarButton }
             }
             VStack(spacing: .space1) {
                 photoPicker
-                removeAvatarButton
+                if viewModel.snapshot.account.avatarURL != nil { removeAvatarButton }
             }
         }
     }
@@ -108,19 +93,27 @@ struct ProfileSettingsView: View {
             Label("settings.avatar.remove.action", systemImage: "trash")
                 .frame(minHeight: .iosMinimumTouchTarget)
         }
-        .disabled(viewModel.avatarData == nil || viewModel.isBusy)
+        .disabled(viewModel.isBusy)
+        .confirmationDialog(
+            "settings.avatar.remove.confirm.title",
+            isPresented: $confirmsAvatarRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("settings.avatar.remove.action", role: .destructive) {
+                Task { await viewModel.deleteAvatar() }
+            }
+            .disabled(viewModel.isBusy)
+            Button("common.cancel", role: .cancel) {}
+        } message: {
+            Text("settings.avatar.remove.confirm.message")
+        }
     }
 
-    private func workingLabel(titleKey: String, operation: SettingsOperation) -> some View {
-        HStack {
-            Text(LocalizedStringKey(titleKey))
-            Spacer(minLength: .space1)
-            if viewModel.isWorking(operation) {
-                ProgressView()
-                    .accessibilityLabel(Text("common.loading"))
-            }
-        }
-        .frame(minHeight: .iosMinimumTouchTarget)
+    private var nameSaveIsDisabled: Bool {
+        let normalized = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return viewModel.isBusy ||
+            !SettingsInputValidation.isValidDisplayName(normalized) ||
+            normalized == viewModel.snapshot.account.displayName
     }
 
     private func saveName() {

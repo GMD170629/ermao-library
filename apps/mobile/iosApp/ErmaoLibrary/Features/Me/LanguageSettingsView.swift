@@ -4,13 +4,18 @@ struct LanguageSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
 
     @Environment(\.appTheme) private var theme
+    @State private var pendingLocale: SettingsLocale?
 
     var body: some View {
-        List {
+        SettingsScreen("settings.language.title") {
             Section {
                 ForEach(SettingsLocale.allCases) { locale in
                     Button {
-                        Task { await viewModel.updateLocale(locale) }
+                        pendingLocale = locale
+                        Task {
+                            _ = await viewModel.updateLocale(locale)
+                            pendingLocale = nil
+                        }
                     } label: {
                         HStack(spacing: .space1Half) {
                             Text(LocalizedStringKey(locale.titleKey))
@@ -21,16 +26,17 @@ struct LanguageSettingsView: View {
                                     .foregroundStyle(theme.brandAccent)
                                     .accessibilityHidden(true)
                             }
-                            if viewModel.isWorking(.updatingLocale) {
+                            if pendingLocale == locale && viewModel.isWorking(.updatingLocale) {
                                 ProgressView()
                                     .accessibilityLabel(Text("common.loading"))
                             }
                         }
-                        .frame(minHeight: .iosMinimumTouchTarget)
+                        .frame(minHeight: SettingsMetrics.rowContentMinimumHeight)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isBusy && !viewModel.isWorking(.updatingLocale))
+                    .listRowInsets(SettingsMetrics.rowInsets)
+                    .disabled(viewModel.isBusy || viewModel.snapshot.locale == locale)
                     .accessibilityValue(
                         viewModel.snapshot.locale == locale
                             ? Text("common.selected")
@@ -40,12 +46,7 @@ struct LanguageSettingsView: View {
             } footer: {
                 Text("settings.language.footer")
             }
-            .listRowBackground(theme.surface)
         }
-        .listStyle(.insetGrouped)
-        .settingsListSurface()
         .settingsAlert(viewModel: viewModel)
-        .navigationTitle("settings.language.title")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }

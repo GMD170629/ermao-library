@@ -19,7 +19,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,7 +29,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.SettingsTextField
 
 @Composable
 fun OpdsScreen(
@@ -43,10 +44,26 @@ fun OpdsScreen(
     modifier: Modifier = Modifier,
 ) {
     var pendingDisable by remember { mutableStateOf(false) }
-    AdministrativePage(AdministrativeCopy.Opds, locale, onBack, modifier) {
+    val snapshot = state.snapshot
+    var enabled by remember(snapshot) { mutableStateOf(snapshot?.enabled ?: false) }
+    var publicAddress by remember(snapshot) { mutableStateOf(snapshot?.publicBaseUrl.orEmpty()) }
+    val hasChanges = snapshot?.let { enabled != it.enabled || publicAddress.trim() != it.publicBaseUrl.trim() } == true
+    AdministrativePage(
+        title = AdministrativeCopy.Opds,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        toolbarActions = {
+            AdministrativeSaveAction(
+                label = AdministrativeCopy.SaveOpds,
+                locale = locale,
+                enabled = !state.mutationInFlight && publicAddress.isNotBlank() && hasChanges,
+                working = state.mutationInFlight,
+                onClick = { onCommand(AdministrativeCommand.SaveOpds(enabled, publicAddress.trim())) },
+            )
+        },
+    ) {
         PageStateContent(state, locale, onRetry) { initial ->
-            var enabled by remember(initial) { mutableStateOf(initial.enabled) }
-            var publicAddress by remember(initial) { mutableStateOf(initial.publicBaseUrl) }
             AdministrativeSwitchRow(
                 AdministrativeCopy.EnableOpds.text(locale), enabled,
                 onCheckedChange = { next -> if (!next && enabled) pendingDisable = true else enabled = next },
@@ -59,9 +76,6 @@ fun OpdsScreen(
                 Modifier.padding(16.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            PrimaryAction(AdministrativeCopy.SaveOpds, locale, !state.mutationInFlight && publicAddress.isNotBlank()) {
-                onCommand(AdministrativeCommand.SaveOpds(enabled, publicAddress.trim()))
-            }
             if (pendingDisable) AdministrativeConfirmDialog(
                 AdministrativeCopy.DisableOpdsTitle, AdministrativeCopy.DisableOpdsBody, AdministrativeCopy.DisableService, locale,
                 onConfirm = { pendingDisable = false; enabled = false }, onDismiss = { pendingDisable = false },
@@ -126,7 +140,11 @@ private fun RestoreBackupDialog(
             Column {
                 Text(backup.fileName)
                 Text(AdministrativeCopy.RestoreWarning.text(locale), color = MaterialTheme.colorScheme.error)
-                OutlinedTextField(confirmation, { confirmation = it }, label = { Text(AdministrativeCopy.TypeRestore.text(locale)) })
+                SettingsTextField(
+                    value = confirmation,
+                    onValueChange = { confirmation = it },
+                    label = AdministrativeCopy.TypeRestore.text(locale),
+                )
             }
         },
         confirmButton = { TextButton(enabled = confirmation == "RESTORE", onClick = { onConfirm(confirmation) }) { Text(AdministrativeCopy.Restore.text(locale)) } },
@@ -252,7 +270,7 @@ fun LogsScreen(
         PageStateContent(state, locale, onRetry) { snapshot ->
             var search by remember(snapshot.query) { mutableStateOf(snapshot.query.search) }
             var level by remember(snapshot.query) { mutableStateOf(snapshot.query.level) }
-            AdministrativeTextField(search, { search = it }, AdministrativeCopy.SearchLogs, locale)
+            AdministrativeTextField(search, { search = it }, AdministrativeCopy.SearchLogs, locale, textAlign = TextAlign.Start)
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(level == null, { level = null }, { Text(AdministrativeCopy.All.text(locale)) })
                 LogLevel.entries.forEach { item -> FilterChip(level == item, { level = item }, { Text(item.copy().text(locale)) }) }

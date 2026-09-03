@@ -63,6 +63,12 @@ data class ImportTaskFilter(
     val keyword: String? = null,
     val page: Int = 1,
     val pageSize: Int = 20,
+    /**
+     * The canonical import-task list is scoped to one library. A null value
+     * keeps the legacy all-libraries request explicitly unavailable instead
+     * of silently guessing a library or issuing multiple unbounded requests.
+     */
+    val libraryId: String? = null,
 )
 
 data class ImportTask(
@@ -145,4 +151,16 @@ data class ImportRescanRequest(
 data class ImportPreferences(
     val allowedExtensions: List<String>,
     val ignorePatterns: String,
+)
+
+/**
+ * Server-wide automatic library scan settings.
+ *
+ * The interval is expressed in minutes to match the HTTP contract. Validation
+ * of the server's supported range is kept at the repository boundary so that
+ * invalid user input is reported as a typed administrative-settings failure.
+ */
+data class LibraryScanSettings(
+    val watchEnabled: Boolean,
+    val intervalMinutes: Int,
 )

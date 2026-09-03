@@ -6,12 +6,39 @@ final class ContentDiscoveryUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testCompactCustomTabControlsStayVisibleAndSelectable() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+
+        for identifier in ["home", "library", "shelves", "me"] {
+            let tab = app.buttons["tab-select-\(identifier)"]
+            XCTAssertTrue(tab.waitForExistence(timeout: 10), "Missing custom tab \(identifier)")
+            XCTAssertTrue(tab.isHittable, "Custom tab \(identifier) is covered")
+            tab.tap()
+            XCTAssertTrue(tab.isSelected, "Custom tab \(identifier) did not expose its selected state")
+        }
+
+        let libraryTab = app.buttons["tab-select-library"]
+        libraryTab.tap()
+        libraryTab.tap()
+        let libraryScreen = app.descendants(matching: .any)["library.screen"].firstMatch
+        XCTAssertTrue(libraryScreen.waitForExistence(timeout: 10))
+        XCTAssertLessThanOrEqual(
+            libraryScreen.frame.maxY,
+            libraryTab.frame.minY,
+            "The custom tab row must consume layout space instead of covering page content"
+        )
+    }
+
     func testLiveCoverManagementUsesChineseAccountLanguage() {
         let app = XCUIApplication()
         // The account's Chinese preference must win over an English system language.
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        let library = app.tabBars.buttons["书库"]
+        let library = app.buttons["tab-select-library"]
         XCTAssertTrue(library.waitForExistence(timeout: 15))
         library.tap()
         let book = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "work.")).firstMatch
@@ -79,7 +106,7 @@ final class ContentDiscoveryUITests: XCTestCase {
                                 "-AppleLocale", chinese ? "zh_CN" : "en_US"]
         app.launch()
         defer { app.terminate() }
-        let libraryTab = app.tabBars.buttons[chinese ? "书库" : "Library"]
+        let libraryTab = app.buttons["tab-select-library"]
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
         libraryTab.tap()
         let sources = app.segmentedControls["library.sourcePicker"]
@@ -191,7 +218,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        let libraryTab = app.tabBars.buttons["Library"]
+        let libraryTab = app.buttons["tab-select-library"]
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
         libraryTab.tap()
         let work = app.buttons["work.pride-and-prejudice"]
@@ -223,7 +250,7 @@ final class ContentDiscoveryUITests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        let libraryTab = app.tabBars.buttons["Library"]
+        let libraryTab = app.buttons["tab-select-library"]
         XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
         libraryTab.tap()
 
@@ -272,8 +299,8 @@ final class ContentDiscoveryUITests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
-        app.tabBars.buttons["Library"].tap()
+        XCTAssertTrue(app.buttons["tab-select-library"].waitForExistence(timeout: 10))
+        app.buttons["tab-select-library"].tap()
 
         let work = app.buttons["work.a-wizard-of-earthsea"]
         XCTAssertTrue(work.waitForExistence(timeout: 10))
@@ -296,8 +323,8 @@ final class ContentDiscoveryUITests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
-        XCTAssertTrue(app.tabBars.buttons["Library"].waitForExistence(timeout: 10))
-        app.tabBars.buttons["Library"].tap()
+        XCTAssertTrue(app.buttons["tab-select-library"].waitForExistence(timeout: 10))
+        app.buttons["tab-select-library"].tap()
         let work = app.buttons["work.the-left-hand-of-darkness"]
         XCTAssertTrue(work.waitForExistence(timeout: 10))
         work.tap()

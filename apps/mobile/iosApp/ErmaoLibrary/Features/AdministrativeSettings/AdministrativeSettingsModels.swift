@@ -1,7 +1,50 @@
 import Foundation
+@preconcurrency import ErmaoShared
+
+enum AdministrativeInputValidation {
+    static let minimumPasswordLength = Int(
+        AdministrativeSettingsValidationPublicKt.administrativeMinimumPasswordLength()
+    )
+    static let maximumPasswordLength = Int(
+        AdministrativeSettingsValidationPublicKt.administrativeMaximumPasswordLength()
+    )
+    static let logMegabytesRange = Int(
+        AdministrativeSettingsValidationPublicKt.administrativeMinimumLogMegabytes()
+    )...Int(
+        AdministrativeSettingsValidationPublicKt.administrativeMaximumLogMegabytes()
+    )
+
+    static func isValidDisplayName(_ value: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidAdministrativeDisplayName(value: value)
+    }
+
+    static func isValidEmail(_ value: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidAdministrativeEmail(value: value)
+    }
+
+    static func isValidOptionalEmail(_ value: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidOptionalAdministrativeEmail(value: value)
+    }
+
+    static func isValidPassword(_ value: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidAdministrativePassword(value: value)
+    }
+
+    static func isValidSMTPHost(_ value: String) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidAdministrativeSmtpHost(value: value)
+    }
+
+    static func isValidSMTPPort(_ value: Int) -> Bool {
+        guard let value = Int32(exactly: value) else { return false }
+        return AdministrativeSettingsValidationPublicKt.isValidAdministrativeSmtpPort(value: value)
+    }
+
+    static func isValidAttachmentMegabytes(_ value: Double) -> Bool {
+        AdministrativeSettingsValidationPublicKt.isValidAdministrativeAttachmentMegabytes(value: value)
+    }
+}
 
 enum AdministrativeSettingsRoute: Hashable, Sendable {
-    case management
     case emailAndKindle
     case kindleQueue
     case users
@@ -10,7 +53,7 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case librarySources
     case librarySourceEditor(sourceID: String?)
     case serverDirectoryPicker(purpose: ServerDirectoryPurpose)
-    case importTasks
+    case importTasks(libraryID: String)
     case importTaskDetail(taskID: String)
     case importScans
     case importPreferences
@@ -28,6 +71,36 @@ enum AdministrativeSettingsRoute: Hashable, Sendable {
     case health
     case logs
     case about
+
+    /// The mobile settings surface intentionally keeps the underlying
+    /// administrative screens available for shared implementation/API reuse,
+    /// while removing the four retired capabilities and every child route
+    /// from iOS navigation.
+    var isAvailableOnMobile: Bool {
+        switch self {
+        case .librarySources,
+             .librarySourceEditor,
+             .serverDirectoryPicker,
+             .importTasks,
+             .importTaskDetail,
+             .importScans,
+             .importPreferences,
+             .organizeQueue,
+             .organizeCandidates,
+             .organizeRuns,
+             .recognitionPolicy,
+             .libraryOperations,
+             .categoryGovernance,
+             .metadataProviders,
+             .metadataProvider,
+             .backups,
+             .workDetailOrder,
+             .health:
+            false
+        default:
+            true
+        }
+    }
 }
 
 enum AdministrativeSettingsLocale: String, CaseIterable, Hashable, Sendable {
@@ -40,7 +113,8 @@ struct AdministrativePermission: Equatable, Sendable {
     let canManageSystem: Bool
 
     func permits(_ route: AdministrativeSettingsRoute) -> Bool {
-        switch route {
+        guard route.isAvailableOnMobile else { return false }
+        return switch route {
         case .users, .userEditor, .userAccess:
             isAdmin
         case .emailAndKindle, .kindleQueue, .about:
@@ -91,22 +165,8 @@ enum AdministrativeLoadState<Value: Equatable & Sendable>: Equatable, Sendable {
 }
 
 struct AdministrativeManagementSummary: Equatable, Sendable {
-    let librarySourceCount: Int
-    let enabledLibraryCount: Int
-    let activeImportCount: Int
-    let importFormatCount: Int
-    let pendingOrganizeCount: Int
-    let availableProviderCount: Int
-    let providerCount: Int
-    let userCount: Int
     let smtpEnabled: Bool
     let failedKindleCount: Int
-    let opdsRunning: Bool
-    let latestBackupAt: Date?
-    let healthyComponentCount: Int
-    let componentCount: Int
-    let logBytes: Int64
-    let logLimitBytes: Int64
 }
 
 enum KindleFileFormat: String, CaseIterable, Hashable, Sendable {
@@ -162,6 +222,33 @@ struct KindleSendTask: Identifiable, Equatable, Sendable {
     let progress: Double?
     let createdAt: Date
     let errorCode: String?
+    let canCancel: Bool
+    let canRetry: Bool
+    let canDelete: Bool
+
+    init(
+        id: String,
+        title: String,
+        recipientMasked: String,
+        status: KindleTaskStatus,
+        progress: Double?,
+        createdAt: Date,
+        errorCode: String?,
+        canCancel: Bool? = nil,
+        canRetry: Bool? = nil,
+        canDelete: Bool? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.recipientMasked = recipientMasked
+        self.status = status
+        self.progress = progress
+        self.createdAt = createdAt
+        self.errorCode = errorCode
+        self.canCancel = canCancel ?? (status == .queued || status == .sending)
+        self.canRetry = canRetry ?? (status == .failed)
+        self.canDelete = canDelete ?? true
+    }
 }
 
 enum UserRole: String, CaseIterable, Hashable, Sendable {
@@ -352,6 +439,16 @@ enum MetadataLanguage: String, CaseIterable, Hashable, Sendable {
 struct ImportPreferences: Equatable, Sendable {
     var allowedExtensions: [String]
     var ignorePatterns: String
+}
+
+struct LibraryScanSettings: Equatable, Sendable {
+    var watchEnabled: Bool
+    var intervalMinutes: Int
+}
+
+struct LibraryImportPreferences: Equatable, Sendable {
+    var scan: LibraryScanSettings
+    var files: ImportPreferences
 }
 
 enum OrganizeJobStatus: String, CaseIterable, Hashable, Sendable {

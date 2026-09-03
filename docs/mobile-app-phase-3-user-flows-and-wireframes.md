@@ -270,7 +270,7 @@ flowchart LR
 
 规则：
 
-- 首次播放成功后立即建立系统音频会话和 mini player。
+- 首次播放成功后立即建立系统音频会话；mini player 按 Now Playing 的退出状态创建，不与全屏播放器重复显示。
 - 折叠 Now Playing 不暂停；切 Tab 不销毁播放状态。
 - 章节 Sheet 选章后保持展开，便于连续浏览。
 - 倍速使用 Menu；睡眠定时使用 Sheet。
@@ -693,7 +693,7 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 
 ### 20.3 行为
 
-- 折叠或系统返回不暂停，回到 mini player。
+- 折叠或系统返回不改变播放状态；仍在播放时回到 mini player，暂停状态退出时不显示 mini player。已显示的 mini player 内暂停后保留恢复入口。
 - 倍速 Menu 显示当前值；自定义倍速不在 P0。
 - 章节/队列 Sheet 选章后保持打开。
 - 睡眠定时 Sheet 在同一层完成所有选择。
@@ -703,7 +703,7 @@ Tab bar 与 mini player 在 Reader 中隐藏。
 
 ### 20.4 Mini player 规格
 
-至少显示封面缩略、标题/章节、播放暂停、轻量进度和展开动作。不能遮挡 Tab，不能把关闭播放作为误触高风险动作。
+至少显示封面缩略、标题/章节、播放暂停、轻量进度和展开动作。Compact 下由应用自有的统一底部容器承载 mini player 与四项 Tab 控件，共用全宽连续表面并仅以内部分隔线分区，不渲染系统 TabBar/NavigationBar，也不使用第二层独立胶囊；Expanded 下固定在内容底部或 rail 邻近安全位置。不能遮挡 Tab 控件，不能把关闭播放作为误触高风险动作。
 
 ### 20.5 状态
 

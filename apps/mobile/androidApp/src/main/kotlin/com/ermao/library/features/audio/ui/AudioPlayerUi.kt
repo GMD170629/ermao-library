@@ -68,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -126,84 +127,82 @@ fun AudioMiniPlayer(
         AndroidAudioPhase.Loading,
         AndroidAudioPhase.Error,
     )
-    Surface(
-        color = theme.colors.surface,
+    Column(
         modifier = modifier
             .fillMaxWidth()
+            .testTag("audio.miniPlayer")
             .semantics { stateDescription = status },
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 72.dp)
-                    .clickable(role = Role.Button, onClick = onOpen)
-                    .padding(horizontal = theme.spacing.two),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
-            ) {
-                AudioArtwork(
-                    contentId = snapshot.bookId ?: snapshot.resourceId ?: title,
-                    title = title,
-                    coverUrl = snapshot.artworkApiPath.orEmpty(),
-                    repository = repository,
-                    context = context,
-                    modifier = Modifier.size(48.dp),
-                )
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
-                ) {
-                    Text(
-                        text = title,
-                        style = theme.typography.headline,
-                        color = theme.colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = chapter,
-                        style = theme.typography.caption,
-                        color = theme.colors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                IconButton(
-                    onClick = onPlayPause,
-                    enabled = playPauseEnabled,
-                    modifier = Modifier
-                        .size(theme.components.controls.minimumTouchTarget)
-                        .semantics { contentDescription = "$playPauseLabel · $title" },
-                ) {
-                    Icon(
-                        imageVector = if (snapshot.phase == AndroidAudioPhase.Playing) {
-                            Icons.Filled.Pause
-                        } else {
-                            Icons.Filled.PlayArrow
-                        },
-                        contentDescription = null,
-                        tint = if (playPauseEnabled) {
-                            theme.colors.textPrimary
-                        } else {
-                            theme.colors.textTertiary
-                        },
-                    )
-                }
-            }
-            LinearProgressIndicator(
-                progress = { snapshot.progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .semantics {
-                        progressBarRangeInfo = ProgressBarRangeInfo(snapshot.progress, 0f..1f)
-                        contentDescription = progressLabel
-                    },
-                color = theme.colors.brandAccent,
-                trackColor = theme.colors.divider,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 72.dp)
+                .clickable(role = Role.Button, onClick = onOpen)
+                .padding(horizontal = theme.spacing.two),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.one),
+        ) {
+            AudioArtwork(
+                contentId = snapshot.bookId ?: snapshot.resourceId ?: title,
+                title = title,
+                coverUrl = snapshot.artworkApiPath.orEmpty(),
+                repository = repository,
+                context = context,
+                modifier = Modifier.size(48.dp),
             )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
+            ) {
+                Text(
+                    text = title,
+                    style = theme.typography.headline,
+                    color = theme.colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = chapter,
+                    style = theme.typography.caption,
+                    color = theme.colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(
+                onClick = onPlayPause,
+                enabled = playPauseEnabled,
+                modifier = Modifier
+                    .size(theme.components.controls.minimumTouchTarget)
+                    .semantics { contentDescription = "$playPauseLabel · $title" },
+            ) {
+                Icon(
+                    imageVector = if (snapshot.phase == AndroidAudioPhase.Playing) {
+                        Icons.Filled.Pause
+                    } else {
+                        Icons.Filled.PlayArrow
+                    },
+                    contentDescription = null,
+                    tint = if (playPauseEnabled) {
+                        theme.colors.textPrimary
+                    } else {
+                        theme.colors.textTertiary
+                    },
+                )
+            }
         }
+        LinearProgressIndicator(
+            progress = { snapshot.progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .semantics {
+                    progressBarRangeInfo = ProgressBarRangeInfo(snapshot.progress, 0f..1f)
+                    contentDescription = progressLabel
+                },
+            color = theme.colors.brandAccent,
+            trackColor = theme.colors.divider,
+        )
     }
 }
 

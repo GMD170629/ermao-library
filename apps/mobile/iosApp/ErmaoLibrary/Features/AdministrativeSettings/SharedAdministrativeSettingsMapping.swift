@@ -21,9 +21,34 @@ extension SharedAdministrativeSettingsClient {
     nonisolated func map(_ value: ErmaoShared.SmtpSettings) -> SMTPSettings { SMTPSettings(host: value.host, port: Int(value.port), encryption: map(value.security), senderEmail: value.fromEmail, username: value.username, senderName: value.fromName, maximumAttachmentMegabytes: value.maximumAttachmentMegabytes?.doubleValue, hasPassword: value.passwordConfigured, replacementPassword: "") }
     nonisolated func map(_ value: ErmaoShared.SmtpSecurity) -> SMTPEncryption { switch value.name { case "Ssl": .tls; case "None": .none; default: .startTLS } }
     nonisolated func map(_ value: SMTPEncryption) -> ErmaoShared.SmtpSecurity { switch value { case .tls: .ssl; case .none: .none; case .startTLS: .starttls } }
-    nonisolated func smtpUpdate(_ value: SMTPSettings) -> ErmaoShared.SmtpSettingsUpdate { ErmaoShared.SmtpSettingsUpdate(host: value.host, port: Int32(value.port), security: map(value.encryption), username: value.username, password: value.replacementPassword.isEmpty ? nil : value.replacementPassword, fromEmail: value.senderEmail, fromName: value.senderName, maximumAttachmentMegabytes: value.maximumAttachmentMegabytes.map(KotlinDouble.init(double:)), clearPassword: false) }
+    nonisolated func smtpUpdate(_ value: SMTPSettings) -> ErmaoShared.SmtpSettingsUpdate {
+        ErmaoShared.SmtpSettingsUpdate(
+            host: value.host.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: Int32(value.port),
+            security: map(value.encryption),
+            username: value.username,
+            password: value.replacementPassword.isEmpty ? nil : value.replacementPassword,
+            fromEmail: value.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            fromName: value.senderName,
+            maximumAttachmentMegabytes: value.maximumAttachmentMegabytes.map(KotlinDouble.init(double:)),
+            clearPassword: false
+        )
+    }
     nonisolated func map(_ value: KindleTaskStatus?) -> ErmaoShared.KindleTaskStatus? { guard let value else { return nil }; switch value { case .queued: return ErmaoShared.KindleTaskStatus.queued; case .sending: return ErmaoShared.KindleTaskStatus.sending; case .sent: return ErmaoShared.KindleTaskStatus.sent; case .failed: return ErmaoShared.KindleTaskStatus.failed; case .cancelled: return ErmaoShared.KindleTaskStatus.cancelled; case .unknown: return ErmaoShared.KindleTaskStatus.unknown } }
-    nonisolated func map(_ value: ErmaoShared.KindleTask) -> KindleSendTask { KindleSendTask(id: value.id, title: value.bookTitle, recipientMasked: mask(email: value.recipientEmail), status: map(value.status), progress: value.status == .sending ? 0.5 : nil, createdAt: date(value.createdAt) ?? .distantPast, errorCode: value.errorMessage) }
+    nonisolated func map(_ value: ErmaoShared.KindleTask) -> KindleSendTask {
+        KindleSendTask(
+            id: value.id,
+            title: value.bookTitle,
+            recipientMasked: mask(email: value.recipientEmail),
+            status: map(value.status),
+            progress: value.status == .sending ? 0.5 : nil,
+            createdAt: date(value.createdAt) ?? .distantPast,
+            errorCode: value.errorMessage,
+            canCancel: value.canCancel,
+            canRetry: value.canRetry,
+            canDelete: value.canDelete
+        )
+    }
     nonisolated func map(_ value: ErmaoShared.KindleTaskStatus) -> KindleTaskStatus { switch value.name { case "Queued": .queued; case "Sending": .sending; case "Sent": .sent; case "Failed": .failed; case "Cancelled": .cancelled; default: .unknown } }
     nonisolated func mask(email: String) -> String { guard let at = email.firstIndex(of: "@") else { return email }; let local = email[..<at]; return String(local.prefix(2)) + "****" + email[at...] }
 
@@ -46,6 +71,8 @@ extension SharedAdministrativeSettingsClient {
     nonisolated func map(_ value: ErmaoShared.ImportScanStatus) -> ImportScanStatus { switch value.name { case "Pending": .pending; case "Running": .running; case "Completed": .completed; case "Failed": .failed; default: .cancelled } }
     nonisolated func map(_ value: ErmaoShared.ImportPreferences) -> ImportPreferences { ImportPreferences(allowedExtensions: value.allowedExtensions, ignorePatterns: value.ignorePatterns) }
     nonisolated func map(_ value: ImportPreferences) -> ErmaoShared.ImportPreferences { ErmaoShared.ImportPreferences(allowedExtensions: value.allowedExtensions, ignorePatterns: value.ignorePatterns) }
+    nonisolated func map(_ value: ErmaoShared.LibraryScanSettings) -> LibraryScanSettings { LibraryScanSettings(watchEnabled: value.watchEnabled, intervalMinutes: Int(value.intervalMinutes)) }
+    nonisolated func map(_ value: LibraryScanSettings) -> ErmaoShared.LibraryScanSettings { ErmaoShared.LibraryScanSettings(watchEnabled: value.watchEnabled, intervalMinutes: Int32(value.intervalMinutes)) }
 
     nonisolated func map(_ value: OrganizeJobStatus?) -> ErmaoShared.OrganizeStatusCategory? { guard let value else { return nil }; switch value { case .organized: return ErmaoShared.OrganizeStatusCategory.success; case .failed: return ErmaoShared.OrganizeStatusCategory.failed; case .pendingRecognition: return ErmaoShared.OrganizeStatusCategory.waiting; case .needsConfirmation: return ErmaoShared.OrganizeStatusCategory.recognizing; case .cancelled: return nil } }
     nonisolated func map(_ value: ErmaoShared.OrganizeJob) -> OrganizeJob { OrganizeJob(id: value.id, title: value.book.title, subtitle: value.book.author, status: map(value.statusCategory), errorCode: value.issueCodes.first) }

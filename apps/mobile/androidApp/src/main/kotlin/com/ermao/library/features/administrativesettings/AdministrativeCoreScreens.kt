@@ -26,18 +26,20 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.SettingsTabRow
+import com.ermao.library.ui.components.SettingsTextField
 
 @Composable
 fun ManagementIndexScreen(
@@ -51,9 +53,10 @@ fun ManagementIndexScreen(
 ) {
     AdministrativePage(AdministrativeCopy.Management, locale, onBack, modifier) {
         PageStateContent(state, locale, onRetry) { snapshot ->
-            ManagementGroup(AdministrativeCopy.Library, snapshot.entries.filter { it.route.group() == ManagementGroup.Library }, locale, capabilities, onNavigate)
-            ManagementGroup(AdministrativeCopy.Services, snapshot.entries.filter { it.route.group() == ManagementGroup.Services }, locale, capabilities, onNavigate)
-            ManagementGroup(AdministrativeCopy.System, snapshot.entries.filter { it.route.group() == ManagementGroup.System }, locale, capabilities, onNavigate)
+            val mobileEntries = snapshot.entries.filterNot { it.route.isRetiredMobileRoute() }
+            ManagementGroup(AdministrativeCopy.Library, mobileEntries.filter { it.route.group() == ManagementGroup.Library }, locale, capabilities, onNavigate)
+            ManagementGroup(AdministrativeCopy.Services, mobileEntries.filter { it.route.group() == ManagementGroup.Services }, locale, capabilities, onNavigate)
+            ManagementGroup(AdministrativeCopy.System, mobileEntries.filter { it.route.group() == ManagementGroup.System }, locale, capabilities, onNavigate)
         }
     }
 }
@@ -181,84 +184,172 @@ fun EmailKindleSettingsScreen(
     selectedTab: EmailKindleTab,
     state: AdministrativePageState<EmailKindleSnapshot>,
     locale: AdministrativeLocale,
-    onTabSelected: (EmailKindleTab) -> Unit,
     onCommand: (AdministrativeCommand) -> Unit,
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AdministrativePage(AdministrativeCopy.EmailAndKindle, locale, onBack, modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(selectedTab == EmailKindleTab.Kindle, { onTabSelected(EmailKindleTab.Kindle) }, { Text(AdministrativeCopy.Kindle.text(locale)) })
-            if (state.snapshot?.canManageSmtp == true || selectedTab == EmailKindleTab.Smtp) {
-                FilterChip(selectedTab == EmailKindleTab.Smtp, { onTabSelected(EmailKindleTab.Smtp) }, { Text(AdministrativeCopy.Smtp.text(locale)) })
-            }
-        }
-        PageStateContent(state, locale, onRetry) { snapshot ->
-            if (selectedTab == EmailKindleTab.Kindle) {
-                KindleSettingsForm(snapshot.kindle, locale, state.mutationInFlight, onCommand)
+    var selectedTabName by rememberSaveable { mutableStateOf(selectedTab.name) }
+    val activeTab = EmailKindleTab.entries.firstOrNull { it.name == selectedTabName } ?: EmailKindleTab.Kindle
+    val snapshot = state.snapshot
+    var kindleRecipient by remember(snapshot?.kindle?.recipient) {
+        mutableStateOf(snapshot?.kindle?.recipient.orEmpty())
+    }
+    var smtpForm by remember(snapshot?.smtp) {
+        mutableStateOf(SmtpFormState.from(snapshot?.smtp))
+    }
+    val kindleChanged = snapshot?.kindle?.let {
+        kindleRecipient.trim() != it.recipient.trim()
+    } == true
+    val smtpChanged = snapshot?.smtp?.let { smtpForm.hasChangesFrom(it) } ?: false
+    val smtpValid = smtpForm.host.isNotBlank() && smtpForm.senderEmail.isNotBlank() &&
+        (smtpForm.port.toIntOrNull() ?: 0) in 1..65535
+    val canSave = !state.mutationInFlight && snapshot != null && when (activeTab) {
+        EmailKindleTab.Kindle -> kindleRecipient.isNotBlank() && kindleChanged
+        EmailKindleTab.Smtp -> smtpValid && smtpChanged
+    }
+    AdministrativePage(
+        title = AdministrativeCopy.EmailAndKindle,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        toolbarActions = {
+            AdministrativeSaveAction(
+                label = if (activeTab == EmailKindleTab.Kindle) AdministrativeCopy.SaveKindle else AdministrativeCopy.SaveSmtp,
+                locale = locale,
+                enabled = canSave,
+                working = state.mutationInFlight,
+                onClick = {
+                    when (activeTab) {
+                        EmailKindleTab.Kindle -> snapshot?.let {
+                            onCommand(AdministrativeCommand.SaveKindle(it.kindle.copy(recipient = kindleRecipient.trim())))
+                        }
+                        EmailKindleTab.Smtp -> if (smtpValid) {
+                            onCommand(AdministrativeCommand.SaveSmtp(smtpForm.toDraft()))
+                        }
+                    }
+                },
+            )
+        },
+    ) {
+        SettingsTabRow(
+            selectedIndex = if (activeTab == EmailKindleTab.Kindle) 0 else 1,
+            tabs = buildList {
+                add(AdministrativeCopy.Kindle.text(locale))
+                if (snapshot?.canManageSmtp == true || activeTab == EmailKindleTab.Smtp) {
+                    add(AdministrativeCopy.Smtp.text(locale))
+                }
+            },
+            enabled = !state.mutationInFlight,
+            onSelect = { index ->
+                selectedTabName = if (index == 0) EmailKindleTab.Kindle.name else EmailKindleTab.Smtp.name
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PageStateContent(state, locale, onRetry) { current ->
+            if (activeTab == EmailKindleTab.Kindle) {
+                KindleSettingsForm(
+                    initial = current.kindle,
+                    recipient = kindleRecipient,
+                    onRecipientChanged = { kindleRecipient = it },
+                    locale = locale,
+                )
             } else {
-                snapshot.smtp?.let { SmtpSettingsForm(it, locale, state.mutationInFlight, onCommand) }
+                current.smtp?.let {
+                    SmtpSettingsForm(
+                        initial = it,
+                        form = smtpForm,
+                        onFormChanged = { smtpForm = it },
+                        locale = locale,
+                        saving = state.mutationInFlight,
+                        onCommand = onCommand,
+                    )
+                }
             }
         }
+    }
+}
+
+private data class SmtpFormState(
+    val host: String,
+    val port: String,
+    val encryption: SmtpEncryption,
+    val senderEmail: String,
+    val username: String,
+    val password: String,
+    val senderName: String,
+    val maximumAttachment: String,
+) {
+    fun toDraft(): SmtpSettingsDraft = SmtpSettingsDraft(
+        host = host.trim(),
+        port = port.toIntOrNull() ?: 0,
+        encryption = encryption,
+        senderEmail = senderEmail.trim(),
+        username = username.trim(),
+        newPassword = password.ifBlank { null },
+        senderName = senderName.trim(),
+        maximumAttachmentMegabytes = maximumAttachment.toDoubleOrNull(),
+    )
+
+    fun hasChangesFrom(initial: SmtpSettings): Boolean =
+        host.trim() != initial.host.trim() ||
+            (port.toIntOrNull() ?: 0) != initial.port ||
+            encryption != initial.encryption ||
+            senderEmail.trim() != initial.senderEmail.trim() ||
+            username.trim() != initial.username.trim() ||
+            password.isNotBlank() ||
+            senderName.trim() != initial.senderName.trim() ||
+            maximumAttachment.toDoubleOrNull() != initial.maximumAttachmentMegabytes
+
+    companion object {
+        fun from(initial: SmtpSettings?): SmtpFormState = SmtpFormState(
+            host = initial?.host.orEmpty(),
+            port = initial?.port?.toString().orEmpty(),
+            encryption = initial?.encryption ?: SmtpEncryption.StartTls,
+            senderEmail = initial?.senderEmail.orEmpty(),
+            username = initial?.username.orEmpty(),
+            password = "",
+            senderName = initial?.senderName.orEmpty(),
+            maximumAttachment = initial?.maximumAttachmentMegabytes?.toString().orEmpty(),
+        )
     }
 }
 
 @Composable
 private fun ColumnScope.KindleSettingsForm(
     initial: KindleSettings,
+    recipient: String,
+    onRecipientChanged: (String) -> Unit,
     locale: AdministrativeLocale,
-    saving: Boolean,
-    onCommand: (AdministrativeCommand) -> Unit,
 ) {
-    var recipient by remember(initial) { mutableStateOf(initial.recipient) }
     AdministrativeSection(AdministrativeCopy.KindleRecipient, locale)
-    AdministrativeTextField(recipient, { recipient = it }, AdministrativeCopy.Email, locale)
+    AdministrativeTextField(recipient, onRecipientChanged, AdministrativeCopy.Email, locale)
     AdministrativeValueRow(AdministrativeCopy.Smtp.text(locale), if (initial.smtpConfigured) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale))
     AdministrativeValueRow(AdministrativeCopy.SenderEmail.text(locale), initial.senderEmail)
-    PrimaryAction(AdministrativeCopy.SaveKindle, locale, !saving && recipient.isNotBlank()) {
-        onCommand(AdministrativeCommand.SaveKindle(initial.copy(recipient = recipient.trim())))
-    }
 }
 
 @Composable
 private fun ColumnScope.SmtpSettingsForm(
     initial: SmtpSettings,
+    form: SmtpFormState,
+    onFormChanged: (SmtpFormState) -> Unit,
     locale: AdministrativeLocale,
     saving: Boolean,
     onCommand: (AdministrativeCommand) -> Unit,
 ) {
-    var host by remember(initial) { mutableStateOf(initial.host) }
-    var portText by remember(initial) { mutableStateOf(initial.port.toString()) }
-    var encryption by remember(initial) { mutableStateOf(initial.encryption) }
-    var sender by remember(initial) { mutableStateOf(initial.senderEmail) }
-    var username by remember(initial) { mutableStateOf(initial.username) }
-    var password by remember(initial) { mutableStateOf("") }
-    var senderName by remember(initial) { mutableStateOf(initial.senderName) }
-    var maximumAttachment by remember(initial) { mutableStateOf(initial.maximumAttachmentMegabytes?.toString().orEmpty()) }
-    val draft = {
-        SmtpSettingsDraft(
-            host.trim(), portText.toIntOrNull() ?: 0, encryption, sender.trim(), username.trim(), password.ifBlank { null },
-            senderName.trim(), maximumAttachment.toDoubleOrNull(),
-        )
-    }
-    AdministrativeTextField(host, { host = it }, AdministrativeCopy.SmtpHost, locale)
-    AdministrativeTextField(portText, { portText = it.filter(Char::isDigit) }, AdministrativeCopy.Port, locale)
-    EnumChoiceRow(AdministrativeCopy.Encryption, SmtpEncryption.entries, encryption, { encryption = it }, locale) { it.name }
-    AdministrativeTextField(sender, { sender = it }, AdministrativeCopy.SenderEmail, locale)
-    AdministrativeTextField(username, { username = it }, AdministrativeCopy.Username, locale)
-    AdministrativeTextField(senderName, { senderName = it }, AdministrativeCopy.DisplayName, locale)
-    AdministrativeTextField(maximumAttachment, { maximumAttachment = it }, AdministrativeCopy.FileFormat, locale)
-    OutlinedTextField(
-        value = password,
-        onValueChange = { password = it },
-        label = { Text(AdministrativeCopy.Password.text(locale)) },
-        placeholder = { if (initial.passwordConfigured) Text(AdministrativeCopy.PasswordUnchanged.text(locale)) },
-        visualTransformation = PasswordVisualTransformation(),
-        singleLine = true,
+    AdministrativeTextField(form.host, { onFormChanged(form.copy(host = it)) }, AdministrativeCopy.SmtpHost, locale)
+    AdministrativeTextField(form.port, { onFormChanged(form.copy(port = it.filter(Char::isDigit))) }, AdministrativeCopy.Port, locale)
+    EnumChoiceRow(AdministrativeCopy.Encryption, SmtpEncryption.entries, form.encryption, { onFormChanged(form.copy(encryption = it)) }, locale) { it.name }
+    AdministrativeTextField(form.senderEmail, { onFormChanged(form.copy(senderEmail = it)) }, AdministrativeCopy.SenderEmail, locale)
+    AdministrativeTextField(form.username, { onFormChanged(form.copy(username = it)) }, AdministrativeCopy.Username, locale)
+    AdministrativeTextField(form.senderName, { onFormChanged(form.copy(senderName = it)) }, AdministrativeCopy.DisplayName, locale)
+    AdministrativeTextField(form.maximumAttachment, { onFormChanged(form.copy(maximumAttachment = it)) }, AdministrativeCopy.FileFormat, locale)
+    SettingsTextField(
+        value = form.password,
+        onValueChange = { onFormChanged(form.copy(password = it)) },
+        label = AdministrativeCopy.Password.text(locale),
+        placeholder = if (initial.passwordConfigured) AdministrativeCopy.PasswordUnchanged.text(locale) else null,
+        password = true,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     )
     initial.lastTest?.let {
@@ -268,11 +359,10 @@ private fun ColumnScope.SmtpSettingsForm(
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
         )
     }
-    val valid = host.isNotBlank() && sender.isNotBlank() && (portText.toIntOrNull() ?: 0) in 1..65535
-    TextButton(onClick = { onCommand(AdministrativeCommand.TestSmtp(draft())) }, enabled = !saving && valid, modifier = Modifier.fillMaxWidth()) {
+    val valid = form.host.isNotBlank() && form.senderEmail.isNotBlank() && (form.port.toIntOrNull() ?: 0) in 1..65535
+    TextButton(onClick = { onCommand(AdministrativeCommand.TestSmtp(form.toDraft())) }, enabled = !saving && valid, modifier = Modifier.fillMaxWidth()) {
         Text(AdministrativeCopy.SendTestEmail.text(locale))
     }
-    PrimaryAction(AdministrativeCopy.SaveSmtp, locale, !saving && valid) { onCommand(AdministrativeCommand.SaveSmtp(draft())) }
 }
 
 @Composable
@@ -283,14 +373,15 @@ internal fun AdministrativeTextField(
     locale: AdministrativeLocale,
     password: Boolean = false,
     supporting: String? = null,
+    textAlign: TextAlign = TextAlign.End,
 ) {
-    OutlinedTextField(
+    SettingsTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label.text(locale)) },
-        supportingText = supporting?.let { ({ Text(it) }) },
-        visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        singleLine = true,
+        label = label.text(locale),
+        supportingText = supporting,
+        password = password,
+        textAlign = textAlign,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     )
 }

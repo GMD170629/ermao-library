@@ -269,7 +269,7 @@ Web 管理只在 `canManageSystem` 或 `isAdmin` 时显示，使用系统浏览�
 |---|---|---|
 | `book.detail` | L2/L3 | 解析 Book 绑定节点后显示目录或资源详情；子节点原生推进，逐层返回并恢复各目的地上下文，不创建 Version 身份 |
 | `reader.session` | L4 | 隐藏 Tab 与 mini player；资源内 TOC、页码/位置使用 replace/update，不堆返回历史 |
-| `audio.now-playing` | L4 Cover | 播放状态独立于页面；关闭后回到精确来源并保留 mini player |
+| `audio.now-playing` | L4 Cover | 播放状态独立于页面；关闭后回到精确来源；退出时仍在播放才创建 mini player，暂停退出不显示；已显示的 mini player 内暂停后保留恢复入口 |
 | `downloads.detail` | L2/L3 | 展示一个持久下载任务的状态、错误和恢复动作；不使用临时 Sheet 代替 |
 
 ## 6. 启动与认证恢复
@@ -364,7 +364,7 @@ flowchart LR
 - Reader 打开时隐藏 Tab 和 mini player，但后台音频可以继续，由系统媒体控制。
 - Reader 返回先完成本地 progress 事务；成功后立即退出，网络 flush 不阻塞。
 - 只有本地持久化失败时才阻断退出，并给出重试或明确放弃本次本地变更的选择。
-- mini player 常驻四 Tab 上方；点击打开 Now Playing。
+- Compact 下由应用自有的统一底部容器共同承载 mini player 与四项 Tab 控件；两者共享一个连续 Surface，系统 TabBar/NavigationBar 不参与渲染。Expanded 下继续使用 Rail/Drawer，mini player 固定在内容底部或 Rail 邻近区域；点击 mini player 打开 Now Playing。
 - Now Playing 返回或下滑只折叠，不暂停播放。
 - “查看图书”先折叠 Now Playing，再在当前 Stack 复用或压入 `book.detail`。
 - 切换音频 `ReadableResource` 替换当前队列；资源内切换 `ResourceAsset` 或 locator 只更新播放状态，不增加页面历史。

@@ -48,8 +48,12 @@ actor SharedSettingsClient: SettingsClient {
         return SettingsPasswordChange(requiresLogin: value.requiresLogin)
     }
 
-    func loadAvatar(etag: String?) async throws -> SettingsAvatarContent {
-        let result = try await repository.loadAvatar(context: context, etag: etag)
+    func loadAvatar(from avatarURL: String, etag: String?) async throws -> SettingsAvatarContent {
+        let result = try await repository.loadAvatar(
+            context: context,
+            avatarUrl: avatarURL,
+            etag: etag
+        )
         let value: ErmaoShared.PersonalAvatar = try settingsValue(result)
         return SettingsAvatarContent(
             data: data(from: value.bytes),

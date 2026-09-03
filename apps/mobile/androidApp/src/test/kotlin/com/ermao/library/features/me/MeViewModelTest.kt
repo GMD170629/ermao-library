@@ -109,7 +109,7 @@ class MeViewModelTest {
             return PersonalSettingsContent(PersonalSettingsSnapshot(ACCOUNT, PersonalPreferences(PersonalSettingsLocale.EnUs)))
         }
 
-        override suspend fun loadAvatar(etag: String?): PersonalSettingsResult<PersonalAvatar> {
+        override suspend fun loadAvatar(avatarUrl: String, etag: String?): PersonalSettingsResult<PersonalAvatar> {
             events += "load-avatar"
             return PersonalSettingsContent(PersonalAvatar(byteArrayOf(), null, null, false))
         }

@@ -7,7 +7,7 @@ protocol AdministrativeSettingsClient: Sendable {
     func loadEmailAndKindle() async throws -> EmailKindleSnapshot
     func saveKindle(_ settings: KindleSettings) async throws -> KindleSettings
     func saveSMTP(_ settings: SMTPSettings) async throws -> SMTPSettings
-    func sendSMTPTest() async throws
+    func sendSMTPTest(_ settings: SMTPSettings) async throws
     func loadKindleTasks(status: KindleTaskStatus?) async throws -> [KindleSendTask]
     func cancelKindleTask(id: String) async throws
     func retryKindleTask(id: String) async throws
@@ -37,7 +37,7 @@ protocol AdministrativeSettingsClient: Sendable {
     func scanDirectory(path: String) async throws
     func cancelDirectoryScan() async throws
 
-    func loadImportTasks(status: ImportTaskStatus?) async throws -> [ImportTask]
+    func loadImportTasks(libraryID: String) async throws -> [ImportTask]
     func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail
     func retryImportTask(id: String) async throws
     func deleteImportTask(id: String) async throws
@@ -47,6 +47,8 @@ protocol AdministrativeSettingsClient: Sendable {
     func cancelImportScan(id: String) async throws
     func loadImportPreferences() async throws -> ImportPreferences
     func saveImportPreferences(_ preferences: ImportPreferences) async throws -> ImportPreferences
+    func loadLibraryScanSettings() async throws -> LibraryScanSettings
+    func saveLibraryScanSettings(_ settings: LibraryScanSettings) async throws -> LibraryScanSettings
 
     func loadOrganizeJobs(status: OrganizeJobStatus?) async throws -> [OrganizeJob]
     func loadPendingOrganizeJobs() async throws -> [OrganizeJob]

@@ -35,6 +35,10 @@ class AdministrativeSettingsViewModel(
     private val generationSource = AtomicLong(0L)
 
     fun load(route: AdministrativeSettingsRoute, force: Boolean = false) {
+        if (route.isRetiredMobileRoute()) {
+            update(route) { AdministrativeScreenState(phase = AdministrativePagePhase.PermissionDenied) }
+            return
+        }
         if (!context.capabilities.contains(route.requiredCapability())) {
             update(route) { AdministrativeScreenState(phase = AdministrativePagePhase.PermissionDenied) }
             return
@@ -97,6 +101,10 @@ class AdministrativeSettingsViewModel(
 
     fun execute(command: AdministrativeCommand) {
         val route = command.ownerRoute
+        if (route.isRetiredMobileRoute()) {
+            setFailure(route, forbiddenFailure())
+            return
+        }
         if (!context.capabilities.contains(command.requiredCapability())) {
             setFailure(route, forbiddenFailure())
             return

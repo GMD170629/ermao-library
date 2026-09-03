@@ -88,6 +88,31 @@ sealed interface AdministrativeSettingsRoute : NavKey {
 
 }
 
+/** Mobile availability guard kept beside the route contract so every Android entry point shares it. */
+internal fun AdministrativeSettingsRoute.isRetiredMobileRoute(): Boolean = when (this) {
+    AdministrativeSettingsRoute.LibrarySources,
+    is AdministrativeSettingsRoute.LibrarySourceEdit,
+    is AdministrativeSettingsRoute.ServerDirectory,
+    AdministrativeSettingsRoute.ImportTasks,
+    is AdministrativeSettingsRoute.ImportTaskDetail,
+    AdministrativeSettingsRoute.ImportScanJobs,
+    is AdministrativeSettingsRoute.ImportScanJob,
+    AdministrativeSettingsRoute.ImportPreferences,
+    AdministrativeSettingsRoute.OrganizeQueue,
+    AdministrativeSettingsRoute.OrganizeCandidates,
+    AdministrativeSettingsRoute.OrganizeRuns,
+    AdministrativeSettingsRoute.RecognitionPolicy,
+    AdministrativeSettingsRoute.LibraryOperations,
+    is AdministrativeSettingsRoute.CategoryGovernance,
+    AdministrativeSettingsRoute.MetadataProviders,
+    is AdministrativeSettingsRoute.MetadataProviderEdit,
+    AdministrativeSettingsRoute.Backups,
+    AdministrativeSettingsRoute.DetailOrder,
+    is AdministrativeSettingsRoute.Health,
+    -> true
+    else -> false
+}
+
 @Serializable
 enum class EmailKindleTab { Kindle, Smtp }
 

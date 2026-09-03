@@ -292,6 +292,15 @@ internal fun JsonElement.toLibraries(): Libraries {
     )
 }
 
+internal fun JsonElement.toLibraryScanSettings(): LibraryScanSettings {
+    val settings = objectValue("INVALID_LIBRARY_SCAN_SETTINGS")
+        .expectKeys("watchEnabled", "intervalMinutes")
+    return LibraryScanSettings(
+        watchEnabled = settings.requiredBoolean("watchEnabled"),
+        intervalMinutes = settings.requiredInt("intervalMinutes"),
+    )
+}
+
 internal fun JsonElement.toDirectoryNode(): DirectoryNode {
     val node = objectValue("INVALID_DIRECTORY_PAYLOAD").expectKeys("node").requiredObject("node")
         .expectKeys("name", "path", "readable", "error", "children")
@@ -338,7 +347,14 @@ internal fun JsonElement.toImportTask(): ImportTask {
 }
 
 internal fun JsonElement.toImportTaskPage(): ImportTaskPage {
-    val root = objectValue("INVALID_IMPORT_TASKS").expectKeys("tasks", "page", "pageSize", "total", "totalPages", "completed", "failed")
+    val root = objectValue("INVALID_IMPORT_TASKS").expectKeys(
+        "tasks", "page", "pageSize", "total", "totalPages", "queued", "running", "completed", "failed",
+    )
+    // The canonical library-scoped endpoint exposes the complete queue
+    // summary. The shared page model only needs terminal counts, but validate
+    // all counters at the wire boundary so malformed responses fail closed.
+    root.requiredInt("queued")
+    root.requiredInt("running")
     return ImportTaskPage(
         tasks = root.requiredArray("tasks").map(JsonElement::toImportTask),
         pageInfo = root.toPageInfo(),

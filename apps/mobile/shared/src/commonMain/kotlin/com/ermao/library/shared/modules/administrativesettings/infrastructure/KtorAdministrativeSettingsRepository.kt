@@ -38,7 +38,7 @@ internal class KtorAdministrativeSettingsRepository(
 
     override suspend fun updateKindleEmail(context: AdministrativeSettingsContext, email: String): AdministrativeSettingsResult<KindleSettings> {
         val normalized = email.trim()
-        if (normalized.isNotEmpty() && !normalized.looksLikeEmail()) return invalid("INVALID_KINDLE_EMAIL", "email")
+        if (!AdministrativeSettingsValidation.isValidOptionalEmail(normalized)) return invalid("INVALID_KINDLE_EMAIL", "email")
         return call(
             context,
             ApiMethod.Put,
@@ -116,7 +116,7 @@ internal class KtorAdministrativeSettingsRepository(
     }
 
     override suspend fun resetUserPassword(context: AdministrativeSettingsContext, userId: String, password: String): AdministrativeSettingsResult<ManagedPasswordChange> {
-        if (password.length !in 10..128) return invalid("INVALID_PASSWORD", "password")
+        if (!AdministrativeSettingsValidation.isValidPassword(password)) return invalid("INVALID_PASSWORD", "password")
         return idCall(
             context,
             ApiMethod.Put,
@@ -165,8 +165,41 @@ internal class KtorAdministrativeSettingsRepository(
             transform = JsonElement::toDirectoryNode,
         )
 
+    override suspend fun loadLibraryScanSettings(context: AdministrativeSettingsContext) =
+        call(context, ApiMethod.Get, "/api/system-settings/library-scan", transform = JsonElement::toLibraryScanSettings)
+
+    override suspend fun updateLibraryScanSettings(
+        context: AdministrativeSettingsContext,
+        settings: LibraryScanSettings,
+    ): AdministrativeSettingsResult<LibraryScanSettings> {
+        if (settings.intervalMinutes !in MIN_LIBRARY_SCAN_INTERVAL_MINUTES..MAX_LIBRARY_SCAN_INTERVAL_MINUTES) {
+            return invalid("INVALID_INTERVAL", "intervalMinutes")
+        }
+        return call(
+            context,
+            ApiMethod.Put,
+            "/api/system-settings/library-scan",
+            body = libraryScanSettingsRequest(settings),
+            transform = JsonElement::toLibraryScanSettings,
+        )
+    }
+
     override suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage> {
-        return unavailable("IMPORT_TASK_LIST_UNAVAILABLE")
+        val rawLibraryId = filter.libraryId ?: return unavailable("IMPORT_TASK_LIST_UNAVAILABLE")
+        val libraryId = rawLibraryId.trim()
+        if (libraryId.isEmpty()) return invalid("INVALID_LIBRARY_ID", "libraryId")
+        validatePage(filter.page, filter.pageSize, 100)?.let { return it }
+        return call(
+            context,
+            ApiMethod.Get,
+            "/api/libraries/${libraryId.encodeURLPathPart()}/import-tasks",
+            query = queryOf(
+                "page" to filter.page.toString(),
+                "pageSize" to filter.pageSize.toString(),
+                "state" to filter.state?.wireValue,
+            ),
+            transform = JsonElement::toImportTaskPage,
+        )
     }
 
     override suspend fun loadImportTask(context: AdministrativeSettingsContext, taskId: String) =
@@ -519,7 +552,7 @@ internal class KtorAdministrativeSettingsRepository(
         context: AdministrativeSettingsContext,
         maximumBytes: Long,
     ): AdministrativeSettingsResult<EventStorage> {
-        if (maximumBytes !in MINIMUM_LOG_BYTES..MAXIMUM_LOG_BYTES) {
+        if (!AdministrativeSettingsValidation.isValidLogBytes(maximumBytes)) {
             return invalid("INVALID_LOG_CAPACITY", "maximumBytes")
         }
         return call(
@@ -675,10 +708,11 @@ internal class KtorAdministrativeSettingsRepository(
         )
 
     private fun validateSmtp(update: SmtpSettingsUpdate): AdministrativeSettingsResult.Failure? = when {
-        update.host.isBlank() -> invalid("INVALID_SMTP_HOST", "host")
-        update.port !in 1..65_535 -> invalid("INVALID_SMTP_PORT", "port")
-        update.fromEmail.isBlank() || !update.fromEmail.looksLikeEmail() -> invalid("INVALID_FROM_EMAIL", "fromEmail")
-        update.maximumAttachmentMegabytes != null && update.maximumAttachmentMegabytes !in 1.0..1000.0 ->
+        !AdministrativeSettingsValidation.isValidSmtpHost(update.host) -> invalid("INVALID_SMTP_HOST", "host")
+        !AdministrativeSettingsValidation.isValidSmtpPort(update.port) -> invalid("INVALID_SMTP_PORT", "port")
+        !AdministrativeSettingsValidation.isValidEmail(update.fromEmail) -> invalid("INVALID_FROM_EMAIL", "fromEmail")
+        update.maximumAttachmentMegabytes != null &&
+            !AdministrativeSettingsValidation.isValidAttachmentMegabytes(update.maximumAttachmentMegabytes) ->
             invalid("INVALID_ATTACHMENT_LIMIT", "maximumAttachmentMegabytes")
         else -> null
     }
@@ -688,9 +722,9 @@ internal class KtorAdministrativeSettingsRepository(
         email: String,
         password: String? = null,
     ): AdministrativeSettingsResult.Failure? = when {
-        name.trim().length !in 1..40 -> invalid("INVALID_NAME", "name")
-        !email.trim().looksLikeEmail() -> invalid("INVALID_EMAIL", "email")
-        password != null && password.length !in 10..128 -> invalid("INVALID_PASSWORD", "password")
+        !AdministrativeSettingsValidation.isValidDisplayName(name) -> invalid("INVALID_NAME", "name")
+        !AdministrativeSettingsValidation.isValidEmail(email) -> invalid("INVALID_EMAIL", "email")
+        password != null && !AdministrativeSettingsValidation.isValidPassword(password) -> invalid("INVALID_PASSWORD", "password")
         else -> null
     }
 
@@ -752,11 +786,6 @@ internal class KtorAdministrativeSettingsRepository(
     private fun queryOf(vararg pairs: Pair<String, String?>): Map<String, List<String>> =
         pairs.mapNotNull { (name, value) -> value?.let { name to listOf(it) } }.toMap()
 
-    private fun String.looksLikeEmail(): Boolean {
-        val at = indexOf('@')
-        return at > 0 && at < lastIndex && substring(at + 1).contains('.') && length <= 320
-    }
-
     private fun String.safeFileName(): String = filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(64).ifBlank { "backup" }
 
     private fun contentDispositionFileName(value: String?): String? {
@@ -817,7 +846,7 @@ internal class KtorAdministrativeSettingsRepository(
         const val IMPORT_ALLOWED_EXTENSIONS = "import.allowedExtensions"
         const val IMPORT_IGNORE_PATTERNS = "import.ignorePatterns"
         const val WORK_DETAIL_ORDER_KEY = "workDetail.tabOrder"
-        const val MINIMUM_LOG_BYTES = 1L * 1024L * 1024L
-        const val MAXIMUM_LOG_BYTES = 100L * 1024L * 1024L
+        const val MIN_LIBRARY_SCAN_INTERVAL_MINUTES = 5
+        const val MAX_LIBRARY_SCAN_INTERVAL_MINUTES = 1440
     }
 }

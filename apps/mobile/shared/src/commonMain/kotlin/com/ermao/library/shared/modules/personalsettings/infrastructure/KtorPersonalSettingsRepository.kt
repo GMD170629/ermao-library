@@ -24,6 +24,7 @@ import com.ermao.library.shared.modules.personalsettings.domain.PersonalSettings
 import com.ermao.library.shared.modules.personalsettings.domain.PersonalSettingsResult
 import com.ermao.library.shared.modules.personalsettings.domain.PersonalSettingsSnapshot
 import com.ermao.library.shared.modules.personalsettings.domain.PersonalSettingsTlsMode
+import com.ermao.library.shared.modules.personalsettings.domain.PersonalSettingsValidation
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
@@ -59,7 +60,7 @@ internal class KtorPersonalSettingsRepository(
         name: String,
     ): PersonalSettingsResult<PersonalAccount> {
         val normalizedName = name.trim()
-        if (normalizedName.isEmpty() || normalizedName.length > MAX_NAME_LENGTH) {
+        if (!PersonalSettingsValidation.isValidDisplayName(normalizedName)) {
             return validationFailure("INVALID_NAME", "name")
         }
         return mapResult(
@@ -82,11 +83,11 @@ internal class KtorPersonalSettingsRepository(
         currentPassword: String,
     ): PersonalSettingsResult<PersonalAccount> {
         val normalizedEmail = email.trim()
-        if (normalizedEmail.isEmpty()) return validationFailure("INVALID_EMAIL", "email")
-        if (currentPassword.isEmpty() || currentPassword.length > MAX_PASSWORD_LENGTH) {
+        if (!PersonalSettingsValidation.isValidEmail(normalizedEmail)) return validationFailure("INVALID_EMAIL", "email")
+        if (!PersonalSettingsValidation.isValidCurrentPassword(currentPassword)) {
             return validationFailure("INVALID_CURRENT_PASSWORD", "currentPassword")
         }
-        return mapResult(
+        val result =
             request(context) { client ->
                 client.execute(
                     ApiRequest(
@@ -102,8 +103,10 @@ internal class KtorPersonalSettingsRepository(
                             ),
                     ),
                 )
-            },
-        ) { wire -> PersonalSettingsResult.Content(wire.user.toDomain()) }
+            }
+        return mapResult(normalizeAccountEmailError(result)) { wire ->
+            PersonalSettingsResult.Content(wire.user.toDomain())
+        }
     }
 
     override suspend fun updatePassword(
@@ -111,10 +114,10 @@ internal class KtorPersonalSettingsRepository(
         currentPassword: String,
         newPassword: String,
     ): PersonalSettingsResult<PersonalPasswordChange> {
-        if (currentPassword.isEmpty() || currentPassword.length > MAX_PASSWORD_LENGTH) {
+        if (!PersonalSettingsValidation.isValidCurrentPassword(currentPassword)) {
             return validationFailure("INVALID_CURRENT_PASSWORD", "currentPassword")
         }
-        if (newPassword.length !in MIN_PASSWORD_LENGTH..MAX_PASSWORD_LENGTH) {
+        if (!PersonalSettingsValidation.isValidNewPassword(newPassword)) {
             return validationFailure("INVALID_NEW_PASSWORD", "newPassword")
         }
         return mapResult(
@@ -145,12 +148,13 @@ internal class KtorPersonalSettingsRepository(
 
     override suspend fun loadAvatar(
         context: PersonalSettingsContext,
+        avatarUrl: String,
         etag: String?,
     ): PersonalSettingsResult<PersonalAvatar> =
         mapResult(
             request(context) { client ->
                 client.loadAuthenticatedAsset(
-                    apiPath = "/api/auth/avatar",
+                    apiPath = avatarUrl,
                     etag = etag,
                     maximumBytes = MAX_AVATAR_BYTES,
                 )
@@ -308,6 +312,19 @@ internal class KtorPersonalSettingsRepository(
             is ApiResult.Failure -> PersonalSettingsResult.Failure(result.error.toPersonalSettingsError())
         }
 
+    private fun <Wire> normalizeAccountEmailError(result: ApiResult<Wire>): ApiResult<Wire> =
+        when (result) {
+            is ApiResult.Success -> result
+            is ApiResult.Failure ->
+                when (result.error.code) {
+                    // Older servers omitted endpoint-specific codes. These
+                    // status fallbacks are unambiguous for account-email writes.
+                    "BAD_REQUEST" -> ApiResult.Failure(result.error.copy(code = "CURRENT_PASSWORD_INCORRECT"))
+                    "CONFLICT" -> ApiResult.Failure(result.error.copy(code = "EMAIL_IN_USE"))
+                    else -> result
+                }
+        }
+
     private fun <T> validationFailure(
         code: String,
         field: String,
@@ -367,9 +384,6 @@ internal class KtorPersonalSettingsRepository(
             encodeDefaults = false
             explicitNulls = false
         }
-        const val MAX_NAME_LENGTH = 40
-        const val MIN_PASSWORD_LENGTH = 10
-        const val MAX_PASSWORD_LENGTH = 128
         const val MAX_AVATAR_BYTES = 5 * 1024 * 1024
     }
 }

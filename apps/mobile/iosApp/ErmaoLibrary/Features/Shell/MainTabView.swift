@@ -148,12 +148,15 @@ struct MainTabView: View {
     private let rootTabs = RootTabContract.definitions
 
     @State private var selectedTabID = RootTabContract.orderedIDs.first ?? ""
+    @State private var visitedTabIDs: Set<String> = Set(RootTabContract.orderedIDs.prefix(1))
     @State private var paths = RootTabPaths()
     @State private var restoredNavigationNamespace: String?
     @State private var readerLaunch: IosReaderLaunchRequest?
     @State private var didOpenUITestRoute = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.audioPlaybackRuntime) private var audioPlaybackRuntime
+    @Environment(\.appTheme) private var theme
+    @EnvironmentObject private var audioPresentation: AudioShellPresentation
 
     @ViewBuilder private func managedTabs(_ context: ContentRequestContext) -> some View {
         if let repository = workManagementRepository {
@@ -177,20 +180,94 @@ struct MainTabView: View {
         } else { tabContent(context) }
     }
 
+    @ViewBuilder
     private func tabContent(_ context: ContentRequestContext) -> some View {
-                TabView(selection: selection) {
-                    ForEach(rootTabs) { tab in
-                        tabRoot(presentation: tab.presentation, context: context)
-                            .tabItem {
-                                Label(
-                                    tab.presentation.title,
-                                    systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
-                                )
-                            }
-                            .tag(tab.id)
-                    }
-                }
+        if horizontalSizeClass == .compact {
+            compactTabContent(context)
+        } else {
+            regularTabContent(context)
+        }
+    }
 
+    private func compactTabContent(_ context: ContentRequestContext) -> some View {
+        VStack(spacing: 0) {
+            ZStack {
+                ForEach(rootTabs.filter { visitedTabIDs.contains($0.id) || $0.id == selectedTabID }) { tab in
+                    let isSelected = selectedTabID == tab.id
+                    tabRoot(presentation: tab.presentation, context: context)
+                        .opacity(isSelected ? 1 : 0)
+                        .allowsHitTesting(isSelected)
+                        .accessibilityHidden(!isSelected)
+                        .zIndex(isSelected ? 1 : 0)
+                        .id(tab.id)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            unifiedBottomChrome
+        }
+    }
+
+    private func regularTabContent(_ context: ContentRequestContext) -> some View {
+        TabView(selection: selection) {
+            ForEach(rootTabs) { tab in
+                tabRoot(presentation: tab.presentation, context: context)
+                    .tabItem {
+                        Label(
+                            tab.presentation.title,
+                            systemImage: tab.presentation.systemImage(isSelected: selectedTabID == tab.id)
+                        )
+                    }
+                    .tag(tab.id)
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            audioMiniPlayer
+        }
+        .toolbarBackground(theme.surface, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+    }
+
+    private var unifiedBottomChrome: some View {
+        VStack(spacing: 0) {
+            audioMiniPlayer
+            RootTabControls(
+                tabs: rootTabs,
+                selectedTabID: selectedTabID,
+                onSelect: { selection.wrappedValue = $0 }
+            )
+        }
+        .background(theme.surface)
+        .background(theme.surface.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Divider()
+                .overlay(theme.divider)
+                .allowsHitTesting(false)
+        }
+        .animation(.easeInOut(duration: 0.2), value: audioPresentation.isMiniPlayerVisible)
+    }
+
+    @ViewBuilder
+    private var audioMiniPlayer: some View {
+        if audioPresentation.isMiniPlayerVisible,
+           let audioPlaybackRuntime,
+           audioPlaybackRuntime.snapshot.hasSession {
+            let snapshot = audioPlaybackRuntime.snapshot
+            AudioMiniPlayer(
+                snapshot: snapshot,
+                onToggle: {
+                    if snapshot.isPlaying {
+                        audioPresentation.handle(.pausefrommini, snapshot: snapshot)
+                    }
+                    audioPlaybackRuntime.togglePlayback()
+                },
+                onRetry: audioPlaybackRuntime.retry,
+                onExpand: {
+                    audioPresentation.handle(.requestnowplaying, snapshot: snapshot)
+                }
+            )
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     private var selection: Binding<String> {
@@ -222,6 +299,7 @@ struct MainTabView: View {
         }
 
         .onChange(of: selectedTabID) { _, value in
+            visitedTabIDs.insert(value)
             guard let namespace = restoredNavigationNamespace else { return }
             UserDefaults.standard.set(value, forKey: "book-content.tab.\(namespace)")
         }
@@ -317,21 +395,21 @@ struct MainTabView: View {
                         libraryRoot(context: context)
                         .id(context.namespaceKey)
                     case .me:
-                        if let settingsViewModel {
+                        if let settingsViewModel, let administrativeSettingsStore {
                             MeRootView(
                                 viewModel: settingsViewModel,
+                                administrativeStore: administrativeSettingsStore,
                                 onOpenRoute: { open(.settings($0), in: .me) },
                                 onOpenDownloads: openDownloadsCenter,
-                                canOpenAdministration: administrativeSettingsStore?.permissions.isAdmin == true ||
-                                    administrativeSettingsStore?.permissions.canManageSystem == true,
+                                downloadStatus: downloads.records.isEmpty ? nil : "\(downloads.records.count)",
                                 onOpenEmailAndKindle: {
                                     open(.administrative(.emailAndKindle), in: .me)
                                 },
                                 onOpenKindleQueue: {
                                     open(.administrative(.kindleQueue), in: .me)
                                 },
-                                onOpenAdministration: {
-                                    open(.administrative(.management), in: .me)
+                                onOpenAdministrativeRoute: {
+                                    open(.administrative($0), in: .me)
                                 }
                             )
                         } else {
@@ -357,7 +435,9 @@ struct MainTabView: View {
                 }
                 .environment(
                     \.administrativeCopy,
-                    administrativeSettingsStore?.copy ?? AdministrativeCopyCatalog(locale: .enUS)
+                    AdministrativeCopyCatalog(
+                        locale: settingsViewModel?.snapshot.locale == .zhCN ? .zhCN : .enUS
+                    )
                 )
             }
         }
@@ -579,10 +659,54 @@ struct MainTabView: View {
 
 }
 
+private struct RootTabControls: View {
+    let tabs: [RootTabDefinition]
+    let selectedTabID: String
+    let onSelect: (String) -> Void
+    @Environment(\.appTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(tabs) { tab in
+                let isSelected = selectedTabID == tab.id
+                Button {
+                    onSelect(tab.id)
+                } label: {
+                    VStack(spacing: .spaceHalf) {
+                        Image(systemName: tab.presentation.systemImage(isSelected: isSelected))
+                            .font(.title3.weight(.semibold))
+                            .frame(height: 24)
+                        Text(tab.presentation.title)
+                            .appTextStyle(.caption)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(isSelected ? theme.brandAccent : theme.textPrimary)
+                    .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+                    .padding(.vertical, .spaceHalf)
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(theme.accentSoft)
+                                .padding(.horizontal, .spaceHalf)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(tab.presentation.title))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .accessibilityIdentifier("tab-select-\(tab.id)")
+            }
+        }
+        .padding(.horizontal, .space1)
+        .padding(.top, .spaceHalf)
+    }
+}
+
 private extension AdministrativeSettingsRoute {
     var identityKey: String {
         switch self {
-        case .management: "management"
         case .emailAndKindle: "email-kindle"
         case .kindleQueue: "kindle-queue"
         case .users: "users"
@@ -591,7 +715,7 @@ private extension AdministrativeSettingsRoute {
         case .librarySources: "library-sources"
         case .librarySourceEditor(let sourceID): "library-source:\(sourceID ?? "new")"
         case .serverDirectoryPicker(let purpose): "server-directory:\(purpose.identityKey)"
-        case .importTasks: "import-tasks"
+        case let .importTasks(libraryID): "import-tasks-\(libraryID)"
         case .importTaskDetail(let taskID): "import-task:\(taskID)"
         case .importScans: "import-scans"
         case .importPreferences: "import-preferences"

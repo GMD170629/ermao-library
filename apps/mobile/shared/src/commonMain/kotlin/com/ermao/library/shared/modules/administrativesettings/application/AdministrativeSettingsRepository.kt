@@ -43,6 +43,7 @@ import com.ermao.library.shared.modules.administrativesettings.domain.MetadataPr
 import com.ermao.library.shared.modules.administrativesettings.domain.Library
 import com.ermao.library.shared.modules.administrativesettings.domain.LibraryDraft
 import com.ermao.library.shared.modules.administrativesettings.domain.Libraries
+import com.ermao.library.shared.modules.administrativesettings.domain.LibraryScanSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.OpdsSettings
 import com.ermao.library.shared.modules.administrativesettings.domain.OpfQueueStatus
 import com.ermao.library.shared.modules.administrativesettings.domain.OrganizeCandidates
@@ -86,6 +87,12 @@ interface AdministrativeSettingsRepository {
     suspend fun updateLibrary(context: AdministrativeSettingsContext, libraryId: String, library: LibraryDraft): AdministrativeSettingsResult<Library>
     suspend fun deleteLibrary(context: AdministrativeSettingsContext, libraryId: String): AdministrativeSettingsResult<Boolean>
     suspend fun loadDirectory(context: AdministrativeSettingsContext, path: String?): AdministrativeSettingsResult<DirectoryNode>
+
+    suspend fun loadLibraryScanSettings(context: AdministrativeSettingsContext): AdministrativeSettingsResult<LibraryScanSettings>
+    suspend fun updateLibraryScanSettings(
+        context: AdministrativeSettingsContext,
+        settings: LibraryScanSettings,
+    ): AdministrativeSettingsResult<LibraryScanSettings>
 
     suspend fun listImportTasks(context: AdministrativeSettingsContext, filter: ImportTaskFilter): AdministrativeSettingsResult<ImportTaskPage>
     suspend fun loadImportTask(context: AdministrativeSettingsContext, taskId: String): AdministrativeSettingsResult<ImportTask>

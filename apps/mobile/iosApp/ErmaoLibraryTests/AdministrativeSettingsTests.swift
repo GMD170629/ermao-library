@@ -15,6 +15,33 @@ final class AdministrativeSettingsTests: XCTestCase {
         XCTAssertEqual(en[.managementTitle], "Management")
     }
 
+    func testHealthCodesAreLocalizedInsteadOfDisplayedAsServerKeys() {
+        let zh = AdministrativeCopyCatalog(locale: .zhCN)
+        let en = AdministrativeCopyCatalog(locale: .enUS)
+
+        XCTAssertEqual(zh.healthText("health.item.database"), "数据库连接")
+        XCTAssertEqual(zh.healthText("health.queue.ok"), "队列运行正常")
+        XCTAssertEqual(en.healthText("health.item.database"), "Database Connection")
+        XCTAssertEqual(en.healthText("health.queue.ok"), "Queue is running normally")
+        XCTAssertEqual(zh.healthText("server.future.health.code"), "未知检查项目")
+        XCTAssertEqual(en.healthText("server.future.health.code"), "Unknown check item")
+    }
+
+    @MainActor
+    func testStoreCopyTracksAChangedLocale() {
+        let store = AdministrativeSettingsStore(
+            client: AdministrativeSettingsClientFake(),
+            permissions: .init(isAdmin: true, canManageSystem: true),
+            locale: .enUS,
+            onUnauthorized: {}
+        )
+
+        store.updateLocale(.zhCN)
+
+        XCTAssertEqual(store.copy.locale, .zhCN)
+        XCTAssertEqual(store.copy[.managementTitle], "管理")
+    }
+
     func testPermissionsKeepUserManagementAdminOnly() {
         let member = AdministrativePermission(isAdmin: false, canManageSystem: false)
         let systemManager = AdministrativePermission(isAdmin: false, canManageSystem: true)
@@ -22,9 +49,36 @@ final class AdministrativeSettingsTests: XCTestCase {
 
         XCTAssertTrue(member.permits(.emailAndKindle))
         XCTAssertFalse(member.permits(.health))
-        XCTAssertTrue(systemManager.permits(.health))
+        XCTAssertFalse(systemManager.permits(.health))
+        XCTAssertTrue(systemManager.permits(.logs))
         XCTAssertFalse(systemManager.permits(.users))
         XCTAssertTrue(admin.permits(.users))
+    }
+
+    func testRetiredMobileAdministrativeRoutesAreNotPermitted() {
+        let manager = AdministrativePermission(isAdmin: true, canManageSystem: true)
+        let retired: [AdministrativeSettingsRoute] = [
+            .librarySources,
+            .librarySourceEditor(sourceID: nil),
+            .serverDirectoryPicker(purpose: .scanDirectory),
+            .importTasks(libraryID: "library"),
+            .importTaskDetail(taskID: "task"),
+            .importScans,
+            .importPreferences,
+            .organizeQueue,
+            .organizeCandidates,
+            .organizeRuns,
+            .recognitionPolicy,
+            .libraryOperations,
+            .categoryGovernance,
+            .metadataProviders,
+            .metadataProvider(providerID: "provider"),
+            .backups,
+            .workDetailOrder,
+            .health,
+        ]
+
+        XCTAssertTrue(retired.allSatisfy { !$0.isAvailableOnMobile && !manager.permits($0) })
     }
 
     @MainActor
@@ -62,34 +116,23 @@ final class AdministrativeSettingsTests: XCTestCase {
         let first = Task { await store.loadSummary(force: true) }
         await Task.yield()
         client.summaryDelay = 0
-        client.summary = AdministrativeManagementSummary(
-            librarySourceCount: 2, enabledLibraryCount: 0, activeImportCount: 0,
-            importFormatCount: 0, pendingOrganizeCount: 0,
-            availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
-            failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
-            healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0
-        )
+        client.summary = AdministrativeManagementSummary(smtpEnabled: true, failedKindleCount: 0)
         await store.loadSummary(force: true)
         await first.value
 
         guard case let .loaded(summary) = store.summary else {
             return XCTFail("Expected loaded summary")
         }
-        XCTAssertEqual(summary.librarySourceCount, 2)
+        XCTAssertTrue(summary.smtpEnabled)
     }
 
-    func testEveryDesignedDestinationHasAStableRoute() {
+    func testEveryAvailableMobileDestinationHasAStableRoute() {
         let routes: [AdministrativeSettingsRoute] = [
-            .management, .emailAndKindle, .kindleQueue, .users, .userEditor(userID: nil),
-            .userAccess(userID: "u"), .librarySources, .librarySourceEditor(sourceID: nil),
-            .serverDirectoryPicker(purpose: .scanDirectory), .importTasks, .importPreferences,
-            .importTaskDetail(taskID: "i"), .importScans,
-            .organizeQueue, .organizeCandidates, .organizeRuns, .recognitionPolicy,
-            .libraryOperations, .categoryGovernance, .metadataProviders,
-            .metadataProvider(providerID: "p"), .opds, .backups,
-            .workDetailOrder, .health, .logs, .about
+            .emailAndKindle, .kindleQueue, .users, .userEditor(userID: nil),
+            .userAccess(userID: "u"), .opds, .logs, .about
         ]
         XCTAssertEqual(Set(routes).count, routes.count)
+        XCTAssertTrue(routes.allSatisfy { $0.isAvailableOnMobile })
     }
 
     @MainActor
@@ -116,13 +159,7 @@ final class AdministrativeSettingsTests: XCTestCase {
 private final class AdministrativeSettingsClientFake: AdministrativeSettingsClient, @unchecked Sendable {
     var nextError: Error?
     var summaryDelay: UInt64 = 0
-    var summary = AdministrativeManagementSummary(
-        librarySourceCount: 0, enabledLibraryCount: 0, activeImportCount: 0,
-        importFormatCount: 0, pendingOrganizeCount: 0,
-        availableProviderCount: 0, providerCount: 0, userCount: 0, smtpEnabled: false,
-        failedKindleCount: 0, opdsRunning: false, latestBackupAt: nil,
-        healthyComponentCount: 0, componentCount: 0, logBytes: 0, logLimitBytes: 0
-    )
+    var summary = AdministrativeManagementSummary(smtpEnabled: false, failedKindleCount: 0)
 
     func invalidatePendingResponses() async throws {}
     func loadManagementSummary() async throws -> AdministrativeManagementSummary { if summaryDelay > 0 { try await Task.sleep(nanoseconds: summaryDelay) }; return summary }
@@ -130,7 +167,7 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func loadEmailAndKindle() async throws -> EmailKindleSnapshot { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func saveKindle(_ settings: KindleSettings) async throws -> KindleSettings { try fail(); return settings }
     func saveSMTP(_ settings: SMTPSettings) async throws -> SMTPSettings { try fail(); return settings }
-    func sendSMTPTest() async throws { try fail() }
+    func sendSMTPTest(_ settings: SMTPSettings) async throws { try fail() }
     func loadKindleTasks(status: KindleTaskStatus?) async throws -> [KindleSendTask] { try fail(); return [] }
     func cancelKindleTask(id: String) async throws { try fail() }; func retryKindleTask(id: String) async throws { try fail() }; func deleteKindleTask(id: String) async throws { try fail() }
     func loadUsers(query: String, enabled: Bool?, page: Int) async throws -> UserPage { try fail(); return .init(users: [], page: 1, pageCount: 1, total: 0) }
@@ -146,10 +183,11 @@ private final class AdministrativeSettingsClientFake: AdministrativeSettingsClie
     func createLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }; func updateLibrarySource(_ source: LibrarySource) async throws -> LibrarySource { try fail(); return source }
     func deleteLibrarySource(id: String) async throws { try fail() }; func rescanLibrarySource(id: String) async throws { try fail() }
     func loadServerDirectories(path: String?) async throws -> ServerDirectoryPage { try fail(); return .init(currentPath: "/", breadcrumbs: [], directories: []) }; func scanDirectory(path: String) async throws { try fail() }; func cancelDirectoryScan() async throws { try fail() }
-    func loadImportTasks(status: ImportTaskStatus?) async throws -> [ImportTask] { try fail(); return [] }; func retryImportTask(id: String) async throws { try fail() }; func deleteImportTask(id: String) async throws { try fail() }; func clearCompletedImportTasks() async throws { try fail() }; func rescanAllLibrarySources() async throws { try fail() }
+    func loadImportTasks(libraryID: String) async throws -> [ImportTask] { try fail(); return [] }; func retryImportTask(id: String) async throws { try fail() }; func deleteImportTask(id: String) async throws { try fail() }; func clearCompletedImportTasks() async throws { try fail() }; func rescanAllLibrarySources() async throws { try fail() }
     func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }
     func loadImportScans() async throws -> [ImportScanJob] { try fail(); return [] }; func cancelImportScan(id: String) async throws { try fail() }
     func loadImportPreferences() async throws -> ImportPreferences { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveImportPreferences(_ preferences: ImportPreferences) async throws -> ImportPreferences { try fail(); return preferences }
+    func loadLibraryScanSettings() async throws -> LibraryScanSettings { try fail(); return .init(watchEnabled: true, intervalMinutes: 30) }; func saveLibraryScanSettings(_ settings: LibraryScanSettings) async throws -> LibraryScanSettings { try fail(); return settings }
     func loadOrganizeJobs(status: OrganizeJobStatus?) async throws -> [OrganizeJob] { try fail(); return [] }; func loadPendingOrganizeJobs() async throws -> [OrganizeJob] { try fail(); return [] }; func loadOrganizeRuns() async throws -> [OrganizeRun] { try fail(); return [] }; func recognizeOrganizeJob(id: String) async throws { try fail() }; func deleteOrganizeJob(id: String) async throws { try fail() }; func loadRecognitionCandidates() async throws -> [RecognitionCandidate] { try fail(); return [] }
     func loadRecognitionPolicy() async throws -> RecognitionPolicy { try fail(); throw AdministrativeFailure(kind: .notFound, code: "fixture") }; func saveRecognitionPolicy(_ policy: RecognitionPolicy) async throws -> RecognitionPolicy { try fail(); return policy }
     func loadLibraryOperations() async throws -> [LibraryOperation] { try fail(); return [] }; func undoLibraryOperation(id: String) async throws { try fail() }

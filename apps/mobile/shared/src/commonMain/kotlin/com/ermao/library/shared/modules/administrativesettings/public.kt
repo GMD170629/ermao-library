@@ -32,6 +32,7 @@ typealias Library = com.ermao.library.shared.modules.administrativesettings.doma
 typealias Libraries = com.ermao.library.shared.modules.administrativesettings.domain.Libraries
 typealias LibraryDraft = com.ermao.library.shared.modules.administrativesettings.domain.LibraryDraft
 typealias LibraryOrganizationMode = com.ermao.library.shared.modules.administrativesettings.domain.LibraryOrganizationMode
+typealias LibraryScanSettings = com.ermao.library.shared.modules.administrativesettings.domain.LibraryScanSettings
 typealias DirectoryNode = com.ermao.library.shared.modules.administrativesettings.domain.DirectoryNode
 typealias DirectoryChild = com.ermao.library.shared.modules.administrativesettings.domain.DirectoryChild
 typealias ImportTask = com.ermao.library.shared.modules.administrativesettings.domain.ImportTask

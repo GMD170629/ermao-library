@@ -32,12 +32,12 @@ sealed interface AdministrativeCommand {
 
     data class SaveSmtp(val settings: SmtpSettingsDraft) : AdministrativeCommand {
         override val operation = AdministrativeOperation.SaveSmtp
-        override val ownerRoute = AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Smtp)
+        override val ownerRoute = AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle)
     }
 
     data class TestSmtp(val settings: SmtpSettingsDraft) : AdministrativeCommand {
         override val operation = AdministrativeOperation.TestSmtp
-        override val ownerRoute = AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Smtp)
+        override val ownerRoute = AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle)
     }
 
     data class CancelKindleTask(val taskId: String) : AdministrativeCommand {

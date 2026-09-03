@@ -185,6 +185,7 @@ enum AudioRecoverableErrorCode: String, Codable, Equatable, Sendable {
 
 struct AudioRecoverableError: Codable, Equatable, Sendable {
     let code: AudioRecoverableErrorCode
+    let recoverable: Bool
     let detail: String?
 }
 
@@ -350,6 +351,7 @@ extension AudioPlaybackSnapshot {
             recoverableError: shared.error.map {
                 AudioRecoverableError(
                     code: AudioRecoverableErrorCode(rawValue: $0.code) ?? .unknown,
+                    recoverable: $0.recoverable,
                     detail: $0.code
                 )
             }

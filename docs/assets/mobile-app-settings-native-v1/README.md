@@ -1,6 +1,6 @@
 # Mobile Native Settings v1
 
-Status: **product and visual design approved on 2026-08-12**.
+Status: **product scope approved on 2026-08-12; iOS control system superseded on 2026-09-03**.
 
 This package expands the Mobile settings scope to provide native functional
 equivalents for the Web settings capabilities. The user-approved scope takes
@@ -37,10 +37,12 @@ or acceptance requirement.
 | `06-opds-data-tab-order.png` | OPDS, backup/download/restore/delete, work-detail order |
 | `07-health-logs-about.png` | Health run/restart, logs/filter/export/capacity, About/releases |
 | `08-recognition-categories-provider.png` | Recognition policy, category governance, provider configuration/test |
-| `09-management-source-access.png` | Management index, source editor/delete, user scope picker |
+| `09-management-source-access.png` | Historical management-index composition only; source editor/delete and user scope picker remain current |
 
-The boards freeze composition, hierarchy, action priority, and state placement.
-Exact system control geometry follows the target platform.
+The boards freeze functional scope and state placement. The old iOS row geometry
+and the management intermediate page are superseded: iOS uses the shared
+`Settings*` controls, `insetGrouped` lists, 54-point rows, a fixed 28-point icon
+slot, and direct system-management destinations from `tab.me`.
 
 ## Route tree and authorization
 
@@ -53,13 +55,12 @@ tab.me
 │   ├── settings.kindle                                  authenticated
 │   └── settings.smtp                                    canManageSystem
 ├── settings.kindle-queue                                authenticated, own tasks
-├── settings.management                                  filtered by permission
-│   ├── settings.users                                   isAdmin
+├── settings.users                                       isAdmin
 │   │   ├── settings.user.create                         isAdmin
 │   │   ├── settings.user.edit                           isAdmin
 │   │   ├── settings.user.scope                          isAdmin
 │   │   └── settings.user.password                       isAdmin, Sheet
-│   ├── settings.library-sources                         canManageSystem
+├── settings.library-sources-and-import                   canManageSystem
 │   │   ├── settings.library-source.create               canManageSystem
 │   │   ├── settings.library-source.edit                 canManageSystem
 │   │   └── settings.server-directory                    canManageSystem, Sheet
@@ -67,6 +68,8 @@ tab.me
 │   │   ├── settings.import-task                         canManageSystem
 │   │   └── settings.import-scans                        canManageSystem
 │   ├── settings.import-preferences                      canManageSystem
+│   └── settings.library-scan                            canManageSystem
+├── settings.smart-organization                          canManageSystem
 │   ├── settings.organize-queue                          canManageSystem
 │   │   └── settings.recognition-candidates              canManageSystem, Sheet
 │   ├── settings.organize-runs                           canManageSystem
@@ -78,12 +81,12 @@ tab.me
 │   ├── settings.metadata-providers                      canManageSystem
 │   │   ├── settings.metadata-provider                   canManageSystem
 │   │   └── settings.provider-pipeline                    canManageSystem
-│   ├── settings.opds                                    canManageSystem
-│   ├── settings.data-backups                            canManageSystem
+├── settings.opds                                        canManageSystem
+├── settings.data-backups                                canManageSystem
 │   │   └── settings.backup-restore                      canManageSystem, Dialog+Sheet
-│   ├── settings.work-detail-order                       canManageSystem
-│   ├── settings.health                                  canManageSystem
-│   └── settings.logs                                    canManageSystem
+│   └── settings.work-detail-order                       canManageSystem
+├── settings.health                                      canManageSystem
+├── settings.logs                                        canManageSystem
 └── about.app                                            authenticated
 ```
 
@@ -105,6 +108,7 @@ to the nearest still-authorized parent.
 | Directory scan | `POST /api/import-tasks/scan-directory` plus returned operation status/cancel contract |
 | Import tasks | list/read/logs/retry/delete, clear and rescan operations under `/api/import-tasks` |
 | Import preferences | `GET/PATCH /api/system-settings` using the existing import-preference keys |
+| Automatic library scan | `GET/PUT /api/system-settings/library-scan` |
 | Organize queue | organize jobs/pending/runs, recognize and delete job operations |
 | Recognition policy | `GET/PUT /api/organize/policy`, `GET /api/metadata/opf-sync/status` |
 | Library operations | `GET /api/library/operations`, operation undo; no Work/Version/Volume structural merge |

@@ -33,4 +33,17 @@ class PersonalSettingsPublicTest {
             )
         }
     }
+
+    @Test
+    fun validationRulesAreAvailableToEveryPlatform() {
+        assertEquals(true, isValidPersonalSettingsDisplayName(" Reader "))
+        assertEquals(false, isValidPersonalSettingsDisplayName("x".repeat(41)))
+        assertEquals(true, isValidPersonalSettingsEmail(" reader@example.com "))
+        assertEquals(false, isValidPersonalSettingsEmail("not-an-email"))
+        assertEquals(true, isValidPersonalSettingsCurrentPassword("current"))
+        assertEquals(false, isValidPersonalSettingsCurrentPassword("x".repeat(129)))
+        assertEquals(true, isValidPersonalSettingsNewPassword("0123456789"))
+        assertEquals(false, isValidPersonalSettingsNewPassword("short"))
+        assertEquals(false, isValidPersonalSettingsNewPassword("x".repeat(129)))
+    }
 }

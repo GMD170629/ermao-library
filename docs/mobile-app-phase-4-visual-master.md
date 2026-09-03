@@ -253,7 +253,7 @@ Secondary Actions
 - 控件内部只使用 `space1`、`space1_5` 或 `space2`；
 - 一页优先保持一条主内容左边线；只有身份图和真正的空状态可以有意居中；
 - 系统导航和状态栏安全区由平台处理，页面不得复制顶部空白；
-- 底部内容 inset 等于系统 Tab/rail 或 mini player 的实际占位、安全区与 `space2` 之和；
+- Compact 底部内容 inset 由应用自有统一底栏及系统安全区的实际占位决定，mini player 与四项 Tab 控件必须共用连续 Surface；Expanded 由 rail、mini player 与安全区共同决定。不得分别硬编码两套底栏高度或形成两个独立胶囊；
 - Expanded 使用双栏时，左侧身份/主动作与右侧内容导航仍属于同一语义状态。
 
 ## 10. 动作层级

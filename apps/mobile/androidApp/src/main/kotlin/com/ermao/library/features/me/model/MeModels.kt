@@ -82,6 +82,7 @@ data class MeRootViewState(
 
 data class ProfileEditorState(
     val displayName: String = "",
+    val savedDisplayName: String = "",
     val pendingAvatar: SanitizedAvatar? = null,
     val avatarRevision: Long = 0L,
     val isSaving: Boolean = false,
@@ -90,6 +91,7 @@ data class ProfileEditorState(
 
 data class SecurityEditorState(
     val email: String = "",
+    val savedEmail: String = "",
     val emailCurrentPassword: String = "",
     val currentPassword: String = "",
     val newPassword: String = "",

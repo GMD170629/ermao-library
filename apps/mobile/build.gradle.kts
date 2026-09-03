@@ -33,7 +33,8 @@ abstract class GenerateDesignTokens : DefaultTask() {
         val typography = root.requiredMap("typography")
         val cover = root.requiredMap("cover")
         val progress = root.requiredMap("progress")
-        validateContract(root, colors, spacing, radii, typography, cover, progress)
+        val settings = root.requiredMap("settings")
+        validateContract(root, colors, spacing, radii, typography, cover, progress, settings)
 
         val outputRoot = outputDirectory.get().asFile
         val kotlinOutput = outputRoot.resolve("kotlin/com/ermao/library/design/GeneratedDesignTokens.kt")
@@ -45,8 +46,8 @@ abstract class GenerateDesignTokens : DefaultTask() {
         androidLightOutput.parentFile.mkdirs()
         androidDarkOutput.parentFile.mkdirs()
 
-        kotlinOutput.writeIfChanged(renderKotlinTokens(colors, spacing, radii, typography, cover, progress))
-        swiftOutput.writeIfChanged(renderSwiftTokens(colors, spacing, radii, typography, cover, progress))
+        kotlinOutput.writeIfChanged(renderKotlinTokens(colors, spacing, radii, typography, cover, progress, settings))
+        swiftOutput.writeIfChanged(renderSwiftTokens(colors, spacing, radii, typography, cover, progress, settings))
         androidLightOutput.writeIfChanged(renderAndroidColors(colors.requiredMap("appLight")))
         androidDarkOutput.writeIfChanged(renderAndroidColors(colors.requiredMap("appDark")))
     }
@@ -68,6 +69,7 @@ abstract class GenerateDesignTokens : DefaultTask() {
         typography: Map<String, Any?>,
         cover: Map<String, Any?>,
         progress: Map<String, Any?>,
+        settings: Map<String, Any?>,
     ): String = buildString {
         appendLine("// Generated from design/tokens.json. Do not edit.")
         appendLine("package com.ermao.library.design")
@@ -102,6 +104,7 @@ abstract class GenerateDesignTokens : DefaultTask() {
         }
         appendKotlinObject("Cover", cover)
         appendKotlinObject("Progress", progress)
+        appendKotlinObject("Settings", settings)
         appendLine("}")
     }
 
@@ -112,6 +115,7 @@ abstract class GenerateDesignTokens : DefaultTask() {
         typography: Map<String, Any?>,
         cover: Map<String, Any?>,
         progress: Map<String, Any?>,
+        settings: Map<String, Any?>,
     ): String = buildString {
         appendLine("// Generated from design/tokens.json. Do not edit.")
         appendLine("import Foundation")
@@ -147,6 +151,7 @@ abstract class GenerateDesignTokens : DefaultTask() {
         }
         appendSwiftEnum("Cover", cover)
         appendSwiftEnum("Progress", progress)
+        appendSwiftEnum("Settings", settings)
         appendLine("}")
     }
 
@@ -186,8 +191,9 @@ abstract class GenerateDesignTokens : DefaultTask() {
         typography: Map<String, Any?>,
         cover: Map<String, Any?>,
         progress: Map<String, Any?>,
+        settings: Map<String, Any?>,
     ) {
-        check((root["schemaVersion"] as? Number)?.toInt() == 1) { "Unsupported token schema" }
+        check((root["schemaVersion"] as? Number)?.toInt() == 2) { "Unsupported token schema" }
         check(colors.keys == setOf("appLight", "appDark", "readerPaper", "readerNight")) {
             "Color appearances do not match Phase 4"
         }
@@ -275,6 +281,20 @@ abstract class GenerateDesignTokens : DefaultTask() {
             "scrubberTrackMaximumHeight" to 3, "iosMinimumTouchTarget" to 44,
             "androidMinimumTouchTarget" to 48,
         )) { "Progress contract does not match Phase 4" }
+        check(settings == mapOf(
+            "rowMinimumHeight" to 54,
+            "horizontalInset" to 16,
+            "verticalInset" to 8,
+            "iconSlotSize" to 28,
+            "iconSize" to 20,
+            "iconTitleSpacing" to 12,
+            "trailingSlotWidth" to 18,
+            "sectionSpacing" to 20,
+            "sectionHeaderBottomSpacing" to 8,
+            "identityAvatarSize" to 52,
+            "identityMinimumHeight" to 76,
+            "bottomActionHeight" to 50,
+        )) { "Settings contract does not match Mobile settings v2" }
     }
 
     private fun String.kotlinIdentifier(): String =

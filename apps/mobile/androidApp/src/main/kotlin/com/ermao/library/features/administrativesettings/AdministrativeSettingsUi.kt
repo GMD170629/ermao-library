@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.SettingsSaveAction
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.coroutines.flow.collectLatest
 
@@ -69,13 +70,19 @@ fun AdministrativeSettingsDestination(
     modifier: Modifier = Modifier,
     onEffect: (AdministrativeSettingsEffect) -> Unit = {},
 ) {
+    if (route.isRetiredMobileRoute()) return
     val states by viewModel.states.collectAsState()
-    val state = states[route] ?: AdministrativeScreenState()
-    LaunchedEffect(route) { viewModel.load(route) }
-    LaunchedEffect(route, state.snapshot) {
+    val stateRoute = if (route is AdministrativeSettingsRoute.EmailKindle) {
+        AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle)
+    } else {
+        route
+    }
+    val state = states[stateRoute] ?: AdministrativeScreenState()
+    LaunchedEffect(stateRoute) { viewModel.load(stateRoute) }
+    LaunchedEffect(stateRoute, state.snapshot) {
         if ((state.snapshot as? ImportScanJobSnapshot)?.job?.active == true ||
             (state.snapshot as? HealthSnapshot)?.let { it.status == HealthStatus.Checking } == true
-        ) viewModel.poll(route)
+        ) viewModel.poll(stateRoute)
     }
     LaunchedEffect(viewModel) {
         viewModel.effects.collectLatest { effect ->
@@ -89,8 +96,7 @@ fun AdministrativeSettingsDestination(
         )
         is AdministrativeSettingsRoute.EmailKindle -> EmailKindleSettingsScreen(
             route.tab, state.typed(), locale,
-            onTabSelected = { onReplace(AdministrativeSettingsRoute.EmailKindle(it)) },
-            onCommand = viewModel::execute, onRetry = { viewModel.load(route, true) }, onBack = onBack, modifier = modifier,
+            onCommand = viewModel::execute, onRetry = { viewModel.load(stateRoute, true) }, onBack = onBack, modifier = modifier,
         )
         AdministrativeSettingsRoute.KindleQueue -> KindleQueueScreen(
             state.typed(), locale, viewModel::execute, { viewModel.load(route, true) }, onBack, modifier,
@@ -370,6 +376,22 @@ internal fun AdministrativeSwitchRow(
 @Composable
 internal fun AdministrativeDivider(start: androidx.compose.ui.unit.Dp = 16.dp) {
     HorizontalDivider(Modifier.padding(start = start), color = WarmPageThemeValues.colors.divider)
+}
+
+@Composable
+internal fun AdministrativeSaveAction(
+    label: AdministrativeCopy,
+    locale: AdministrativeLocale,
+    enabled: Boolean,
+    working: Boolean,
+    onClick: () -> Unit,
+) {
+    SettingsSaveAction(
+        contentDescription = label.text(locale),
+        enabled = enabled,
+        working = working,
+        onClick = onClick,
+    )
 }
 
 @Composable

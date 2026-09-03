@@ -22,6 +22,8 @@ typealias AudioProgressSession = com.ermao.library.shared.modules.audio.applicat
 typealias AudioPlaybackEffectType = com.ermao.library.shared.modules.audio.application.AudioPlaybackEffectType
 typealias AudioPlaybackEffect = com.ermao.library.shared.modules.audio.application.AudioPlaybackEffect
 typealias AudioPlaybackTransition = com.ermao.library.shared.modules.audio.application.AudioPlaybackTransition
+typealias AudioChromeState = com.ermao.library.shared.modules.audio.application.AudioChromeState
+typealias AudioChromeEvent = com.ermao.library.shared.modules.audio.application.AudioChromeEvent
 typealias AudioLaunchRequest = com.ermao.library.shared.modules.audio.application.AudioLaunchRequest
 typealias AudioPlaybackStateMachine = com.ermao.library.shared.modules.audio.application.AudioPlaybackStateMachine
 typealias LocalAudioPublicationFactory =
@@ -36,3 +38,17 @@ typealias AudioMediaOpenResult = com.ermao.library.shared.modules.audio.applicat
 typealias AudioMediaContent = com.ermao.library.shared.modules.audio.application.AudioMediaOpenResult.Content
 typealias AudioMediaOpenFailure = com.ermao.library.shared.modules.audio.application.AudioMediaOpenResult.Failure
 typealias AudioMediaTransport = com.ermao.library.shared.modules.audio.application.AudioMediaTransport
+
+fun reduceAudioChromeState(
+    currentState: AudioChromeState,
+    event: AudioChromeEvent,
+    hasSession: Boolean,
+    playbackStage: AudioPlaybackStage,
+    hasRecoverableError: Boolean = false,
+): AudioChromeState = com.ermao.library.shared.modules.audio.application.reduceAudioChromeState(
+    currentState = currentState,
+    event = event,
+    hasSession = hasSession,
+    playbackStage = playbackStage,
+    hasRecoverableError = hasRecoverableError,
+)

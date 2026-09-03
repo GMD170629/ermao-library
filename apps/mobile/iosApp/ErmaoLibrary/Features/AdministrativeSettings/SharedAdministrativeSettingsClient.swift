@@ -7,7 +7,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     private let appIdentity: AdministrativeAppIdentity
     private let serverVersionLoader: @Sendable () async throws -> String
     private let permissions: AdministrativePermission
-    private var cachedSMTP: SMTPSettings?
     private var cachedUsers: [String: AdministrativeUser] = [:]
     private var cachedSources: [String: LibrarySource] = [:]
     private var cachedProviderConfigurations: [String: MetadataProviderConfiguration] = [:]
@@ -35,59 +34,22 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         guard permissions.canManageSystem || permissions.isAdmin else {
             throw AdministrativeFailure(kind: .forbidden, code: "ADMINISTRATIVE_FORBIDDEN")
         }
-        if permissions.isAdmin && !permissions.canManageSystem {
-            async let users: [ErmaoShared.ManagedUser] = value(try await repository.listUsers(context: context))
-            async let kindle: ErmaoShared.KindleTaskPage = value(try await repository.listKindleTasks(context: context, filter: ErmaoShared.KindleTaskFilter(status: .failed, page: 1, pageSize: 1)))
-            let loadedUsers = try await users
-            let loadedKindle = try await kindle
-            return AdministrativeManagementSummary(
-                librarySourceCount: 0, enabledLibraryCount: 0, activeImportCount: 0,
-                importFormatCount: 0, pendingOrganizeCount: 0,
-                availableProviderCount: 0, providerCount: 0, userCount: loadedUsers.count,
-                smtpEnabled: false, failedKindleCount: Int(loadedKindle.pageInfo.total), opdsRunning: false,
-                latestBackupAt: nil, healthyComponentCount: 0, componentCount: 0,
-                logBytes: 0, logLimitBytes: 0
-            )
-        }
-        async let folders: ErmaoShared.Libraries = value(try await repository.loadLibraries(context: context))
-        async let preferences: ErmaoShared.ImportPreferences = value(try await repository.loadImportPreferences(context: context))
-        async let organize: ErmaoShared.OrganizeJobPage = value(try await repository.listOrganizeJobs(context: context, filter: ErmaoShared.OrganizeJobFilter(search: nil, status: nil, page: 1, pageSize: 1)))
-        async let providers: ErmaoShared.MetadataProviders = value(try await repository.loadMetadataProviders(context: context))
-        async let users: [ErmaoShared.ManagedUser] = permissions.isAdmin
-            ? value(try await repository.listUsers(context: context))
-            : []
-        async let email: ErmaoShared.EmailSettings = value(try await repository.loadEmailSettings(context: context))
         async let kindle: ErmaoShared.KindleTaskPage = value(try await repository.listKindleTasks(context: context, filter: ErmaoShared.KindleTaskFilter(status: .failed, page: 1, pageSize: 1)))
-        async let opds: ErmaoShared.OpdsSettings = value(try await repository.loadOpdsSettings(context: context))
-        async let backups: [ErmaoShared.BackupArchive] = value(try await repository.listBackups(context: context))
-        async let events: ErmaoShared.ManagementEventPage = value(try await repository.listManagementEvents(context: context, filter: managementFilter(LogFilter(query: "", levels: Set(LogLevel.allCases), source: nil, since: nil), pageSize: 1)))
-        let loadedFolders = try await folders
-        let loadedProviders = try await providers
-        let loadedBackups = try await backups
-        let loadedEvents = try await events
-        let loadedPreferences = try await preferences
-        let loadedOrganize = try await organize
-        let loadedUsers = try await users
-        let loadedEmail = try await email
         let loadedKindle = try await kindle
-        let loadedOPDS = try await opds
+        let smtpEnabled: Bool
+        if permissions.canManageSystem {
+            do {
+                let loadedEmail: ErmaoShared.EmailSettings = try value(try await repository.loadEmailSettings(context: context))
+                smtpEnabled = !loadedEmail.smtp.host.isEmpty
+            } catch let failure as AdministrativeFailure where failure.kind == .forbidden {
+                smtpEnabled = false
+            }
+        } else {
+            smtpEnabled = false
+        }
         return AdministrativeManagementSummary(
-            librarySourceCount: loadedFolders.libraries.count,
-            enabledLibraryCount: loadedFolders.libraries.filter(\.enabled).count,
-            activeImportCount: 0,
-            importFormatCount: loadedPreferences.allowedExtensions.count,
-            pendingOrganizeCount: Int(loadedOrganize.pageInfo.total),
-            availableProviderCount: loadedProviders.providers.filter { $0.enabled && $0.lastTestStatus?.lowercased() == "ok" }.count,
-            providerCount: loadedProviders.providers.count,
-            userCount: loadedUsers.count,
-            smtpEnabled: !loadedEmail.smtp.host.isEmpty,
-            failedKindleCount: Int(loadedKindle.pageInfo.total),
-            opdsRunning: loadedOPDS.enabled,
-            latestBackupAt: loadedBackups.compactMap { date($0.createdAt) }.max(),
-            healthyComponentCount: 0,
-            componentCount: 0,
-            logBytes: loadedEvents.storage.sizeBytes,
-            logLimitBytes: loadedEvents.storage.maximumBytes
+            smtpEnabled: smtpEnabled,
+            failedKindleCount: Int(loadedKindle.pageInfo.total)
         )
     }
 
@@ -98,7 +60,6 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
         do {
             let smtpWire: ErmaoShared.EmailSettings = try value(try await repository.loadEmailSettings(context: context))
             let smtp = map(smtpWire.smtp)
-            cachedSMTP = smtp
             return EmailKindleSnapshot(kindle: kindle, smtp: smtp, canManageSMTP: true)
         } catch let failure as AdministrativeFailure where failure.kind == .forbidden {
             return EmailKindleSnapshot(kindle: kindle, smtp: nil, canManageSMTP: false)
@@ -106,15 +67,19 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     }
 
     func saveKindle(_ settings: KindleSettings) async throws -> KindleSettings {
-        let wire: ErmaoShared.KindleSettings = try value(try await repository.updateKindleEmail(context: context, email: settings.recipient))
+        let wire: ErmaoShared.KindleSettings = try value(
+            try await repository.updateKindleEmail(
+                context: context,
+                email: settings.recipient.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        )
         return map(wire)
     }
     func saveSMTP(_ settings: SMTPSettings) async throws -> SMTPSettings {
         let wire: ErmaoShared.EmailSettings = try value(try await repository.updateEmailSettings(context: context, update: smtpUpdate(settings)))
-        let mapped = map(wire.smtp); cachedSMTP = mapped; return mapped
+        return map(wire.smtp)
     }
-    func sendSMTPTest() async throws {
-        guard let settings = cachedSMTP else { throw AdministrativeFailure(kind: .validation, code: "SMTP_NOT_LOADED") }
+    func sendSMTPTest(_ settings: SMTPSettings) async throws {
         let tested: ErmaoShared.SmtpTestResult = try value(try await repository.testSmtp(context: context, update: smtpUpdate(settings)))
         guard tested.connected else { throw AdministrativeFailure(kind: .unavailable, code: "SMTP_TEST_FAILED") }
     }
@@ -173,11 +138,33 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func scanDirectory(path: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_DIRECTORY_SCAN_UNAVAILABLE") }
     func cancelDirectoryScan() async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_SCAN_CANCEL_UNAVAILABLE") }
 
-    func loadImportTasks(status: ImportTaskStatus?) async throws -> [ImportTask] { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_LIST_UNAVAILABLE") }
+    func loadImportTasks(libraryID: String) async throws -> [ImportTask] {
+        let page: ErmaoShared.ImportTaskPage = try value(
+            try await repository.listImportTasks(
+                context: context,
+                filter: ErmaoShared.ImportTaskFilter(
+                    state: nil,
+                    keyword: nil,
+                    page: 1,
+                    pageSize: 100,
+                    libraryId: libraryID
+                )
+            )
+        )
+        return page.tasks.map(map)
+    }
     func loadImportTaskDetail(id: String) async throws -> ImportTaskDetail {
         let task: ErmaoShared.ImportTask = try value(try await repository.loadImportTask(context: context, taskId: id))
-        let logs: ErmaoShared.ImportTaskLogPage = try value(try await repository.listImportTaskLogs(context: context, taskId: id, page: 1, pageSize: 100))
-        return ImportTaskDetail(task: map(task), logs: logs.logs.map(map))
+        let logs: [ImportTaskLog]
+        do {
+            let page: ErmaoShared.ImportTaskLogPage = try value(
+                try await repository.listImportTaskLogs(context: context, taskId: id, page: 1, pageSize: 100)
+            )
+            logs = page.logs.map(map)
+        } catch let failure as AdministrativeFailure where failure.kind == .unavailable {
+            logs = []
+        }
+        return ImportTaskDetail(task: map(task), logs: logs)
     }
     func retryImportTask(id: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_RETRY_UNAVAILABLE") }
     func deleteImportTask(id: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_TASK_DELETE_UNAVAILABLE") }
@@ -187,6 +174,8 @@ actor SharedAdministrativeSettingsClient: AdministrativeSettingsClient {
     func cancelImportScan(id: String) async throws { throw AdministrativeFailure(kind: .unavailable, code: "IMPORT_SCAN_CANCEL_UNAVAILABLE") }
     func loadImportPreferences() async throws -> ImportPreferences { let wire: ErmaoShared.ImportPreferences = try value(try await repository.loadImportPreferences(context: context)); return map(wire) }
     func saveImportPreferences(_ preferences: ImportPreferences) async throws -> ImportPreferences { let wire: ErmaoShared.ImportPreferences = try value(try await repository.updateImportPreferences(context: context, preferences: map(preferences))); return map(wire) }
+    func loadLibraryScanSettings() async throws -> LibraryScanSettings { let wire: ErmaoShared.LibraryScanSettings = try value(try await repository.loadLibraryScanSettings(context: context)); return map(wire) }
+    func saveLibraryScanSettings(_ settings: LibraryScanSettings) async throws -> LibraryScanSettings { let wire: ErmaoShared.LibraryScanSettings = try value(try await repository.updateLibraryScanSettings(context: context, settings: map(settings))); return map(wire) }
 
     func loadOrganizeJobs(status: OrganizeJobStatus?) async throws -> [OrganizeJob] { let wire: ErmaoShared.OrganizeJobPage = try value(try await repository.listOrganizeJobs(context: context, filter: ErmaoShared.OrganizeJobFilter(search: nil, status: map(status), page: 1, pageSize: 200))); return wire.jobs.map(map) }
     func loadPendingOrganizeJobs() async throws -> [OrganizeJob] { let wire: ErmaoShared.PendingOrganizeJobs = try value(try await repository.loadPendingOrganizeJobs(context: context)); return wire.jobs.map(map) }

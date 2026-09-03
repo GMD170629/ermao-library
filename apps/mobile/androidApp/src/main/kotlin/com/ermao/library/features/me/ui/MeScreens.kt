@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -38,7 +39,6 @@ import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -63,7 +63,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.me.model.AboutViewState
@@ -76,6 +75,9 @@ import com.ermao.library.features.me.platform.AvatarSanitizationFailure
 import com.ermao.library.features.me.platform.AvatarSanitizationResult
 import com.ermao.library.features.me.platform.decodeBoundedAvatarPreview
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
+import com.ermao.library.ui.components.SettingsSaveAction
+import com.ermao.library.ui.components.SettingsTabRow
+import com.ermao.library.ui.components.SettingsTextField
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.coroutines.launch
 
@@ -109,7 +111,6 @@ fun MeRootScreen(
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
         ) {
-            state.account?.let { AccountIdentity(it, state.avatarBytes) }
             state.failure?.let { InlineFailure(onRetry) }
             SettingsSection(R.string.me_section_account)
             SettingsRow(R.string.me_profile_title, R.string.me_profile_summary, Icons.Outlined.AccountCircle, onOpenProfile)
@@ -185,7 +186,20 @@ fun ProfileScreen(
             }
         }
     }
-    SettingsPageScaffold(R.string.me_profile_title, onBack, modifier) {
+    SettingsPageScaffold(
+        title = R.string.me_profile_title,
+        onBack = onBack,
+        modifier = modifier,
+        topBarActions = {
+            SettingsSaveAction(
+                contentDescription = stringResource(R.string.me_save_display_name),
+                enabled = !state.isSaving && state.displayName.isNotBlank() &&
+                    state.displayName.trim() != state.savedDisplayName.trim(),
+                working = state.isSaving,
+                onClick = onSaveName,
+            )
+        },
+    ) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -214,19 +228,13 @@ fun ProfileScreen(
             }
             avatarError?.let { Text(avatarFailureText(it), color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
             HorizontalDivider(color = WarmPageThemeValues.colors.divider)
-            OutlinedTextField(
+            SettingsTextField(
                 value = state.displayName,
                 onValueChange = onDisplayNameChanged,
-                label = { Text(stringResource(R.string.me_display_name_label)) },
-                singleLine = true,
+                label = stringResource(R.string.me_display_name_label),
                 modifier = Modifier.fillMaxWidth(),
             )
             state.failure?.let { InlineFailure() }
-            Button(
-                onClick = onSaveName,
-                enabled = !state.isSaving && state.displayName.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) { Text(stringResource(if (state.isSaving) R.string.me_saving else R.string.me_save)) }
         }
     }
     if (confirmDelete) {
@@ -239,6 +247,8 @@ fun ProfileScreen(
         )
     }
 }
+
+private enum class SecurityTab { Email, Password }
 
 @Composable
 fun SecurityScreen(
@@ -258,36 +268,52 @@ fun SecurityScreen(
     var confirmEmail by rememberSaveable { mutableStateOf(false) }
     var confirmPassword by rememberSaveable { mutableStateOf(false) }
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
-    SettingsPageScaffold(R.string.me_security_title, onBack, modifier) {
+    var selectedTabName by rememberSaveable { mutableStateOf(SecurityTab.Email.name) }
+    val selectedTab = SecurityTab.entries.firstOrNull { it.name == selectedTabName } ?: SecurityTab.Email
+    val isEmailTab = selectedTab == SecurityTab.Email
+    val canSaveEmail = !state.isSaving && state.email.isNotBlank() && state.emailCurrentPassword.isNotBlank() &&
+        state.email.trim() != state.savedEmail.trim()
+    val canSavePassword = !state.isSaving && state.currentPassword.isNotBlank() && state.newPassword.isNotBlank() &&
+        state.confirmPassword.isNotBlank() && state.newPassword == state.confirmPassword
+    SettingsPageScaffold(
+        title = R.string.me_security_title,
+        onBack = onBack,
+        modifier = modifier,
+        topBarActions = {
+            SettingsSaveAction(
+                contentDescription = stringResource(if (isEmailTab) R.string.me_email_change else R.string.me_password_change),
+                enabled = if (isEmailTab) canSaveEmail else canSavePassword,
+                working = state.isSaving,
+                onClick = { if (isEmailTab) confirmEmail = true else confirmPassword = true },
+            )
+        },
+    ) {
         Column(
             Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SectionHeading(R.string.me_email_section)
-            OutlinedTextField(
-                value = state.email,
-                onValueChange = onEmailChanged,
-                label = { Text(stringResource(R.string.me_email_label)) },
-                singleLine = true,
+            SettingsTabRow(
+                selectedIndex = if (isEmailTab) 0 else 1,
+                tabs = listOf(stringResource(R.string.me_email_section), stringResource(R.string.me_password_section)),
+                enabled = !state.isSaving,
+                onSelect = { selectedTabName = SecurityTab.entries[it].name },
                 modifier = Modifier.fillMaxWidth(),
             )
-            PasswordField(state.emailCurrentPassword, onEmailCurrentPasswordChanged, R.string.me_current_password_label)
-            Button(
-                onClick = { confirmEmail = true },
-                enabled = !state.isSaving && state.email.isNotBlank() && state.emailCurrentPassword.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) { Text(stringResource(R.string.me_email_change)) }
-            HorizontalDivider()
-            SectionHeading(R.string.me_password_section)
-            PasswordField(state.currentPassword, onCurrentPasswordChanged, R.string.me_current_password_label)
-            PasswordField(state.newPassword, onNewPasswordChanged, R.string.me_new_password_label)
-            PasswordField(state.confirmPassword, onPasswordConfirmationChanged, R.string.me_confirm_password_label)
-            Button(
-                onClick = { confirmPassword = true },
-                enabled = !state.isSaving && state.currentPassword.isNotBlank() && state.newPassword.isNotBlank() &&
-                    state.confirmPassword.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            ) { Text(stringResource(R.string.me_password_change)) }
+            if (isEmailTab) {
+                SectionHeading(R.string.me_email_section)
+                SettingsTextField(
+                    value = state.email,
+                    onValueChange = onEmailChanged,
+                    label = stringResource(R.string.me_email_label),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                PasswordField(state.emailCurrentPassword, onEmailCurrentPasswordChanged, R.string.me_current_password_label)
+            } else {
+                SectionHeading(R.string.me_password_section)
+                PasswordField(state.currentPassword, onCurrentPasswordChanged, R.string.me_current_password_label)
+                PasswordField(state.newPassword, onNewPasswordChanged, R.string.me_new_password_label)
+                PasswordField(state.confirmPassword, onPasswordConfirmationChanged, R.string.me_confirm_password_label)
+            }
             state.failure?.let { InlineFailure() }
             HorizontalDivider()
             TextButton(onClick = { confirmLogout = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
@@ -353,21 +379,6 @@ fun AboutScreen(
             state.serverVersion ?: stringResource(if (state.isLoading) R.string.me_loading else R.string.me_not_available),
         )
         state.failure?.let { InlineFailure(onRetry) }
-    }
-}
-
-@Composable
-private fun AccountIdentity(account: MeAccountViewState, avatarBytes: ByteArray?) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Avatar(account.displayName, avatarBytes)
-        Column(Modifier.weight(1f)) {
-            Text(account.displayName, style = WarmPageThemeValues.typography.headline)
-            Text(account.email, color = WarmPageThemeValues.colors.textSecondary)
-        }
     }
 }
 
@@ -473,12 +484,11 @@ private fun LanguageRow(
 
 @Composable
 private fun PasswordField(value: String, onValueChanged: (String) -> Unit, label: Int) {
-    OutlinedTextField(
+    SettingsTextField(
         value = value,
         onValueChange = onValueChanged,
-        label = { Text(stringResource(label)) },
-        visualTransformation = PasswordVisualTransformation(),
-        singleLine = true,
+        label = stringResource(label),
+        password = true,
         modifier = Modifier.fillMaxWidth(),
     )
 }
@@ -489,6 +499,7 @@ private fun SettingsPageScaffold(
     title: Int,
     onBack: () -> Unit,
     modifier: Modifier,
+    topBarActions: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(
@@ -502,6 +513,7 @@ private fun SettingsPageScaffold(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.navigate_back))
                     }
                 },
+                actions = topBarActions,
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = WarmPageThemeValues.colors.canvas),
             )
         },

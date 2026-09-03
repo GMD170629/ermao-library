@@ -140,6 +140,46 @@ class KtorAdministrativeSettingsRepositoryTest {
     }
 
     @Test
+    fun importTaskListUsesTheCanonicalLibraryScopedWebContract() = runBlocking {
+        val harness = Harness(Response(200, IMPORT_TASK_PAGE))
+
+        val page = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.listImportTasks(
+                context(),
+                ImportTaskFilter(
+                    state = ImportTaskState.Failed,
+                    page = 2,
+                    pageSize = 50,
+                    libraryId = "folder-1",
+                ),
+            ),
+        ).value
+
+        val parsed = assertIs<ImportTaskPage>(page)
+        assertEquals(1, parsed.tasks.size)
+        assertEquals(1, parsed.failed)
+        assertEquals(HttpMethod.Get, harness.requests.single().method)
+        assertEquals("/base/api/libraries/folder-1/import-tasks", harness.requests.single().path)
+        assertEquals(
+            mapOf("page" to "2", "pageSize" to "50", "state" to "FAILED"),
+            harness.requests.single().query,
+        )
+    }
+
+    @Test
+    fun importTaskListWithoutLibraryScopeRemainsExplicitlyUnavailable() = runBlocking {
+        val harness = Harness()
+
+        val failure = assertIs<AdministrativeSettingsFailure>(
+            harness.repository.listImportTasks(context(), ImportTaskFilter(page = 1, pageSize = 50)),
+        )
+
+        assertEquals(AdministrativeSettingsErrorKind.Unavailable, failure.error.kind)
+        assertEquals("IMPORT_TASK_LIST_UNAVAILABLE", failure.error.code)
+        assertTrue(harness.requests.isEmpty())
+    }
+
+    @Test
     fun nativeSystemOperationsDoNotExposeOrUseWebPages() = runBlocking {
         val harness = Harness(
             Response(200, LIBRARIES),
@@ -252,6 +292,67 @@ class KtorAdministrativeSettingsRepositoryTest {
         assertEquals("/base/api/libraries/folder-1", harness.requests[0].path)
         assertTrue(harness.requests[0].body.contains("\"organizationMode\":\"VOLUMES\""))
         assertEquals("", harness.requests[1].body)
+    }
+
+    @Test
+    fun libraryScanSettingsUseDedicatedTypedReadAndUpdateContracts() = runBlocking {
+        val harness = Harness(
+            Response(200, LIBRARY_SCAN_SETTINGS),
+            Response(200, LIBRARY_SCAN_SETTINGS_UPDATED),
+        )
+
+        val loaded = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.loadLibraryScanSettings(context()),
+        ).value
+        assertEquals(LibraryScanSettings(watchEnabled = true, intervalMinutes = 30), loaded)
+
+        val updated = assertIs<AdministrativeSettingsContent<*>>(
+            harness.repository.updateLibraryScanSettings(
+                context(),
+                LibraryScanSettings(watchEnabled = false, intervalMinutes = 180),
+            ),
+        ).value
+        assertEquals(LibraryScanSettings(watchEnabled = false, intervalMinutes = 180), updated)
+
+        assertEquals(
+            listOf(
+                HttpMethod.Get to "/base/api/system-settings/library-scan",
+                HttpMethod.Put to "/base/api/system-settings/library-scan",
+            ),
+            harness.requests.map { it.method to it.path },
+        )
+        assertEquals("""{"watchEnabled":false,"intervalMinutes":180}""", harness.requests[1].body)
+    }
+
+    @Test
+    fun libraryScanSettingsRejectOutOfRangeUpdatesBeforeNetwork() = runBlocking {
+        val harness = Harness()
+
+        val failure = assertIs<AdministrativeSettingsFailure>(
+            harness.repository.updateLibraryScanSettings(
+                context(),
+                LibraryScanSettings(watchEnabled = true, intervalMinutes = 1441),
+            ),
+        )
+
+        assertEquals(AdministrativeSettingsErrorKind.Validation, failure.error.kind)
+        assertEquals("INVALID_INTERVAL", failure.error.code)
+        assertEquals(listOf(AdministrativeSettingsFieldViolation("intervalMinutes", "INVALID_FIELD")), failure.error.fieldViolations)
+        assertTrue(harness.requests.isEmpty())
+    }
+
+    @Test
+    fun malformedLibraryScanSettingsAreProtocolFailures() = runBlocking {
+        val harness = Harness(
+            Response(200, """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":"30"}}"""),
+        )
+
+        val failure = assertIs<AdministrativeSettingsFailure>(
+            harness.repository.loadLibraryScanSettings(context()),
+        )
+
+        assertEquals(AdministrativeSettingsErrorKind.Protocol, failure.error.kind)
+        assertEquals("INVALID_intervalMinutes", failure.error.code)
     }
 
     @Test
@@ -520,6 +621,7 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val LIBRARY_PAYLOAD = """{"ok":true,"data":{"library":{"id":"folder-1","name":"Books","rootPath":"/books","organizationMode":"VOLUMES","enabled":true,"ignorePatterns":"*.tmp","ignoreHidden":true,"minFileSizeBytes":10240,"description":null,"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val DIRECTORY = """{"ok":true,"data":{"node":{"name":"books","path":"/books","readable":true,"error":null,"children":[]}}}"""
         const val IMPORT_TASK_DETAIL = """{"ok":true,"data":{"task":{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","libraryName":"Books","resourceId":"resource-1","resourceTitle":"Book","sourceNodeId":"node-1","sourceName":"book.epub","sourceRelativePath":"book.epub","bookTitle":"Book","role":"PRIMARY","state":"SUCCEEDED","errorSummary":null,"createdAt":"2026-08-12T00:00:00Z","startedAt":"2026-08-12T00:00:01Z","finishedAt":"2026-08-12T00:00:02Z"}}}"""
+        const val IMPORT_TASK_PAGE = """{"ok":true,"data":{"tasks":[{"id":"task-1","kind":"IMPORT_ASSET","libraryId":"folder-1","libraryName":"Books","resourceId":"resource-1","resourceTitle":"Book","sourceNodeId":"node-1","sourceName":"book.epub","sourceRelativePath":"book.epub","bookTitle":"Book","role":"PRIMARY","state":"FAILED","errorSummary":"parse failed","createdAt":"2026-08-12T00:00:00Z","startedAt":"2026-08-12T00:00:01Z","finishedAt":"2026-08-12T00:00:02Z"}],"page":2,"pageSize":50,"total":51,"totalPages":2,"queued":3,"running":1,"completed":47,"failed":1}}"""
         const val ORGANIZE_POLICY = """{"ok":true,"data":{"policy":{"id":"default","enabled":false,"scheduleMode":"MANUAL","intervalMinutes":60,"autoRunOnNew":false,"autoRunOnNewSince":null,"rules":{"unrecognized":true,"missingMetadata":true},"writeMetadataToFiles":false,"preferLocalMetadata":true,"localMetadataPriority":["SIDECAR_OPF","EMBEDDED","PATH"],"lastScheduledAt":null,"nextRunAt":null,"updatedAt":"2026-08-12T00:00:00Z"}}}"""
         const val PENDING_ORGANIZE = """{"ok":true,"data":{"jobs":[],"books":[],"total":0}}"""
         const val ORGANIZE_JOBS = """{"ok":true,"data":{"jobs":[{"id":"job-1","trigger":"SCHEDULE","statusCategory":"WAITING","issueCodes":[],"reasonCodes":["MISSING_METADATA"],"metadataSources":[],"createdAt":"2026-08-12T00:00:00Z","updatedAt":"2026-08-12T00:01:00Z","book":{"id":"book-1","title":"Book","author":"Author"}}],"page":1,"pageSize":20,"total":1,"totalPages":1,"statusCounts":{"SUCCESS":0,"FAILED":0,"RECOGNIZING":0,"WAITING":1},"providerNames":{}}}"""
@@ -530,6 +632,8 @@ class KtorAdministrativeSettingsRepositoryTest {
         const val BACKUP_RESTORED = """{"ok":true,"data":{"id":"backup-1","restored":true,"restoredAt":"2026-08-12T00:00:00Z","counts":{"works":1},"restoredCounts":{"works":1},"actualCounts":{"works":1}}}"""
         const val BACKUP_DELETED = """{"ok":true,"data":{"deleted":true,"id":"backup-1"}}"""
         const val IMPORT_PREFERENCES = """{"ok":true,"data":{"settings":{"import.allowedExtensions":[".epub"],"import.ignorePatterns":"*.tmp"}}}"""
+        const val LIBRARY_SCAN_SETTINGS = """{"ok":true,"data":{"watchEnabled":true,"intervalMinutes":30}}"""
+        const val LIBRARY_SCAN_SETTINGS_UPDATED = """{"ok":true,"data":{"watchEnabled":false,"intervalMinutes":180}}"""
         const val HEALTH_RUN = """{"ok":true,"data":{"run":{"runId":"run-1","status":"completed","version":2,"startedAt":1,"finishedAt":2,"groups":[],"items":[],"summary":{"total":0,"completed":0,"ok":0,"warning":0,"error":0,"skipped":0}}}}"""
         const val EVENTS = """{"ok":true,"data":{"events":[],"page":1,"pageSize":20,"total":0,"totalPages":1,"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"facets":{"sources":[],"levels":[]}}}"""
         const val LOG_SETTINGS = """{"ok":true,"data":{"storage":{"sizeBytes":0,"maxBytes":1048576,"lastPrunedAt":null},"minBytes":1048576,"maxBytes":104857600}}"""

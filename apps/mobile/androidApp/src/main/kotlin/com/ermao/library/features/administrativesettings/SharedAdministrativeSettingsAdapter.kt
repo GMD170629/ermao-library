@@ -46,6 +46,9 @@ import com.ermao.library.shared.modules.administrativesettings.UpdateManagedUser
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTab as SharedDetailTab
 import com.ermao.library.shared.modules.administrativesettings.WorkDetailTabOrder as SharedDetailOrder
 import com.ermao.library.shared.modules.administrativesettings.domain.ProviderSettingValue as SharedProviderValue
+import com.ermao.library.shared.modules.settingscenter.SettingsItemId
+import com.ermao.library.shared.modules.settingscenter.SettingsGroupId
+import com.ermao.library.shared.modules.settingscenter.visibleSettingsCatalog
 
 class SharedAdministrativeSettingsAdapter(
     private val sharedRepository: SharedRepository,
@@ -443,14 +446,20 @@ class SharedAdministrativeSettingsAdapter(
 }
 
 private fun managementSnapshot(capabilities: Set<AdministrativeCapability>): ManagementSnapshot {
-    val routes = listOf(
-        AdministrativeSettingsRoute.LibrarySources, AdministrativeSettingsRoute.ImportTasks, AdministrativeSettingsRoute.ImportPreferences,
-        AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.RecognitionPolicy,
-        AdministrativeSettingsRoute.CategoryGovernance(), AdministrativeSettingsRoute.MetadataProviders, AdministrativeSettingsRoute.Users,
-        AdministrativeSettingsRoute.EmailKindle(), AdministrativeSettingsRoute.KindleQueue, AdministrativeSettingsRoute.Opds,
-        AdministrativeSettingsRoute.Backups, AdministrativeSettingsRoute.DetailOrder, AdministrativeSettingsRoute.Health(), AdministrativeSettingsRoute.Logs,
-    )
-    return ManagementSnapshot(routes.filter { it.requiredCapability() in capabilities }.map(::ManagementEntry))
+    val catalog = visibleSettingsCatalog(
+        isAdmin = AdministrativeCapability.ManageUsers in capabilities,
+        canManageSystem = AdministrativeCapability.ManageOpds in capabilities ||
+            AdministrativeCapability.ViewLogs in capabilities,
+    ).filter { it.groupId == SettingsGroupId.SYSTEM_MANAGEMENT }
+    val routes = catalog.mapNotNull { entry ->
+        when (entry.itemId) {
+            SettingsItemId.USERS -> AdministrativeSettingsRoute.Users
+            SettingsItemId.OPDS -> AdministrativeSettingsRoute.Opds
+            SettingsItemId.LOGS -> AdministrativeSettingsRoute.Logs
+            else -> null
+        }
+    }
+    return ManagementSnapshot(routes.map(::ManagementEntry))
 }
 
 private inline fun <T, R> SharedResult<T>.map(transform: (T) -> R): AdministrativeResult<R> = when (this) {

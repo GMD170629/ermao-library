@@ -4,6 +4,29 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import ErmaoLibrary
 
+final class SettingsMetricsTests: XCTestCase {
+    func testSettingsRowsShareTheApprovedGeometry() {
+        XCTAssertEqual(SettingsMetrics.rowMinimumHeight, 54)
+        XCTAssertEqual(SettingsMetrics.horizontalInset, 16)
+        XCTAssertEqual(SettingsMetrics.verticalInset, 8)
+        XCTAssertEqual(SettingsMetrics.rowContentMinimumHeight, 38)
+        XCTAssertEqual(SettingsMetrics.iconSlotSize, 28)
+        XCTAssertEqual(SettingsMetrics.iconSize, 20)
+        XCTAssertEqual(SettingsMetrics.iconTitleSpacing, 12)
+        XCTAssertEqual(SettingsMetrics.separatorLeading, 40)
+        XCTAssertEqual(SettingsMetrics.trailingSlotWidth, 18)
+        XCTAssertEqual(SettingsMetrics.sectionSpacing, 20)
+        XCTAssertEqual(SettingsMetrics.sectionHeaderBottomSpacing, 8)
+        XCTAssertEqual(SettingsMetrics.bottomActionHeight, 50)
+    }
+
+    func testIdentityGeometryUsesTheCompactApprovedMeasurements() {
+        XCTAssertEqual(SettingsMetrics.identityAvatarSize, 52)
+        XCTAssertEqual(SettingsMetrics.identityMinimumHeight, 76)
+        XCTAssertEqual(SettingsMetrics.identityContentMinimumHeight, 60)
+    }
+}
+
 final class AvatarImageProcessorTests: XCTestCase {
     func testJPEGIsReencodedWithoutSourceMetadataAndWithinLimit() throws {
         let source = try makeImageData(
@@ -138,6 +161,20 @@ final class AvatarImageProcessorTests: XCTestCase {
 
 @MainActor
 final class SettingsViewModelTests: XCTestCase {
+    func testAvatarDownloadUsesTheURLReturnedByTheAccountInterface() async {
+        let client = SettingsClientSpy()
+        let avatarURL = "/api/auth/avatar?v=42"
+        let serverAvatar = Data("server-rendered-avatar".utf8)
+        await client.configureAvatar(url: avatarURL, data: serverAvatar)
+        let viewModel = makeViewModel(client: client)
+
+        await viewModel.loadIfNeeded()
+
+        let requestedAvatarURLs = await client.requestedAvatarURLs()
+        XCTAssertEqual(requestedAvatarURLs, [avatarURL])
+        XCTAssertEqual(viewModel.avatarData, serverAvatar)
+    }
+
     func testSuccessfulNameUpdateRefreshesSession() async {
         let client = SettingsClientSpy()
         let refreshCount = MainActorCounter()
@@ -150,6 +187,93 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertTrue(didSave)
         XCTAssertEqual(viewModel.snapshot.account.displayName, "New Name")
         XCTAssertEqual(refreshCount.value, 1)
+    }
+
+    func testInvalidDisplayNameDoesNotReachClient() async {
+        let client = SettingsClientSpy()
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveName(String(repeating: "x", count: 41))
+        let nameCallCount = await client.nameUpdateCallCount()
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.profile.name.maximum")
+        XCTAssertEqual(nameCallCount, 0)
+    }
+
+    func testUnchangedEmailDoesNotReachClient() async {
+        let client = SettingsClientSpy()
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveEmail(
+            " reader@example.com ",
+            currentPassword: "current-password"
+        )
+        let emailCallCount = await client.emailUpdateCallCount()
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.security.email.unchanged")
+        XCTAssertEqual(emailCallCount, 0)
+    }
+
+    func testInvalidEmailDoesNotReachClient() async {
+        let client = SettingsClientSpy()
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveEmail(
+            "not-an-email",
+            currentPassword: "current-password"
+        )
+        let emailCallCount = await client.emailUpdateCallCount()
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.security.email.invalid")
+        XCTAssertEqual(emailCallCount, 0)
+    }
+
+    func testIncorrectCurrentPasswordShowsSpecificRecoveryMessage() async {
+        let client = SettingsClientSpy()
+        await client.setError(
+            SettingsClientError(kind: .validation, code: "CURRENT_PASSWORD_INCORRECT")
+        )
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveEmail(
+            "new@example.com",
+            currentPassword: "incorrect-password"
+        )
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.titleKey, "settings.error.currentPassword.title")
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.error.currentPassword.message")
+        XCTAssertNil(viewModel.alert?.referenceCode)
+    }
+
+    func testEmailConflictShowsSpecificRecoveryMessage() async {
+        let client = SettingsClientSpy()
+        await client.setError(SettingsClientError(kind: .conflict, code: "EMAIL_IN_USE"))
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveEmail(
+            "used@example.com",
+            currentPassword: "current-password"
+        )
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.titleKey, "settings.error.emailInUse.title")
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.error.emailInUse.message")
+    }
+
+    func testUnknownStableErrorIncludesReferenceCode() async {
+        let client = SettingsClientSpy()
+        await client.setError(SettingsClientError(kind: .server, code: "SETTINGS_WRITE_FAILED"))
+        let viewModel = makeViewModel(client: client)
+
+        let didSave = await viewModel.saveName("New Name")
+
+        XCTAssertFalse(didSave)
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.error.server")
+        XCTAssertEqual(viewModel.alert?.referenceCode, "SETTINGS_WRITE_FAILED")
     }
 
     func testUnauthorizedMutationRequestsFullScreenReauthentication() async {
@@ -183,6 +307,27 @@ final class SettingsViewModelTests: XCTestCase {
         let passwordCallCount = await client.passwordUpdateCallCount()
         XCTAssertEqual(passwordCallCount, 0)
         XCTAssertEqual(viewModel.alert?.messageKey, "settings.security.purgeFailed")
+    }
+
+    func testShortPasswordDoesNotPurgeOrReachClient() async {
+        let client = SettingsClientSpy()
+        let purgeCount = MainActorCounter()
+        let viewModel = makeViewModel(
+            client: client,
+            purgeCurrentNamespace: { purgeCount.value += 1 }
+        )
+
+        let didChange = await viewModel.changePassword(
+            currentPassword: "old-password",
+            newPassword: "short",
+            confirmation: "short"
+        )
+        let passwordCallCount = await client.passwordUpdateCallCount()
+
+        XCTAssertFalse(didChange)
+        XCTAssertEqual(viewModel.alert?.messageKey, "settings.security.newPassword.minimum")
+        XCTAssertEqual(purgeCount.value, 0)
+        XCTAssertEqual(passwordCallCount, 0)
     }
 
     func testPasswordPurgesBeforeUpdateAndLogsOutAfterSuccess() async {
@@ -280,8 +425,13 @@ private actor EventRecorder {
 
 private actor SettingsClientSpy: SettingsClient {
     private var error: SettingsClientError?
+    private var nameCalls = 0
+    private var emailCalls = 0
     private var passwordCalls = 0
     private let events: EventRecorder?
+    private var avatarURL: String?
+    private var avatarContent = Data()
+    private var avatarRequests: [String] = []
 
     init(events: EventRecorder? = nil) {
         self.events = events
@@ -295,17 +445,36 @@ private actor SettingsClientSpy: SettingsClient {
         passwordCalls
     }
 
+    func nameUpdateCallCount() -> Int {
+        nameCalls
+    }
+
+    func emailUpdateCallCount() -> Int {
+        emailCalls
+    }
+
+    func configureAvatar(url: String, data: Data) {
+        avatarURL = url
+        avatarContent = data
+    }
+
+    func requestedAvatarURLs() -> [String] {
+        avatarRequests
+    }
+
     func loadSettings() async throws -> (account: SettingsAccount, locale: SettingsLocale) {
         try throwIfNeeded()
         return (account(name: "Original Name"), .zhCN)
     }
 
     func updateName(_ name: String) async throws -> SettingsAccount {
+        nameCalls += 1
         try throwIfNeeded()
         return account(name: name)
     }
 
     func updateEmail(_ email: String, currentPassword: String) async throws -> SettingsAccount {
+        emailCalls += 1
         try throwIfNeeded()
         return SettingsAccount(id: "user-1", displayName: "Original Name", email: email, avatarURL: nil)
     }
@@ -320,9 +489,10 @@ private actor SettingsClientSpy: SettingsClient {
         return SettingsPasswordChange(requiresLogin: true)
     }
 
-    func loadAvatar(etag: String?) async throws -> SettingsAvatarContent {
+    func loadAvatar(from avatarURL: String, etag: String?) async throws -> SettingsAvatarContent {
         try throwIfNeeded()
-        return SettingsAvatarContent(data: Data(), contentType: nil, etag: nil, notModified: false)
+        avatarRequests.append(avatarURL)
+        return SettingsAvatarContent(data: avatarContent, contentType: "image/webp", etag: nil, notModified: false)
     }
 
     func uploadAvatar(_ upload: SettingsAvatarUpload) async throws -> SettingsAccount {
@@ -354,7 +524,7 @@ private actor SettingsClientSpy: SettingsClient {
             id: "user-1",
             displayName: name,
             email: "reader@example.com",
-            avatarURL: nil
+            avatarURL: avatarURL
         )
     }
 }

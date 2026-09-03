@@ -9,7 +9,7 @@ final class AdministrativeSettingsStore: ObservableObject {
 
     let client: any AdministrativeSettingsClient
     let permissions: AdministrativePermission
-    let copy: AdministrativeCopyCatalog
+    @Published private(set) var copy: AdministrativeCopyCatalog
     private let onUnauthorized: @MainActor @Sendable () -> Void
     private var generations: [String: Int] = [:]
 
@@ -23,6 +23,12 @@ final class AdministrativeSettingsStore: ObservableObject {
         self.permissions = permissions
         copy = AdministrativeCopyCatalog(locale: locale)
         self.onUnauthorized = onUnauthorized
+    }
+
+    func updateLocale(_ locale: AdministrativeSettingsLocale) {
+        guard copy.locale != locale else { return }
+        copy = AdministrativeCopyCatalog(locale: locale)
+        notice = nil
     }
 
     func loadSummary(force: Bool = false) async {

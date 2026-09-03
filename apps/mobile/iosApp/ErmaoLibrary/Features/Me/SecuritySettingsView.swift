@@ -1,9 +1,14 @@
 import SwiftUI
 
 struct SecuritySettingsView: View {
+    private enum Tab: Hashable {
+        case email
+        case password
+    }
+
     @ObservedObject var viewModel: SettingsViewModel
 
-    @Environment(\.appTheme) private var theme
+    @State private var tab: Tab = .email
     @State private var email: String
     @State private var emailCurrentPassword = ""
     @State private var currentPassword = ""
@@ -17,105 +22,190 @@ struct SecuritySettingsView: View {
     }
 
     var body: some View {
-        List {
+        SettingsScreen("settings.security.title") {
             Section {
+                SettingsTabPicker("settings.security.title", selection: $tab) {
+                    Text("settings.security.email.tab").tag(Tab.email)
+                    Text("settings.security.password.tab").tag(Tab.password)
+                }
+                .disabled(viewModel.isBusy)
+            }
+
+            switch tab {
+            case .email:
+                emailForm
+            case .password:
+                passwordForm
+            }
+
+            Section {
+                SettingsActionRow("me.logout.action", role: .destructive) {
+                    confirmsLogout = true
+                }
+                .disabled(viewModel.isBusy)
+                .confirmationDialog(
+                    "me.logout.confirm.title",
+                    isPresented: $confirmsLogout,
+                    titleVisibility: .visible
+                ) {
+                    Button("me.logout.confirm.action", role: .destructive) {
+                        Task { await viewModel.signOut() }
+                    }
+                    .disabled(viewModel.isBusy)
+                    Button("common.cancel", role: .cancel) {}
+                } message: {
+                    Text("me.logout.confirm.message")
+                }
+            } footer: {
+                Text("settings.security.logout.footer")
+            }
+        }
+        .settingsAlert(viewModel: viewModel)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                SettingsToolbarAction(
+                    currentSaveTitle,
+                    working: currentSaveIsWorking,
+                    disabled: currentSaveIsDisabled,
+                    action: saveCurrentTab
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emailForm: some View {
+        Section {
+            SettingsTextInputRow("me.email") {
                 TextField("me.email", text: $email)
+                    .labelsHidden()
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityHint(Text("settings.security.email.hint"))
+            }
+            SettingsTextInputRow("settings.security.currentPassword") {
                 SecureField("settings.security.currentPassword", text: $emailCurrentPassword)
+                    .labelsHidden()
                     .textContentType(.password)
                     .submitLabel(.done)
-                    .onSubmit(saveEmail)
-
-                Button(action: saveEmail) {
-                    HStack {
-                        Text("settings.security.email.save")
-                        Spacer(minLength: .space1)
-                        if viewModel.isWorking(.savingEmail) {
-                            ProgressView().accessibilityLabel(Text("common.loading"))
-                        }
+                    .onSubmit {
+                        guard !emailSaveIsDisabled else { return }
+                        saveEmail()
                     }
-                    .frame(minHeight: .iosMinimumTouchTarget)
-                }
-                .disabled(
-                    viewModel.isBusy ||
-                        emailCurrentPassword.isEmpty ||
-                        email.trimmingCharacters(in: .whitespacesAndNewlines) ==
-                        viewModel.snapshot.account.email
-                )
-            } header: {
-                Text("settings.security.email.section")
-            } footer: {
+            }
+        } header: {
+            SettingsSectionHeader("settings.security.email.section")
+        } footer: {
+            VStack(alignment: .leading, spacing: .spaceHalf) {
                 Text("settings.security.email.footer")
-            }
-            .listRowBackground(theme.surface)
-
-            Section {
-                SecureField("settings.security.currentPassword", text: $currentPassword)
-                    .textContentType(.password)
-                SecureField("settings.security.newPassword", text: $newPassword)
-                    .textContentType(.newPassword)
-                SecureField("settings.security.confirmPassword", text: $confirmation)
-                    .textContentType(.newPassword)
-                    .submitLabel(.done)
-                    .onSubmit(changePassword)
-
-                PrimaryActionButton(
-                    "settings.security.changePassword.action",
-                    isWorking: viewModel.isWorking(.changingPassword),
-                    isDisabled: !passwordFormIsComplete || viewModel.isBusy,
-                    action: changePassword
-                )
-                .listRowInsets(
-                    EdgeInsets(
-                        top: .space2,
-                        leading: 0,
-                        bottom: .space1,
-                        trailing: 0
-                    )
-                )
-            } header: {
-                Text("settings.security.password.section")
-            } footer: {
-                Text("settings.security.password.footer")
-            }
-            .listRowBackground(theme.surface)
-
-            Section {
-                Button("me.logout.action", role: .destructive) {
-                    confirmsLogout = true
+                if !email.isEmpty && !emailIsValid {
+                    validationMessage("settings.security.email.invalid")
                 }
-                .frame(minHeight: .iosMinimumTouchTarget)
-                .disabled(viewModel.isBusy)
-            } footer: {
-                Text("settings.security.logout.footer")
+                if emailCurrentPassword.count > SettingsInputValidation.maximumPasswordLength {
+                    validationMessage("settings.security.currentPassword.maximum")
+                }
             }
-            .listRowBackground(theme.surface)
-        }
-        .listStyle(.insetGrouped)
-        .settingsListSurface()
-        .settingsAlert(viewModel: viewModel)
-        .navigationTitle("settings.security.title")
-        .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
-            "me.logout.confirm.title",
-            isPresented: $confirmsLogout,
-            titleVisibility: .visible
-        ) {
-            Button("me.logout.confirm.action", role: .destructive) {
-                Task { await viewModel.signOut() }
-            }
-            Button("common.cancel", role: .cancel) {}
-        } message: {
-            Text("me.logout.confirm.message")
         }
     }
 
-    private var passwordFormIsComplete: Bool {
-        !currentPassword.isEmpty && !newPassword.isEmpty && !confirmation.isEmpty
+    @ViewBuilder
+    private var passwordForm: some View {
+        Section {
+            SettingsTextInputRow("settings.security.currentPassword") {
+                SecureField("settings.security.currentPassword", text: $currentPassword)
+                    .labelsHidden()
+                    .textContentType(.password)
+            }
+            SettingsTextInputRow("settings.security.newPassword") {
+                SecureField("settings.security.newPassword", text: $newPassword)
+                    .labelsHidden()
+                    .textContentType(.newPassword)
+            }
+            SettingsTextInputRow("settings.security.confirmPassword") {
+                SecureField("settings.security.confirmPassword", text: $confirmation)
+                    .labelsHidden()
+                    .textContentType(.newPassword)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        guard !passwordSaveIsDisabled else { return }
+                        changePassword()
+                    }
+            }
+        } header: {
+            SettingsSectionHeader("settings.security.password.section")
+        } footer: {
+            VStack(alignment: .leading, spacing: .spaceHalf) {
+                Text("settings.security.password.footer")
+                if currentPassword.count > SettingsInputValidation.maximumPasswordLength {
+                    validationMessage("settings.security.currentPassword.maximum")
+                }
+                if !newPassword.isEmpty && newPassword.count < SettingsInputValidation.minimumPasswordLength {
+                    validationMessage("settings.security.newPassword.minimum")
+                } else if newPassword.count > SettingsInputValidation.maximumPasswordLength {
+                    validationMessage("settings.security.newPassword.maximum")
+                }
+                if !confirmation.isEmpty && newPassword != confirmation {
+                    validationMessage("settings.security.password.mismatch")
+                }
+            }
+        }
+    }
+
+    private var currentSaveTitle: LocalizedStringKey {
+        switch tab {
+        case .email:
+            "settings.security.email.save"
+        case .password:
+            "settings.security.changePassword.action"
+        }
+    }
+
+    private var currentSaveIsWorking: Bool {
+        switch tab {
+        case .email:
+            viewModel.isWorking(.savingEmail)
+        case .password:
+            viewModel.isWorking(.changingPassword)
+        }
+    }
+
+    private var currentSaveIsDisabled: Bool {
+        if viewModel.isBusy { return true }
+        return switch tab {
+        case .email:
+            emailSaveIsDisabled
+        case .password:
+            passwordSaveIsDisabled
+        }
+    }
+
+    private var emailIsValid: Bool {
+        SettingsInputValidation.isValidEmail(email)
+    }
+
+    private var emailSaveIsDisabled: Bool {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !emailIsValid ||
+            !SettingsInputValidation.isValidCurrentPassword(emailCurrentPassword) ||
+            normalizedEmail == viewModel.snapshot.account.email
+    }
+
+    private var passwordSaveIsDisabled: Bool {
+        !SettingsInputValidation.isValidCurrentPassword(currentPassword) ||
+            !SettingsInputValidation.isValidNewPassword(newPassword) ||
+            confirmation.isEmpty ||
+            newPassword != confirmation
+    }
+
+    private func saveCurrentTab() {
+        switch tab {
+        case .email:
+            saveEmail()
+        case .password:
+            changePassword()
+        }
     }
 
     private func saveEmail() {
@@ -139,5 +229,10 @@ struct SecuritySettingsView: View {
                 confirmation = ""
             }
         }
+    }
+
+    private func validationMessage(_ key: LocalizedStringKey) -> some View {
+        Text(key)
+            .foregroundStyle(.red)
     }
 }

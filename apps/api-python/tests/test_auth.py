@@ -433,12 +433,14 @@ def test_account_email_change_requires_password_and_rejects_case_insensitive_dup
         json={"email": "new@example.com", "currentPassword": "wrong"},
     )
     assert bad_password.status_code == 400
+    assert bad_password.json()["error"]["code"] == "CURRENT_PASSWORD_INCORRECT"
 
     duplicate = client.patch(
         "/api/auth/account/email",
         json={"email": "OTHER@EXAMPLE.COM", "currentPassword": "starshipnas"},
     )
     assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "EMAIL_IN_USE"
 
     changed = client.patch(
         "/api/auth/account/email",
@@ -473,6 +475,20 @@ def test_account_password_change_revokes_all_sessions(client, db_session):
         db_session.query(UserSession).filter(UserSession.user_id == user.id).count()
         == 1
     )
+
+    bad_password = client.patch(
+        "/api/auth/account/password",
+        json={"currentPassword": "wrong-password", "newPassword": "new-password-123"},
+    )
+    assert bad_password.status_code == 400
+    assert bad_password.json()["error"]["code"] == "CURRENT_PASSWORD_INCORRECT"
+
+    unchanged = client.patch(
+        "/api/auth/account/password",
+        json={"currentPassword": "starshipnas", "newPassword": "starshipnas"},
+    )
+    assert unchanged.status_code == 400
+    assert unchanged.json()["error"]["code"] == "NEW_PASSWORD_MUST_DIFFER"
 
     changed = client.patch(
         "/api/auth/account/password",

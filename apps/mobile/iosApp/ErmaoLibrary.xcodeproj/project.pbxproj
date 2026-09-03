@@ -71,7 +71,6 @@
 		B05700000000000000000057 /* LanguageSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05700000000000000000057 /* LanguageSettingsView.swift */; };
 		B05800000000000000000058 /* AboutSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05800000000000000000058 /* AboutSettingsView.swift */; };
 		B05900000000000000000059 /* SharedSettingsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05900000000000000000059 /* SharedSettingsClient.swift */; };
-		B06000000000000000000060 /* AdministrativeManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06000000000000000000060 /* AdministrativeManagementView.swift */; };
 		B06100000000000000000061 /* AdministrativeSettingsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06100000000000000000061 /* AdministrativeSettingsClient.swift */; };
 		B06200000000000000000062 /* AdministrativeSettingsComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06200000000000000000062 /* AdministrativeSettingsComponents.swift */; };
 		B06300000000000000000063 /* AdministrativeSettingsCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06300000000000000000063 /* AdministrativeSettingsCopy.swift */; };
@@ -266,7 +265,6 @@
 		F05700000000000000000057 /* LanguageSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettingsView.swift; sourceTree = "<group>"; };
 		F05800000000000000000058 /* AboutSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutSettingsView.swift; sourceTree = "<group>"; };
 		F05900000000000000000059 /* SharedSettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSettingsClient.swift; sourceTree = "<group>"; };
-		F06000000000000000000060 /* AdministrativeManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeManagementView.swift; sourceTree = "<group>"; };
 		F06100000000000000000061 /* AdministrativeSettingsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsClient.swift; sourceTree = "<group>"; };
 		F06200000000000000000062 /* AdministrativeSettingsComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsComponents.swift; sourceTree = "<group>"; };
 		F06300000000000000000063 /* AdministrativeSettingsCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdministrativeSettingsCopy.swift; sourceTree = "<group>"; };
@@ -667,7 +665,6 @@
 		G12200000000000000000122 /* AdministrativeSettings */ = {
 			isa = PBXGroup;
 			children = (
-				F06000000000000000000060 /* AdministrativeManagementView.swift */,
 				F06100000000000000000061 /* AdministrativeSettingsClient.swift */,
 				F06200000000000000000062 /* AdministrativeSettingsComponents.swift */,
 				F06300000000000000000063 /* AdministrativeSettingsCopy.swift */,
@@ -1026,7 +1023,6 @@
 				B05700000000000000000057 /* LanguageSettingsView.swift in Sources */,
 				B05800000000000000000058 /* AboutSettingsView.swift in Sources */,
 				B05900000000000000000059 /* SharedSettingsClient.swift in Sources */,
-				B06000000000000000000060 /* AdministrativeManagementView.swift in Sources */,
 				B06100000000000000000061 /* AdministrativeSettingsClient.swift in Sources */,
 				B06200000000000000000062 /* AdministrativeSettingsComponents.swift in Sources */,
 				B06300000000000000000063 /* AdministrativeSettingsCopy.swift in Sources */,

@@ -18,7 +18,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,8 +28,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ermao.library.ui.components.SettingsTextField
 import com.ermao.library.ui.components.rememberForwardProgress
 
 private enum class QueueFilter { All, Running, Failed }
@@ -172,7 +172,7 @@ fun UsersScreen(
         AdministrativeCopy.UsersAndPermissions, locale, onBack, modifier,
         toolbarActions = { IconButton({ onNavigate(AdministrativeSettingsRoute.UserEdit()) }) { Icon(Icons.Outlined.PersonAdd, AdministrativeCopy.AddUser.text(locale)) } },
     ) {
-        AdministrativeTextField(search, { search = it }, AdministrativeCopy.Search, locale)
+        AdministrativeTextField(search, { search = it }, AdministrativeCopy.Search, locale, textAlign = TextAlign.Start)
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(enabledFilter == null, { enabledFilter = null }, { Text(AdministrativeCopy.All.text(locale)) })
             FilterChip(enabledFilter == true, { enabledFilter = true }, { Text(AdministrativeCopy.Enabled.text(locale)) })
@@ -219,20 +219,65 @@ fun UserEditScreen(
 ) {
     var showReset by remember { mutableStateOf(false) }
     var showDelete by remember { mutableStateOf(false) }
+    val snapshot = state.snapshot
+    val user = snapshot?.user
+    var displayName by remember(user) { mutableStateOf(user?.displayName.orEmpty()) }
+    var email by remember(user) { mutableStateOf(user?.email.orEmpty()) }
+    var role by remember(user) { mutableStateOf(user?.role ?: UserRole.Member) }
+    var enabled by remember(user) { mutableStateOf(user?.enabled ?: true) }
+    var userLocale by remember(user) { mutableStateOf(user?.locale ?: AdministrativeLocale.EnUs) }
+    var initialPassword by remember(user) { mutableStateOf("") }
+    var canManageSystem by remember(snapshot) { mutableStateOf(snapshot?.canManageSystem ?: false) }
+    var canViewManualImports by remember(snapshot) { mutableStateOf(snapshot?.canViewManualImports ?: false) }
+    val hasChanges = snapshot?.let { initial ->
+        val initialUser = initial.user
+        initialUser == null ||
+            displayName.trim() != initialUser.displayName.trim() ||
+            email.trim() != initialUser.email.trim() ||
+            role != initialUser.role ||
+            enabled != initialUser.enabled ||
+            userLocale != initialUser.locale ||
+            canManageSystem != initial.canManageSystem ||
+            canViewManualImports != initial.canViewManualImports ||
+            initialPassword.isNotBlank()
+    } == true
+    val canSave = snapshot != null && !state.mutationInFlight && hasChanges &&
+        displayName.isNotBlank() && email.isNotBlank() && (user != null || initialPassword.length in 10..128)
     AdministrativePage(
-        if (state.snapshot?.user == null) AdministrativeCopy.NewUser else AdministrativeCopy.EditUser,
-        locale, onBack, modifier,
+        title = if (user == null) AdministrativeCopy.NewUser else AdministrativeCopy.EditUser,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        toolbarActions = {
+            AdministrativeSaveAction(
+                label = AdministrativeCopy.SaveUser,
+                locale = locale,
+                enabled = canSave,
+                working = state.mutationInFlight,
+                onClick = {
+                    snapshot?.let { current ->
+                        onCommand(
+                            AdministrativeCommand.SaveUser(
+                                UserDraft(
+                                    current.user?.id,
+                                    displayName.trim(),
+                                    email.trim(),
+                                    role,
+                                    enabled,
+                                    initialPassword.ifBlank { null },
+                                    canManageSystem,
+                                    canViewManualImports,
+                                    current.selectedSourceIds,
+                                    userLocale,
+                                ),
+                            ),
+                        )
+                    }
+                },
+            )
+        },
     ) {
-        PageStateContent(state, locale, onRetry) { snapshot ->
-            val user = snapshot.user
-            var displayName by remember(user) { mutableStateOf(user?.displayName.orEmpty()) }
-            var email by remember(user) { mutableStateOf(user?.email.orEmpty()) }
-            var role by remember(user) { mutableStateOf(user?.role ?: UserRole.Member) }
-            var enabled by remember(user) { mutableStateOf(user?.enabled ?: true) }
-            var userLocale by remember(user) { mutableStateOf(user?.locale ?: AdministrativeLocale.EnUs) }
-            var initialPassword by remember(user) { mutableStateOf("") }
-            var canManageSystem by remember(snapshot) { mutableStateOf(snapshot.canManageSystem) }
-            var canViewManualImports by remember(snapshot) { mutableStateOf(snapshot.canViewManualImports) }
+        PageStateContent(state, locale, onRetry) { current ->
             AdministrativeSection(AdministrativeCopy.Users, locale)
             AdministrativeTextField(displayName, { displayName = it }, AdministrativeCopy.DisplayName, locale)
             AdministrativeTextField(email, { email = it }, AdministrativeCopy.Email, locale)
@@ -240,11 +285,11 @@ fun UserEditScreen(
             EnumChoiceRow(AdministrativeCopy.Language, AdministrativeLocale.entries, userLocale, { userLocale = it }, locale) {
                 when (it) { AdministrativeLocale.ZhCn -> "简体中文"; AdministrativeLocale.EnUs -> "English (United States)" }
             }
-            if (user != null) {
+            if (current.user != null) {
                 AdministrativeNavigationRow(
                     AdministrativeCopy.AccessScope.text(locale),
-                    if (snapshot.canManageSystem) AdministrativeCopy.AllLibraries.text(locale) else "${snapshot.selectedSourceIds.size} ${AdministrativeCopy.Items.text(locale)}",
-                    { onNavigate(AdministrativeSettingsRoute.UserAccess(user.id)) },
+                    if (current.canManageSystem) AdministrativeCopy.AllLibraries.text(locale) else "${current.selectedSourceIds.size} ${AdministrativeCopy.Items.text(locale)}",
+                    { onNavigate(AdministrativeSettingsRoute.UserAccess(current.user.id)) },
                 )
                 AdministrativeSection(AdministrativeCopy.AccountStatus, locale)
                 AdministrativeSwitchRow(AdministrativeCopy.EnableAccount.text(locale), enabled, { enabled = it })
@@ -254,25 +299,11 @@ fun UserEditScreen(
             }
             AdministrativeSwitchRow(AdministrativeCopy.System.text(locale), canManageSystem, { canManageSystem = it }, supporting = "canManageSystem")
             AdministrativeSwitchRow(AdministrativeCopy.ImportTasks.text(locale), canViewManualImports, { canViewManualImports = it })
-            PrimaryAction(
-                AdministrativeCopy.SaveUser,
-                locale,
-                !state.mutationInFlight && displayName.isNotBlank() && email.isNotBlank() && (user != null || initialPassword.length in 10..128),
-            ) {
-                onCommand(
-                    AdministrativeCommand.SaveUser(
-                        UserDraft(
-                            user?.id, displayName.trim(), email.trim(), role, enabled, initialPassword.ifBlank { null },
-                            canManageSystem, canViewManualImports, snapshot.selectedSourceIds, userLocale,
-                        ),
-                    ),
-                )
-            }
-            if (user != null) DangerousAction(AdministrativeCopy.DeleteUser, locale, !state.mutationInFlight) { showDelete = true }
-            if (showReset) ResetPasswordDialog(user?.id.orEmpty(), locale, onCommand) { showReset = false }
+            if (current.user != null) DangerousAction(AdministrativeCopy.DeleteUser, locale, !state.mutationInFlight) { showDelete = true }
+            if (showReset) ResetPasswordDialog(current.user?.id.orEmpty(), locale, onCommand) { showReset = false }
             if (showDelete) AdministrativeConfirmDialog(
                 AdministrativeCopy.DeleteUserTitle, AdministrativeCopy.DeleteUserBody, AdministrativeCopy.DeleteUser, locale,
-                onConfirm = { showDelete = false; onCommand(AdministrativeCommand.DeleteUser(user?.id.orEmpty())) },
+                onConfirm = { showDelete = false; onCommand(AdministrativeCommand.DeleteUser(current.user?.id.orEmpty())) },
                 onDismiss = { showDelete = false },
             )
         }
@@ -293,8 +324,18 @@ private fun ResetPasswordDialog(
         title = { Text(AdministrativeCopy.ResetPassword.text(locale)) },
         text = {
             Column {
-                OutlinedTextField(password, { password = it }, label = { Text(AdministrativeCopy.NewPassword.text(locale)) }, visualTransformation = PasswordVisualTransformation())
-                OutlinedTextField(confirmation, { confirmation = it }, label = { Text(AdministrativeCopy.ConfirmPassword.text(locale)) }, visualTransformation = PasswordVisualTransformation())
+                SettingsTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = AdministrativeCopy.NewPassword.text(locale),
+                    password = true,
+                )
+                SettingsTextField(
+                    value = confirmation,
+                    onValueChange = { confirmation = it },
+                    label = AdministrativeCopy.ConfirmPassword.text(locale),
+                    password = true,
+                )
             }
         },
         confirmButton = {
@@ -316,17 +357,42 @@ fun UserAccessScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AdministrativePage(AdministrativeCopy.AccessScope, locale, onBack, modifier) {
-        PageStateContent(state, locale, onRetry) { snapshot ->
-            var allLibraries by remember(snapshot) { mutableStateOf(snapshot.allLibraries) }
-            var selected by remember(snapshot) { mutableStateOf(snapshot.sources.filter(AccessSource::selected).map(AccessSource::id).toSet()) }
+    val snapshot = state.snapshot
+    var allLibraries by remember(snapshot) { mutableStateOf(snapshot?.allLibraries ?: false) }
+    var selected by remember(snapshot) {
+        mutableStateOf(snapshot?.sources?.filter(AccessSource::selected)?.map(AccessSource::id)?.toSet().orEmpty())
+    }
+    val hasChanges = snapshot?.let {
+        allLibraries != it.allLibraries || selected != it.sources.filter(AccessSource::selected).map(AccessSource::id).toSet()
+    } == true
+    val canSave = snapshot != null && !state.mutationInFlight && hasChanges && (allLibraries || selected.isNotEmpty())
+    AdministrativePage(
+        title = AdministrativeCopy.AccessScope,
+        locale = locale,
+        onBack = onBack,
+        modifier = modifier,
+        toolbarActions = {
+            AdministrativeSaveAction(
+                label = AdministrativeCopy.SaveAccessScope,
+                locale = locale,
+                enabled = canSave,
+                working = state.mutationInFlight,
+                onClick = {
+                    snapshot?.let {
+                        onCommand(AdministrativeCommand.SaveUserAccess(it.user.id, allLibraries, selected))
+                    }
+                },
+            )
+        },
+    ) {
+        PageStateContent(state, locale, onRetry) { current ->
             ListItem(
-                headlineContent = { Text(snapshot.user.displayName) },
-                supportingContent = { Text(snapshot.user.email) },
+                headlineContent = { Text(current.user.displayName) },
+                supportingContent = { Text(current.user.email) },
                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
             )
             AdministrativeSwitchRow(AdministrativeCopy.AllLibraries.text(locale), allLibraries, { allLibraries = it })
-            snapshot.sources.forEach { source ->
+            current.sources.forEach { source ->
                 AdministrativeSwitchRow(
                     source.name,
                     allLibraries || selected.contains(source.id),
@@ -336,9 +402,6 @@ fun UserAccessScreen(
                 )
             }
             Text(AdministrativeCopy.UserAccessHint.text(locale), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            PrimaryAction(AdministrativeCopy.SaveAccessScope, locale, !state.mutationInFlight && (allLibraries || selected.isNotEmpty())) {
-                onCommand(AdministrativeCommand.SaveUserAccess(snapshot.user.id, allLibraries, selected))
-            }
         }
     }
 }

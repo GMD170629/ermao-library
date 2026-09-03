@@ -1,4 +1,26 @@
 import Foundation
+@preconcurrency import ErmaoShared
+
+enum SettingsInputValidation {
+    static let minimumPasswordLength = Int(PersonalSettingsPublicKt.personalSettingsMinimumPasswordLength())
+    static let maximumPasswordLength = Int(PersonalSettingsPublicKt.personalSettingsMaximumPasswordLength())
+
+    static func isValidDisplayName(_ value: String) -> Bool {
+        PersonalSettingsPublicKt.isValidPersonalSettingsDisplayName(value: value)
+    }
+
+    static func isValidEmail(_ value: String) -> Bool {
+        PersonalSettingsPublicKt.isValidPersonalSettingsEmail(value: value)
+    }
+
+    static func isValidCurrentPassword(_ value: String) -> Bool {
+        PersonalSettingsPublicKt.isValidPersonalSettingsCurrentPassword(value: value)
+    }
+
+    static func isValidNewPassword(_ value: String) -> Bool {
+        PersonalSettingsPublicKt.isValidPersonalSettingsNewPassword(value: value)
+    }
+}
 
 enum SettingsRoute: String, CaseIterable, Hashable, Identifiable, Sendable {
     case profile
@@ -123,7 +145,7 @@ protocol SettingsClient: Sendable {
     func updateName(_ name: String) async throws -> SettingsAccount
     func updateEmail(_ email: String, currentPassword: String) async throws -> SettingsAccount
     func updatePassword(currentPassword: String, newPassword: String) async throws -> SettingsPasswordChange
-    func loadAvatar(etag: String?) async throws -> SettingsAvatarContent
+    func loadAvatar(from avatarURL: String, etag: String?) async throws -> SettingsAvatarContent
     func uploadAvatar(_ upload: SettingsAvatarUpload) async throws -> SettingsAccount
     func deleteAvatar() async throws -> SettingsAccount
     func updateLocale(_ locale: SettingsLocale) async throws -> SettingsLocale
@@ -153,4 +175,11 @@ struct SettingsAlert: Identifiable, Equatable, Sendable {
     let id = UUID()
     let titleKey: String
     let messageKey: String
+    let referenceCode: String?
+
+    init(titleKey: String, messageKey: String, referenceCode: String? = nil) {
+        self.titleKey = titleKey
+        self.messageKey = messageKey
+        self.referenceCode = referenceCode
+    }
 }

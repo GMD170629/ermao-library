@@ -7,31 +7,46 @@ struct EmailKindleSettingsView: View {
     @State private var tab: Tab = .kindle
     @State private var kindle: KindleSettings?
     @State private var smtp: SMTPSettings?
+    @State private var initialKindle: KindleSettings?
+    @State private var initialSMTP: SMTPSettings?
     @State private var testSucceeded = false
 
     @Environment(\.administrativeCopy) private var copy
-    @Environment(\.appTheme) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker(copy[.emailKindle], selection: $tab) {
+            SettingsTabPicker(verbatim: copy[.emailKindle], selection: $tab) {
                 Text(copy[.kindleTab]).tag(Tab.kindle)
                 if snapshot?.canManageSMTP == true { Text(copy[.smtpTab]).tag(Tab.smtp) }
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, .space2)
             .padding(.vertical, .space1)
+            .disabled(store.operationInFlight != nil)
 
             AdministrativeStateView(state: state, retry: load) { _ in
                 if tab == .kindle { kindleForm } else { smtpForm }
             }
+            .disabled(store.operationInFlight != nil)
         }
-        .background(theme.canvas)
+        .settingsPageSurface()
         .navigationTitle(copy[.emailKindle])
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if currentSettingsAreLoaded {
+                ToolbarItem(placement: .confirmationAction) {
+                    AdministrativeToolbarAction(
+                        title: currentSaveTitle,
+                        working: currentSaveIsWorking,
+                        disabled: currentSaveIsDisabled,
+                        action: saveCurrentTab
+                    )
+                }
+            }
+        }
         .task { await loadAsync() }
         .onDisappear { store.cancelPendingRequests() }
-        .administrativeNotice(store: store)
+        .onChange(of: tab) { _, _ in testSucceeded = false }
+        .onChange(of: smtp) { _, _ in testSucceeded = false }
     }
 
     private var snapshot: EmailKindleSnapshot? {
@@ -39,87 +54,177 @@ struct EmailKindleSettingsView: View {
     }
 
     private var kindleForm: some View {
-        Form {
+        Group {
             if let binding = Binding($kindle) {
+                SettingsForm {
                 Section(copy[.kindleRecipient]) {
-                    TextField(copy[.kindleRecipient], text: binding.recipient)
-                        .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SettingsTextInputRow(LocalizedStringKey(copy[.kindleRecipient])) {
+                        TextField(LocalizedStringKey(copy[.kindleRecipient]), text: binding.recipient)
+                            .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
                 }
                 Section {
-                    LabeledContent("SMTP") { Text(binding.wrappedValue.smtpConfigured ? copy[.enabled] : copy[.disabled]) }
-                    LabeledContent(copy[.senderEmail], value: binding.wrappedValue.senderEmail.isEmpty ? "—" : binding.wrappedValue.senderEmail)
+                    SettingsValueRow(
+                        verbatim: "SMTP",
+                        value: binding.wrappedValue.smtpConfigured ? copy[.enabled] : copy[.disabled]
+                    )
+                    SettingsValueRow(
+                        LocalizedStringKey(copy[.senderEmail]),
+                        value: binding.wrappedValue.senderEmail.isEmpty ? "—" : binding.wrappedValue.senderEmail
+                    )
                 }
-                Section {
-                    AdministrativeBottomAction(
-                        title: copy[.saveKindle], working: store.operationInFlight == "save-kindle",
-                        disabled: binding.wrappedValue.recipient.trimmingCharacters(in: .whitespaces).isEmpty
-                    ) { saveKindle(binding.wrappedValue) }
-                    .listRowInsets(EdgeInsets())
                 }
+                .administrativeNotice(store: store)
+            } else {
+                SettingsLoadingState(title: LocalizedStringKey(copy[.loading]))
             }
         }
-        .administrativeListSurface()
     }
 
     private var smtpForm: some View {
-        Form {
+        Group {
             if let binding = Binding($smtp) {
+                SettingsForm {
                 Section {
-                    TextField(copy[.smtpHost], text: binding.host)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField(copy[.smtpPort], value: binding.port, format: .number)
-                        .keyboardType(.numberPad)
-                    Picker(copy[.smtpEncryption], selection: binding.encryption) {
-                        ForEach(SMTPEncryption.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.smtpHost])) {
+                        TextField(LocalizedStringKey(copy[.smtpHost]), text: binding.host)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
                     }
-                    TextField(copy[.senderEmail], text: binding.senderEmail)
-                        .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField(copy[.username], text: binding.username).textInputAutocapitalization(.never)
-                    TextField(copy[.senderName], text: binding.senderName)
-                    TextField(copy[.maximumAttachment], value: binding.maximumAttachmentMegabytes, format: .number)
-                        .keyboardType(.decimalPad)
-                    SecureField(binding.wrappedValue.hasPassword ? copy[.passwordConfigured] : copy[.password], text: binding.replacementPassword)
+                    SettingsTextInputRow(LocalizedStringKey(copy[.smtpPort])) {
+                        TextField(LocalizedStringKey(copy[.smtpPort]), value: binding.port, format: .number)
+                            .keyboardType(.numberPad)
+                    }
+                    SettingsFieldRow(LocalizedStringKey(copy[.smtpEncryption])) {
+                        Picker(LocalizedStringKey(copy[.smtpEncryption]), selection: binding.encryption) {
+                            ForEach(SMTPEncryption.allCases, id: \.self) { value in
+                                Text(encryptionTitle(value)).tag(value)
+                            }
+                        }
+                    }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.senderEmail])) {
+                        TextField(LocalizedStringKey(copy[.senderEmail]), text: binding.senderEmail)
+                            .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.username])) {
+                        TextField(LocalizedStringKey(copy[.username]), text: binding.username).textInputAutocapitalization(.never)
+                    }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.senderName])) {
+                        TextField(LocalizedStringKey(copy[.senderName]), text: binding.senderName)
+                    }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.maximumAttachment])) {
+                        TextField(LocalizedStringKey(copy[.maximumAttachment]), value: binding.maximumAttachmentMegabytes, format: .number)
+                            .keyboardType(.decimalPad)
+                    }
+                    SettingsTextInputRow(LocalizedStringKey(copy[.password])) {
+                        SecureField(
+                            LocalizedStringKey(binding.wrappedValue.hasPassword ? copy[.passwordConfigured] : copy[.password]),
+                            text: binding.replacementPassword
+                        )
+                    }
                 }
                 Section {
-                    Button { testSMTP() } label: {
-                        Label(testSucceeded ? copy[.smtpTestSucceeded] : copy[.sendTestEmail], systemImage: testSucceeded ? "checkmark.circle" : "paperplane")
-                            .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
-                    }
-                    .disabled(store.operationInFlight != nil)
-                    AdministrativeBottomAction(
-                        title: copy[.saveSMTP], working: store.operationInFlight == "save-smtp",
-                        disabled: binding.wrappedValue.host.isEmpty || binding.wrappedValue.port < 1
-                    ) { saveSMTP(binding.wrappedValue) }
-                    .listRowInsets(EdgeInsets())
+                    SettingsActionRow(
+                        LocalizedStringKey(testSucceeded ? copy[.smtpTestSucceeded] : copy[.sendTestEmail])
+                    ) { testSMTP() }
+                    .disabled(smtpTestIsDisabled)
                 }
+                }
+                .administrativeNotice(store: store)
+            } else {
+                SettingsLoadingState(title: LocalizedStringKey(copy[.loading]))
             }
         }
-        .administrativeListSurface()
     }
 
+    private var currentSettingsAreLoaded: Bool {
+        switch tab {
+        case .kindle: kindle != nil
+        case .smtp: smtp != nil
+        }
+    }
+    private var currentSaveTitle: String {
+        tab == .kindle ? copy[.saveKindle] : copy[.saveSMTP]
+    }
+    private var currentSaveIsWorking: Bool {
+        store.operationInFlight == (tab == .kindle ? "save-kindle" : "save-smtp")
+    }
+    private var currentSaveIsDisabled: Bool {
+        if store.operationInFlight != nil { return true }
+        switch tab {
+        case .kindle:
+            guard let kindle, let initialKindle else { return true }
+            return !isValidKindleEmail(kindle.recipient) || kindle == initialKindle
+        case .smtp:
+            guard let smtp, let initialSMTP else { return true }
+            return !isValidSMTP(smtp) || smtp == initialSMTP
+        }
+    }
+    private var smtpTestIsDisabled: Bool {
+        guard let smtp else { return true }
+        return store.operationInFlight != nil || !isValidSMTP(smtp)
+    }
+    private func saveCurrentTab() {
+        switch tab {
+        case .kindle:
+            if let kindle { saveKindle(kindle) }
+        case .smtp:
+            if let smtp { saveSMTP(smtp) }
+        }
+    }
     private func load() { Task { await loadAsync() } }
     private func loadAsync() async {
         state = .loading
         let loaded = await store.load(scope: "email-kindle") { try await store.client.loadEmailAndKindle() }
         state = loaded
-        if case let .loaded(value) = loaded { kindle = value.kindle; smtp = value.smtp }
+        if case let .loaded(value) = loaded {
+            kindle = value.kindle
+            smtp = value.smtp
+            initialKindle = value.kindle
+            initialSMTP = value.smtp
+        }
     }
     private func saveKindle(_ value: KindleSettings) {
+        guard store.operationInFlight == nil, isValidKindleEmail(value.recipient) else { return }
         Task {
             let result = await store.performValue(id: "save-kindle") { try await store.client.saveKindle(value) }
-            if case let .success(updated) = result { kindle = updated }
+            if case let .success(updated) = result {
+                kindle = updated
+                initialKindle = updated
+            }
         }
     }
     private func saveSMTP(_ value: SMTPSettings) {
+        guard store.operationInFlight == nil, isValidSMTP(value) else { return }
         Task {
             let result = await store.performValue(id: "save-smtp") { try await store.client.saveSMTP(value) }
-            if case let .success(updated) = result { smtp = updated }
+            if case let .success(updated) = result {
+                smtp = updated
+                initialSMTP = updated
+            }
         }
     }
     private func testSMTP() {
+        guard let smtp, isValidSMTP(smtp), store.operationInFlight == nil else { return }
         Task {
-            let ok = await store.perform(id: "test-smtp", success: .smtpTestSucceeded) { try await store.client.sendSMTPTest() }
+            let ok = await store.perform(id: "test-smtp", success: .smtpTestSucceeded) { try await store.client.sendSMTPTest(smtp) }
             if ok { testSucceeded = true }
+        }
+    }
+    private func isValidSMTP(_ value: SMTPSettings) -> Bool {
+        guard AdministrativeInputValidation.isValidSMTPHost(value.host),
+              AdministrativeInputValidation.isValidSMTPPort(value.port),
+              AdministrativeInputValidation.isValidEmail(value.senderEmail) else { return false }
+        guard let maximumAttachment = value.maximumAttachmentMegabytes else { return true }
+        return AdministrativeInputValidation.isValidAttachmentMegabytes(maximumAttachment)
+    }
+    private func isValidKindleEmail(_ rawValue: String) -> Bool {
+        AdministrativeInputValidation.isValidOptionalEmail(rawValue)
+    }
+    private func encryptionTitle(_ value: SMTPEncryption) -> String {
+        switch value {
+        case .none: copy[.noEncryption]
+        case .startTLS: "STARTTLS"
+        case .tls: "TLS"
         }
     }
 }
@@ -140,17 +245,17 @@ struct KindleQueueView: View {
             }
             .pickerStyle(.segmented).padding(.horizontal, .space2).padding(.vertical, .space1)
             AdministrativeStateView(state: state, retry: load) { tasks in
-                List(filtered(tasks)) { task in taskRow(task) }
-                    .listStyle(.plain).administrativeListSurface()
+                SettingsList { ForEach(filtered(tasks)) { task in taskRow(task) } }
                     .overlay { if filtered(tasks).isEmpty { AdministrativeEmptyView(title: copy[.empty], systemImage: "paperplane") } }
             }
+            .disabled(store.operationInFlight != nil)
         }
-        .background(theme.canvas)
+        .settingsPageSurface()
         .navigationTitle(copy[.kindleQueueTitle])
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(copy[.refresh], action: load) } }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(copy[.refresh], action: load).disabled(store.operationInFlight != nil) } }
         .confirmationDialog(copy[.deleteKindleTitle], isPresented: Binding(get: { taskToDelete != nil }, set: { if !$0 { taskToDelete = nil } }), titleVisibility: .visible) {
-            if let taskToDelete { Button(copy[.delete], role: .destructive) { delete(taskToDelete) } }
+            if let taskToDelete { Button(copy[.delete], role: .destructive) { delete(taskToDelete) }.disabled(store.operationInFlight != nil) }
             Button(copy[.cancel], role: .cancel) { taskToDelete = nil }
         } message: { Text(copy[.deleteKindleMessage]) }
         .task { await loadAsync() }
@@ -166,14 +271,14 @@ struct KindleQueueView: View {
             HStack {
                 Text(task.createdAt.administrativeFormatted(locale: copy.locale)).appTextStyle(.caption).foregroundStyle(theme.textTertiary)
                 Spacer()
-                if task.status == .sending || task.status == .queued { Button(copy[.cancel]) { cancel(task) } }
-                if task.status == .failed { Button(copy[.retry]) { retry(task) } }
-                Button(copy[.delete], role: .destructive) { taskToDelete = task }
+                if task.canCancel { Button(copy[.cancel]) { cancel(task) } }
+                if task.canRetry { Button(copy[.retry]) { retry(task) } }
+                if task.canDelete { Button(copy[.delete], role: .destructive) { taskToDelete = task } }
             }
             .buttonStyle(.borderless)
+            .disabled(store.operationInFlight != nil)
         }
         .padding(.vertical, .spaceHalf)
-        .listRowBackground(theme.surface)
     }
 
     private func status(_ task: KindleSendTask) -> some View {
@@ -193,6 +298,7 @@ struct KindleQueueView: View {
     private func retry(_ task: KindleSendTask) { mutate("retry-kindle-\(task.id)") { try await store.client.retryKindleTask(id: task.id) } }
     private func delete(_ task: KindleSendTask) { taskToDelete = nil; mutate("delete-kindle-\(task.id)") { try await store.client.deleteKindleTask(id: task.id) } }
     private func mutate(_ id: String, operation: @escaping @Sendable () async throws -> Void) {
+        guard store.operationInFlight == nil else { return }
         Task { if await store.perform(id: id, operation: operation) { await loadAsync() } }
     }
 }

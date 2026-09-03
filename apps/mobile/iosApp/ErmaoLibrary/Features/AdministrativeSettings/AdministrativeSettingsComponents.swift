@@ -1,27 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct AdministrativeSettingsHostView: View {
-    @StateObject private var store: AdministrativeSettingsStore
-    @State private var path: [AdministrativeSettingsRoute] = []
-
-    init(store: @autoclosure @escaping () -> AdministrativeSettingsStore) {
-        _store = StateObject(wrappedValue: store())
-    }
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            AdministrativeManagementView(store: store)
-                .administrativeDestinations(store: store)
-        }
-        .administrativeNavigation { path.append($0) }
-        .tint(theme.actionAccent)
-        .environment(\.administrativeCopy, store.copy)
-    }
-
-    @Environment(\.appTheme) private var theme
-}
-
 private struct AdministrativeCopyKeyEnvironment: EnvironmentKey {
     static let defaultValue = AdministrativeCopyCatalog(locale: .enUS)
 }
@@ -49,62 +28,47 @@ extension View {
         environment(\.administrativeNavigate, onNavigate)
     }
 
-    func administrativeDestinations(store: AdministrativeSettingsStore) -> some View {
-        navigationDestination(for: AdministrativeSettingsRoute.self) { route in
-            AdministrativeSettingsDestination(route: route, store: store)
-        }
-    }
-
-    func administrativeListSurface() -> some View {
-        modifier(AdministrativeListSurfaceModifier())
-    }
-}
-
-private struct AdministrativeListSurfaceModifier: ViewModifier {
-    @Environment(\.appTheme) private var theme
-
-    func body(content: Content) -> some View {
-        content
-            .scrollContentBackground(.hidden)
-            .background(theme.canvas)
-            .tint(theme.actionAccent)
-    }
 }
 
 struct AdministrativeSettingsDestination: View {
     let route: AdministrativeSettingsRoute
     @ObservedObject var store: AdministrativeSettingsStore
 
-    @ViewBuilder var body: some View {
-        switch route {
-        case .management: AdministrativeManagementView(store: store)
-        case .emailAndKindle: EmailKindleSettingsView(store: store)
-        case .kindleQueue: KindleQueueView(store: store)
-        case .users: UsersSettingsView(store: store)
-        case let .userEditor(userID): UserEditorView(store: store, userID: userID)
-        case let .userAccess(userID): UserAccessView(store: store, userID: userID)
-        case .librarySources: LibrarySourcesView(store: store)
-        case let .librarySourceEditor(sourceID): LibrarySourceEditorView(store: store, sourceID: sourceID)
-        case let .serverDirectoryPicker(purpose): ServerDirectoryPickerView(store: store, purpose: purpose)
-        case .importTasks: ImportTasksView(store: store)
-        case let .importTaskDetail(taskID): ImportTaskDetailView(store: store, taskID: taskID)
-        case .importScans: ImportScansView(store: store)
-        case .importPreferences: ImportPreferencesView(store: store)
-        case .organizeQueue: OrganizeQueueView(store: store)
-        case .organizeCandidates: RecognitionCandidatesView(store: store)
-        case .organizeRuns: OrganizeRunsView(store: store)
-        case .recognitionPolicy: RecognitionPolicyView(store: store)
-        case .libraryOperations: LibraryOperationsView(store: store)
-        case .categoryGovernance: CategoryGovernanceView(store: store)
-        case .metadataProviders: MetadataProvidersView(store: store)
-        case let .metadataProvider(providerID): MetadataProviderDetailView(store: store, providerID: providerID)
-        case .opds: OPDSSettingsView(store: store)
-        case .backups: BackupsView(store: store)
-        case .workDetailOrder: WorkDetailOrderView(store: store)
-        case .health: SystemHealthView(store: store)
-        case .logs: SystemLogsView(store: store)
-        case .about: AdministrativeAboutView(store: store)
+    var body: some View {
+        Group {
+            switch route {
+            case .emailAndKindle: EmailKindleSettingsView(store: store)
+            case .kindleQueue: KindleQueueView(store: store)
+            case .users: UsersSettingsView(store: store)
+            case let .userEditor(userID): UserEditorView(store: store, userID: userID)
+            case let .userAccess(userID): UserAccessView(store: store, userID: userID)
+            case .opds: OPDSSettingsView(store: store)
+            case .logs: SystemLogsView(store: store)
+            case .about: AdministrativeAboutView(store: store)
+            case .librarySources,
+                 .librarySourceEditor,
+                 .serverDirectoryPicker,
+                 .importTasks,
+                 .importTaskDetail,
+                 .importScans,
+                 .importPreferences,
+                 .organizeQueue,
+                 .organizeCandidates,
+                 .organizeRuns,
+                 .recognitionPolicy,
+                 .libraryOperations,
+                 .categoryGovernance,
+                 .metadataProviders,
+                 .metadataProvider,
+                 .backups,
+                 .workDetailOrder,
+                 .health:
+                Color.clear
+                    .navigationTitle("tab.me")
+            }
         }
+        .settingsPageSurface()
+        .environment(\.administrativeCopy, store.copy)
     }
 }
 
@@ -187,24 +151,32 @@ struct AdministrativeBottomAction: View {
     var destructive = false
     var working = false
     var disabled = false
-    let action: () -> Void
-
-    @Environment(\.appTheme) private var theme
+    let action: @MainActor () -> Void
 
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                Text(title).appTextStyle(.button).opacity(working ? 0 : 1)
-                if working { ProgressView().tint(theme.onAction) }
-            }
-            .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(destructive ? .red : theme.actionAccent)
-        .disabled(disabled || working)
-        .padding(.horizontal, .space2)
-        .padding(.vertical, .space1)
-        .background(theme.canvas)
+        SettingsBottomActionBar(
+            verbatim: title,
+            destructive: destructive,
+            working: working,
+            disabled: disabled,
+            action: action
+        )
+    }
+}
+
+struct AdministrativeToolbarAction: View {
+    let title: String
+    var working = false
+    var disabled = false
+    let action: @MainActor () -> Void
+
+    var body: some View {
+        SettingsToolbarAction(
+            verbatim: title,
+            working: working,
+            disabled: disabled,
+            action: action
+        )
     }
 }
 

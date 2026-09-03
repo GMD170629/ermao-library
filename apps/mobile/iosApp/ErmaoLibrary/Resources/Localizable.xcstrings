@@ -2598,6 +2598,22 @@
         }
       }
     },
+    "settings.status.configured": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configured"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已配置"
+          }
+        }
+      }
+    },
     "settings.administration.section": {
       "localizations": {
         "en": {
@@ -2609,7 +2625,39 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "管理"
+            "value": "系统管理"
+          }
+        }
+      }
+    },
+    "settings.administration.libraryImport": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library Sources & Import"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "书库来源与导入"
+          }
+        }
+      }
+    },
+    "settings.administration.smartOrganization": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Smart Organization"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "智能整理"
           }
         }
       }
@@ -7862,6 +7910,70 @@
         }
       }
     },
+    "settings.error.currentPassword.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current password you entered is incorrect. Check it and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入的当前密码不正确，请检查后重新输入。"
+          }
+        }
+      }
+    },
+    "settings.error.currentPassword.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incorrect Current Password"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前密码错误"
+          }
+        }
+      }
+    },
+    "settings.error.emailInUse.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This email address belongs to another account. Use a different email address."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该邮箱已绑定其他账户，请更换一个邮箱。"
+          }
+        }
+      }
+    },
+    "settings.error.emailInUse.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email Already in Use"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮箱已被使用"
+          }
+        }
+      }
+    },
     "settings.error.forbidden": {
       "localizations": {
         "en": {
@@ -7894,6 +8006,38 @@
         }
       }
     },
+    "settings.error.newPasswordMustDiffer.message": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a new password that is different from your current password."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新密码不能与当前密码相同，请使用其他密码。"
+          }
+        }
+      }
+    },
+    "settings.error.newPasswordMustDiffer.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a Different Password"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新密码不能重复"
+          }
+        }
+      }
+    },
     "settings.error.protocol": {
       "localizations": {
         "en": {
@@ -7922,6 +8066,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "操作过于频繁，请稍后重试。"
+          }
+        }
+      }
+    },
+    "settings.error.referenceCode": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Error code"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "错误代码"
+          }
+        }
+      }
+    },
+    "settings.error.server": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The server couldn’t complete this settings update. Try again later."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器暂时无法完成此次设置更新，请稍后重试。"
           }
         }
       }
@@ -8118,6 +8294,22 @@
         }
       }
     },
+    "settings.profile.name.maximum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use 40 characters or fewer for the display name."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示名称不能超过 40 个字符。"
+          }
+        }
+      }
+    },
     "settings.profile.name.required": {
       "localizations": {
         "en": {
@@ -8246,6 +8438,22 @@
         }
       }
     },
+    "settings.security.currentPassword.maximum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The current password must be 128 characters or fewer."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前密码不能超过 128 位。"
+          }
+        }
+      }
+    },
     "settings.security.currentPassword.required": {
       "localizations": {
         "en": {
@@ -8342,6 +8550,38 @@
         }
       }
     },
+    "settings.security.email.tab": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮箱"
+          }
+        }
+      }
+    },
+    "settings.security.email.unchanged": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a different login email before saving."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先输入与当前邮箱不同的登录邮箱。"
+          }
+        }
+      }
+    },
     "settings.security.logout.footer": {
       "localizations": {
         "en": {
@@ -8370,6 +8610,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "新密码"
+          }
+        }
+      }
+    },
+    "settings.security.newPassword.maximum": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use 128 characters or fewer for the new password."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新密码不能超过 128 位。"
           }
         }
       }
@@ -8423,6 +8679,22 @@
       }
     },
     "settings.security.password.section": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Password"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "密码"
+          }
+        }
+      }
+    },
+    "settings.security.password.tab": {
       "localizations": {
         "en": {
           "stringUnit": {

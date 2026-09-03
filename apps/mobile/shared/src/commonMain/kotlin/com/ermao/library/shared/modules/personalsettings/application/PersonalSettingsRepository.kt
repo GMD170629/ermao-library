@@ -33,6 +33,7 @@ interface PersonalSettingsRepository {
 
     suspend fun loadAvatar(
         context: PersonalSettingsContext,
+        avatarUrl: String,
         etag: String? = null,
     ): PersonalSettingsResult<PersonalAvatar>
 

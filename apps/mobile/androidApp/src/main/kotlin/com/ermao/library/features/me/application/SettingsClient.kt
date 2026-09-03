@@ -17,7 +17,7 @@ import com.ermao.library.features.me.model.SanitizedAvatarMimeType
 
 interface SettingsClient {
     suspend fun load(): PersonalSettingsResult<PersonalSettingsSnapshot>
-    suspend fun loadAvatar(etag: String? = null): PersonalSettingsResult<PersonalAvatar>
+    suspend fun loadAvatar(avatarUrl: String, etag: String? = null): PersonalSettingsResult<PersonalAvatar>
     suspend fun updateName(name: String): PersonalSettingsResult<PersonalAccount>
     suspend fun updateEmail(email: String, currentPassword: String): PersonalSettingsResult<PersonalAccount>
     suspend fun updatePassword(currentPassword: String, newPassword: String): PersonalSettingsResult<PersonalPasswordChange>
@@ -32,7 +32,7 @@ class RepositorySettingsClient(
     private val context: PersonalSettingsContext,
 ) : SettingsClient {
     override suspend fun load() = repository.loadSettings(context)
-    override suspend fun loadAvatar(etag: String?) = repository.loadAvatar(context, etag)
+    override suspend fun loadAvatar(avatarUrl: String, etag: String?) = repository.loadAvatar(context, avatarUrl, etag)
     override suspend fun updateName(name: String) = repository.updateName(context, name)
     override suspend fun updateEmail(email: String, currentPassword: String) =
         repository.updateEmail(context, email, currentPassword)

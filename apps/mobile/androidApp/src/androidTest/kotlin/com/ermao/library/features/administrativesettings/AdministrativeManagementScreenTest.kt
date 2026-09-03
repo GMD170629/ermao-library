@@ -19,7 +19,7 @@ class AdministrativeManagementScreenTest {
     @Test
     fun managementIndexShowsAuthorizedNativeRowsAndNavigatesWithTypedRoute() {
         var destination: AdministrativeSettingsRoute? = null
-        val entryRoute = AdministrativeSettingsRoute.LibrarySources
+        val entryRoute = AdministrativeSettingsRoute.Users
         compose.setContent {
             WarmPageTheme {
                 ManagementIndexScreen(
@@ -30,7 +30,7 @@ class AdministrativeManagementScreenTest {
                         mutationInFlight = false,
                     ),
                     locale = AdministrativeLocale.EnUs,
-                    capabilities = setOf(AdministrativeCapability.ViewAdministration, AdministrativeCapability.ManageLibrarySources),
+                    capabilities = setOf(AdministrativeCapability.ViewAdministration, AdministrativeCapability.ManageUsers),
                     onNavigate = { destination = it },
                     onRetry = {},
                     onBack = {},
@@ -38,23 +38,30 @@ class AdministrativeManagementScreenTest {
             }
         }
 
-        compose.onNodeWithText("Library sources").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Users and permissions").assertIsDisplayed().performClick()
         assertEquals(entryRoute, destination)
     }
 
     @Test
-    fun managementIndexHidesRowsWithoutCapability() {
+    fun managementIndexNeverShowsRetiredMobileRows() {
         compose.setContent {
             WarmPageTheme {
                 ManagementIndexScreen(
                     state = AdministrativePageState(
                         phase = AdministrativePagePhase.Content,
-                        snapshot = ManagementSnapshot(listOf(ManagementEntry(AdministrativeSettingsRoute.Backups))),
+                        snapshot = ManagementSnapshot(
+                            listOf(
+                                ManagementEntry(AdministrativeSettingsRoute.LibrarySources),
+                                ManagementEntry(AdministrativeSettingsRoute.OrganizeQueue),
+                                ManagementEntry(AdministrativeSettingsRoute.Backups),
+                                ManagementEntry(AdministrativeSettingsRoute.Health()),
+                            ),
+                        ),
                         failure = null,
                         mutationInFlight = false,
                     ),
                     locale = AdministrativeLocale.EnUs,
-                    capabilities = setOf(AdministrativeCapability.ViewAdministration),
+                    capabilities = AdministrativeCapability.entries.toSet(),
                     onNavigate = {},
                     onRetry = {},
                     onBack = {},
@@ -62,6 +69,9 @@ class AdministrativeManagementScreenTest {
             }
         }
 
+        compose.onNodeWithText("Library sources").assertDoesNotExist()
+        compose.onNodeWithText("Smart organization").assertDoesNotExist()
         compose.onNodeWithText("Data and backups").assertDoesNotExist()
+        compose.onNodeWithText("System health").assertDoesNotExist()
     }
 }

@@ -393,7 +393,12 @@ def update_email(
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if not verify_password(payload.current_password, user.password_hash):
-        raise BasicBadRequestError(MessageError(message="当前密码不正确"))
+        raise BasicBadRequestError(
+            MessageError(
+                message="当前密码不正确",
+                code="CURRENT_PASSWORD_INCORRECT",
+            )
+        )
 
     email = _normalized_email(payload.email)
     duplicate = (
@@ -402,7 +407,9 @@ def update_email(
         .first()
     )
     if duplicate is not None:
-        raise BasicConflictError(MessageError(message="该邮箱已被使用"))
+        raise BasicConflictError(
+            MessageError(message="该邮箱已被使用", code="EMAIL_IN_USE")
+        )
 
     updated_at = db_timestamp()
     try:
@@ -413,7 +420,9 @@ def update_email(
             updated_at=updated_at,
         )
     except IntegrityError:
-        raise BasicConflictError(MessageError(message="该邮箱已被使用"))
+        raise BasicConflictError(
+            MessageError(message="该邮箱已被使用", code="EMAIL_IN_USE")
+        )
     db.refresh(user)
     return UserResponse(
         data=UserPayload(user=AuthUser.model_validate(user.to_auth_view()))
@@ -461,9 +470,19 @@ def update_password(
     if user is None:
         raise BasicUnauthorizedError(MessageError(message="UNAUTHORIZED"))
     if not verify_password(payload.current_password, user.password_hash):
-        raise BasicBadRequestError(MessageError(message="当前密码不正确"))
+        raise BasicBadRequestError(
+            MessageError(
+                message="当前密码不正确",
+                code="CURRENT_PASSWORD_INCORRECT",
+            )
+        )
     if verify_password(payload.new_password, user.password_hash):
-        raise BasicBadRequestError(MessageError(message="新密码不能与当前密码相同"))
+        raise BasicBadRequestError(
+            MessageError(
+                message="新密码不能与当前密码相同",
+                code="NEW_PASSWORD_MUST_DIFFER",
+            )
+        )
 
     password_hash = hash_password(payload.new_password)
     persist_account_password(

@@ -65,7 +65,7 @@ private struct FixtureSettingsClient: SettingsClient {
     func updatePassword(currentPassword: String, newPassword: String) async throws -> SettingsPasswordChange {
         SettingsPasswordChange(requiresLogin: true)
     }
-    func loadAvatar(etag: String?) async throws -> SettingsAvatarContent {
+    func loadAvatar(from avatarURL: String, etag: String?) async throws -> SettingsAvatarContent {
         SettingsAvatarContent(data: Data(), contentType: nil, etag: nil, notModified: false)
     }
     func uploadAvatar(_ upload: SettingsAvatarUpload) async throws -> SettingsAccount { account }

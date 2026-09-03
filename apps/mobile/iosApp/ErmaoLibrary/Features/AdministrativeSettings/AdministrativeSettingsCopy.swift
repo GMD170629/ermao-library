@@ -6,10 +6,10 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case metadataProviders, usersPermissions, emailKindle, kindleQueue, opds, backups
     case workDetailOrder, systemHealth, systemLogs, enhancedAbout
     case loading, retry, save, saved, cancel, delete, remove, add, edit, done, close
-    case all, active, failed, completed, enabled, disabled, available, unavailable
+    case all, active, failed, error, completed, enabled, disabled, available, unavailable, manual, undone
     case search, empty, unknown, test, testing, refresh, rescan, clearCompleted
     case kindleTab, smtpTab, kindleRecipient, kindleSendEnabled, kindleFormat, subjectTemplate
-    case smtpEnabled, smtpHost, smtpPort, smtpEncryption, senderEmail, senderName, maximumAttachment, username, password
+    case smtpEnabled, smtpHost, smtpPort, smtpEncryption, noEncryption, senderEmail, senderName, maximumAttachment, username, password
     case passwordConfigured, sendTestEmail, smtpTestSucceeded, saveKindle, saveSMTP
     case kindleQueueTitle, sending, sent, queued, taskCancel, taskRetry, taskDelete
     case deleteKindleTitle, deleteKindleMessage
@@ -38,15 +38,17 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case organizeRuns, organizePending, reviewCount
     case clearOrganized, candidateTitle, confidence, useResult, skip
     case recognitionPolicyTitle, scheduledRecognition, schedule, runAfterImport
-    case persistOPF, localMetadataFirst, metadataPriority, recognitionScope
+    case persistOPF, localMetadataFirst, metadataPriority, pathAndFilename, recognitionScope
     case recognizeUnmatched, recognizeIncomplete, eligibleCount, nextRun, opfQueue
     case merge, categoryGovernanceTitle, author, tag, series
     case selectedCount, aliases, bookCount, deleteCategory, mergeCategoriesTitle
     case targetCategory, confirmMerge, renameCategory, newCategoryName, confirmRename
-    case operationHistory, undoOperation, undoOperationMessage
-    case providersTitle, provider, autoMatching
+    case operationHistory, undoOperation, undoOperationMessage, otherOperation
+    case mergeFacets, renameFacet, deleteFacet, bulkUpdateMetadata, bulkFindReplace
+    case bulkShelfMembership, bulkReadingStatus, bulkBookCovers
+    case providersTitle, provider, providerDouban, providerBangumi, providerAI, autoMatching
     case confidenceThreshold, autoApply, testProviders, saveConfiguration
-    case providerConfigurationTitle, apiBaseURL, apiKey, keepSecretHint, countryRegion
+    case providerConfigurationTitle, apiBaseURL, apiKey, userAgent, accessToken, model, configurationItem, keepSecretHint, countryRegion
     case languageCode, rateLimit, connectionTest, saveAndTest, connected, responseTime
     case opdsTitle, opdsEnabled, serviceStatus, running, stopped, publicBaseURL, catalogURL
     case opdsInstructions, copy, copied, disableOPDSTitle, disableOPDSMessage, disableService
@@ -60,9 +62,9 @@ enum AdministrativeCopyKey: String, CaseIterable, Sendable {
     case featureConfiguration, healthy, warning, checking
     case logsTitle, searchLogs, allLevels, allSources, recentSevenDays, logCapacity
     case manageLogs, exportFiltered, clearInformationWarning, saveCapacity, capacityMegabytes
-    case clearLogsTitle, clearLogsMessage, clearAllLogs, information
+    case clearLogsTitle, clearLogsMessage, clearAllLogs, information, correlationID
     case aboutTitle, appVersion, serverVersion, compatibility, compatible, supportedFormats
-    case openSourceLicense, operationMode, selfHosted, releaseHistory, projectAddress, share
+    case openSourceLicense, operationMode, selfHosted, releaseHistory, projectAddress, share, plainText
     case authorizationRequired, permissionDenied, conflict, temporarilyUnavailable
     case invalidInput, requestFailed, noResults, destructiveCannotUndo
 }
@@ -96,13 +98,14 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .enhancedAbout: "About Ermao Library", .loading: "Loading…", .retry: "Retry", .save: "Save",
         .saved: "Saved", .cancel: "Cancel", .delete: "Delete", .remove: "Remove", .add: "Add",
         .edit: "Edit", .done: "Done", .close: "Close", .all: "All", .active: "Active",
-        .failed: "Failed", .completed: "Completed", .enabled: "Enabled", .disabled: "Disabled",
+        .failed: "Failed", .error: "Error", .completed: "Completed", .enabled: "Enabled", .disabled: "Disabled",
+        .manual: "Manual", .undone: "Undone",
         .available: "Available", .unavailable: "Unavailable", .search: "Search", .empty: "No items",
         .unknown: "Unknown", .test: "Test", .testing: "Testing…", .refresh: "Refresh",
         .rescan: "Rescan", .clearCompleted: "Clear Completed", .kindleTab: "Kindle", .smtpTab: "SMTP",
         .kindleRecipient: "Kindle Recipient", .kindleSendEnabled: "Send to Kindle Enabled",
         .kindleFormat: "File Format", .subjectTemplate: "Subject Template", .smtpEnabled: "Enable SMTP",
-        .smtpHost: "SMTP Host", .smtpPort: "Port", .smtpEncryption: "Encryption", .senderEmail: "Sender Email",
+        .smtpHost: "SMTP Host", .smtpPort: "Port", .smtpEncryption: "Encryption", .noEncryption: "None", .senderEmail: "Sender Email",
         .senderName: "Sender Name", .maximumAttachment: "Maximum Attachment (MB)",
         .username: "Username", .password: "Password", .passwordConfigured: "Configured; leave blank to keep it",
         .sendTestEmail: "Send Test Email", .smtpTestSucceeded: "Test email sent", .saveKindle: "Save Kindle Settings",
@@ -155,7 +158,7 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .candidateTitle: "Select Recognition Result", .confidence: "Confidence", .useResult: "Use This Result",
         .skip: "Skip", .recognitionPolicyTitle: "Recognition Policy", .scheduledRecognition: "Scheduled Recognition",
         .schedule: "Schedule", .runAfterImport: "Run After New Import", .persistOPF: "Persist Changes to OPF",
-        .localMetadataFirst: "Prefer Local Metadata", .metadataPriority: "Metadata Priority",
+        .localMetadataFirst: "Prefer Local Metadata", .metadataPriority: "Metadata Priority", .pathAndFilename: "Path & Filename",
         .recognitionScope: "Recognition Scope", .recognizeUnmatched: "Unrecognized Books",
         .recognizeIncomplete: "Missing Author or Cover", .eligibleCount: "Eligible Books", .nextRun: "Next Run",
         .opfQueue: "OPF Save Queue", .merge: "Merge", .categoryGovernanceTitle: "Category Governance", .author: "Authors",
@@ -163,13 +166,18 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .bookCount: "Books", .deleteCategory: "Delete Category", .mergeCategoriesTitle: "Merge Categories",
         .targetCategory: "Target Category", .confirmMerge: "Confirm Merge", .renameCategory: "Rename Category",
         .newCategoryName: "New Name", .confirmRename: "Rename", .operationHistory: "Operation History",
-        .undoOperation: "Undo Operation", .undoOperationMessage: "Undo this library operation?",
-        .providersTitle: "Metadata Providers",
-        .provider: "Providers",
+        .undoOperation: "Undo Operation", .undoOperationMessage: "Undo this library operation?", .otherOperation: "Other Operation",
+        .mergeFacets: "Merge Categories", .renameFacet: "Rename Category", .deleteFacet: "Delete Category",
+        .bulkUpdateMetadata: "Bulk Update Metadata", .bulkFindReplace: "Bulk Find and Replace",
+        .bulkShelfMembership: "Bulk Update Shelves", .bulkReadingStatus: "Bulk Update Reading Status",
+        .bulkBookCovers: "Bulk Update Covers", .providersTitle: "Metadata Providers",
+        .provider: "Providers", .providerDouban: "Douban Books", .providerBangumi: "Bangumi",
+        .providerAI: "AI Metadata Recognition",
         .autoMatching: "Automatic Matching", .confidenceThreshold: "Confidence Threshold",
         .autoApply: "Automatically Apply High Confidence Results", .testProviders: "Test Providers",
         .saveConfiguration: "Save Configuration", .providerConfigurationTitle: "Provider Configuration",
-        .apiBaseURL: "API Base URL", .apiKey: "API Key", .keepSecretHint: "Configured; leave blank to keep unchanged",
+        .apiBaseURL: "API Base URL", .apiKey: "API Key", .userAgent: "User Agent",
+        .accessToken: "Access Token", .model: "Model", .configurationItem: "Configuration Item", .keepSecretHint: "Configured; leave blank to keep unchanged",
         .countryRegion: "Country/Region", .languageCode: "Language", .rateLimit: "Automatic Recognition Rate",
         .connectionTest: "Connection Test", .saveAndTest: "Save and Test", .connected: "Connected",
         .responseTime: "Response Time", .opdsTitle: "OPDS", .opdsEnabled: "Enable OPDS Service",
@@ -195,11 +203,11 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .manageLogs: "Manage Logs", .exportFiltered: "Export Filtered Results",
         .clearInformationWarning: "Clear Information & Warnings", .saveCapacity: "Save Capacity",
         .capacityMegabytes: "Capacity Limit (MB)", .clearLogsTitle: "Clear all management logs?",
-        .clearLogsMessage: "All management event records will be permanently removed.", .clearAllLogs: "Clear All Logs", .information: "Information",
+        .clearLogsMessage: "All management event records will be permanently removed.", .clearAllLogs: "Clear All Logs", .information: "Information", .correlationID: "Correlation ID",
         .aboutTitle: "About Ermao Library", .appVersion: "App Version", .serverVersion: "Server Version",
         .compatibility: "Compatibility", .compatible: "Compatible", .supportedFormats: "Supported Formats",
         .openSourceLicense: "Open-source License", .operationMode: "Operation Mode", .selfHosted: "Self-hosted Reading & Library Management",
-        .releaseHistory: "Release History", .projectAddress: "Project Address", .share: "Share",
+        .releaseHistory: "Release History", .projectAddress: "Project Address", .share: "Share", .plainText: "Text",
         .authorizationRequired: "Your session has expired. Sign in again to continue.",
         .permissionDenied: "You do not have permission to perform this action.",
         .conflict: "The server state changed. Refresh and try again.",
@@ -222,13 +230,14 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .opds: "OPDS", .backups: "数据与备份", .workDetailOrder: "作品详情顺序", .systemHealth: "系统健康",
         .systemLogs: "系统日志", .enhancedAbout: "关于二毛图书", .loading: "正在加载…", .retry: "重试",
         .save: "保存", .saved: "已保存", .cancel: "取消", .delete: "删除", .remove: "移除", .add: "新增",
-        .edit: "编辑", .done: "完成", .close: "关闭", .all: "全部", .active: "进行中", .failed: "失败",
+        .edit: "编辑", .done: "完成", .close: "关闭", .all: "全部", .active: "进行中", .failed: "失败", .error: "错误",
         .completed: "已完成", .enabled: "已启用", .disabled: "已停用", .available: "可用", .unavailable: "不可用",
+        .manual: "手动", .undone: "已撤销",
         .search: "搜索", .empty: "暂无内容", .unknown: "未知", .test: "测试", .testing: "测试中…",
         .refresh: "刷新", .rescan: "重新扫描", .clearCompleted: "清理已完成", .kindleTab: "Kindle", .smtpTab: "SMTP",
         .kindleRecipient: "Kindle 接收地址", .kindleSendEnabled: "启用发送到 Kindle", .kindleFormat: "文件格式",
         .subjectTemplate: "主题模板", .smtpEnabled: "启用 SMTP", .smtpHost: "SMTP 主机", .smtpPort: "端口",
-        .smtpEncryption: "加密方式", .senderEmail: "发件邮箱", .username: "用户名", .password: "密码",
+        .smtpEncryption: "加密方式", .noEncryption: "无", .senderEmail: "发件邮箱", .username: "用户名", .password: "密码",
         .senderName: "发件人名称", .maximumAttachment: "最大附件（MB）",
         .passwordConfigured: "已配置，留空不修改", .sendTestEmail: "发送测试邮件", .smtpTestSucceeded: "测试邮件已发送",
         .saveKindle: "保存 Kindle 设置", .saveSMTP: "保存 SMTP 设置", .kindleQueueTitle: "Kindle 发送队列",
@@ -270,18 +279,23 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .pauseQueue: "暂停队列", .clearOrganized: "清除已整理", .candidateTitle: "选择识别结果", .confidence: "置信度",
         .useResult: "使用此结果", .skip: "跳过", .recognitionPolicyTitle: "识别策略", .scheduledRecognition: "定时执行识别",
         .schedule: "执行周期", .runAfterImport: "新增后自动执行", .persistOPF: "元数据变化自动保存到旁车 OPF",
-        .localMetadataFirst: "本地元数据优先", .metadataPriority: "元数据优先级", .recognitionScope: "识别范围",
+        .localMetadataFirst: "本地元数据优先", .metadataPriority: "元数据优先级", .pathAndFilename: "路径与文件名", .recognitionScope: "识别范围",
         .recognizeUnmatched: "尚未识别的读物", .recognizeIncomplete: "缺少作者或封面", .eligibleCount: "符合规则的读物",
         .nextRun: "下次执行", .opfQueue: "OPF 保存队列", .merge: "合并",
         .categoryGovernanceTitle: "分类治理", .author: "作者", .tag: "标签", .series: "丛书",
         .selectedCount: "已选择", .aliases: "别名", .bookCount: "图书", .deleteCategory: "删除分类",
         .mergeCategoriesTitle: "合并分类", .targetCategory: "目标分类", .confirmMerge: "确认合并",
         .renameCategory: "重命名分类", .newCategoryName: "新名称", .confirmRename: "重命名",
-        .operationHistory: "操作历史", .undoOperation: "撤销操作", .undoOperationMessage: "撤销此书库操作？",
-        .providersTitle: "元数据提供者", .provider: "提供者",
+        .operationHistory: "操作历史", .undoOperation: "撤销操作", .undoOperationMessage: "撤销此书库操作？", .otherOperation: "其他操作",
+        .mergeFacets: "合并分类", .renameFacet: "重命名分类", .deleteFacet: "删除分类",
+        .bulkUpdateMetadata: "批量更新元数据", .bulkFindReplace: "批量查找替换",
+        .bulkShelfMembership: "批量更新书架", .bulkReadingStatus: "批量更新阅读状态",
+        .bulkBookCovers: "批量更新封面", .providersTitle: "元数据提供者", .provider: "提供者",
+        .providerDouban: "豆瓣图书", .providerBangumi: "Bangumi", .providerAI: "AI 元数据识别",
         .autoMatching: "自动匹配", .confidenceThreshold: "置信度阈值", .autoApply: "自动应用高置信度结果",
         .testProviders: "测试提供者", .saveConfiguration: "保存配置", .providerConfigurationTitle: "提供者配置",
-        .apiBaseURL: "API 地址", .apiKey: "API 密钥", .keepSecretHint: "已配置，留空不修改", .countryRegion: "国家/地区",
+        .apiBaseURL: "API 地址", .apiKey: "API 密钥", .userAgent: "用户代理",
+        .accessToken: "访问令牌", .model: "模型", .configurationItem: "配置项", .keepSecretHint: "已配置，留空不修改", .countryRegion: "国家/地区",
         .languageCode: "语言", .rateLimit: "自动识别限流", .connectionTest: "连接测试", .saveAndTest: "保存并测试",
         .connected: "连接正常", .responseTime: "响应时间", .opdsTitle: "OPDS", .opdsEnabled: "启用 OPDS 服务",
         .serviceStatus: "服务状态", .running: "运行中", .stopped: "已停止", .publicBaseURL: "服务基础地址",
@@ -303,10 +317,10 @@ struct AdministrativeCopyCatalog: Equatable, Sendable {
         .allSources: "全部来源", .recentSevenDays: "近 7 天", .logCapacity: "日志容量", .manageLogs: "管理日志",
         .exportFiltered: "导出筛选结果", .clearInformationWarning: "清理信息与警告", .saveCapacity: "保存容量",
         .capacityMegabytes: "日志容量上限（MB）", .clearLogsTitle: "清空全部管理日志？",
-        .clearLogsMessage: "全部管理事件记录将被永久移除。", .clearAllLogs: "清空全部日志", .information: "信息", .aboutTitle: "关于二毛图书",
+        .clearLogsMessage: "全部管理事件记录将被永久移除。", .clearAllLogs: "清空全部日志", .information: "信息", .correlationID: "关联 ID", .aboutTitle: "关于二毛图书",
         .appVersion: "App 版本", .serverVersion: "服务器版本", .compatibility: "兼容性", .compatible: "兼容",
         .supportedFormats: "支持格式", .openSourceLicense: "开源许可", .operationMode: "运行方式",
-        .selfHosted: "自托管阅读与书库管理", .releaseHistory: "版本历史", .projectAddress: "项目地址", .share: "分享",
+        .selfHosted: "自托管阅读与书库管理", .releaseHistory: "版本历史", .projectAddress: "项目地址", .share: "分享", .plainText: "文本",
         .authorizationRequired: "登录状态已失效，请重新登录后继续。", .permissionDenied: "你没有执行此操作的权限。",
         .conflict: "服务器状态已变化，请刷新后重试。", .temporarilyUnavailable: "服务暂时不可用。",
         .invalidInput: "请检查标记的输入项。", .requestFailed: "请求未能完成。", .noResults: "没有符合条件的结果",
@@ -318,4 +332,59 @@ extension AdministrativeCopyCatalog {
     func formatted(_ key: AdministrativeCopyKey, _ arguments: CVarArg...) -> String {
         String(format: self[key], locale: Locale(identifier: locale.rawValue), arguments: arguments)
     }
+
+    func healthText(_ code: String) -> String {
+        guard let values = Self.healthValues[code] else {
+            return locale == .zhCN ? "未知检查项目" : "Unknown check item"
+        }
+        return locale == .zhCN ? values.zhCN : values.enUS
+    }
+
+    private static let healthValues: [String: (enUS: String, zhCN: String)] = [
+        "health.group.storage": ("Directories & Database", "目录与数据库"),
+        "health.group.queues": ("Background Queues", "后台队列"),
+        "health.group.configuration": ("Feature Configuration", "功能配置"),
+        "health.item.database": ("Database Connection", "数据库连接"),
+        "health.item.importFolder": ("Enabled Import Directories", "启用的导入目录"),
+        "health.item.storageRoot": ("Storage Root", "存储根目录"),
+        "health.item.databaseDirectory": ("Database Directory", "数据库目录"),
+        "health.item.libraryDirectory": ("Library Directory", "书库目录"),
+        "health.item.coversDirectory": ("Covers Directory", "封面目录"),
+        "health.item.indexesDirectory": ("Indexes Directory", "索引目录"),
+        "health.item.backupsDirectory": ("Backups Directory", "备份目录"),
+        "health.item.logsDirectory": ("Logs Directory", "日志目录"),
+        "health.item.secretsDirectory": ("Secrets Directory", "密钥目录"),
+        "health.item.importQueue": ("Import Queue", "导入队列"),
+        "health.item.downloadQueue": ("Download Queue", "下载队列"),
+        "health.item.kindleQueue": ("Kindle Send Queue", "Kindle 发送队列"),
+        "health.item.metadataQueue": ("Metadata Recognition Queue", "元数据识别队列"),
+        "health.item.smtp": ("Kindle / SMTP Configuration", "Kindle / SMTP 配置"),
+        "health.item.metadataProviders": ("Metadata Providers", "元数据数据源"),
+        "health.pending": ("Waiting for check", "等待检查"),
+        "health.running": ("Checking", "正在检查"),
+        "health.directory.ok": ("Directory permissions are valid", "目录权限正常"),
+        "health.directory.notConfigured": ("Directory is not configured", "目录尚未配置"),
+        "health.directory.missing": ("Directory does not exist", "目录不存在"),
+        "health.directory.notDirectory": ("Configured path is not a directory", "配置路径不是目录"),
+        "health.directory.notReadable": ("Directory cannot be read or traversed", "目录不可读取或遍历"),
+        "health.directory.notWritable": ("Directory is not writable", "目录不可写入"),
+        "health.database.ok": ("Database connection is healthy", "数据库连接正常"),
+        "health.database.error": ("Database connection failed", "数据库连接失败"),
+        "health.queue.disabled": ("Queue is disabled", "队列已停用"),
+        "health.queue.noHeartbeat": ("No queue heartbeat received", "未收到队列运行心跳"),
+        "health.queue.stale": ("Queue heartbeat is stale", "队列心跳已过期"),
+        "health.queue.recentError": ("Queue is running but recently reported an error", "队列运行中，但最近出现错误"),
+        "health.queue.ok": ("Queue is running normally", "队列运行正常"),
+        "health.smtp.invalid": ("SMTP configuration is invalid", "SMTP 配置无效"),
+        "health.smtp.notConfigured": ("SMTP is not configured", "SMTP 尚未配置"),
+        "health.smtp.connectionFailed": ("SMTP connection or authentication failed", "SMTP 连接或认证失败"),
+        "health.smtp.noRecipients": ("SMTP works, but no user has configured a Kindle address", "SMTP 正常，但尚无用户配置 Kindle 邮箱"),
+        "health.smtp.ok": ("SMTP connection, encryption, and authentication are healthy", "SMTP 连接、加密与认证正常"),
+        "health.providers.noneEnabled": ("No metadata provider is enabled", "尚未启用元数据数据源"),
+        "health.providers.failed": ("One or more metadata providers failed", "一个或多个数据源连接失败"),
+        "health.providers.ok": ("Enabled metadata providers are healthy", "已启用的数据源连接正常"),
+        "health.check.failed": ("Check execution failed", "检查执行失败"),
+        "health.run.interrupted": ("Service interruption prevented check completion", "服务中断，检查未能完成"),
+        "health.unknownCheck": ("Unknown check item", "未知检查项目")
+    ]
 }

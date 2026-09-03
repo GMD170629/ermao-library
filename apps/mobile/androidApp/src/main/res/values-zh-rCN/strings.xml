@@ -366,6 +366,7 @@
     <string name="me_avatar_delete_confirm_message">此账户将在当前服务器上恢复默认头像。</string>
     <string name="me_display_name_label">显示名称</string>
     <string name="me_save">保存</string>
+    <string name="me_save_display_name">保存显示名称</string>
     <string name="me_saving">正在保存…</string>
     <string name="me_email_section">登录邮箱</string>
     <string name="me_email_label">邮箱</string>

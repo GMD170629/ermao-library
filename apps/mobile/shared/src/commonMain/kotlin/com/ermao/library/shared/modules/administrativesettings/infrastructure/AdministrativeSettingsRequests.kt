@@ -57,6 +57,11 @@ internal fun LibraryDraft.toRequest(): JsonObject = buildJsonObject {
     put("description", description?.trim()?.let(::JsonPrimitive) ?: JsonNull)
 }
 
+internal fun libraryScanSettingsRequest(settings: LibraryScanSettings): JsonObject = buildJsonObject {
+    put("watchEnabled", settings.watchEnabled)
+    put("intervalMinutes", settings.intervalMinutes)
+}
+
 internal fun OrganizePolicy.toRequest(): JsonObject = buildJsonObject {
     put("enabled", enabled)
     put("scheduleMode", scheduleMode.wireValue)

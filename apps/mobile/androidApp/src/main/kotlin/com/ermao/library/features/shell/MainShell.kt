@@ -60,9 +60,14 @@ import com.ermao.library.features.library.ui.FacetScreen
 import com.ermao.library.features.library.ui.LibraryScreen
 import com.ermao.library.features.library.ui.WorkDetailScreen
 import com.ermao.library.features.audio.ui.AudioMiniPlayer
+import com.ermao.library.features.audio.model.AndroidAudioPhase
 import com.ermao.library.features.audio.ui.AudioNowPlayingDialog
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.navigation.MobileNavigation
+import com.ermao.library.shared.modules.audio.AudioChromeEvent
+import com.ermao.library.shared.modules.audio.AudioChromeState
+import com.ermao.library.shared.modules.audio.AudioPlaybackStage
+import com.ermao.library.shared.modules.audio.reduceAudioChromeState
 import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.domain.ReadingUnit
@@ -83,6 +88,7 @@ import com.ermao.library.features.administrativesettings.AdministrativeLocale
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsContext
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsDestination
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsFeatureFactory
+import com.ermao.library.features.administrativesettings.isRetiredMobileRoute
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsRoute
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsSideEffects
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsSystemActions
@@ -123,6 +129,17 @@ private data class TabPresentation(
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector,
 )
+
+private fun AndroidAudioPhase.toSharedAudioPlaybackStage(): AudioPlaybackStage = when (this) {
+    AndroidAudioPhase.Idle -> AudioPlaybackStage.Idle
+    AndroidAudioPhase.Loading -> AudioPlaybackStage.Preparing
+    AndroidAudioPhase.Ready -> AudioPlaybackStage.Ready
+    AndroidAudioPhase.Playing -> AudioPlaybackStage.Playing
+    AndroidAudioPhase.Paused -> AudioPlaybackStage.Paused
+    AndroidAudioPhase.Buffering -> AudioPlaybackStage.Buffering
+    AndroidAudioPhase.Ended -> AudioPlaybackStage.Ended
+    AndroidAudioPhase.Error -> AudioPlaybackStage.Error
+}
 
 @Serializable
 data object HomeRoot : NavKey
@@ -191,6 +208,11 @@ fun MainShell(
     val libraryBackStack = rememberNavBackStack(LibraryRoot)
     val shelvesBackStack = rememberNavBackStack(ShelvesRoot)
     val meBackStack = rememberNavBackStack(MeRoot)
+    LaunchedEffect(Unit) {
+        meBackStack.removeAll { key ->
+            (key as? AdministrativeSettingsRoute)?.isRetiredMobileRoute() == true
+        }
+    }
     var selectedTabValue by rememberSaveable { mutableStateOf(TabId.Home.stableValue) }
     val onViewShelves = {
         navigateToShelvesRoot(
@@ -227,12 +249,34 @@ fun MainShell(
         session.identity.namespace.userId,
         session.identity.namespace.authorizationVersion,
     ).joinToString("-")
-    var audioNowPlayingVisible by rememberSaveable { mutableStateOf(false) }
+    var audioChromeState by rememberSaveable { mutableStateOf(AudioChromeState.Hidden) }
+    val audioNowPlayingVisible = audioChromeState == AudioChromeState.NowPlaying
+    val audioMiniPlayerVisible = audioChromeState == AudioChromeState.Mini
+    fun dispatchAudioChrome(
+        event: AudioChromeEvent,
+        hasSessionOverride: Boolean? = null,
+        playbackStageOverride: AudioPlaybackStage? = null,
+    ) {
+        audioChromeState = reduceAudioChromeState(
+            currentState = audioChromeState,
+            event = event,
+            hasSession = hasSessionOverride ?: audioSnapshot.hasSession,
+            playbackStage = playbackStageOverride ?: audioSnapshot.phase.toSharedAudioPlaybackStage(),
+            hasRecoverableError = audioSnapshot.error?.recoverable == true,
+        )
+    }
     LaunchedEffect(audioPlayerRequested) {
         if (audioPlayerRequested) {
-            audioNowPlayingVisible = true
+            dispatchAudioChrome(AudioChromeEvent.RequestNowPlaying)
             onAudioPlayerRequestConsumed()
         }
+    }
+    LaunchedEffect(
+        audioSnapshot.hasSession,
+        audioSnapshot.phase,
+        audioSnapshot.error?.recoverable,
+    ) {
+        dispatchAudioChrome(AudioChromeEvent.PlaybackChanged)
     }
     LaunchedEffect(audioSnapshot.error?.code, audioSnapshot.namespace?.key) {
         val errorCode = audioSnapshot.error?.code
@@ -433,7 +477,11 @@ fun MainShell(
             bootstrapGateway = audioBootstrapGateway,
             mediaTransport = audioMediaTransport,
         )
-        audioNowPlayingVisible = true
+        dispatchAudioChrome(
+            event = AudioChromeEvent.RequestNowPlaying,
+            hasSessionOverride = true,
+            playbackStageOverride = AudioPlaybackStage.Preparing,
+        )
     }
     val navigationItems = MobileNavigation.orderedRootTabs.map { tab ->
         val presentation = tab.presentation
@@ -474,10 +522,28 @@ fun MainShell(
             }
         },
         modifier = modifier,
+        bottomAccessory = {
+            if (audioMiniPlayerVisible) {
+                AudioMiniPlayer(
+                    snapshot = audioSnapshot,
+                    repository = contentRepository,
+                    context = contentContext,
+                    onOpen = {
+                        dispatchAudioChrome(AudioChromeEvent.RequestNowPlaying)
+                    },
+                    onPlayPause = {
+                        if (audioSnapshot.phase == AndroidAudioPhase.Playing) {
+                            dispatchAudioChrome(AudioChromeEvent.PauseFromMini)
+                            audioRuntime.pause()
+                        } else {
+                            audioRuntime.play()
+                        }
+                    },
+                )
+            }
+        },
     ) {
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                NavDisplay(
+        NavDisplay(
                     backStack = currentBackStack,
                     onBack = { currentBackStack.removeLastOrNull() },
                     entryProvider = entryProvider {
@@ -657,7 +723,11 @@ fun MainShell(
                                         mimeType = record.sourceMimeType,
                                         artworkApiPath = record.coverUrl.takeIf(String::isNotBlank),
                                     )
-                                    audioNowPlayingVisible = true
+                                    dispatchAudioChrome(
+                                        event = AudioChromeEvent.RequestNowPlaying,
+                                        hasSessionOverride = true,
+                                        playbackStageOverride = AudioPlaybackStage.Preparing,
+                                    )
                                 } else {
                                     meBackStack.add(ReaderUnavailableRoute(record.resourceId, record.readerType))
                                 }
@@ -704,64 +774,7 @@ fun MainShell(
                 entry<AdministrativeSettingsRoute.UserAccess> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
-                entry<AdministrativeSettingsRoute.LibrarySources> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.LibrarySourceEdit> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ServerDirectory> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ImportTasks> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ImportTaskDetail> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ImportScanJobs> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ImportScanJob> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.ImportPreferences> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.OrganizeQueue> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.OrganizeCandidates> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.OrganizeRuns> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.RecognitionPolicy> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.LibraryOperations> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.CategoryGovernance> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.MetadataProviders> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.MetadataProviderEdit> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
                 entry<AdministrativeSettingsRoute.Opds> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.Backups> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.DetailOrder> { route ->
-                    AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
-                }
-                entry<AdministrativeSettingsRoute.Health> { route ->
                     AdministrativeDestination(route, administrativeViewModel, administrativeLocale, administrativeCapabilities, administrativeSystemActions, meBackStack)
                 }
                 entry<AdministrativeSettingsRoute.Logs> { route ->
@@ -834,31 +847,18 @@ fun MainShell(
                 }
                     },
                 )
-            }
-            AudioMiniPlayer(
-                snapshot = audioSnapshot,
-                repository = contentRepository,
-                context = contentContext,
-                onOpen = { audioNowPlayingVisible = true },
-                onPlayPause = {
-                    if (audioSnapshot.phase == com.ermao.library.features.audio.model.AndroidAudioPhase.Playing) {
-                        audioRuntime.pause()
-                    } else {
-                        audioRuntime.play()
-                    }
-                },
-            )
-        }
         AudioNowPlayingDialog(
             visible = audioNowPlayingVisible,
             snapshot = audioSnapshot,
             runtime = audioRuntime,
             repository = contentRepository,
             context = contentContext,
-            onDismiss = { audioNowPlayingVisible = false },
+            onDismiss = {
+                dispatchAudioChrome(AudioChromeEvent.DismissNowPlaying)
+            },
         )
     }
-    }
+}
 }
 
 private fun openResource(

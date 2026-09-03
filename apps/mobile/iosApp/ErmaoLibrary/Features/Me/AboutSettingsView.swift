@@ -6,29 +6,15 @@ struct AboutSettingsView: View {
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        List {
-            Section("settings.about.app.section") {
-                LabeledContent("settings.about.version") {
-                    Text(viewModel.snapshot.app.version)
-                        .foregroundStyle(theme.textSecondary)
-                        .textSelection(.enabled)
-                }
-                LabeledContent("settings.about.build") {
-                    Text(viewModel.snapshot.app.build)
-                        .foregroundStyle(theme.textSecondary)
-                        .textSelection(.enabled)
-                }
+        SettingsScreen("settings.about.title") {
+            SettingsSection("settings.about.app.section") {
+                SettingsValueRow("settings.about.version", value: viewModel.snapshot.app.version)
+                SettingsValueRow("settings.about.build", value: viewModel.snapshot.app.build)
             }
-            .listRowBackground(theme.surface)
 
-            Section("settings.about.server.section") {
-                LabeledContent("settings.about.serverName") {
-                    Text(viewModel.snapshot.server.displayName)
-                        .foregroundStyle(theme.textSecondary)
-                        .multilineTextAlignment(.trailing)
-                        .textSelection(.enabled)
-                }
-                LabeledContent("settings.about.serverVersion") {
+            SettingsSection("settings.about.server.section") {
+                SettingsValueRow("settings.about.serverName", value: viewModel.snapshot.server.displayName)
+                SettingsFieldRow("settings.about.serverVersion") {
                     if viewModel.serverVersionState == .loading {
                         ProgressView()
                             .accessibilityLabel(Text("settings.about.serverVersion.loading"))
@@ -51,13 +37,8 @@ struct AboutSettingsView: View {
                     }
                 }
             }
-            .listRowBackground(theme.surface)
         }
-        .listStyle(.insetGrouped)
-        .settingsListSurface()
         .settingsAlert(viewModel: viewModel)
-        .navigationTitle("settings.about.title")
-        .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadServerVersionIfNeeded() }
     }
 }

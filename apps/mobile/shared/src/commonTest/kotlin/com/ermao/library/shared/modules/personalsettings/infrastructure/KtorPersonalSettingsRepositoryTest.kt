@@ -159,11 +159,11 @@ class KtorPersonalSettingsRepositoryTest {
             )
 
         val loaded = assertIs<PersonalSettingsResult.Content<*>>(
-            harness.repository.loadAvatar(context(), "avatar-v1"),
+            harness.repository.loadAvatar(context(), "/api/auth/avatar?v=41", "avatar-v1"),
         ).value
         val fresh = assertIs<com.ermao.library.shared.modules.personalsettings.domain.PersonalAvatar>(loaded)
         val unchanged = assertIs<PersonalSettingsResult.Content<*>>(
-            harness.repository.loadAvatar(context(), "avatar-v2"),
+            harness.repository.loadAvatar(context(), "/api/auth/avatar?v=42", "avatar-v2"),
         ).value
         val notModified = assertIs<com.ermao.library.shared.modules.personalsettings.domain.PersonalAvatar>(unchanged)
 
@@ -175,10 +175,12 @@ class KtorPersonalSettingsRepositoryTest {
         assertEquals(true, notModified.notModified)
         assertEquals("avatar-v1", harness.requests[0].headers[HttpHeaders.IfNoneMatch])
         assertEquals("avatar-v2", harness.requests[1].headers[HttpHeaders.IfNoneMatch])
+        assertEquals("v=41", harness.requests[0].query)
+        assertEquals("v=42", harness.requests[1].query)
     }
 
     @Test
-    fun localizedServerMessagesNeverDriveOrEscapeTheTypedError() = runBlocking {
+    fun legacyAccountEmailStatusMapsToEndpointCodeWithoutUsingLocalizedMessage() = runBlocking {
         val harness =
             Harness(
                 Response(
@@ -192,7 +194,7 @@ class KtorPersonalSettingsRepositoryTest {
         )
 
         assertEquals(PersonalSettingsErrorKind.Validation, failure.error.kind)
-        assertEquals("BAD_REQUEST", failure.error.code)
+        assertEquals("CURRENT_PASSWORD_INCORRECT", failure.error.code)
         assertEquals(emptyList(), failure.error.fieldViolations)
         assertEquals(false, failure.toString().contains("当前密码不正确"))
     }
@@ -201,6 +203,12 @@ class KtorPersonalSettingsRepositoryTest {
     fun httpFailuresMapByStatusAndStableCodesOnly() = runBlocking {
         val cases =
             listOf(
+                ErrorCase(
+                    statusCode = 400,
+                    errorBody = """{"message":"当前密码不正确","code":"CURRENT_PASSWORD_INCORRECT"}""",
+                    expectedKind = PersonalSettingsErrorKind.Validation,
+                    expectedCode = "CURRENT_PASSWORD_INCORRECT",
+                ),
                 ErrorCase(
                     statusCode = 401,
                     errorBody = """{"message":"请重新登录","code":"UNAUTHORIZED"}""",
@@ -354,6 +362,7 @@ class KtorPersonalSettingsRepositoryTest {
                             CapturedRequest(
                                 method = request.method,
                                 path = request.url.encodedPath,
+                                query = request.url.encodedQuery,
                                 body = request.body.readText(),
                                 contentType = request.body.contentType?.toString() ?: request.headers[HttpHeaders.ContentType],
                                 headers = request.headers.entries().associate { (key, value) -> key to value.first() },
@@ -402,6 +411,7 @@ class KtorPersonalSettingsRepositoryTest {
     private data class CapturedRequest(
         val method: HttpMethod,
         val path: String,
+        val query: String,
         val body: String,
         val contentType: String?,
         val headers: Map<String, String>,

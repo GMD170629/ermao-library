@@ -10,7 +10,7 @@ struct DownloadCenterView: View {
     @Environment(\.appTheme) private var theme
 
     var body: some View {
-        List {
+        SettingsList {
             storageSection
             if !store.completedSearch.isEmpty {
                 completedSection
@@ -20,8 +20,6 @@ struct DownloadCenterView: View {
                 failedSection
             }
         }
-        .listStyle(.plain)
-        .settingsListSurface()
         .accessibilityIdentifier("downloads.screen")
         .navigationTitle("downloads.title")
         .searchable(text: $store.completedSearch, prompt: "downloads.search.prompt")
@@ -64,7 +62,6 @@ struct DownloadCenterView: View {
                 .accessibilityIdentifier("downloads.storage.error")
             }
         }
-        .listRowBackground(theme.surface)
     }
 
     @ViewBuilder
@@ -75,7 +72,6 @@ struct DownloadCenterView: View {
                     taskRow(record)
                 }
             }
-            .listRowBackground(theme.surface)
         }
     }
 
@@ -131,7 +127,6 @@ struct DownloadCenterView: View {
                     .padding(.vertical, .spaceHalf)
                 }
             }
-            .listRowBackground(theme.surface)
         }
     }
 
@@ -159,7 +154,6 @@ struct DownloadCenterView: View {
                     .padding(.vertical, .spaceHalf)
                 }
             }
-            .listRowBackground(theme.surface)
         }
     }
 

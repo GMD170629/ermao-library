@@ -8,12 +8,30 @@ private enum AudioPresentation: String, Identifiable {
     var id: String { rawValue }
 }
 
-/// App-wide shell adapter. It provides the real safe-area inset for the mini
-/// player and owns the only Now Playing presentation.
+@MainActor
+final class AudioShellPresentation: ObservableObject {
+    @Published private(set) var chromeState: ErmaoShared.AudioChromeState = .hidden
+
+    var isNowPlayingPresented: Bool { chromeState == .nowplaying }
+    var isMiniPlayerVisible: Bool { chromeState == .mini }
+
+    func handle(_ event: ErmaoShared.AudioChromeEvent, snapshot: AudioPlaybackSnapshot) {
+        chromeState = PublicKt.reduceAudioChromeState(
+            currentState: chromeState,
+            event: event,
+            hasSession: snapshot.hasSession,
+            playbackStage: snapshot.chromePlaybackStage,
+            hasRecoverableError: snapshot.recoverableError?.recoverable == true
+        )
+    }
+}
+
+/// App-wide audio presentation state. The selected tab owns the mini player's
+/// safe-area placement, while this host owns the only Now Playing cover.
 struct AudioApplicationHost<Content: View>: View {
     @ObservedObject var runtime: AudioPlaybackRuntime
     private let content: Content
-    @State private var isNowPlayingPresented = false
+    @StateObject private var presentation = AudioShellPresentation()
 
     init(
         runtime: AudioPlaybackRuntime,
@@ -25,33 +43,33 @@ struct AudioApplicationHost<Content: View>: View {
 
     var body: some View {
         content
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if runtime.snapshot.hasSession {
-                    AudioMiniPlayer(
-                        snapshot: runtime.snapshot,
-                        onToggle: runtime.togglePlayback,
-                        onRetry: runtime.retry,
-                        onExpand: { isNowPlayingPresented = true }
-                    )
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            .environmentObject(presentation)
+            .fullScreenCover(isPresented: Binding(
+                get: { presentation.isNowPlayingPresented },
+                set: { isPresented in
+                    if !isPresented {
+                        presentation.handle(.dismissnowplaying, snapshot: runtime.snapshot)
+                    }
                 }
-            }
-            .fullScreenCover(isPresented: $isNowPlayingPresented) {
+            )) {
                 AudioNowPlayingView(runtime: runtime)
             }
             .environment(\.audioPlaybackRuntime, runtime)
-            .onChange(of: runtime.snapshot.lifecycle) { _, lifecycle in
-                if lifecycle == .idle { isNowPlayingPresented = false }
+            .onAppear {
+                presentation.handle(.playbackchanged, snapshot: runtime.snapshot)
+            }
+            .onChange(of: runtime.snapshot.lifecycle) { _, _ in
+                presentation.handle(.playbackchanged, snapshot: runtime.snapshot)
             }
             .onChange(of: runtime.nowPlayingPresentationRequestID) { _, requestID in
-                if requestID != nil { isNowPlayingPresented = true }
+                if requestID != nil {
+                    presentation.handle(.requestnowplaying, snapshot: runtime.snapshot)
+                }
             }
     }
 }
 
-private struct AudioMiniPlayer: View {
+struct AudioMiniPlayer: View {
     let snapshot: AudioPlaybackSnapshot
     let onToggle: () -> Void
     let onRetry: () -> Void
@@ -120,13 +138,6 @@ private struct AudioMiniPlayer: View {
         }
         .padding(.horizontal, .space1Half)
         .padding(.vertical, .space1)
-        .background(theme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(theme.divider.opacity(0.8), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
         .overlay(alignment: .bottom) {
             ProgressView(value: progress, total: 1)
                 .progressViewStyle(.linear)
@@ -142,6 +153,21 @@ private struct AudioMiniPlayer: View {
     private var progress: Double {
         guard snapshot.totalDurationMillis > 0 else { return 0 }
         return min(1, max(0, Double(snapshot.absolutePositionMillis) / Double(snapshot.totalDurationMillis)))
+    }
+}
+
+private extension AudioPlaybackSnapshot {
+    var chromePlaybackStage: ErmaoShared.AudioPlaybackStage {
+        switch lifecycle {
+        case .idle: .idle
+        case .loading: .preparing
+        case .ready: .ready
+        case .playing: .playing
+        case .paused: .paused
+        case .buffering: .buffering
+        case .ended: .ended
+        case .error: .error
+        }
     }
 }
 
