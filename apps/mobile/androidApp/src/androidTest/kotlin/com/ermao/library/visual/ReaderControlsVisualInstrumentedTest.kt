@@ -125,6 +125,10 @@ class ReaderControlsVisualInstrumentedTest {
             CaptureRequest("pdf-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Day),
         )
         val epubRequests = listOf(
+            CaptureRequest("epub-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Day),
+            CaptureRequest("epub-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Day),
+            CaptureRequest("epub-settings-night.png", ReaderPanelCapture.Settings, ReaderTheme.Night),
+            CaptureRequest("epub-settings-advanced-night.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Night),
             CaptureRequest("epub-page-width.png", ReaderPanelCapture.AppearancePageWidth, ReaderTheme.Day),
         )
         val passiveStatusRequests = listOf(
@@ -180,7 +184,7 @@ class ReaderControlsVisualInstrumentedTest {
                     ReaderPanelCapture.Settings -> openPanel(READER_SETTINGS_TEST_TAG)
                     ReaderPanelCapture.AdvancedSettings -> {
                         openPanel(READER_SETTINGS_TEST_TAG)
-                        composeRule.onNodeWithText(context.getString(R.string.reader_advanced_settings))
+                        composeRule.onNodeWithTag("reader-advanced-settings")
                             .performScrollTo()
                             .performClick()
                         composeRule.waitForIdle()

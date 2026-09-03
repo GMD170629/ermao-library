@@ -143,6 +143,55 @@ class ReaderPreferencesTest {
     }
 
     @Test
+    fun swipeCapabilityStatesRemainDistinctForAndroidPresentation() {
+        val preferences = ReaderPreferences()
+        val swipe = ReaderSettingsCatalog.settings.first { it.id == "swipePageTurn" }
+        val fixedCapabilities = ReaderCapabilities.epub(supportsVolumeKeys = true)
+
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.NotImplemented, "notImplemented"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                swipe,
+                ReaderMorphology.Reflowable,
+                fixedCapabilities,
+                preferences,
+                ready = true,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.Available),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                swipe,
+                ReaderMorphology.Reflowable,
+                fixedCapabilities.copy(supportsSwipeToggle = true),
+                preferences,
+                ready = true,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "engineNotReady"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                swipe,
+                ReaderMorphology.Reflowable,
+                fixedCapabilities,
+                preferences,
+                ready = false,
+            ),
+        )
+        assertEquals(
+            ReaderSettingState(ReaderControlAvailability.TemporarilyUnavailable, "publicationConstraint"),
+            ReaderSettingsCatalog.resolveReaderSetting(
+                swipe,
+                ReaderMorphology.Reflowable,
+                fixedCapabilities,
+                preferences,
+                ready = true,
+                nativeUnavailable = setOf(ReaderControl.Swipe),
+            ),
+        )
+    }
+
+    @Test
     fun resetClearsAllReadingFormats() {
         val defaults = resetReaderPreferences()
         assertEquals(ReaderPreferences(), defaults)

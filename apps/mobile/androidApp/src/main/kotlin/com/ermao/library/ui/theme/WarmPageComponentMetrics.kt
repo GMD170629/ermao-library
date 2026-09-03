@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ermao.library.design.GeneratedDesignTokens
 
 /** Android-only component geometry. Shared visual tokens remain generated from design/tokens.json. */
 @Immutable
@@ -15,6 +16,7 @@ data class WarmPageComponentMetrics(
     val grid: WarmPageGridMetrics,
     val covers: WarmPageComponentCoverMetrics,
     val workDetail: WarmPageWorkDetailMetrics,
+    val settings: WarmPageSettingsMetrics,
     val dividerThickness: Dp,
 )
 
@@ -77,6 +79,22 @@ data class WarmPageWorkDetailMetrics(
     val statusBadgeMinimumHeight: Dp,
 )
 
+@Immutable
+data class WarmPageSettingsMetrics(
+    val rowMinimumHeight: Dp,
+    val horizontalInset: Dp,
+    val verticalInset: Dp,
+    val iconSlotSize: Dp,
+    val iconSize: Dp,
+    val iconTitleSpacing: Dp,
+    val trailingSlotWidth: Dp,
+    val sectionSpacing: Dp,
+    val sectionHeaderBottomSpacing: Dp,
+    val identityAvatarSize: Dp,
+    val identityMinimumHeight: Dp,
+    val bottomActionHeight: Dp,
+)
+
 val WarmPageComponentMetricTokens = WarmPageComponentMetrics(
     page = WarmPagePageMetrics(
         compactGutter = WarmPageSpacingTokens.two,
@@ -122,6 +140,20 @@ val WarmPageComponentMetricTokens = WarmPageComponentMetrics(
         horizontalVolumeWidth = 84.dp,
         chapterRowMinimumHeight = 56.dp,
         statusBadgeMinimumHeight = 24.dp,
+    ),
+    settings = WarmPageSettingsMetrics(
+        rowMinimumHeight = GeneratedDesignTokens.Settings.RowMinimumHeight.dp,
+        horizontalInset = GeneratedDesignTokens.Settings.HorizontalInset.dp,
+        verticalInset = GeneratedDesignTokens.Settings.VerticalInset.dp,
+        iconSlotSize = GeneratedDesignTokens.Settings.IconSlotSize.dp,
+        iconSize = GeneratedDesignTokens.Settings.IconSize.dp,
+        iconTitleSpacing = GeneratedDesignTokens.Settings.IconTitleSpacing.dp,
+        trailingSlotWidth = GeneratedDesignTokens.Settings.TrailingSlotWidth.dp,
+        sectionSpacing = GeneratedDesignTokens.Settings.SectionSpacing.dp,
+        sectionHeaderBottomSpacing = GeneratedDesignTokens.Settings.SectionHeaderBottomSpacing.dp,
+        identityAvatarSize = GeneratedDesignTokens.Settings.IdentityAvatarSize.dp,
+        identityMinimumHeight = GeneratedDesignTokens.Settings.IdentityMinimumHeight.dp,
+        bottomActionHeight = GeneratedDesignTokens.Settings.BottomActionHeight.dp,
     ),
     dividerThickness = Dp.Hairline,
 )

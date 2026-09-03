@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.centerLeft
 import androidx.compose.ui.test.centerRight
 import androidx.compose.ui.test.swipe
@@ -30,6 +31,7 @@ import com.ermao.library.features.reader.application.ReaderResumeNotice
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
+import com.ermao.library.shared.modules.reader.ReaderControl
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderLocation
@@ -242,7 +244,7 @@ class ReaderScreenContentsInstrumentedTest {
     }
 
     @Test
-    fun androidReaderSettingsDoNotExposeDoublePageMode() {
+    fun androidReaderSettingsFollowSharedReflowableSpreadCatalog() {
         val controller = DeferredContentsController()
         compose.setContent {
             ReaderScreen(
@@ -259,7 +261,193 @@ class ReaderScreenContentsInstrumentedTest {
         showTestHostOverKeyguard()
 
         compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
-        compose.onNodeWithTag("reader-setting-textSpread").assertDoesNotExist()
+        compose.onNodeWithTag("reader-setting-section-card-interface").assertIsDisplayed()
+        val heading = compose.onNodeWithTag("reader-setting-section-heading-interface")
+            .fetchSemanticsNode()
+        assertTrue(heading.config.contains(SemanticsProperties.Heading))
+        compose.onNodeWithTag("reader-setting-textSpread").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun fixedReaderControlsUseReadOnlyStatusInsteadOfDisabledSwitch() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Fixed control fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
+        val alwaysOn = instrumentation.targetContext.getString(R.string.reader_setting_always_on)
+        val explanation = instrumentation.targetContext.getString(R.string.reader_setting_swipe_always_on_explanation)
+        val readOnly = compose.onNodeWithTag("reader-setting-readonly-swipePageTurn")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+
+        assertTrue(!readOnly.config.contains(SemanticsActions.OnClick))
+        compose.onNodeWithText(alwaysOn).assertIsDisplayed()
+        compose.onNodeWithText(explanation).assertIsDisplayed()
+        compose.onNodeWithText("由当前阅读器确定").assertDoesNotExist()
+        compose.onNodeWithText("Fixed for this reader").assertDoesNotExist()
+    }
+
+    @Test
+    fun unsupportedAndTemporaryReaderControlsHaveDistinctReadOnlyCopy() {
+        val controller = DeferredContentsController(unavailable = setOf(ReaderControl.TapZones))
+        val notAdjustable = instrumentation.targetContext.getString(R.string.reader_setting_not_adjustable)
+        val temporarilyUnavailable = instrumentation.targetContext.getString(R.string.reader_setting_temporarily_unavailable)
+        val publicationConstraint = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
+            .availabilityReasons.getValue("publicationConstraint")
+        val constraintCopy = if (
+            instrumentation.targetContext.resources.configuration.locales[0].language == "zh"
+        ) {
+            publicationConstraint.chinese
+        } else {
+            publicationConstraint.english
+        }
+        compose.setContent {
+            ReaderScreen(
+                title = "Unavailable control fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
+        val unsupported = compose.onNodeWithTag("reader-setting-readonly-optimization")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        assertTrue(unsupported.config[SemanticsProperties.Text].any { it.text == notAdjustable })
+        val temporary = compose.onNodeWithTag("reader-setting-readonly-tapZones")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val temporaryText = temporary.config[SemanticsProperties.Text]
+        assertTrue(temporaryText.any { it.text == temporarilyUnavailable })
+        assertTrue(temporaryText.any { it.text == constraintCopy })
+    }
+
+    @Test
+    fun advancedReaderSettingsExposeExpandedStateAndGroupedSections() {
+        val controller = DeferredContentsController()
+        compose.setContent {
+            ReaderScreen(
+                title = "Advanced settings fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
+        val advanced = compose.onNodeWithTag("reader-advanced-settings")
+            .performScrollTo()
+            .assertIsDisplayed()
+        val collapsed = instrumentation.targetContext.getString(R.string.reader_advanced_collapsed)
+        val expanded = instrumentation.targetContext.getString(R.string.reader_advanced_expanded)
+        assertTrue(advanced.fetchSemanticsNode().config.contains(SemanticsProperties.Heading))
+        assertEquals(collapsed, advanced.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+        advanced.performClick()
+        assertEquals(expanded, advanced.fetchSemanticsNode().config[SemanticsProperties.StateDescription])
+        compose.onNodeWithTag("reader-setting-section-card-textLayoutAdvanced")
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun readerSettingsPreserveSwitchSegmentedChoiceSheetAndResetInteractions() {
+        val initial = ReaderPreferences().copy(
+            display = ReaderPreferences().display.copy(showClock = false),
+        )
+        val controller = DeferredContentsController(initialPreferences = initial)
+        val reversedTapZones = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings
+            .first { it.id == "tapZones" }
+            .options.first { it.value == "reversed" }
+            .let { option -> localized(option.chinese, option.english) }
+        val reset = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings
+            .first { it.id == "reset" }
+            .let { setting -> localized(setting.chinese, setting.english) }
+        compose.setContent {
+            ReaderScreen(
+                title = "Settings interaction fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
+        compose.onNodeWithTag("reader-setting-control-showClock").performClick()
+        compose.waitUntil { controller.preferences.value.display.showClock }
+
+        compose.onNodeWithTag("reader-setting-control-tapZones").performScrollTo()
+        compose.onNodeWithText(reversedTapZones).performClick()
+        compose.waitUntil {
+            controller.preferences.value.interaction.tapZones.wireValue == "reversed"
+        }
+
+        compose.onNodeWithTag("reader-setting-control-progressStyle").performScrollTo().performClick()
+        compose.onNodeWithTag("settings-choice-sheet").assertIsDisplayed()
+        compose.onNodeWithTag("settings-choice-percent").performClick()
+        compose.waitUntil {
+            controller.preferences.value.display.progressStyle.wireValue == "percent"
+        }
+
+        compose.onNodeWithText(reset).performScrollTo().performClick()
+        compose.waitUntil { controller.preferences.value == ReaderPreferences() }
+    }
+
+    @Test
+    fun readerPageWidthRetainsItsNumberControlInteraction() {
+        val controller = DeferredContentsController()
+        val pageWidth = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings
+            .first { it.id == "textPageWidth" }
+            .let { setting -> localized(setting.chinese, setting.english) }
+        compose.setContent {
+            ReaderScreen(
+                title = "Number setting fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag("reader-appearance").performClick()
+        compose.onNodeWithTag("reader-setting-textPageWidth").performScrollTo()
+        compose.onNodeWithContentDescription(pageWidth)
+            .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(900f) }
+        compose.waitUntil { controller.preferences.value.epub.pageWidth == 900 }
     }
 
     @Test
@@ -329,7 +517,13 @@ class ReaderScreenContentsInstrumentedTest {
         instrumentation.waitForIdleSync()
     }
 
-    private class DeferredContentsController : ReaderScreenController {
+    private fun localized(chinese: String, english: String): String =
+        if (instrumentation.targetContext.resources.configuration.locales[0].language == "zh") chinese else english
+
+    private class DeferredContentsController(
+        private val unavailable: Set<ReaderControl> = emptySet(),
+        initialPreferences: ReaderPreferences = ReaderPreferences(),
+    ) : ReaderScreenController {
         private val loadGate = CompletableDeferred<Unit>()
         private val contentsMutex = Mutex()
         private var contentsLoaded = false
@@ -359,7 +553,8 @@ class ReaderScreenContentsInstrumentedTest {
         override val capabilities = ReaderCapabilities.epub(supportsVolumeKeys = true, supportsCustomFonts = true)
         private val locationState = MutableStateFlow<ReaderLocation?>(entries.first().location)
         override val currentLocation: StateFlow<ReaderLocation?> = locationState
-        override val preferences: StateFlow<ReaderPreferences> = MutableStateFlow(ReaderPreferences())
+        private val preferenceState = MutableStateFlow(initialPreferences)
+        override val preferences: StateFlow<ReaderPreferences> = preferenceState
         private val restoreWarningState = MutableStateFlow<ReaderError?>(null)
         override val restoreWarning: StateFlow<ReaderError?> = restoreWarningState
         override val resumeNotice: StateFlow<ReaderResumeNotice?> = MutableStateFlow(null)
@@ -376,6 +571,8 @@ class ReaderScreenContentsInstrumentedTest {
             }
             entries
         }
+
+        override fun unavailableControls(preferences: ReaderPreferences): Set<ReaderControl> = unavailable
 
         fun releaseContents() {
             loadGate.complete(Unit)
@@ -401,7 +598,9 @@ class ReaderScreenContentsInstrumentedTest {
         }
         override fun dismissResumeNotice() = Unit
         override fun returnToResumeNotice() = false
-        override fun updatePreferences(updated: ReaderPreferences) = Unit
+        override fun updatePreferences(updated: ReaderPreferences) {
+            preferenceState.value = updated
+        }
         override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
         override fun removeBookmark(id: String) = Unit
         override fun goToBookmark(id: String) = false

@@ -1,0 +1,62 @@
+{
+  "runId": "20260903-android-reader-settings-v2",
+  "status": "BLOCKED",
+  "targetContract": "target-contract.md",
+  "baseline": {
+    "sourceCommit": "243d4d8416f51cd13c99ea8ce7b083385ad1b5ad",
+    "dirtyWorkspace": true,
+    "captures": [
+      {
+        "file": "baseline/android/reader-settings/zh-CN-light/01-settings-top.png",
+        "sha256": "6F365453260E21B0B860D031EB2F144D2FBFEE46ACF594A05BC7D1D643FBFC6E",
+        "type": "product-shell"
+      },
+      {
+        "file": "baseline/android/reader-settings/zh-CN-light/02-settings-advanced.png",
+        "sha256": "2EDA970834CAC7B11648ABAB9C3E54D16AEDAF503CFA4F7E94CC0BA2C8CAA1A2",
+        "type": "product-shell"
+      }
+    ]
+  },
+  "device": {
+    "serial": "9e896bbc",
+    "manufacturer": "Xiaomi",
+    "model": "M2102K1AC",
+    "androidVersion": "12",
+    "resolution": "1440x3200",
+    "densityDpi": 560,
+    "physicalDevice": true,
+    "orientation": "portrait",
+    "locale": "zh-CN",
+    "theme": "light",
+    "fontScale": 1.0
+  },
+  "candidate": {
+    "id": "candidate-01",
+    "status": "built-awaiting-device-unlock",
+    "apk": {
+      "file": "../../../androidApp/build/outputs/apk/debug/androidApp-debug.apk",
+      "sha256": "CE945F0E9B03F59BD5427F0312EC542CBA9CBE52EB4D5AD359DF18E9458F1F97"
+    },
+    "testApk": {
+      "file": "../../../androidApp/build/outputs/apk/androidTest/debug/androidApp-debug-androidTest.apk",
+      "sha256": "4701291B4EA57DFC0FF885A5E4AEDF756F48112F4C452BA18F2B566F4B1B2BE2"
+    },
+    "screenshots": [],
+    "instrumentation": {
+      "compile": "passed",
+      "deviceRun": "blocked: physical device is securely locked",
+      "report": "verification-notes.md"
+    },
+    "crashAnrCheck": null,
+    "independentReview": null,
+    "axes": null
+  },
+  "explicitExclusions": [
+    "web",
+    "ios",
+    "reader contract changes",
+    "preference schema changes",
+    "other Android settings pages"
+  ]
+}

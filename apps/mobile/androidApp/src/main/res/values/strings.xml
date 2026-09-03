@@ -652,8 +652,14 @@
     <string name="reader_error_pdf_engine_limit">The PDF engine reached its loading step limit.</string>
     <string name="reader_error_read">The reader could not read the requested book resource.</string>
     <string name="reader_setting_saved_value">Saved current value: %1$s</string>
-    <string name="reader_setting_unavailable_short">Not supported by the current reader engine. The saved value is preserved.</string>
+    <string name="reader_setting_unavailable_short">This setting is temporarily unavailable.</string>
     <string name="reader_preferences_save_failed">Could not save reading settings on this device. Try again.</string>
-    <string name="reader_preferences_engine_failed">The reading engine failed to accept the settings and provided no displayable details.</string>
-    <string name="reader_swipe_fixed">This SDK always enables swipe page turning and exposes no option to disable it.</string>
+    <string name="reader_preferences_engine_failed">Unable to apply the reading settings. Try again.</string>
+    <string name="reader_setting_always_on">Always on</string>
+    <string name="reader_setting_swipe_always_on_explanation">Swipe page turning is always on and cannot be turned off.</string>
+    <string name="reader_setting_not_adjustable">Not adjustable</string>
+    <string name="reader_setting_not_adjustable_explanation">This setting cannot currently be adjusted manually.</string>
+    <string name="reader_setting_temporarily_unavailable">Temporarily unavailable</string>
+    <string name="reader_advanced_collapsed">Collapsed</string>
+    <string name="reader_advanced_expanded">Expanded</string>
 </resources>

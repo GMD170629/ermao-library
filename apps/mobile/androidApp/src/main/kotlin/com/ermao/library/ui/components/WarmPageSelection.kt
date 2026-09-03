@@ -2,6 +2,7 @@ package com.ermao.library.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -11,7 +12,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
 data class WarmPageChoice<T>(
@@ -30,6 +34,12 @@ fun <T> WarmPageSegmentedControl(
     enabled: Boolean = true,
 ) {
     val theme = WarmPageThemeValues
+    val fontScale = LocalDensity.current.fontScale
+    val segmentHeight = when {
+        fontScale >= 1.75f -> 128.dp
+        fontScale >= 1.2f -> 72.dp
+        else -> theme.components.controls.segmentedMinimumHeight
+    }
     SingleChoiceSegmentedButtonRow(
         modifier = modifier
             .fillMaxWidth()
@@ -69,11 +79,14 @@ fun <T> WarmPageSegmentedControl(
                     Text(
                         text = option.label,
                         style = theme.typography.label,
-                        maxLines = 1,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
                     )
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(segmentHeight),
             )
         }
     }

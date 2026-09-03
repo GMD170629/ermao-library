@@ -638,8 +638,14 @@
     <string name="reader_error_pdf_engine_limit">PDF 引擎达到加载步骤上限。</string>
     <string name="reader_error_read">阅读器无法读取所请求的图书资源。</string>
     <string name="reader_setting_saved_value">已保存的当前值：%1$s</string>
-    <string name="reader_setting_unavailable_short">当前阅读引擎暂不支持，已保留设置值。</string>
+    <string name="reader_setting_unavailable_short">此设置当前暂不可用。</string>
     <string name="reader_preferences_save_failed">无法保存此设备的阅读设置，请重试。</string>
-    <string name="reader_preferences_engine_failed">阅读引擎提交设置失败；引擎未提供可显示的详细原因。</string>
-    <string name="reader_swipe_fixed">当前 SDK 固定开启滑动翻页，没有提供关闭接口。</string>
+    <string name="reader_preferences_engine_failed">无法应用阅读设置，请重试。</string>
+    <string name="reader_setting_always_on">始终开启</string>
+    <string name="reader_setting_swipe_always_on_explanation">当前阅读器始终启用滑动翻页，无法手动关闭。</string>
+    <string name="reader_setting_not_adjustable">暂不可调整</string>
+    <string name="reader_setting_not_adjustable_explanation">此设置当前不支持手动调整。</string>
+    <string name="reader_setting_temporarily_unavailable">暂不可用</string>
+    <string name="reader_advanced_collapsed">已收起</string>
+    <string name="reader_advanced_expanded">已展开</string>
 </resources>

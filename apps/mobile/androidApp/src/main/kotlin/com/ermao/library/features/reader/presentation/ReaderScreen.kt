@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
@@ -105,9 +106,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -150,6 +153,13 @@ import com.ermao.library.ui.components.WarmPageChoice
 import com.ermao.library.ui.components.WarmPageModalBottomSheet
 import com.ermao.library.ui.components.WarmPageSegmentedControl
 import com.ermao.library.ui.components.WarmPageSnackbarHost
+import com.ermao.library.ui.components.WarmSettingsInlineMessage
+import com.ermao.library.ui.components.WarmSettingsChoice
+import com.ermao.library.ui.components.WarmSettingsChoiceSheet
+import com.ermao.library.ui.components.WarmSettingsDivider
+import com.ermao.library.ui.components.WarmSettingsSection
+import com.ermao.library.ui.components.WarmSettingsSwitchRow
+import com.ermao.library.ui.components.WarmSettingsValueRow
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
@@ -1089,8 +1099,13 @@ private fun ReaderPreferenceSheet(
     failure: ReaderCommandRejected?,
     onUpdate: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
-) = ReaderSheet(if (panel == ReaderPanel.Appearance) R.string.reader_appearance else R.string.reader_settings_title, onDismiss) { scroll ->
+) = ReaderSheet(
+    title = if (panel == ReaderPanel.Appearance) R.string.reader_appearance else R.string.reader_settings_title,
+    onDismiss = onDismiss,
+    usePageTitle = true,
+) { scroll ->
     val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
+    val theme = WarmPageThemeValues
     var advanced by remember { mutableStateOf(false) }
     val sections = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.sections.filter {
         it.panel == if (panel == ReaderPanel.Appearance) "appearance" else "settings"
@@ -1104,21 +1119,21 @@ private fun ReaderPreferenceSheet(
     val regularSections = populatedSections.filter { !it.first.advanced && it.first.id != "reset" }
     val advancedSections = populatedSections.filter { it.first.advanced }
     val resetSections = populatedSections.filter { it.first.id == "reset" }
+    val sectionStyle = if (panel == ReaderPanel.Settings) {
+        ReaderPreferenceSectionStyle.GroupedCard
+    } else {
+        ReaderPreferenceSectionStyle.Flat
+    }
     Column(
         Modifier.verticalScroll(scroll).testTag(READER_PREFERENCES_SCROLL_TEST_TAG),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
     ) {
         if (failure != null) {
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-            ) {
-                Text(
-                    readerPreferenceFailureMessage(failure),
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
+            WarmSettingsInlineMessage(
+                message = readerPreferenceFailureMessage(failure),
+                modifier = Modifier.background(MaterialTheme.colorScheme.errorContainer),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
         }
         regularSections.forEach { (section, settings) ->
             ReaderPreferenceSection(
@@ -1129,48 +1144,73 @@ private fun ReaderPreferenceSheet(
                 negativeLetterSpacingEnabled,
                 chinese,
                 onUpdate,
+                sectionStyle,
             )
         }
         if (advancedSections.isNotEmpty()) {
-            Surface(
-                color = WarmPageThemeValues.colors.surfaceRaised,
-                shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
-                border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+            val advancedStateDescription = stringResource(
+                if (advanced) R.string.reader_advanced_expanded else R.string.reader_advanced_collapsed,
+            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
             ) {
-                Column {
-                    TextButton(
-                        onClick = { advanced = !advanced },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(theme.radii.task),
+                    color = theme.colors.surfaceRaised,
+                    border = BorderStroke(theme.components.dividerThickness, theme.colors.divider),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = theme.components.settings.rowMinimumHeight)
+                            .testTag("reader-advanced-settings")
+                            .clickable(
+                                role = Role.Button,
+                                onClick = { advanced = !advanced },
+                            )
+                            .semantics(mergeDescendants = true) {
+                                heading()
+                                stateDescription = advancedStateDescription
+                            }
+                            .padding(
+                                horizontal = theme.components.settings.horizontalInset,
+                                vertical = theme.components.settings.verticalInset,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             stringResource(R.string.reader_advanced_settings),
-                            Modifier.weight(1f),
-                            color = WarmPageThemeValues.colors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                            style = theme.typography.headline,
+                            color = theme.colors.textPrimary,
                         )
                         Icon(
                             Icons.Default.ExpandMore,
                             contentDescription = null,
-                            modifier = Modifier.rotate(if (advanced) 180f else 0f),
+                            tint = theme.colors.textSecondary,
+                            modifier = Modifier
+                                .size(theme.components.controls.iconSize)
+                                .rotate(if (advanced) 180f else 0f),
                         )
                     }
-                    if (advanced) {
-                        Column(
-                            Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            advancedSections.forEach { (section, settings) ->
-                                ReaderPreferenceSection(
-                                    section,
-                                    settings,
-                                    preferences,
-                                    settingState,
-                                    negativeLetterSpacingEnabled,
-                                    chinese,
-                                    onUpdate,
-                                    nested = true,
-                                )
-                            }
+                }
+                if (advanced) {
+                    Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.three)) {
+                        advancedSections.forEach { (section, settings) ->
+                            ReaderPreferenceSection(
+                                section,
+                                settings,
+                                preferences,
+                                settingState,
+                                negativeLetterSpacingEnabled,
+                                chinese,
+                                onUpdate,
+                                sectionStyle,
+                            )
                         }
                     }
                 }
@@ -1185,9 +1225,15 @@ private fun ReaderPreferenceSheet(
                 negativeLetterSpacingEnabled,
                 chinese,
                 onUpdate,
+                sectionStyle,
             )
         }
     }
+}
+
+private enum class ReaderPreferenceSectionStyle {
+    Flat,
+    GroupedCard,
 }
 
 @Composable
@@ -1199,22 +1245,17 @@ private fun ReaderPreferenceSection(
     negativeLetterSpacingEnabled: Boolean,
     chinese: Boolean,
     onUpdate: (ReaderPreferences) -> Unit,
-    nested: Boolean = false,
+    style: ReaderPreferenceSectionStyle,
 ) {
+    val theme = WarmPageThemeValues
     val settingsWithState = settings.map { it to settingState(it) }
-    val allUnavailable = settingsWithState.all { (_, state) ->
-        state.availability != ReaderControlAvailability.Available
+    if (section.id == "reset") {
+        HorizontalDivider(color = theme.colors.divider)
     }
-    val content: @Composable () -> Unit = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (section.chinese.isNotEmpty()) {
-                Text(
-                    if (chinese) section.chinese else section.english,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = WarmPageThemeValues.colors.textPrimary,
-                )
-            }
-            settingsWithState.forEach { (setting, state) ->
+    if (section.id == "top" || section.id == "reset") {
+        Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
+            settingsWithState.forEachIndexed { index, (setting, state) ->
+                if (index > 0) HorizontalDivider(color = theme.colors.divider)
                 ReaderCatalogSetting(
                     setting,
                     preferences,
@@ -1222,27 +1263,69 @@ private fun ReaderPreferenceSection(
                     negativeLetterSpacingEnabled,
                     chinese,
                     onUpdate,
-                    showUnavailableHint = !allUnavailable,
-                )
-            }
-            if (allUnavailable) {
-                Text(
-                    stringResource(R.string.reader_setting_unavailable_short),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = WarmPageThemeValues.colors.textSecondary,
                 )
             }
         }
-    }
-    if (section.id == "top" || section.id == "reset") {
-        content()
-    } else {
-        Surface(
-            color = if (nested) WarmPageThemeValues.colors.surface else WarmPageThemeValues.colors.surfaceRaised,
-            shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
-            border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+    } else if (style == ReaderPreferenceSectionStyle.Flat) {
+        WarmSettingsSection(
+            title = if (chinese) section.chinese else section.english,
         ) {
-            Column(Modifier.padding(12.dp)) { content() }
+            settingsWithState.forEachIndexed { index, (setting, state) ->
+                if (index > 0) HorizontalDivider(color = theme.colors.divider)
+                ReaderCatalogSetting(
+                    setting,
+                    preferences,
+                    state,
+                    negativeLetterSpacingEnabled,
+                    chinese,
+                    onUpdate,
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("reader-setting-section-${section.id}"),
+        ) {
+            Text(
+                text = if (chinese) section.chinese else section.english,
+                style = theme.typography.headline,
+                color = theme.colors.textPrimary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("reader-setting-section-heading-${section.id}")
+                    .padding(
+                        start = theme.components.settings.horizontalInset,
+                        end = theme.components.settings.horizontalInset,
+                        bottom = theme.components.settings.sectionHeaderBottomSpacing,
+                    )
+                    .semantics { heading() },
+            )
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("reader-setting-section-card-${section.id}"),
+                shape = RoundedCornerShape(theme.radii.task),
+                color = theme.colors.surfaceRaised,
+                border = BorderStroke(theme.components.dividerThickness, theme.colors.divider),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+            ) {
+                Column {
+                    settingsWithState.forEachIndexed { index, (setting, state) ->
+                        if (index > 0) WarmSettingsDivider()
+                        ReaderCatalogSetting(
+                            setting,
+                            preferences,
+                            state,
+                            negativeLetterSpacingEnabled,
+                            chinese,
+                            onUpdate,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1270,15 +1353,24 @@ private fun ReaderCatalogSetting(
     negativeLetterSpacingEnabled: Boolean,
     chinese: Boolean,
     onUpdate: (ReaderPreferences) -> Unit,
-    showUnavailableHint: Boolean,
 ) {
+    val theme = WarmPageThemeValues
     val label = if (chinese) setting.chinese else setting.english
     val value = setting.value(preferences)
+    var choiceSheetVisible by remember(setting.id) { mutableStateOf(false) }
     val available = state.availability == ReaderControlAvailability.Available
-    val fixedSwipe = setting.id == "swipePageTurn" && !available
+    val fixedSwipe = setting.id == "swipePageTurn" &&
+        state.availability == ReaderControlAvailability.NotImplemented &&
+        state.reasonId == "notImplemented"
+    val selectedValueLabel = setting.options.firstOrNull { option ->
+        option.value == value ||
+            option.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true
+    }?.let { option -> if (chinese) option.chinese else option.english } ?: value
     val unavailableReason = state.reasonId?.let(
         com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get,
     )
+    val unavailableMessage = unavailableReason?.let { if (chinese) it.chinese else it.english }
+        ?: stringResource(R.string.reader_setting_unavailable_short)
     fun change(value: String) {
         var updated = setting.change(preferences, value)
         if (setting.id == "theme") updated = updated.copy(appearance = updated.appearance.copy(themeMode = ReaderThemeMode.Manual))
@@ -1286,37 +1378,107 @@ private fun ReaderCatalogSetting(
     }
     Column(
         Modifier.fillMaxWidth().testTag("reader-setting-${setting.id}"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
     ) {
+        if (!available) {
+            val status = when {
+                fixedSwipe -> stringResource(R.string.reader_setting_always_on)
+                state.availability == ReaderControlAvailability.NotImplemented ->
+                    stringResource(R.string.reader_setting_not_adjustable)
+                else -> stringResource(R.string.reader_setting_temporarily_unavailable)
+            }
+            val explanation = when {
+                fixedSwipe -> stringResource(R.string.reader_setting_swipe_always_on_explanation)
+                state.availability == ReaderControlAvailability.NotImplemented ->
+                    stringResource(R.string.reader_setting_not_adjustable_explanation)
+                else -> unavailableMessage
+            }
+            WarmSettingsValueRow(
+                label = label,
+                value = status,
+                supporting = explanation,
+                modifier = Modifier
+                    .testTag("reader-setting-readonly-${setting.id}")
+                    .semantics(mergeDescendants = true) {},
+            )
+            return@Column
+        }
         when (setting.kind) {
-            "action" -> OutlinedButton(
-                { onUpdate(resetReaderPreferences()) },
-                Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
-            ) { Text(label) }
-            "toggle" -> Surface(
-                color = WarmPageThemeValues.colors.surface,
-                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+            "action" -> TextButton(
+                onClick = { onUpdate(resetReaderPreferences()) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = theme.components.controls.minimumTouchTarget),
             ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                    val checked = value == "true" || value == "system"
-                    Switch(checked = fixedSwipe || available && checked, onCheckedChange = {
-                        change(if (setting.id == "themeMode") { if (it) "system" else "manual" } else it.toString())
-                    }, enabled = available)
-                }
+                Text(
+                    text = label,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = theme.typography.button,
+                    color = theme.colors.textSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Start,
+                )
+            }
+            "toggle" -> {
+                val checked = value == "true" || value == "system"
+                WarmSettingsSwitchRow(
+                    label = label,
+                    checked = checked,
+                    modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
+                    onCheckedChange = {
+                        change(if (setting.id == "themeMode") {
+                            if (it) "system" else "manual"
+                        } else it.toString())
+                    },
+                )
             }
             "number" -> ReaderNumberSetting(setting, label, value.toDouble(), available, ::change)
             else -> {
                 if (setting.id == "theme") {
+                    Text(
+                        text = label,
+                        style = theme.typography.body,
+                        color = theme.colors.textPrimary,
+                        modifier = Modifier.padding(horizontal = theme.spacing.two),
+                    )
                     ReaderThemeChoices(setting, value, chinese, available, ::change)
+                } else if (
+                    setting.options.size > 4 ||
+                    setting.options.any { option ->
+                        val optionLabel = if (chinese) option.chinese else option.english
+                        optionLabel.length > 16
+                    }
+                ) {
+                    WarmSettingsValueRow(
+                        label = label,
+                        value = selectedValueLabel,
+                        modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
+                        onClick = { choiceSheetVisible = true },
+                        enabled = available,
+                    )
+                    if (choiceSheetVisible) {
+                        WarmSettingsChoiceSheet(
+                            title = label,
+                            options = setting.options.map { option ->
+                                WarmSettingsChoice(
+                                    id = option.value,
+                                    value = option.value,
+                                    label = if (chinese) option.chinese else option.english,
+                                    enabled = setting.id != "letterSpacing" ||
+                                        option.value.toDouble() >= 0 || negativeLetterSpacingEnabled,
+                                )
+                            },
+                            selected = value,
+                            onSelect = ::change,
+                            onDismissRequest = { choiceSheetVisible = false },
+                        )
+                    }
                 } else {
-                    Text(label, style = MaterialTheme.typography.labelMedium, color = WarmPageThemeValues.colors.textSecondary)
+                    Text(
+                        text = label,
+                        style = theme.typography.body,
+                        color = theme.colors.textPrimary,
+                        modifier = Modifier.padding(horizontal = theme.spacing.two),
+                    )
                     WarmPageSegmentedControl(
                         options = setting.options.map { option ->
                             WarmPageChoice(
@@ -1330,28 +1492,24 @@ private fun ReaderCatalogSetting(
                         selected = value,
                         onSelect = ::change,
                         enabled = available,
+                        modifier = Modifier.padding(
+                            horizontal = theme.components.settings.horizontalInset,
+                        ).testTag("reader-setting-control-${setting.id}"),
                     )
                 }
                 if (setting.options.none { it.value == value || it.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true }) {
-                    Text(
-                        stringResource(R.string.reader_setting_saved_value, value),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = WarmPageThemeValues.colors.textSecondary,
+                    WarmSettingsInlineMessage(
+                        message = stringResource(R.string.reader_setting_saved_value, value),
                     )
                 }
             }
         }
-        if (fixedSwipe) Text(stringResource(R.string.reader_swipe_fixed), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
-        if (!available && !fixedSwipe && showUnavailableHint) {
-            Text(
-                unavailableReason?.let { if (chinese) it.chinese else it.english }
-                    ?: stringResource(R.string.reader_setting_unavailable_short),
-                style = MaterialTheme.typography.bodySmall,
-                color = WarmPageThemeValues.colors.textSecondary,
-            )
+        if (setting.id == "letterSpacing" && !negativeLetterSpacingEnabled) {
+            WarmSettingsInlineMessage(stringResource(R.string.reader_negative_spacing_retained))
         }
-        if (setting.id == "letterSpacing" && !negativeLetterSpacingEnabled) Text(stringResource(R.string.reader_negative_spacing_retained), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
-        if (setting.id == "fontFamily") Text(stringResource(R.string.reader_font_mapping), style = MaterialTheme.typography.bodySmall, color = WarmPageThemeValues.colors.textSecondary)
+        if (setting.id == "fontFamily") {
+            WarmSettingsInlineMessage(stringResource(R.string.reader_font_mapping))
+        }
     }
 }
 
@@ -1363,7 +1521,12 @@ private fun ReaderThemeChoices(
     available: Boolean,
     onChange: (String) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = WarmPageThemeValues.components.settings.horizontalInset),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+    ) {
         setting.options.forEach { option ->
             val selected = option.value == value
             val label = if (chinese) option.chinese else option.english
@@ -1416,64 +1579,73 @@ private fun ReaderNumberSetting(
     available: Boolean,
     onChange: (String) -> Unit,
 ) {
+    val theme = WarmPageThemeValues
     if (setting.id.endsWith("PageWidth")) {
         var sliderValue by remember(number) { mutableFloatStateOf(number.toFloat()) }
-        Text(label, style = MaterialTheme.typography.labelMedium, color = WarmPageThemeValues.colors.textSecondary)
-        Surface(
-            color = WarmPageThemeValues.colors.surface,
-            shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-            border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+        Text(
+            text = label,
+            style = theme.typography.body,
+            color = theme.colors.textPrimary,
+            modifier = Modifier.padding(horizontal = theme.spacing.two),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = theme.components.settings.rowMinimumHeight)
+                .padding(horizontal = theme.spacing.two),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ReaderSlider(
-                    value = sliderValue,
-                    onValueChange = { sliderValue = it },
-                    onValueChangeFinished = { onChange(numberSettingValue(setting, sliderValue.toDouble())) },
-                    valueRange = setting.minimum.toFloat()..setting.maximum.toFloat(),
-                    steps = ((setting.maximum - setting.minimum) / setting.step).roundToInt().minus(1).coerceAtLeast(0),
-                    enabled = available,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics { contentDescription = label },
-                )
-                Text(
-                    "${sliderValue.roundToInt()} px",
-                    Modifier.width(64.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = WarmPageThemeValues.colors.textSecondary,
-                )
-            }
+            ReaderSlider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onChange(numberSettingValue(setting, sliderValue.toDouble())) },
+                valueRange = setting.minimum.toFloat()..setting.maximum.toFloat(),
+                steps = ((setting.maximum - setting.minimum) / setting.step).roundToInt().minus(1).coerceAtLeast(0),
+                enabled = available,
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { contentDescription = label },
+            )
+            Text(
+                "${sliderValue.roundToInt()} px",
+                Modifier.width(64.dp),
+                style = theme.typography.label,
+                color = theme.colors.textSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            )
         }
     } else {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = WarmPageThemeValues.colors.textSecondary)
-            Surface(
-                color = WarmPageThemeValues.colors.surface,
-                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { onChange(numberSettingValue(setting, number - setting.step)) },
-                        enabled = available && number > setting.minimum,
-                        modifier = Modifier.semantics { contentDescription = "${label} −" },
-                    ) { Icon(Icons.Default.Remove, null, Modifier.size(18.dp)) }
-                    Text(
-                        if (setting.id.endsWith("Zoom")) "${(number * 100).roundToInt()}%" else java.text.NumberFormat.getNumberInstance().format(number),
-                        Modifier.width(64.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = WarmPageThemeValues.colors.textPrimary,
-                    )
-                    IconButton(
-                        onClick = { onChange(numberSettingValue(setting, number + setting.step)) },
-                        enabled = available && number < setting.maximum,
-                        modifier = Modifier.semantics { contentDescription = "${label} +" },
-                    ) { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) }
-                }
-            }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 54.dp)
+                .padding(horizontal = theme.spacing.two),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
+        ) {
+            Text(
+                label,
+                Modifier.weight(1f),
+                style = theme.typography.body,
+                color = theme.colors.textPrimary,
+            )
+            IconButton(
+                onClick = { onChange(numberSettingValue(setting, number - setting.step)) },
+                enabled = available && number > setting.minimum,
+                modifier = Modifier.semantics { contentDescription = "${label} −" },
+            ) { Icon(Icons.Default.Remove, null, Modifier.size(theme.components.controls.iconSize)) }
+            Text(
+                if (setting.id.endsWith("Zoom")) "${(number * 100).roundToInt()}%" else java.text.NumberFormat.getNumberInstance().format(number),
+                Modifier.width(64.dp),
+                style = theme.typography.label,
+                color = theme.colors.textPrimary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            )
+            IconButton(
+                onClick = { onChange(numberSettingValue(setting, number + setting.step)) },
+                enabled = available && number < setting.maximum,
+                modifier = Modifier.semantics { contentDescription = "${label} +" },
+            ) { Icon(Icons.Default.Add, null, Modifier.size(theme.components.controls.iconSize)) }
         }
     }
 }
@@ -1718,26 +1890,35 @@ private fun ReaderSheet(
     title: Int,
     onDismiss: () -> Unit,
     snackbarHostState: SnackbarHostState? = null,
+    usePageTitle: Boolean = false,
     content: @Composable (ScrollState) -> Unit,
 ) {
-    WarmPageModalBottomSheet(onDismissRequest = onDismiss) {
+    val theme = WarmPageThemeValues
+    WarmPageModalBottomSheet(
+        onDismissRequest = onDismiss,
+        skipPartiallyExpanded = true,
+    ) {
         Box(Modifier.fillMaxWidth()) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = theme.spacing.two)
                     .testTag(READER_SHEET_TEST_TAG),
             ) {
-                ReaderSheetHeader(title, onDismiss)
-                content(rememberScrollState())
-                Spacer(Modifier.height(24.dp))
+                ReaderSheetHeader(title, onDismiss, usePageTitle)
+                Box(
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    content(rememberScrollState())
+                }
+                Spacer(Modifier.height(theme.spacing.six))
             }
             snackbarHostState?.let { hostState ->
                 WarmPageSnackbarHost(
                     hostState = hostState,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
                 )
             }
         }
@@ -1745,9 +1926,26 @@ private fun ReaderSheet(
 }
 
 @Composable
-private fun ReaderSheetHeader(title: Int, onDismiss: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+private fun ReaderSheetHeader(
+    title: Int,
+    onDismiss: () -> Unit,
+    usePageTitle: Boolean = false,
+) {
+    val theme = WarmPageThemeValues
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = theme.components.settings.rowMinimumHeight),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(title),
+            Modifier
+                .weight(1f)
+                .semantics { heading() },
+            style = if (usePageTitle) theme.typography.title else theme.typography.sectionTitle,
+            color = theme.colors.textPrimary,
+        )
         IconButton(onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.reader_done)) }
     }
 }
