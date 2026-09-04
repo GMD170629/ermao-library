@@ -22,7 +22,7 @@ from app.bootstrap.media import (
     media_resource_query,
     media_streaming,
 )
-from app.bootstrap.reader import reader_resource_service
+from app.bootstrap.reader import reader_resource_service, reader_v5_library_queries
 from app.contracts.media_capabilities import ReaderType, reader_type_for_format
 from app.core.authorization import (
     AuthorizationContext,
@@ -408,7 +408,11 @@ class SqlAlchemyOpdsCatalog:
             library = SqlAlchemyCatalogQueries(db)
             books = ListCatalogBooks(library)
             facets = ListCatalogFacets(library)
-            smart_shelves = GetSmartShelfBookIds(SqlAlchemyLibraryQueries(db))
+            smart_shelves = GetSmartShelfBookIds(
+                SqlAlchemyLibraryQueries(
+                    db, reader_queries=reader_v5_library_queries(db)
+                )
+            )
             shelves = SqlAlchemyCatalogShelfQueries(
                 db,
                 smart_book_ids=lambda rules, user_id: smart_shelves.execute(

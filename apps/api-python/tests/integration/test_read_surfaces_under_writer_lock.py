@@ -179,7 +179,7 @@ def test_get_surfaces_remain_read_only_while_writer_slot_is_held(
                     "/api/auth/me",
                     "/api/libraries",
                     "/api/books",
-                    "/api/reader/v4/resources/writer-lock-resource/bootstrap",
+                    "/api/reader/v5/resources/writer-lock-resource/bootstrap",
                 ):
                     started_at = monotonic()
                     response = client.get(path)

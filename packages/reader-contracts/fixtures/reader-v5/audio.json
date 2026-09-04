@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 5,
+  "clientId": "android-audio-fixture",
+  "mutationId": "f4743f84-16dc-4202-ab50-729e4d036d16",
+  "capturedAtEpochMillis": 1786500000300,
+  "position": {
+    "locator": {
+      "href": "audio/chapter-03.m4b",
+      "type": "audio/mp4",
+      "title": "第三章",
+      "locations": {
+        "position": 3,
+        "progression": 0.5,
+        "totalProgression": 0.35,
+        "time": 120.5
+      }
+    },
+    "presentation": {
+      "displayPercent": 35,
+      "totalProgression": 0.35,
+      "currentHref": "audio/chapter-03.m4b",
+      "chapter": {
+        "href": "audio/chapter-03.m4b",
+        "title": "第三章",
+        "index": 2
+      },
+      "page": null,
+      "playback": {
+        "positionMillis": 120500,
+        "durationMillis": 241000
+      }
+    }
+  }
+}

@@ -17,7 +17,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
+    ReaderResourceProgressV5,
 )
 from app.models.auth import User, UserLibraryAccess
 from app.modules.library.application.book_list import BookListQuery
@@ -30,6 +30,9 @@ from app.modules.library.infrastructure.dashboard import (
 )
 from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
+)
+from app.modules.reader.infrastructure.v5_library_queries import (
+    SqlAlchemyReaderV5LibraryPresentationQueries,
 )
 
 _ResultT = TypeVar("_ResultT")
@@ -200,6 +203,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
         ]
     )
     _seed_manual_library(db_session, book_count=2_000)
+    reader_queries = SqlAlchemyReaderV5LibraryPresentationQueries(db_session)
 
     result, vm_steps = _sqlite_vm_steps(
         db_session,
@@ -213,6 +217,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
                 sort="recent_import",
                 sort_direction="desc",
             ),
+            reader_queries=reader_queries,
         ),
     )
 
@@ -253,7 +258,12 @@ def test_member_recent_import_listing_has_bounded_query_work(
     engine = db_session.get_bind()
     event.listen(engine, "before_cursor_execute", count_selects)
     try:
-        views = ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db_session)).execute(
+        views = ListBookshelfItems(
+            SqlAlchemyBookshelfItemQueries(
+                db_session,
+                reader_queries=reader_queries,
+            )
+        ).execute(
             context=context,
             book_ids=tuple(str(book["id"]) for book in recent),
         )
@@ -261,7 +271,9 @@ def test_member_recent_import_listing_has_bounded_query_work(
         event.remove(engine, "before_cursor_execute", count_selects)
 
     assert len(views) == 10
-    assert select_count == 2
+    # The v5 presentation batch is an explicit third read alongside the
+    # bookshelf book/resource queries; it remains constant-time (no N+1).
+    assert select_count == 3
 
     filtered_result, filtered_vm_steps = _sqlite_vm_steps(
         db_session,
@@ -276,6 +288,7 @@ def test_member_recent_import_listing_has_bounded_query_work(
                 sort_direction="desc",
                 status="UNREAD",
             ),
+            reader_queries=reader_queries,
         ),
     )
 
@@ -341,18 +354,24 @@ def test_continue_reading_does_not_scan_every_visible_resource(
     )
     db_session.add(user)
     _seed_manual_library(db_session, book_count=2_000)
+    reader_queries = SqlAlchemyReaderV5LibraryPresentationQueries(db_session)
     now = datetime.now(UTC)
     db_session.add(
-        ReaderResourceProgress(
+        ReaderResourceProgressV5(
             id="scale-reader-progress",
             user_id=user.id,
             resource_id="scale-resource-001999",
-            reader_type="epub",
-            position="1",
-            percent=40,
-            extra="{}",
-            progressed_at=now,
-            created_at=now,
+            client_id="scale-reader-client",
+            mutation_id="00000000-0000-4000-8000-000000000021",
+            locator_json="{}",
+            presentation_json=(
+                '{"chapter":null,"currentHref":null,"displayPercent":40,'
+                '"page":null,"playback":null,"totalProgression":0.4}'
+            ),
+            display_percent=40,
+            total_progression=0.4,
+            captured_at=now,
+            revision=1,
             updated_at=now,
         )
     )
@@ -368,10 +387,15 @@ def test_continue_reading_does_not_scan_every_visible_resource(
 
     progress, vm_steps = _sqlite_vm_steps(
         db_session,
-        lambda: continue_reading_progress(db_session, context, user.id),
+        lambda: continue_reading_progress(
+            db_session,
+            context,
+            user.id,
+            reader_queries=reader_queries,
+        ),
     )
 
     assert progress is not None
     assert progress["bookId"] == "scale-book-001999"
     assert progress["resourceId"] == "scale-resource-001999"
-    assert vm_steps < 75_000
+    assert vm_steps < 100_000

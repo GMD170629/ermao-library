@@ -232,7 +232,7 @@ class KtorWorkManagementRepositoryTest {
 
         val request = harness.requests.single()
         assertEquals("PUT", request.method)
-        assertEquals("/base/api/reader/v4/resources/resource-1/reading-status", request.path)
+        assertEquals("/base/api/reader/v5/resources/resource-1/reading-status", request.path)
         assertEquals("{\"status\":\"FINISHED\"}", request.body)
         assertTrue(harness.requests.none { "/volumes" in it.path })
     }

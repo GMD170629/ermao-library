@@ -6,6 +6,7 @@ import type {
   ReaderKind,
   ReaderLifecycle,
   ReaderLocation,
+  ReaderPositionReport,
   ReaderNavigationEntry,
   ReaderOperationKind,
   ReaderPreferences
@@ -24,6 +25,7 @@ export type ReaderSessionState = {
   navigationItems: ReaderNavigationEntry[];
   navigationReady: boolean;
   location: ReaderLocation | null;
+  position: ReaderPositionReport | null;
   percent: number;
   phase: string | null;
   paginationProgress: { completed: number; total: number; percent: number } | null;
@@ -69,6 +71,7 @@ export function createReaderSessionState(sessionId: string, preferences: ReaderP
     navigationItems: [],
     navigationReady: false,
     location: null,
+    position: null,
     percent: 0,
     phase: null,
     paginationProgress: null,
@@ -118,7 +121,7 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
       if (event.sessionId !== state.sessionId || !isCurrentOperation(state, event.operation)) return state;
       switch (event.type) {
         case 'ready':
-          return { ...state, lifecycle: 'ready', capabilities: event.capabilities, location: event.location, error: null, phase: null, paginationProgress: null };
+          return { ...state, lifecycle: 'ready', capabilities: event.capabilities, location: event.location, position: event.position ?? null, error: null, phase: null, paginationProgress: null };
         case 'capabilities-changed':
           return { ...state, capabilities: event.capabilities };
         case 'metadata-changed':
@@ -126,7 +129,7 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
         case 'navigation-changed':
           return { ...state, navigationItems: event.items, navigationReady: true };
         case 'location-changed':
-          return { ...state, location: event.location, percent: clampPercent(event.percent) };
+          return { ...state, location: event.location, position: event.position ?? state.position, percent: clampPercent(event.percent) };
         case 'phase-changed':
           return {
             ...state,
@@ -149,6 +152,6 @@ export function readerSessionReducer(state: ReaderSessionState, action: ReaderSe
       }
     }
     case 'session/dispose':
-      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, navigationItems: [], navigationReady: false, phase: null, paginationProgress: null };
+      return { ...state, lifecycle: 'disposed', capabilities: null, totalPages: null, navigationItems: [], navigationReady: false, location: null, position: null, phase: null, paginationProgress: null };
   }
 }

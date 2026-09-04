@@ -293,6 +293,41 @@ final class ContentDiscoveryUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Earthsea"].waitForExistence(timeout: 10))
     }
 
+    func testReturningFromWorkDetailKeepsLibraryVisibleAndInteractive() {
+        let app = XCUIApplication()
+        app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        defer { app.terminate() }
+
+        let libraryTab = app.buttons["tab-select-library"]
+        XCTAssertTrue(libraryTab.waitForExistence(timeout: 10))
+        libraryTab.tap()
+
+        let work = app.buttons["work.pride-and-prejudice"]
+        XCTAssertTrue(work.waitForExistence(timeout: 10))
+        work.tap()
+        let details = app.scrollViews.matching(identifier: "work.detail.screen")
+        XCTAssertTrue(details.firstMatch.waitForExistence(timeout: 10))
+        guard let detail = details.allElementsBoundByIndex.first(where: \.isHittable) else {
+            return XCTFail("The active work detail scroll view must be hittable")
+        }
+        detail.swipeUp()
+        detail.swipeUp()
+        detail.swipeUp()
+
+        guard let backButton = app.navigationBars.buttons.allElementsBoundByIndex.first(where: \.isHittable) else {
+            return XCTFail("The active work detail navigation bar must expose a back button")
+        }
+        backButton.tap()
+
+        let library = app.scrollViews["library.screen"]
+        XCTAssertTrue(library.waitForExistence(timeout: 10))
+        XCTAssertTrue(library.isHittable)
+        XCTAssertTrue(work.waitForExistence(timeout: 10))
+        XCTAssertTrue(work.isHittable)
+    }
+
     func testWorkWithoutDescriptionOrMediaChoiceShowsChaptersDirectly() throws {
         let app = XCUIApplication()
         app.launchEnvironment["ERMAO_UI_TEST_CONTENT_FIXTURE"] = "1"

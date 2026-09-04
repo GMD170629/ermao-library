@@ -1,6 +1,5 @@
 import ReadiumNavigator
 import SwiftUI
-@preconcurrency import ErmaoShared
 
 struct IosComicReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -20,29 +19,13 @@ struct IosComicReaderView: View {
                 if session.phase == .reading || session.phase == .background {
                     IosReaderControls(session: session, onClose: close)
                 }
-                if session.restoreWarning != nil {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Text("reader.restore.warning.message")
-                            Spacer()
-                            Button { session.dismissRestoreWarning() } label: { Image(systemName: "xmark") }
-                                .accessibilityLabel(Text("common.close"))
-                        }
-                        .padding()
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .padding()
-                    }
-                }
-                if let snapshot = session.remoteProgressSnapshot,
-                   let location = snapshot.locator as? ErmaoShared.ComicPublicationLocation {
+                if let snapshot = session.remoteProgressSnapshot {
                     IosPageRemoteProgressNotice(
                         snapshot: snapshot,
-                        position: String(
-                            format: String(localized: "reader.page.number.format"),
-                            Int(location.pageIndex) + 1
-                        ),
+                        position: snapshot.position.presentation.page.map {
+                            String(format: String(localized: "reader.page.number.format"), Int($0.number))
+                        } ?? String(format: "%d%%", Int(snapshot.position.presentation.displayPercent.rounded())),
+                        actionFailed: session.remoteProgressActionFailed,
                         onOpen: { Task { await session.goToRemoteProgress() } },
                         onClose: session.dismissRemoteProgressNotice
                     )
@@ -55,7 +38,6 @@ struct IosComicReaderView: View {
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .task {
             await session.open()
-            await session.verifyRestoredLocationAfterPresentation()
             UIApplication.shared.isIdleTimerDisabled = session.preferences.keepScreenAwake
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }

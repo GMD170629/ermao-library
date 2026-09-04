@@ -21,8 +21,6 @@ internal class AndroidReaderPublicationStore(
     namespace: ReaderSyncNamespace? = null,
     private val completedPublication: AndroidCompletedPublication? = null,
 ) {
-    private val obsoleteRangeCache = File(context.cacheDir, "reader/pdf-range-v3")
-    private val cacheRoot = context.cacheDir.canonicalFile
     private val publicationRoot = namespace?.let { value ->
         File(
             File(File(context.filesDir, PUBLICATION_DIRECTORY), sha256(readerAccountStorageKey(value))),
@@ -30,27 +28,9 @@ internal class AndroidReaderPublicationStore(
         )
     } ?: File(File(context.filesDir, PUBLICATION_DIRECTORY), "unscoped")
 
-    init {
-        removeLegacyHashedPublicationArtifacts(publicationRoot)
-    }
-
     /** Removes only a server/asset-attributed automatic replica, never Downloads or local imports. */
     suspend fun removeAutomaticReplica(resourceId: String, assetId: String) = withContext(Dispatchers.IO) {
         removeAutomaticReaderReplica(publicationRoot, resourceId, assetId)
-        if (obsoleteRangeCache.exists()) {
-            require(obsoleteRangeCache.canonicalFile.toPath().startsWith(cacheRoot.toPath()))
-            Files.walkFileTree(obsoleteRangeCache.toPath(), object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
-                override fun visitFile(path: java.nio.file.Path, attributes: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
-                    Files.delete(path)
-                    return java.nio.file.FileVisitResult.CONTINUE
-                }
-                override fun postVisitDirectory(path: java.nio.file.Path, error: java.io.IOException?): java.nio.file.FileVisitResult {
-                    if (error != null) throw error
-                    Files.delete(path)
-                    return java.nio.file.FileVisitResult.CONTINUE
-                }
-            })
-        }
     }
 
     suspend fun publishLocalEpub(
@@ -193,14 +173,6 @@ private fun publicationTooLargeFailure(): ReaderOpenFailure {
             ),
         ),
     )
-}
-
-internal fun removeLegacyHashedPublicationArtifacts(publicationRoot: File) {
-    publicationRoot.listFiles { file -> file.isFile && file.name.endsWith(".sha256") }
-        ?.forEach { sidecar ->
-            File(sidecar.parentFile, sidecar.name.removeSuffix(".sha256")).delete()
-            sidecar.delete()
-        }
 }
 
 internal fun isSafeComicArchiveEntryPath(name: String, isDirectory: Boolean): Boolean {

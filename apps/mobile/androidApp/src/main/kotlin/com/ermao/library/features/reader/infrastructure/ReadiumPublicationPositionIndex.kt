@@ -13,17 +13,22 @@ internal data class ReflowablePositionPoint(
 /** One authoritative index for Android reflowable progress display and seeking. */
 internal class ReadiumPublicationPositionIndex private constructor(
     private val entries: List<Entry>,
+    private val orderedResourceKeys: List<String>,
 ) {
     private val points = entries.map(Entry::point)
 
     fun totalProgression(locator: Locator): Double? {
-        locator.locations.totalProgression?.let { return it.coerceIn(0.0, 1.0) }
-        return resolveReflowableTotalProgression(
+        resolveReflowableTotalProgression(
             resourceKey = locator.href.toString(),
             progression = locator.locations.progression,
             position = locator.locations.position,
             points = points,
-        )
+        )?.let { return it }
+        val resourceKey = normalizeResourceKey(locator.href.toString())
+        val index = orderedResourceKeys.indexOf(resourceKey).takeIf { it >= 0 } ?: return null
+        val withinResource = locator.locations.progression?.coerceIn(0.0, 1.0) ?: 0.0
+        return ((index + withinResource) / orderedResourceKeys.size.coerceAtLeast(1))
+            .coerceIn(0.0, 1.0)
     }
 
     fun nearestLocator(totalProgression: Double): Locator? = nearestReflowablePositionIndex(
@@ -32,9 +37,12 @@ internal class ReadiumPublicationPositionIndex private constructor(
     )?.let(entries::get)?.locator
 
     companion object {
-        val Empty = ReadiumPublicationPositionIndex(emptyList())
+        val Empty = ReadiumPublicationPositionIndex(emptyList(), emptyList())
 
-        fun from(positions: List<Locator>): ReadiumPublicationPositionIndex = ReadiumPublicationPositionIndex(
+        fun from(
+            positions: List<Locator>,
+            orderedResourceKeys: List<String> = emptyList(),
+        ): ReadiumPublicationPositionIndex = ReadiumPublicationPositionIndex(
             entries = positions.mapNotNull { locator ->
                 val total = locator.locations.totalProgression ?: return@mapNotNull null
                 Entry(
@@ -47,6 +55,7 @@ internal class ReadiumPublicationPositionIndex private constructor(
                     ),
                 )
             },
+            orderedResourceKeys = orderedResourceKeys.map(::normalizeResourceKey),
         )
     }
 

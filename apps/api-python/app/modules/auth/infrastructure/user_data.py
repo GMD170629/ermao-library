@@ -12,7 +12,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.dml import Delete, Update
 
 from app.core.sql_batches import sqlite_parameter_chunks
-from app.models import BookDetailPreference, LibraryOperation, ReaderResourceProgress
+from app.models import (
+    BookDetailPreference,
+    LibraryOperation,
+    ReaderBookmarkV5,
+    ReaderProgressMutationV5,
+    ReaderResourceProgress,
+    ReaderResourceProgressV5,
+    ReaderResourceReadingStatusV5,
+)
 from app.models.auth import (
     PasswordResetToken,
     ReaderBookmark,
@@ -224,6 +232,10 @@ def prepare_personal_user_deletion(
         ReaderBookmark,
         BookDetailPreference,
         ReaderResourceProgress,
+        ReaderResourceProgressV5,
+        ReaderProgressMutationV5,
+        ReaderResourceReadingStatusV5,
+        ReaderBookmarkV5,
         ReaderProgressCursor,
         ReaderBookPreference,
         ReaderPreference,

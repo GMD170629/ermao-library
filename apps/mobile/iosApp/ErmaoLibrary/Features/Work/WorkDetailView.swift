@@ -136,6 +136,10 @@ private struct WorkDetailFeedback: Identifiable, Equatable {
     let isError: Bool
 }
 
+// Keep the existing chapter, page, and track preview implementation available
+// while the product surface is temporarily hidden.
+private let resourcePreviewIsVisible = false
+
 struct WorkDetailView: View {
     let context: ContentRequestContext
     let client: any ContentClient
@@ -171,6 +175,7 @@ struct WorkDetailView: View {
     @State private var coverRefreshToken = 0
     @State private var downloadMenuRecord: ManagedDownloadRecord?
     @State private var pendingDownloadRemoval: ManagedDownloadRecord?
+    @State private var fullMetadataPath: String?
     @Environment(\.managementRevision) private var managementRevision
     @Environment(\.managementChange) private var managementChange
     @Environment(\.appTheme) private var theme
@@ -321,6 +326,14 @@ struct WorkDetailView: View {
         } message: {
             Text(readerAccessErrorMessage)
         }
+        .alert(
+            "work.metadata.filePath.fullTitle",
+            isPresented: fullMetadataPathIsPresented
+        ) {
+            Button("common.done", role: .cancel) { fullMetadataPath = nil }
+        } message: {
+            Text(fullMetadataPath ?? "")
+        }
     }
 
     private var downloadDialogScreen: some View {
@@ -415,6 +428,13 @@ struct WorkDetailView: View {
         Binding(
             get: { pendingDownloadRemoval != nil },
             set: { if !$0 { pendingDownloadRemoval = nil } }
+        )
+    }
+
+    private var fullMetadataPathIsPresented: Binding<Bool> {
+        Binding(
+            get: { fullMetadataPath != nil },
+            set: { if !$0 { fullMetadataPath = nil } }
         )
     }
 
@@ -1311,78 +1331,80 @@ struct WorkDetailView: View {
                 Button("work.contents.openChildren") { openContent(.directory(sourceNodeID: node.sourceNodeID)) }
                     .frame(minHeight: .iosMinimumTouchTarget)
             }
-            HStack(alignment: .firstTextBaseline) {
-                Text(resourceDetailTitle(resource)).appTextStyle(.sectionTitle)
-                Spacer()
-                if let page = store.resourceDetailPage {
-                    Text(String(
-                        format: String(localized: "work.resource.units.count.format"),
-                        locale: locale,
-                        page.total
-                    ))
-                    .appTextStyle(.label)
-                    .foregroundStyle(theme.textSecondary)
-                }
-            }
-            Text("\(resource.title) · \(resource.formatLabel)")
-                .appTextStyle(.caption)
-                .foregroundStyle(theme.textSecondary)
-                .padding(.top, .spaceHalf)
-                .padding(.bottom, .space1)
-
-            if let page = store.resourceDetailPage {
-                if page.units.isEmpty {
-                    Text("work.resource.units.empty")
-                        .appTextStyle(.body)
-                        .foregroundStyle(theme.textTertiary)
-                        .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
-                } else {
-                    if resource.readerType.lowercased() == "comic" || resource.readerType.lowercased() == "pdf" {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(
-                                    .adaptive(
-                                        minimum: BookCoverLayout.horizontalCardWidth,
-                                        maximum: BookCoverLayout.horizontalCardWidth
-                                    ),
-                                    spacing: .space2,
-                                    alignment: .top
-                                )
-                            ],
-                            alignment: .leading,
-                            spacing: .space2
-                        ) {
-                            ForEach(page.units) { unit in
-                                resourcePageTile(unit, detail: detail)
-                            }
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach(Array(page.units.enumerated()), id: \.element.id) { index, unit in
-                                resourceUnitRow(
-                                    unit,
-                                    displayIndex: (page.page - 1) * page.pageSize + index + 1,
-                                    detail: detail
-                                )
-                                Divider().overlay(theme.divider.opacity(0.72))
-                            }
-                        }
-                    }
-                    if page.totalPages > 1 {
-                        paginationRow(page: page.page, totalPages: page.totalPages, action: store.selectResourceDetailPage)
-                            .padding(.top, .space2)
-                    }
-                }
-            } else if store.isLoadingContentBrowser {
-                HStack(spacing: .space1) {
-                    ProgressView()
-                    Text("common.loading")
-                        .appTextStyle(.body)
+            if resourcePreviewIsVisible {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(resourceDetailTitle(resource)).appTextStyle(.sectionTitle)
+                    Spacer()
+                    if let page = store.resourceDetailPage {
+                        Text(String(
+                            format: String(localized: "work.resource.units.count.format"),
+                            locale: locale,
+                            page.total
+                        ))
+                        .appTextStyle(.label)
                         .foregroundStyle(theme.textSecondary)
+                    }
                 }
-                .frame(maxWidth: .infinity, minHeight: 112, alignment: .center)
-            } else if store.contentBrowserFailed {
-                contentBrowserRetry
+                Text("\(resource.title) · \(resource.formatLabel)")
+                    .appTextStyle(.caption)
+                    .foregroundStyle(theme.textSecondary)
+                    .padding(.top, .spaceHalf)
+                    .padding(.bottom, .space1)
+
+                if let page = store.resourceDetailPage {
+                    if page.units.isEmpty {
+                        Text("work.resource.units.empty")
+                            .appTextStyle(.body)
+                            .foregroundStyle(theme.textTertiary)
+                            .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
+                    } else {
+                        if resource.readerType.lowercased() == "comic" || resource.readerType.lowercased() == "pdf" {
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(
+                                        .adaptive(
+                                            minimum: BookCoverLayout.horizontalCardWidth,
+                                            maximum: BookCoverLayout.horizontalCardWidth
+                                        ),
+                                        spacing: .space2,
+                                        alignment: .top
+                                    )
+                                ],
+                                alignment: .leading,
+                                spacing: .space2
+                            ) {
+                                ForEach(page.units) { unit in
+                                    resourcePageTile(unit, detail: detail)
+                                }
+                            }
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(Array(page.units.enumerated()), id: \.element.id) { index, unit in
+                                    resourceUnitRow(
+                                        unit,
+                                        displayIndex: (page.page - 1) * page.pageSize + index + 1,
+                                        detail: detail
+                                    )
+                                    Divider().overlay(theme.divider.opacity(0.72))
+                                }
+                            }
+                        }
+                        if page.totalPages > 1 {
+                            paginationRow(page: page.page, totalPages: page.totalPages, action: store.selectResourceDetailPage)
+                                .padding(.top, .space2)
+                        }
+                    }
+                } else if store.isLoadingContentBrowser {
+                    HStack(spacing: .space1) {
+                        ProgressView()
+                        Text("common.loading")
+                            .appTextStyle(.body)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 112, alignment: .center)
+                } else if store.contentBrowserFailed {
+                    contentBrowserRetry
+                }
             }
         }
     }
@@ -1640,13 +1662,13 @@ struct WorkDetailView: View {
     }
 
     private func selectedResourceMetadata(_ resource: BookResource) -> some View {
-        let rows: [(LocalizedStringKey, String?)] = [
-            ("work.metadata.format", resource.formatLabel),
-            ("work.metadata.language", resource.language),
-            ("work.metadata.published", formattedMetadataDate(resource.publishedAt)),
-            ("work.metadata.pages", resource.pageCount.map(String.init)),
-            ("work.metadata.source", resource.metadataSource),
-            ("work.metadata.filePath", resource.assets.first?.path),
+        let rows: [(LocalizedStringKey, String?, Bool)] = [
+            ("work.metadata.format", resource.formatLabel, false),
+            ("work.metadata.language", resource.language, false),
+            ("work.metadata.published", formattedMetadataDate(resource.publishedAt), false),
+            ("work.metadata.pages", resource.pageCount.map(String.init), false),
+            ("work.metadata.source", resource.metadataSource, false),
+            ("work.metadata.filePath", resource.assets.first?.path, true),
         ]
         return VStack(alignment: .leading, spacing: 0) {
             Text("work.metadata.title")
@@ -1655,15 +1677,21 @@ struct WorkDetailView: View {
                 .foregroundStyle(theme.textSecondary)
                 .padding(.bottom, .space1)
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                let value = metadataValue(row.1)
                 HStack(alignment: .firstTextBaseline, spacing: .space2) {
                     Text(row.0).appTextStyle(.caption).foregroundStyle(theme.textSecondary)
                     Spacer(minLength: .space1)
-                    Text(metadataValue(row.1))
+                    Text(value)
                         .appTextStyle(.callout)
                         .multilineTextAlignment(.trailing)
-                        .lineLimit(2)
+                        .lineLimit(row.2 ? 1 : 2)
+                        .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, minHeight: .iosMinimumTouchTarget)
+                .contentShape(Rectangle())
+                .onLongPressGesture {
+                    if row.2, value != "—" { fullMetadataPath = value }
+                }
                 Divider().overlay(theme.divider.opacity(0.72))
             }
         }

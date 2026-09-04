@@ -44,7 +44,7 @@ private struct AudioBootstrapFailure: Error, Equatable, Sendable {
     let recoverable: Bool
 }
 
-/// Shared Reader v4 bootstrap plus the validated audio projection. Keeping
+/// Shared Reader v5 bootstrap plus the validated audio projection. Keeping
 /// both values together lets the progress owner reuse the exact Reader target
 /// and remote snapshot instead of inventing a parallel protocol.
 @MainActor
@@ -150,27 +150,42 @@ final class SwitchingKmpAudioMediaStreamAdapter: AudioMediaStreamAdapter, AudioS
     }
 }
 
-/// Adapter for the existing Reader v4 local-first progress database and sync
-/// outbox. Native code only maps projections; cadence, conflict and retry
-/// policy remain owned by KMP.
+/// Adapter for the Reader v5 local-first position database and latest-only
+/// outbox. Cadence, idempotent retry and acknowledgement remain owned by KMP.
 @MainActor
-final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguring {
+final class KmpAudioProgressAdapter: AudioRemoteProgressAdapter, AudioSessionConfiguring {
     private final class ProgressContext {
         let namespace: String
+        let bookID: String
         let resourceID: String
-        let runtime: ErmaoShared.ReaderProgressSyncRuntime
+        let runtime: ErmaoShared.ReaderPositionSyncRuntime
         let progressSession: ErmaoShared.AudioProgressSession
+        let publication: ErmaoShared.AudioPublication
+        let target: ErmaoShared.ReaderProgressSyncTarget
+        let server: ErmaoShared.ReaderPositionServerPort
+        let clientID: String
+        var etag: String?
 
         init(
             namespace: String,
+            bookID: String,
             resourceID: String,
-            runtime: ErmaoShared.ReaderProgressSyncRuntime,
-            progressSession: ErmaoShared.AudioProgressSession
+            runtime: ErmaoShared.ReaderPositionSyncRuntime,
+            progressSession: ErmaoShared.AudioProgressSession,
+            publication: ErmaoShared.AudioPublication,
+            target: ErmaoShared.ReaderProgressSyncTarget,
+            server: ErmaoShared.ReaderPositionServerPort,
+            clientID: String
         ) {
             self.namespace = namespace
+            self.bookID = bookID
             self.resourceID = resourceID
             self.runtime = runtime
             self.progressSession = progressSession
+            self.publication = publication
+            self.target = target
+            self.server = server
+            self.clientID = clientID
         }
     }
 
@@ -179,6 +194,7 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
     private var session: IosAudioSessionContext?
     private var activeContext: ProgressContext?
     private var preparedContext: ProgressContext?
+    var remoteSnapshotHandler: ((ErmaoShared.ReaderProgressSnapshotV5?) -> Void)?
 
     init(cookieStore: KeychainCookiePayloadStore) {
         self.cookieStore = cookieStore
@@ -190,30 +206,42 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
         closeAllContexts()
     }
 
-    func configure(bootstrap: AudioBootstrapEnvelope) async -> ErmaoShared.AudioReaderLocation? {
+    func configure(bootstrap: AudioBootstrapEnvelope) async throws -> ErmaoShared.AudioReaderLocation? {
         guard let context = prepareProgress(
             bookID: bootstrap.publication.bookId,
             resourceID: bootstrap.publication.resource.resourceId,
-            remoteSnapshot: bootstrap.remoteSnapshot
-        ) else { return nil }
-        let restored = try? await context.progressSession.restore(
             publication: bootstrap.publication,
             remoteSnapshot: bootstrap.remoteSnapshot
-        )
+        ) else { return nil }
+        let restored: ErmaoShared.AudioReaderLocation?
+        do {
+            restored = try await context.progressSession.restore(
+                publication: bootstrap.publication,
+                remoteSnapshot: bootstrap.remoteSnapshot
+            )
+        } catch {
+            throw AudioAdapterError.locationRestoreFailed
+        }
         guard preparedContext === context || activeContext === context else { return nil }
         return restored
     }
 
-    func configureLocal(publication: ErmaoShared.AudioPublication) async -> ErmaoShared.AudioReaderLocation? {
+    func configureLocal(publication: ErmaoShared.AudioPublication) async throws -> ErmaoShared.AudioReaderLocation? {
         guard let context = prepareProgress(
             bookID: publication.bookId,
             resourceID: publication.resource.resourceId,
-            remoteSnapshot: nil
-        ) else { return nil }
-        let restored = try? await context.progressSession.restore(
             publication: publication,
             remoteSnapshot: nil
-        )
+        ) else { return nil }
+        let restored: ErmaoShared.AudioReaderLocation?
+        do {
+            restored = try await context.progressSession.restore(
+                publication: publication,
+                remoteSnapshot: nil
+            )
+        } catch {
+            throw AudioAdapterError.locationRestoreFailed
+        }
         guard preparedContext === context || activeContext === context else { return nil }
         return restored
     }
@@ -242,7 +270,8 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
     private func prepareProgress(
         bookID: String,
         resourceID: String,
-        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+        publication: ErmaoShared.AudioPublication,
+        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
     ) -> ProgressContext? {
         guard let retainedSession = session else { return nil }
         if let activeContext,
@@ -274,11 +303,11 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
         )
         do {
             let database = try IosReaderLocalDatabase(identity: localIdentity)
-            let server = ErmaoShared.IosCompositionKt.createIosReaderProgressSyncPort(
+            let server = ErmaoShared.IosCompositionKt.createIosReaderPositionSyncPort(
                 cookieStore: cookieStore,
                 profile: retainedSession.sharedProfile
             )
-            let runtime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+            let runtime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
                 stateStore: database,
                 target: target,
                 server: server
@@ -299,9 +328,14 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
             )
             let context = ProgressContext(
                 namespace: retainedSession.namespaceKey,
+                bookID: bookID,
                 resourceID: resourceID,
                 runtime: runtime,
-                progressSession: progressSession
+                progressSession: progressSession,
+                publication: publication,
+                target: target,
+                server: server,
+                clientID: deviceIdentity.stableDeviceId()
             )
             preparedContext = context
             return context
@@ -312,8 +346,8 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
 
     func save(_ effect: ErmaoShared.AudioPlaybackEffect) async throws {
         guard effect.type == .saveprogress,
-              let asset = effect.asset,
-              let reason = effect.progressReason else {
+              effect.asset != nil,
+              effect.progressReason != nil else {
             throw AudioCompositionError.invalidBootstrap
         }
         guard let namespace = effect.namespaceKey,
@@ -325,25 +359,77 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
         guard let context else {
             throw AudioCompositionError.unauthenticated
         }
-        _ = try await context.progressSession.save(
-            assetId: asset.assetId,
-            chapterId: effect.chapterId,
-            positionMillis: effect.positionMillis,
-            durationMillis: effect.durationMillis,
-            reason: reason
-        )
+        // Preserve the complete same-event presentation (publication-wide
+        // progression, chapter/index and engine href) owned by the shared
+        // audio adapter. Reconstructing the call from a subset would reduce
+        // every multi-track book to per-track progress.
+        try await context.progressSession.save(effect: effect)
+        remoteSnapshotHandler?(context.runtime.coordinator.remotePositionNotice()?.snapshot)
+        if let local = try await context.runtime.store.load(resourceId: resourceID) {
+            ReaderProgressPresentationCenter.shared.publish(
+                namespaceKey: namespace,
+                bookID: context.bookID,
+                resourceID: resourceID,
+                position: local.position,
+                capturedAtEpochMillis: local.capturedAtEpochMillis
+            )
+        }
     }
 
     func flush(namespace: String) async {
         guard session?.namespaceKey == namespace else { return }
         if let activeContext, activeContext.namespace == namespace {
+            try? await activeContext.runtime.store.retryPendingUpload()
             try? await activeContext.runtime.store.awaitPendingUpload()
         }
         if let preparedContext,
            preparedContext !== activeContext,
            preparedContext.namespace == namespace {
+            try? await preparedContext.runtime.store.retryPendingUpload()
             try? await preparedContext.runtime.store.awaitPendingUpload()
         }
+    }
+
+    func checkForRemoteProgress() async {
+        guard let context = activeContext else { return }
+        let result: ErmaoShared.ReaderPositionQueryResult
+        do {
+            result = try await context.server.load(target: context.target, etag: context.etag)
+        } catch {
+            return
+        }
+        if let current = result as? ErmaoShared.ReaderPositionQueryResultCurrent {
+            context.etag = current.etag
+            guard let snapshot = current.snapshot else { return }
+            _ = try? await context.runtime.coordinator.observeRemotePosition(
+                snapshot: snapshot,
+                currentClientId: context.clientID
+            )
+            remoteSnapshotHandler?(context.runtime.coordinator.remotePositionNotice()?.snapshot)
+        } else if let unchanged = result as? ErmaoShared.ReaderPositionQueryResultUnchanged {
+            context.etag = unchanged.etag ?? context.etag
+        }
+    }
+
+    func dismissRemoteProgress() {
+        activeContext?.runtime.coordinator.dismissRemotePositionNotice()
+        remoteSnapshotHandler?(nil)
+    }
+
+    func remoteLocation(
+        for snapshot: ErmaoShared.ReaderProgressSnapshotV5
+    ) async throws -> ErmaoShared.AudioReaderLocation {
+        guard let context = activeContext else { throw AudioCompositionError.unauthenticated }
+        return try await context.progressSession.remoteLocation(
+            publication: context.publication,
+            snapshot: snapshot
+        )
+    }
+
+    func acceptRemote(_ snapshot: ErmaoShared.ReaderProgressSnapshotV5) async throws {
+        guard let context = activeContext else { throw AudioCompositionError.unauthenticated }
+        try await context.progressSession.acceptRemote(snapshot: snapshot, clientId: context.clientID)
+        remoteSnapshotHandler?(nil)
     }
 
     private func matchingContext(namespace: String, resourceID: String) -> ProgressContext? {
@@ -376,6 +462,7 @@ final class KmpAudioProgressAdapter: AudioProgressAdapter, AudioSessionConfiguri
         activeContext?.runtime.close()
         preparedContext = nil
         activeContext = nil
+        remoteSnapshotHandler?(nil)
     }
 }
 

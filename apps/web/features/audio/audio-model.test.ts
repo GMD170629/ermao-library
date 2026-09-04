@@ -7,8 +7,9 @@ import type { AudioPlaybackState } from './types';
 const payload = {
   ok: true,
   data: {
-    schemaVersion: 4,
+    schemaVersion: 5,
     userId: 'user-1',
+    resourceUrl: '/api/reader/v5/resources/resource-1/publication',
     readerType: 'audio',
     book: { id: 'book-1', title: '有声书', author: '作者' },
     resource: { id: 'resource-1', bookId: 'book-1', title: '第一资源', sortOrder: 0, durationMs: 30_000, chapterCount: 1, resourceCompleted: false },
@@ -22,22 +23,34 @@ const payload = {
     ],
     units: [{ id: 'chapter-1', title: '第一章', assetId: 'asset-1', startMs: 0, endMs: 10_000, index: 0 }],
     progressSnapshot: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 3,
+      clientId: 'client-1',
+      mutationId: '00000000-0000-4000-8000-000000000001',
+      capturedAtEpochMillis: 90,
       receivedAtEpochMillis: 100,
-      displayPercent: 50,
-      locator: {
-        kind: 'audio',
-        assetId: 'asset-2',
-        positionMillis: 7_000
+      position: {
+        locator: {
+          href: '/api/assets/asset-2',
+          type: 'audio/mpeg',
+          locations: { position: 2, progression: 0.35, totalProgression: 0.5, time: 7 }
+        },
+        presentation: {
+          displayPercent: 50,
+          totalProgression: 0.5,
+          currentHref: 'asset-2',
+          chapter: null,
+          page: null,
+          playback: { positionMillis: 7_000, durationMillis: 20_000 }
+        }
       }
     }
   }
 };
 
-test('normalizes the resource-first Reader v4 audio bootstrap', () => {
+test('normalizes the resource-first Reader v5 audio bootstrap', () => {
   const bootstrap = normalizeAudioBootstrap(payload, 'resource-1');
-  assert.equal(bootstrap.schemaVersion, 4);
+  assert.equal(bootstrap.schemaVersion, 5);
   assert.equal(bootstrap.resource.id, 'resource-1');
   assert.deepEqual(bootstrap.availableResources.map((resource) => resource.id), ['resource-1', 'resource-2']);
   assert.equal(bootstrap.resumeLocation?.resourceId, 'resource-1');

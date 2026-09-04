@@ -45,8 +45,10 @@ def verify(root: Path) -> None:
         raise ValueError("Readium SwiftPM lock does not match the approved revision")
 
     mapper = (root / MAPPER).read_text(encoding="utf-8")
-    if re.findall(r'version: "readium-swift:([^"]+)"', mapper) != [VERSION]:
-        raise ValueError("Readium locator diagnostic version is stale")
+    if "locator.jsonString()" not in mapper:
+        raise ValueError("Reader v5 must serialize the public Readium Locator directly")
+    if "IosReaderExactLocatorCapture" in mapper or "readium-swift:" in mapper:
+        raise ValueError("Reader v5 must not wrap or reconcile the Readium Locator")
     policy = (root / POLICY).read_text(encoding="utf-8")
     if (
         f"iOS pins official Readium Swift Toolkit {VERSION} to revision `{REVISION}`"

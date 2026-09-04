@@ -21,6 +21,7 @@ from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
 def _field_contract(field: LibraryFilterFieldDefinition) -> dict[str, Any]:
@@ -116,6 +117,7 @@ def compile_filter_predicate(
     *,
     user_id: str | None = None,
     shelf_owner_user_id: str | None = None,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> tuple[ColumnElement[bool] | None, str | None]:
     normalized, error = normalize_filter_rules(rules)
     if error:
@@ -133,6 +135,7 @@ def compile_filter_predicate(
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=shelf_owner_user_id,
+                reader_queries=reader_queries,
                 library_roots=library_roots,
             ),
             None,
@@ -149,6 +152,7 @@ def compile_filter_rules(
     user_id: str | None = None,
     param_prefix: str = "smart_filter",
     shelf_owner_user_id: str | None = None,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> tuple[ColumnElement[bool] | None, dict[str, Any], str | None]:
     del alias, param_prefix
     predicate, error = compile_filter_predicate(
@@ -156,5 +160,6 @@ def compile_filter_rules(
         rules,
         user_id=user_id,
         shelf_owner_user_id=shelf_owner_user_id,
+        reader_queries=reader_queries,
     )
     return predicate, {}, error

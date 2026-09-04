@@ -22,7 +22,6 @@ from app.models import (
     LibraryFacet,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
-    ReaderResourceProgress,
 )
 from app.models.auth import User
 from app.modules.library.application.book_list import (
@@ -44,6 +43,7 @@ from app.modules.library.infrastructure.filter_query import (
     resolve_library_roots,
 )
 from app.modules.reader.public import (
+    ReaderV5LibraryPresentationQueryPort,
     ResourceReadingState,
     choose_continue_resource_id,
     completed_for_available_resources,
@@ -85,6 +85,7 @@ def _predicates(
     context: AuthorizationContext,
     user: User,
     query: BookListQuery,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> list[ColumnElement[bool]]:
     predicates: list[ColumnElement[bool]] = [
         LibraryBook.visibility_state == "VISIBLE",
@@ -111,7 +112,11 @@ def _predicates(
             )
         )
     if query.status:
-        predicates.append(reading_status_predicate(context, user.id, query.status))
+        predicates.append(
+            reading_status_predicate(
+                context, user.id, query.status, reader_queries=reader_queries
+            )
+        )
     if query.tag:
         predicates.append(
             exists(
@@ -153,6 +158,7 @@ def _predicates(
             context=context,
             user_id=user.id,
             shelf_owner_user_id=user.id,
+            reader_queries=reader_queries,
             library_roots=resolve_library_roots(db, query.filter_expression, context),
         )
         if dynamic is not None:
@@ -165,6 +171,7 @@ def _order(
     *,
     user: User,
     context: AuthorizationContext,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> list[ColumnElement[object]]:
     descending = (query.sort_direction or "").lower() == "desc" or (
         not query.sort_direction
@@ -199,21 +206,15 @@ def _order(
             ascending(LibraryBook.id),
         ]
     if query.sort == "recent_read":
-        latest_read_at = (
-            select(func.max(ReaderResourceProgress.updated_at))
-            .join(
-                LibraryReadableResource,
-                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
-            )
-            .where(
-                LibraryReadableResource.book_id == LibraryBook.id,
-                ReaderResourceProgress.user_id == user.id,
-                resource_visibility_predicate(context),
-            )
-            .correlate(LibraryBook)
-            .scalar_subquery()
+        latest_read_at = reader_queries.latest_read_at_expression(
+            context=context,
+            user_id=user.id,
+            book_id_expression=LibraryBook.id,
         )
-        return [direction(latest_read_at), ascending(LibraryBook.id)]
+        return [
+            direction(cast(ColumnElement[object], latest_read_at)),
+            ascending(LibraryBook.id),
+        ]
     if query.sort == "recent_import":
         return [direction(LibraryBook.created_at), direction(LibraryBook.id)]
     return [direction(LibraryBook.updated_at), direction(LibraryBook.id)]
@@ -225,6 +226,7 @@ def _resource_summaries(
     context: AuthorizationContext,
     user: User,
     book_ids: tuple[str, ...],
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, list[_ResourceSummary]]:
     if not book_ids:
         return {}
@@ -233,20 +235,11 @@ def _resource_summaries(
             LibraryReadableResource.book_id,
             LibraryReadableResource.id.label("resource_id"),
             LibraryReadableResourceMetadata.resource_index,
-            ReaderResourceProgress.percent,
-            ReaderResourceProgress.updated_at.label("progress_updated_at"),
         )
         .select_from(LibraryReadableResource)
         .outerjoin(
             LibraryReadableResourceMetadata,
             LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
-        )
-        .outerjoin(
-            ReaderResourceProgress,
-            and_(
-                ReaderResourceProgress.resource_id == LibraryReadableResource.id,
-                ReaderResourceProgress.user_id == user.id,
-            ),
         )
         .where(
             LibraryReadableResource.book_id.in_(book_ids),
@@ -258,15 +251,23 @@ def _resource_summaries(
             LibraryReadableResource.id.asc(),
         )
     ).all()
+    progress_by_resource = reader_queries.list_presentations(
+        user_id=user.id,
+        resource_ids=[str(row.resource_id) for row in rows],
+    )
     result: dict[str, list[_ResourceSummary]] = {book_id: [] for book_id in book_ids}
     for row in rows:
-        percent = min(100.0, max(0.0, float(row.percent or 0)))
+        progress = progress_by_resource.get(str(row.resource_id))
+        percent = min(
+            100.0,
+            max(0.0, float(progress.display_percent if progress else 0)),
+        )
         result[str(row.book_id)].append(
             _ResourceSummary(
                 resource_id=str(row.resource_id),
                 sort_order=int(row.resource_index or 0),
                 percent=percent,
-                last_read_at=row.progress_updated_at,
+                last_read_at=progress.updated_at if progress else None,
             )
         )
     return result
@@ -345,6 +346,7 @@ def _project_books(
     user: User,
     rows: list[tuple[LibraryBook, LibraryBookMetadata | None]],
     projection: str,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> list[dict[str, Any]]:
     book_ids = tuple(str(book.id) for book, _metadata in rows)
     cover_paths = SqlAlchemyBookCoverQueries(db).preferred_paths(book_ids)
@@ -364,6 +366,7 @@ def _project_books(
         context=context,
         user=user,
         book_ids=book_ids,
+        reader_queries=reader_queries,
     )
     tags_by_book = _tag_names(db, book_ids=book_ids)
     projected: list[dict[str, Any]] = []
@@ -415,9 +418,15 @@ def _project_books(
     return projected
 
 
-def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
+def list_books(
+    db: Session,
+    user: User,
+    query: BookListQuery,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
+) -> BookListResult:
     context = authorization_context(db, user)
-    predicates = _predicates(db, context, user, query)
+    predicates = _predicates(db, context, user, query, reader_queries)
     base = (
         select(LibraryBook, LibraryBookMetadata)
         .select_from(LibraryBook)
@@ -433,6 +442,7 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
                 query,
                 user=user,
                 context=context,
+                reader_queries=reader_queries,
             )
         )
         .limit(page_size)
@@ -447,6 +457,7 @@ def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
             user=user,
             rows=normalized_rows,
             projection=query.projection,
+            reader_queries=reader_queries,
         ),
         total=total,
         page=page,

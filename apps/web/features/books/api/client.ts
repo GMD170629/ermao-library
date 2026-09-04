@@ -83,6 +83,7 @@ export function mapReadableResourceView(value: unknown): ReadableResourceView | 
     return [{
       id: assetId,
       title: stringValue(asset.title, assetId),
+      path: nullableString(asset.path) ?? undefined,
       resourceId: assetResourceId,
       sourceNodeId: assetSourceNodeId,
       role,
@@ -636,7 +637,7 @@ export function assetDownloadUrl(assetId: string): string {
 }
 
 export async function updateResourceReadingStatus(resourceId: string, status: 'UNREAD' | 'FINISHED'): Promise<void> {
-  await apiJson(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/reading-status`, {
+  await apiJson(`/api/reader/v5/resources/${encodeURIComponent(resourceId)}/reading-status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status })

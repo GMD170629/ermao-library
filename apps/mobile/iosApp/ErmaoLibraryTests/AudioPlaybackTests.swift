@@ -273,8 +273,7 @@ final class AudioPlaybackRuntimeStateMachineTests: XCTestCase {
             restored: ErmaoShared.AudioReaderLocation(
                 assetId: envelope.publication.assets[0].assetId,
                 chapterId: nil,
-                positionMillis: 24_000,
-                engineLocator: nil
+                positionMillis: 24_000
             )
         )
         let engine = RuntimeFakeAudioEngine()
@@ -300,6 +299,24 @@ final class AudioPlaybackRuntimeStateMachineTests: XCTestCase {
         let seek = try XCTUnwrap(progress.saved.first(where: { $0.progressReason == .seek }))
         XCTAssertEqual(seek.positionMillis, 31_000)
         XCTAssertEqual(seek.durationMillis?.int64Value, 60_000)
+    }
+
+    func testInvalidV5AudioLocatorReportsLocationRestoreFailed() async throws {
+        let context = makeAudioTestContext()
+        let envelope = makeAudioEnvelope(resourceID: "resource-a", context: context)
+        let progress = RuntimeFakeProgressAdapter(configureError: .locationRestoreFailed)
+        let runtime = makeRuntime(
+            gateway: RuntimeFakeBootstrapGateway(envelopes: ["resource-a": envelope]),
+            progress: progress,
+            engine: RuntimeFakeAudioEngine(),
+            system: RuntimeFakeSystemMedia()
+        )
+        runtime.sessionDidChange(isAuthenticated: true, session: context)
+
+        runtime.launch(AudioLaunchIntent(resourceID: "resource-a", autoplay: false), namespace: context.namespaceKey)
+
+        try await waitUntil { runtime.snapshot.lifecycle == .error }
+        XCTAssertEqual(runtime.snapshot.recoverableError?.code, .locationRestoreFailed)
     }
 
     func testStopSavesLocallyBeforeTeardownAndNowPlayingClear() async throws {
@@ -331,6 +348,30 @@ final class AudioPlaybackRuntimeStateMachineTests: XCTestCase {
         XCTAssertLessThan(stopSave, teardown)
         XCTAssertLessThan(teardown, clear)
         XCTAssertEqual(runtime.snapshot.lifecycle, .idle)
+    }
+
+    func testShutdownFlushesPendingAudioProgressAfterNativeTeardown() async throws {
+        let context = makeAudioTestContext()
+        let envelope = makeAudioEnvelope(resourceID: "resource-a", context: context)
+        let progress = RuntimeFakeProgressAdapter()
+        let engine = RuntimeFakeAudioEngine()
+        let runtime = makeRuntime(
+            gateway: RuntimeFakeBootstrapGateway(envelopes: ["resource-a": envelope]),
+            progress: progress,
+            engine: engine,
+            system: RuntimeFakeSystemMedia()
+        )
+        runtime.sessionDidChange(isAuthenticated: true, session: context)
+        runtime.launch(AudioLaunchIntent(resourceID: "resource-a", autoplay: false), namespace: context.namespaceKey)
+        try await waitUntil { engine.pendingSourceID != nil }
+        let source = try XCTUnwrap(engine.pendingSourceID)
+        engine.emit(.prepared(sourceID: source, durationMillis: 60_000))
+        engine.confirmCommit()
+
+        await runtime.shutdown()
+
+        XCTAssertEqual(engine.teardownCount, 1)
+        XCTAssertEqual(progress.flushedNamespaces, [context.namespaceKey])
     }
 
     func testStopDuringInitialCommitWindowStillTearsDownNativeEngine() async throws {
@@ -670,6 +711,7 @@ private final class RuntimeFakeBootstrapGateway: AudioBootstrapGateway {
 private final class RuntimeFakeProgressAdapter: AudioProgressAdapter {
     let restored: ErmaoShared.AudioReaderLocation?
     let log: RuntimeAudioEventLog?
+    let configureError: AudioAdapterError?
     private(set) var saved: [ErmaoShared.AudioPlaybackEffect] = []
     private(set) var flushedNamespaces: [String] = []
     private(set) var committedResourceIDs: [String] = []
@@ -680,18 +722,22 @@ private final class RuntimeFakeProgressAdapter: AudioProgressAdapter {
 
     init(
         restored: ErmaoShared.AudioReaderLocation? = nil,
-        log: RuntimeAudioEventLog? = nil
+        log: RuntimeAudioEventLog? = nil,
+        configureError: AudioAdapterError? = nil
     ) {
         self.restored = restored
         self.log = log
+        self.configureError = configureError
     }
 
-    func configure(bootstrap: AudioBootstrapEnvelope) async -> ErmaoShared.AudioReaderLocation? {
-        restored
+    func configure(bootstrap: AudioBootstrapEnvelope) async throws -> ErmaoShared.AudioReaderLocation? {
+        if let configureError { throw configureError }
+        return restored
     }
 
-    func configureLocal(publication: ErmaoShared.AudioPublication) async -> ErmaoShared.AudioReaderLocation? {
-        restored
+    func configureLocal(publication: ErmaoShared.AudioPublication) async throws -> ErmaoShared.AudioReaderLocation? {
+        if let configureError { throw configureError }
+        return restored
     }
 
     func commitPrepared(resourceID: String, namespace: String) {

@@ -235,12 +235,14 @@ final class IosReaderComposition: ObservableObject {
         let result: ErmaoShared.ReaderBootstrapResult?
         let bootstrapFailure: IosReaderFailure?
         if opensVerifiedLocalArtifact {
-            // The original file is sufficient to open. Synchronization uses its
-            // own non-blocking ports below and must not delay an offline launch.
-            result = nil
+            // Publication bytes remain local, but a reachable v5 bootstrap is
+            // still the authoritative confirmed snapshot for the next open.
+            // Failure is non-fatal because verified local content and a durable
+            // pending v5 mutation must remain usable offline.
+            result = try? await gateway.load(request: bootstrapRequest)
             bootstrapFailure = nil
             Self.logger.notice(
-                "reader_start platform=ios format=local entry=download stage=bootstrap_skipped code=READER_LOCAL_CONTENT"
+                "reader_start platform=ios format=local entry=download stage=bootstrap_optional code=READER_LOCAL_CONTENT"
             )
         } else {
             do {
@@ -259,7 +261,7 @@ final class IosReaderComposition: ObservableObject {
         }
         let onlineBootstrap = (result as? ErmaoShared.ReaderBootstrapResultContent)?.value
         if let onlineBootstrap {
-            if let assetID = onlineBootstrap.resource.assetId {
+            if !opensVerifiedLocalArtifact, let assetID = onlineBootstrap.resource.assetId {
                 try await managedStore.removeAutomaticReplica(resourceID: request.resourceID, assetID: assetID,
                                                               namespace: request.context.namespaceKey)
             }
@@ -277,7 +279,7 @@ final class IosReaderComposition: ObservableObject {
         )
         let target: ErmaoShared.ReaderProgressSyncTarget
         let exactSourceFormat: ErmaoShared.ReaderSourceFormat
-        let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+        let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
         let source: ErmaoShared.ReaderSource
         if opensVerifiedLocalArtifact {
             if let launchArtifactFailure { throw launchArtifactFailure }
@@ -309,7 +311,7 @@ final class IosReaderComposition: ObservableObject {
             guard Self.hasCompleteReaderEngine(for: exactSourceFormat) else {
                 throw IosReaderFailure(code: .unsupportedFormat)
             }
-            remoteSnapshot = nil
+            remoteSnapshot = onlineBootstrap?.remoteSnapshot
             source = Self.sharedSource(existing)
         } else {
             guard let onlineBootstrap else {
@@ -342,42 +344,24 @@ final class IosReaderComposition: ObservableObject {
             bookId: target.bookId,
             resourceId: target.resourceId
         )
-        var progressStore: any ErmaoShared.ReaderProgressSyncingStore
+        var progressStore: any ErmaoShared.ReaderPositionSyncingStore
         let progressCoordination: IosReaderProgressSessionCoordination?
-        var sessionRemoteSnapshot = remoteSnapshot
+        let sessionRemoteSnapshot = remoteSnapshot
         do {
             let database = try IosReaderLocalDatabase(identity: localIdentity)
-            let serverPort = IosCompositionKt.createIosReaderProgressSyncPort(
+            let serverPort = IosCompositionKt.createIosReaderPositionSyncPort(
                 cookieStore: cookieStore,
                 profile: profile
             )
-            let progressRuntime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+            let progressRuntime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
                 stateStore: database,
                 target: target,
                 server: serverPort
             )
             progressStore = progressRuntime.store
-            if opensVerifiedLocalArtifact {
-                // Local content opens immediately. The same authenticated runtime
-                // recovers pending uploads and checks remote state after presentation.
-                sessionRemoteSnapshot = nil
-            } else {
-                let localProgress = try await database.load(resourceId: source.resourceId)
-                let durableState = try await database.loadSyncState()
-                let startupDecision = ErmaoShared.PublicKt.decidePendingVsServerStartup(
-                    localProgress: localProgress,
-                    durableState: durableState,
-                    remoteSnapshot: remoteSnapshot,
-                    openedSource: source
-                )
-                if startupDecision is ErmaoShared.PendingVsServerDecisionUseLocalPending {
-                    sessionRemoteSnapshot = nil
-                }
-                try await progressRuntime.coordinator.applyStartupDecision(
-                    target: target,
-                    decision: startupDecision
-                )
-            }
+            // The session resolves the fixed v5 priority: explicit target,
+            // durable local pending, server snapshot, then publication start.
+            // No conflict rebasing or Locator comparison is performed here.
             progressCoordination = IosReaderProgressSessionCoordination(
                 runtime: progressRuntime,
                 database: database,

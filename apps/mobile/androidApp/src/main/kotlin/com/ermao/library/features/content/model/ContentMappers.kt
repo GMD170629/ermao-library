@@ -115,7 +115,7 @@ fun Resource.toUiContent(selected: Boolean = false): ResourceContent = ResourceC
     assets = assets.map { asset ->
         AssetContent(
             id = asset.id,
-            path = asset.downloadUrl ?: asset.url.orEmpty(),
+            path = asset.path.orEmpty(),
             sizeBytes = asset.sizeBytes,
             displaySize = asset.displaySize,
         )

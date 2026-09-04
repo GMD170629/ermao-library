@@ -16,14 +16,14 @@ import com.ermao.library.shared.modules.administrativesettings.infrastructure.Kt
 import com.ermao.library.shared.modules.servers.application.ServerProfileRepository
 import com.ermao.library.shared.modules.servers.infrastructure.KtorServerProbe
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
-import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
+import com.ermao.library.shared.modules.reader.application.ReaderPositionServerPort
 import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.audio.AudioMediaTransport
 import com.ermao.library.shared.modules.audio.infrastructure.KtorAudioMediaTransport
-import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderPositionSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorPdfRangeServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServerPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
@@ -118,11 +118,11 @@ fun createAndroidComicPageServerPort(
     ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
 )
 
-fun createAndroidReaderProgressSyncPort(
+fun createAndroidReaderPositionSyncPort(
     context: Context,
     profile: ServerProfile,
-): ReaderProgressServerPort =
-    KtorReaderProgressSyncPort(
+): ReaderPositionServerPort =
+    KtorReaderPositionSyncPort(
         clients = ApiClientFactory(AndroidEncryptedCookieVault(context.applicationContext)),
         profile = profile,
     )

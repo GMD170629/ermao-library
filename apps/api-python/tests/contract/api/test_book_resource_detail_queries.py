@@ -25,7 +25,7 @@ from app.models import (
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
     ReadableResourceNavigationUnit,
-    ReaderResourceProgress,
+    ReaderResourceProgressV5,
 )
 from app.models.auth import User, UserLibraryAccess
 from app.models.organize import MetadataWritebackOperation, OrganizePolicy
@@ -192,16 +192,23 @@ def test_book_detail_is_bounded_and_projects_resource_assets(
     user = _login(client, db_session)
     _book, resources = _add_book(db_session, resource_count=12)
     db_session.add(
-        ReaderResourceProgress(
+        ReaderResourceProgressV5(
             id="detail-progress",
             user_id=user.id,
             resource_id=resources[1].id,
-            reader_type="reflowable",
-            position="chapter-2",
-            percent=42.5,
-            extra="{}",
-            progressed_at=datetime.now(UTC),
-            source_protocol="SHUKU_WEB",
+            client_id="detail-client",
+            mutation_id="00000000-0000-4000-8000-000000000001",
+            locator_json="{}",
+            presentation_json=(
+                '{"displayPercent":42.5,"totalProgression":0.425,'
+                '"currentHref":null,"chapter":null,"page":null,"playback":null}'
+            ),
+            display_percent=42.5,
+            total_progression=0.425,
+            captured_at=datetime.now(UTC),
+            received_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            revision=1,
         )
     )
     db_session.commit()
@@ -590,30 +597,29 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
             for index in range(5)
         ]
     )
-    progress = ReaderResourceProgress(
+    progress = ReaderResourceProgressV5(
         id="chapter-state-progress",
         user_id=user.id,
         resource_id="detail-resource-01",
-        reader_type="reflowable",
-        position="0",
-        percent=1,
-        extra="{}",
-        location_json=json.dumps(
-            {
-                "kind": "reflowable",
-                "engineLocator": {
-                    "engine": "readium",
-                    "platform": "web",
-                    "version": "readium-test:1",
-                    "payload": {
-                        "href": "OEBPS/Text/chapter-4.xhtml",
-                        "locations": {},
-                    },
-                },
-            }
+        client_id="chapter-state-client",
+        mutation_id="00000000-0000-4000-8000-000000000003",
+        locator_json='{"opaque":true}',
+        presentation_json=(
+            '{"displayPercent":1,"totalProgression":0.01,'
+            '"currentHref":"OEBPS/Text/chapter-4.xhtml",'
+            '"chapter":{"href":"OEBPS/Text/chapter-4.xhtml",'
+            '"title":"Chapter 4","index":3},"page":null,"playback":null}'
         ),
-        progressed_at=datetime.now(UTC),
-        source_protocol="SHUKU_WEB",
+        display_percent=1,
+        total_progression=0.01,
+        current_href="OEBPS/Text/chapter-4.xhtml",
+        chapter_href="OEBPS/Text/chapter-4.xhtml",
+        chapter_title="Chapter 4",
+        chapter_index=3,
+        captured_at=datetime.now(UTC),
+        received_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        revision=1,
     )
     db_session.add(progress)
     db_session.commit()
@@ -629,19 +635,12 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
     assert data["currentChapterTitle"] == "Chapter 4"
     assert data["currentChapterSortOrder"] == 3
 
-    progress.location_json = json.dumps(
-        {
-            "kind": "reflowable",
-            "engineLocator": {
-                "engine": "readium",
-                "platform": "web",
-                "version": "readium-test:1",
-                "payload": {
-                    "href": "OEBPS/Text/split-resource.xhtml",
-                    "locations": {"position": 4},
-                },
-            },
-        }
+    progress.current_href = "OEBPS/Text/split-resource.xhtml"
+    progress.presentation_json = (
+        '{"displayPercent":1,"totalProgression":0.01,'
+        '"currentHref":"OEBPS/Text/split-resource.xhtml",'
+        '"chapter":{"href":"OEBPS/Text/chapter-4.xhtml",'
+        '"title":"Chapter 4","index":3},"page":null,"playback":null}'
     )
     db_session.commit()
     position_response = client.get(
@@ -669,8 +668,11 @@ def test_reading_units_project_exact_current_chapter_for_read_states(
         "/api/books/detail-book/resources/detail-resource-01/reading-units"
     )
     ambiguous_data = ambiguous_response.json()["data"]
-    assert ambiguous_data["currentChapterIndex"] is None
-    assert ambiguous_data["currentChapterTitle"] is None
+    # v5 takes the chapter projection from the client presentation.  Adding
+    # an ambiguous navigation href must not make the server inspect Locator
+    # bytes or replace the explicitly reported chapter.
+    assert ambiguous_data["currentChapterIndex"] == 3
+    assert ambiguous_data["currentChapterTitle"] == "Chapter 4"
 
 
 def test_resource_details_preserve_member_scope_and_anti_enumeration(
@@ -836,7 +838,7 @@ def test_openapi_exposes_only_canonical_book_resource_reader_paths() -> None:
     assert "/api/books/{book_id}/resources" in paths
     assert "/api/books/{book_id}/contents" in paths
     assert "/api/resources/{resource_id}" in paths
-    assert "/api/reader/v4/resources/{resource_id}/bootstrap" in paths
+    assert "/api/reader/v5/resources/{resource_id}/bootstrap" in paths
     assert not any(
         path.startswith("/api/works") or "/versions" in path or "/volumes" in path
         for path in paths

@@ -4,7 +4,7 @@ import {
   type ReaderPreferences
 } from '@shuku/reader-core';
 import { emitReaderDebug } from './debug';
-import type { ReaderStorage } from './storage';
+import type { ReaderV5Storage } from './v5-storage';
 
 export type ResolvedReaderPreferences = {
   preferences: ReaderPreferences;
@@ -12,7 +12,7 @@ export type ResolvedReaderPreferences = {
 };
 
 export class ReaderPreferenceRepository {
-  constructor(private readonly storage: ReaderStorage) {}
+  constructor(private readonly storage: ReaderV5Storage) {}
 
   async resolve(userId: string, bookId: string, serverDefault: unknown): Promise<ResolvedReaderPreferences> {
     const local = await this.storage.getPreference(userId, bookId);

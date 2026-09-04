@@ -61,6 +61,9 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("resourceFacets", "LibraryReadableResourceFacet"),
     ("shelfBooks", "ShelfBook"),
     ("readerProgress", "ReaderResourceProgress"),
+    ("readerProgressV5", "ReaderResourceProgressV5"),
+    ("readerReadingStatusV5", "ReaderResourceReadingStatusV5"),
+    ("readerBookmarksV5", "ReaderBookmarkV5"),
     ("bookPreferences", "BookDetailPreference"),
     ("importTasks", "LibraryImportTask"),
     ("organizeJobs", "OrganizeJob"),
@@ -73,6 +76,7 @@ BACKUP_TABLES: list[tuple[str, str]] = [
     ("readerProgressCursors", "ReaderProgressCursor"),
     ("readerBookmarks", "ReaderBookmark"),
     ("readerProgressMutations", "ReaderProgressMutation"),
+    ("readerProgressMutationsV5", "ReaderProgressMutationV5"),
     ("libraryOperations", "LibraryOperation"),
     ("sources", "Source"),
     ("systemSettings", "SystemSetting"),
@@ -147,6 +151,9 @@ def counts_for_export(
         "shelves": len(database_export.get("shelves", [])),
         "shelfBooks": len(database_export.get("shelfBooks", [])),
         "readerProgress": len(database_export.get("readerProgress", [])),
+        "readerProgressV5": len(database_export.get("readerProgressV5", [])),
+        "readerReadingStatusV5": len(database_export.get("readerReadingStatusV5", [])),
+        "readerBookmarksV5": len(database_export.get("readerBookmarksV5", [])),
         "bookPreferences": len(database_export.get("bookPreferences", [])),
         "importTasks": len(database_export.get("importTasks", [])),
         "readerPreferences": len(database_export.get("readerPreferences", [])),
@@ -155,6 +162,9 @@ def counts_for_export(
         "readerBookmarks": len(database_export.get("readerBookmarks", [])),
         "readerProgressMutations": len(
             database_export.get("readerProgressMutations", [])
+        ),
+        "readerProgressMutationsV5": len(
+            database_export.get("readerProgressMutationsV5", [])
         ),
         "sourceNodes": len(database_export.get("sourceNodes", [])),
         "sourceNodeMetadata": len(database_export.get("sourceNodeMetadata", [])),

@@ -5,6 +5,7 @@ import type {
   ReaderCommand,
   ReaderCommandAck,
   ReaderLocation,
+  ReaderPositionReport,
   ReaderPreferences,
   ReaderSource
 } from './types';
@@ -18,6 +19,8 @@ export type ReaderAdapterOpenContext = ReaderAdapterOperationContext & {
   sessionId: string;
   source: ReaderSource;
   initialLocation: ReaderLocation | null;
+  /** v5 restores only the engine-owned Locator; presentation is never a target. */
+  initialPosition?: ReaderPositionReport | null;
   preferences: ReaderPreferences;
 };
 
@@ -32,4 +35,3 @@ export interface ReaderAdapter {
   subscribe(listener: ReaderAdapterListener): () => void;
   dispose(): Promise<void> | void;
 }
-

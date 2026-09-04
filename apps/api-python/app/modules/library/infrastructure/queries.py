@@ -20,11 +20,18 @@ from app.modules.library.infrastructure.filter_query import (
     compile_filter_expression,
     resolve_library_roots,
 )
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
 class SqlAlchemyLibraryQueries:
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
+    ) -> None:
         self._db = db
+        self._reader_queries = reader_queries
 
     def matching_book_ids(
         self,
@@ -78,7 +85,10 @@ class SqlAlchemyLibraryQueries:
                 ),
             )
             dynamic = compile_filter_expression(
-                status_filters, context=context, user_id=user_id
+                status_filters,
+                context=context,
+                user_id=user_id,
+                reader_queries=self._reader_queries,
             )
             if dynamic is not None:
                 predicates.append(dynamic)
@@ -118,6 +128,7 @@ class SqlAlchemyLibraryQueries:
                 context=context,
                 user_id=user_id,
                 shelf_owner_user_id=user_id,
+                reader_queries=self._reader_queries,
                 library_roots=resolve_library_roots(
                     self._db, criteria.filters, context
                 ),

@@ -1,128 +1,136 @@
-﻿import Foundation
 import XCTest
-@preconcurrency import ErmaoShared
-@preconcurrency import ReadiumShared
 @testable import ErmaoLibrary
+@preconcurrency import ErmaoShared
+import ReadiumShared
 
 final class ReaderProgressContractTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        #if targetEnvironment(simulator)
-        XCTFail("iOS Reader tests must run on a connected physical device, never Simulator.")
-        #endif
+    func testReadiumLocatorRoundTripPreservesEmptyHighlightNullAndExtensions() throws {
+        let json = #"{"href":"OEBPS/Text/backcover.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":".cover","fragments":[],"position":190,"progression":1,"totalProgression":0.25,"vendor":{"nullable":null,"empty":""}},"text":{"highlight":""},"unknownExtension":{"preserve":true}}"#
+        let readium = try Locator(jsonString: json)
+        let opaque = try ReadiumSwiftLocatorMapper().opaqueLocator(from: readium)
+        let restored = try XCTUnwrap(try ReadiumSwiftLocatorMapper().locator(from: opaque))
+
+        XCTAssertEqual(try canonicalJSONObjectData(restored.jsonString()), try canonicalJSONObjectData(json))
+        let root = try XCTUnwrap(try semanticJSONObject(opaque.canonicalJson) as? [String: Any])
+        let text = try XCTUnwrap(root["text"] as? [String: Any])
+        XCTAssertEqual(text["highlight"] as? String, "")
+        let locations = try XCTUnwrap(root["locations"] as? [String: Any])
+        let vendor = try XCTUnwrap(locations["vendor"] as? [String: Any])
+        XCTAssertTrue(vendor["nullable"] is NSNull)
     }
 
-    func testV4ExactLocatorRoundTripsAsObjectPayload() throws {
-        let codec = ErmaoShared.PublicKt.createReaderProgressJson()
-        let progress = try codec.decode(payload: exactProgressPayload())
-        let encoded = try codec.encode(progress: progress)
-        let decoded = try IosReaderProgressContractDecoder.decode(encoded)
+    func testOpaqueLocatorAcceptsUnknownObjectWithoutExactnessProofFields() throws {
+        let json = #"{"text":{"highlight":""},"nested":{"unknown":[null,"",{"x":true}]}}"#
+        let opaque = try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: json)
 
-        XCTAssertTrue(encoded.contains(#""version":7"#))
-        XCTAssertTrue(encoded.contains(#""engine":"readium""#))
-        XCTAssertTrue(encoded.contains(#""payload":{"href""#))
-        XCTAssertFalse(encoded.contains(#""payload":"{"#))
-        XCTAssertEqual(decoded.resourceID, "volume-epub-42")
-        XCTAssertEqual(decoded.resourceKey, "OPS/chapter-03.xhtml")
-        XCTAssertEqual(decoded.quoteExact, "A portable reading position")
-        XCTAssertTrue(decoded.engineLocatorCanonicalJSON?.contains("\"cssSelector\":\"#paragraph-17\"") == true)
+        XCTAssertEqual(try canonicalJSONObjectData(opaque.canonicalJson), try canonicalJSONObjectData(json))
     }
 
-    func testReadium390RestoresAnExact380LocatorWithoutChangingItsAnchor() throws {
-        let progress = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
-        let location = try XCTUnwrap(progress.location as? ErmaoShared.ReflowReaderLocation)
-        let mapper = ReadiumSwiftLocatorMapper()
-        let restored = try XCTUnwrap(try mapper.exactLocator(from: location))
-        XCTAssertEqual(restored.href.string, "OPS/chapter-03.xhtml")
-        XCTAssertEqual(restored.locations["cssSelector"]?.string, "#paragraph-17")
-        let updated = try mapper.sharedLocation(from: restored)
-        XCTAssertEqual(updated.engineLocator?.version, "readium-swift:3.9.0")
-        let roundTripped = try XCTUnwrap(try mapper.exactLocator(from: updated))
-        XCTAssertEqual(roundTripped, restored, "Serialization key ordering may change; the complete locator must not")
-    }
-
-    func testLegacyV1AndProgressionOnlyLocatorsAreRejected() {
-        let codec = ErmaoShared.PublicKt.createReaderProgressJson()
-        let legacy = exactProgressPayload().replacingOccurrences(of: #""version":7"#, with: #""version":1"#)
-        let approximate = exactProgressPayload().replacingOccurrences(
-            of: ##""locations":{"cssSelector":"#paragraph-17","progression":0.375}"##,
-            with: #""locations":{"progression":0.375}"#
-        ).replacingOccurrences(
-            of: #",\"text\":{\"highlight\":\"A portable reading position\",\"before\":\"Before\",\"after\":\"after\"}"#
-                .replacingOccurrences(of: "\\\"", with: "\""),
-            with: ""
+    func testPresentationNeverBecomesARestoreFallbackForAnUnsupportedLocator() throws {
+        let opaque = try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: #"{}"#)
+        let presentation = ErmaoShared.ReaderPositionPresentation(
+            displayPercent: 99,
+            totalProgression: 0.99,
+            currentHref: "OEBPS/Text/backcover.xhtml",
+            chapter: nil,
+            page: nil,
+            playback: nil
         )
+        let report = ErmaoShared.ReaderPositionReport(locator: opaque, presentation: presentation)
 
-        XCTAssertThrowsError(try codec.decode(payload: legacy))
-        XCTAssertThrowsError(try codec.decode(payload: approximate))
-        XCTAssertThrowsError(try IosReaderProgressContractDecoder.decode(legacy))
+        XCTAssertNil(try? ReadiumSwiftLocatorMapper().locator(from: report.locator))
+        XCTAssertEqual(report.presentation.displayPercent, 99)
     }
 
-    func testSwiftMapperRejectsProgressionOnlyLocatorBeforeKmpProgressConstruction() throws {
-        let locator = try XCTUnwrap(
-            try Locator(
-                jsonString: #"{"href":"OPS/chapter.xhtml","type":"application/xhtml+xml","locations":{"progression":0.25,"totalProgression":0.5}}"#
-            )
-        )
+    func testOpaqueLocatorRejectsNonObjectAndOversizedPayloads() {
         XCTAssertThrowsError(
-            try ReadiumSwiftLocatorMapper().sharedLocation(from: locator)
+            try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: #"[1,2,3]"#)
+        )
+        let oversized = #"{"payload":""# + String(repeating: "x", count: 65_536) + #""}"#
+        XCTAssertThrowsError(
+            try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: oversized)
         )
     }
 
-    func testExactBlockComparatorRequiresResourceAndAnchor() throws {
-        let progress = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
-        let location = try XCTUnwrap(progress.location as? ErmaoShared.ReflowReaderLocation)
-        let expected = try XCTUnwrap(ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location))
-        let same = try XCTUnwrap(ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location))
-        let anotherResourceProgress = try ErmaoShared.PublicKt.createReaderProgressJson().decode(
-            payload: exactProgressPayload().replacingOccurrences(
-                of: "OPS/chapter-03.xhtml",
-                with: "OPS/chapter-04.xhtml"
+    func testPresentationDoesNotDeriveFromLocatorProgression() throws {
+        let opaque = try ErmaoShared.PublicKt.createReaderOpaqueLocator(
+            payloadJson: #"{"locations":{"totalProgression":0.25},"text":{"highlight":""}}"#
+        )
+        let presentation = ErmaoShared.ReaderPositionPresentation(
+            displayPercent: 99,
+            totalProgression: 0.99,
+            currentHref: "OEBPS/Text/backcover.xhtml",
+            chapter: ErmaoShared.ReaderChapterPresentation(
+                href: "OEBPS/Text/backcover.xhtml",
+                title: "封底",
+                index: KotlinInt(int: 19)
+            ),
+            page: nil,
+            playback: nil
+        )
+        let report = ErmaoShared.ReaderPositionReport(locator: opaque, presentation: presentation)
+
+        XCTAssertEqual(report.presentation.displayPercent, 99)
+        XCTAssertEqual(report.presentation.totalProgression, 0.99)
+        let locatorRoot = try XCTUnwrap(try semanticJSONObject(report.locator.canonicalJson) as? [String: Any])
+        let locations = try XCTUnwrap(locatorRoot["locations"] as? [String: Any])
+        XCTAssertEqual((locations["totalProgression"] as? NSNumber)?.doubleValue, 0.25)
+    }
+
+    func testAndroidStylePdfLocatorCanBeConsumedWithoutFieldConversion() throws {
+        let androidLocator = #"{"href":"document.pdf","type":"application/pdf","locations":{"position":190,"progression":1,"totalProgression":1},"vendor":{"android":null}}"#
+        let opaque = try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: androidLocator)
+        let restored = try XCTUnwrap(try ReadiumSwiftLocatorMapper().locator(from: opaque))
+
+        XCTAssertEqual(restored.locations.position, 190)
+        XCTAssertEqual(
+            try canonicalJSONObjectData(restored.jsonString()),
+            try canonicalJSONObjectData(androidLocator)
+        )
+    }
+
+    func testEveryCrossPlatformV5FixtureRoundTripsWithoutPositionConversion() throws {
+        let bundle = Bundle(for: Self.self)
+        let codec = ErmaoShared.PublicKt.createReaderPositionReportJson()
+        let fixtures = [
+            "reader-v5-reflowable-empty-highlight",
+            "reader-v5-pdf",
+            "reader-v5-comic",
+            "reader-v5-audio",
+        ]
+
+        for fixture in fixtures {
+            let url = try XCTUnwrap(
+                bundle.url(forResource: fixture, withExtension: "json"),
+                "Missing bundled contract fixture \(fixture)"
             )
-        )
-        let anotherResource = try XCTUnwrap(
-            ErmaoShared.ReadiumLocatorEnvelope.companion.from(
-                location: try XCTUnwrap(anotherResourceProgress.location as? ErmaoShared.ReflowReaderLocation)
+            let document = try XCTUnwrap(
+                try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
             )
-        )
+            let position = try XCTUnwrap(document["position"] as? [String: Any])
+            let positionData = try JSONSerialization.data(
+                withJSONObject: position,
+                options: [.sortedKeys]
+            )
+            let positionJSON = try XCTUnwrap(String(data: positionData, encoding: .utf8))
 
-        XCTAssertEqual(ErmaoShared.PublicKt.compareExactReadiumLocators(expected: expected, recaptured: same), .exact)
-        XCTAssertNotEqual(
-            ErmaoShared.PublicKt.compareExactReadiumLocators(expected: expected, recaptured: anotherResource),
-            ErmaoShared.ExactBlockMatch.exact
-        )
+            let decoded = try codec.decode(payload: positionJSON)
+            let encoded = codec.encode(position: decoded)
+
+            XCTAssertEqual(
+                try canonicalJSONObjectData(encoded),
+                try canonicalJSONObjectData(positionJSON),
+                "Reader v5 semantic drift in \(fixture)"
+            )
+        }
     }
 
-    func testRestoreNeverFallsBackToPercentageForAnotherSource() throws {
-        let local = try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: exactProgressPayload())
-        let plan = ErmaoShared.PublicKt.planReaderProgressRestore(
-            localProgress: local,
-            remoteSnapshot: nil,
-            openedSource: makeSource(sourceID: "another-volume")
-        )
-
-        XCTAssertFalse(plan.usesLocalExact)
-        XCTAssertNil(plan.localProgress)
-        XCTAssertNil(plan.remoteSnapshot)
-        XCTAssertTrue(plan.candidates.isEmpty)
+    private func semanticJSONObject(_ json: String) throws -> Any {
+        try JSONSerialization.jsonObject(with: Data(json.utf8), options: [.fragmentsAllowed])
     }
 
-    private func makeSource(sourceID: String = "volume-epub-42") -> ErmaoShared.ReaderSource {
-        ErmaoShared.LocalReaderSource(
-            resourceId: sourceID,
-            displayTitle: "Fixture",
-            format: .epub,
-            bookId: "work-42",
-            assetId: nil,
-            sourceFormat: .epub
-        )
-    }
-
-    private func exactProgressPayload(
-        sourceID: String = "volume-epub-42",
-        updatedAt: Int64 = 1_775_988_123_456,
-        deviceID: String = "ios-installation-a"
-    ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":7,"resourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"OPS/chapter-03.xhtml","progression":0.375,"totalProgression":0.625,"position":17,"textQuote":{"exact":"A portable reading position","prefix":"Before","suffix":"after"},"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"OPS/chapter-03.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#paragraph-17","progression":0.375},"text":{"highlight":"A portable reading position","before":"Before","after":"after"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(deviceID)","percent":62.5}"##
+    private func canonicalJSONObjectData(_ json: String) throws -> Data {
+        let value = try semanticJSONObject(json)
+        return try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
     }
 }

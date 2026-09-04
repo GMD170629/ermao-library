@@ -66,3 +66,31 @@ class TimestampMilliseconds(TypeDecorator[datetime]):
 
     def process_result_value(self, value: Any, _dialect) -> datetime | None:
         return timestamp_ms_to_datetime(value)
+
+
+class ExactTimestampMilliseconds(TypeDecorator[datetime]):
+    """Persist epoch milliseconds without legacy unit guessing.
+
+    ``TimestampMilliseconds`` accepts old second-based values for the
+    pre-v5 schema. Reader v5's wire contract is unambiguously epoch
+    milliseconds, including small test/future values, so its isolated tables
+    use this exact adapter instead.
+    """
+
+    impl = BigInteger
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, _dialect) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+            return int(aware.timestamp() * 1000)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("exact epoch milliseconds require a datetime or number")
+        return int(value)
+
+    def process_result_value(self, value: Any, _dialect) -> datetime | None:
+        if value is None:
+            return None
+        return datetime.fromtimestamp(int(value) / 1000, UTC)

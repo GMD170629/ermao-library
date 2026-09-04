@@ -112,7 +112,11 @@ class ErmaoLibraryApplication : Application() {
         readerProgressPresentationCenter = ReaderProgressPresentationCenter()
         audioTransportRegistry = AndroidAudioTransportRegistry()
         audioTransportProvider = RegisteredAuthenticatedAudioDataSourceProvider(audioTransportRegistry)
-        audioPlaybackRuntime = AndroidAudioPlaybackRuntime(this, audioTransportRegistry)
+        audioPlaybackRuntime = AndroidAudioPlaybackRuntime(
+            context = this,
+            transportRegistry = audioTransportRegistry,
+            publishProgressUpdate = readerProgressPresentationCenter::publish,
+        )
         mobileRuntime = createAndroidMobileRuntime(
             context = this,
             profileRepository = mobileStore,

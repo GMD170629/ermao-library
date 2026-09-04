@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.models import LibraryBook, MetadataLookupTask
 from app.models.auth import User
@@ -57,6 +60,7 @@ from app.modules.library.infrastructure import book_list as library_book_list
 from app.modules.library.infrastructure import books as library_books
 from app.modules.library.infrastructure import dashboard as library_dashboard
 from app.modules.library.infrastructure import facet_queries as library_facet_queries
+from app.modules.library.infrastructure import legacy_views as library_legacy_views
 from app.modules.library.infrastructure import operations as library_operation_store
 from app.modules.library.infrastructure import projections as library_projections
 from app.modules.library.infrastructure import (
@@ -93,14 +97,11 @@ from app.modules.library.infrastructure.groupings import (
     SqlAlchemyLibraryGroupingQueries,
 )
 from app.modules.library.infrastructure.legacy_views import (
-    book_view,
     bookshelf_book_list_view,
     bookshelf_item_view,
     bookshelf_item_views,
-    list_resource_views,
     management_book_list_view,
     preferred_book_cover_path,
-    resource_view,
 )
 from app.modules.library.infrastructure.operation_management import (
     SqlAlchemyLibraryOperationManagement,
@@ -128,7 +129,9 @@ from app.modules.library.infrastructure.source_node_metadata_recognition import 
 
 
 def bookshelf_items(db: Session) -> ListBookshelfItems:
-    return ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db))
+    return ListBookshelfItems(
+        SqlAlchemyBookshelfItemQueries(db, reader_queries=reader_v5_library_queries(db))
+    )
 
 
 def library_catalog(db: Session) -> SqlAlchemyCatalogQueries:
@@ -142,23 +145,37 @@ def effective_book_cover_paths(
 
 
 def bulk_metadata(db: Session) -> ExecuteBulkMetadata:
-    return ExecuteBulkMetadata(SqlAlchemyBulkBookOperations(db), db)
+    return ExecuteBulkMetadata(
+        SqlAlchemyBulkBookOperations(db, reader_queries=reader_v5_library_queries(db)),
+        db,
+    )
 
 
 def bulk_find_replace_preview(db: Session) -> PreviewBulkFindReplace:
-    return PreviewBulkFindReplace(SqlAlchemyBulkBookOperations(db))
+    return PreviewBulkFindReplace(
+        SqlAlchemyBulkBookOperations(db, reader_queries=reader_v5_library_queries(db))
+    )
 
 
 def bulk_find_replace(db: Session) -> ExecuteBulkFindReplace:
-    return ExecuteBulkFindReplace(SqlAlchemyBulkBookOperations(db), db)
+    return ExecuteBulkFindReplace(
+        SqlAlchemyBulkBookOperations(db, reader_queries=reader_v5_library_queries(db)),
+        db,
+    )
 
 
 def bulk_shelf_membership(db: Session) -> ExecuteBulkShelfMembership:
-    return ExecuteBulkShelfMembership(SqlAlchemyBulkBookOperations(db), db)
+    return ExecuteBulkShelfMembership(
+        SqlAlchemyBulkBookOperations(db, reader_queries=reader_v5_library_queries(db)),
+        db,
+    )
 
 
 def bulk_reading_status(db: Session) -> ExecuteBulkReadingStatus:
-    return ExecuteBulkReadingStatus(SqlAlchemyBulkBookOperations(db), db)
+    return ExecuteBulkReadingStatus(
+        SqlAlchemyBulkBookOperations(db, reader_queries=reader_v5_library_queries(db)),
+        db,
+    )
 
 
 def merge_library_facets(db: Session) -> MergeLibraryFacets:
@@ -220,9 +237,12 @@ def library_groupings(db: Session) -> ListLibraryGroupings:
 
 
 def dashboard_queries(db: Session) -> DashboardQueries:
+    reader_queries = reader_v5_library_queries(db)
     return DashboardQueries(
-        activity=library_dashboard.SqlAlchemyDashboardActivityQueries(db),
-        bookshelf=SqlAlchemyBookshelfItemQueries(db),
+        activity=library_dashboard.SqlAlchemyDashboardActivityQueries(
+            db, reader_queries=reader_queries
+        ),
+        bookshelf=SqlAlchemyBookshelfItemQueries(db, reader_queries=reader_queries),
     )
 
 
@@ -232,6 +252,46 @@ def library_cover_publication(settings: Settings) -> RemoteCoverPublication:
 
 def get_book(db: Session, book_id: str) -> dict[str, object] | None:
     return library_books.get_book(db, book_id)
+
+
+def book_view(
+    db: Session, book: dict[str, Any], user_id: str | None = None
+) -> dict[str, Any]:
+    return library_legacy_views.book_view(
+        db,
+        book,
+        user_id,
+        reader_queries=reader_v5_library_queries(db),
+    )
+
+
+def resource_view(
+    db: Session, resource_id: str, user_id: str | None = None
+) -> dict[str, Any] | None:
+    return library_legacy_views.resource_view(
+        db,
+        resource_id,
+        user_id,
+        reader_queries=reader_v5_library_queries(db),
+    )
+
+
+def list_resource_views(
+    db: Session,
+    book_id: str,
+    user_id: str | None,
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    return library_legacy_views.list_resource_views(
+        db,
+        book_id,
+        user_id,
+        page=page,
+        page_size=page_size,
+        reader_queries=reader_v5_library_queries(db),
+    )
 
 
 def update_book(db: Session) -> UpdateBook:
@@ -249,7 +309,9 @@ def resource_details(
     navigation: ResourceNavigationEnsurer,
 ) -> ListResourceDetails:
     return ListResourceDetails(
-        SqlAlchemyResourceDetailQueries(db, user_id),
+        SqlAlchemyResourceDetailQueries(
+            db, user_id, reader_queries=reader_v5_library_queries(db)
+        ),
         navigation,
     )
 
@@ -306,7 +368,12 @@ def load_metadata_apply_job_ids(db: Session, book_id: str) -> tuple[str, ...]:
 
 
 def list_books(db: Session, user: User, query: BookListQuery) -> BookListResult:
-    return library_book_list.list_books(db, user, query)
+    return library_book_list.list_books(
+        db,
+        user,
+        query,
+        reader_queries=reader_v5_library_queries(db),
+    )
 
 
 __all__ = [

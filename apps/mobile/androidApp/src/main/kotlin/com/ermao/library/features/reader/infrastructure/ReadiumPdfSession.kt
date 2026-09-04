@@ -95,8 +95,6 @@ internal class ReadiumPdfSession(
     override val currentLocation: StateFlow<ReaderLocation?> = _currentLocation.asStateFlow()
     private val _preferences = MutableStateFlow(initialPreferences)
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
-    private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
-    override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
     private val _resumeNotice = MutableStateFlow<ReaderResumeNotice?>(null)
     override val resumeNotice: StateFlow<ReaderResumeNotice?> = _resumeNotice.asStateFlow()
     private val _resumeActionFailed = MutableStateFlow(false)
@@ -108,20 +106,15 @@ internal class ReadiumPdfSession(
 
     private var publication: Publication? = null
 
-    override fun dismissRestoreWarning() {
-        _restoreWarning.value = null
-    }
     private var navigator: PdfNavigatorFragment<*, *>? = null
     private var nativeDocument: ShukuPdfiumDocument? = null
     private var positions: List<Locator> = emptyList()
     private var pageCount: Int = 0
     private var pages: List<ReaderPdfPage> = emptyList()
     private var locationJob: Job? = null
+    private var sessionScope: CoroutineScope? = null
     private var lastPersistedLocation: PdfReaderLocation? = null
-    private var expectedRestorePage: Int? = null
-    private var failedRestorePage: Int? = null
-    private var restoreFailed = false
-    private var awaitingInitialObservation = true
+    private var remoteTarget: ReaderProgressSnapshotV5? = null
     private var prepared = false
     private val saveMutex = Mutex()
 
@@ -177,14 +170,11 @@ internal class ReadiumPdfSession(
         val restorePage = when {
             explicitPage != null -> explicitPage
             localPosition != null -> pageForPosition(localPosition.position)
-                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
             startupPositionSource == ReaderStartupPositionSource.ServerSnapshot && remoteSnapshot != null ->
                 pageForPosition(remoteSnapshot.position)
-                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
             else -> null
         }
         val initialLocator = restorePage?.let(positions::get)
-        expectedRestorePage = restorePage
         if (localPosition != null && restorePage != null) {
             val location = restorePage.toLocation()
             _currentLocation.value = location
@@ -295,30 +285,21 @@ internal class ReadiumPdfSession(
     override fun bind(scope: CoroutineScope) {
         val currentNavigator = checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
+        sessionScope = scope
+        progressCoordinator?.let { coordinator ->
+            scope.launch {
+                coordinator.remotePositionNotices.collectLatest { notice ->
+                    remoteTarget = notice?.snapshot
+                    _resumeActionFailed.value = false
+                    _resumeNotice.value = notice?.snapshot?.let(::resumeNotice)
+                }
+            }
+        }
         locationJob = scope.launch {
             currentNavigator.currentLocator.collectLatest { locator ->
-                val page = locator.pageIndex()?.takeIf(::isValidPage) ?: run {
-                    publishReaderRestoreWarning(_restoreWarning, "pdf", "locator_mapping")
-                    return@collectLatest
-                }
+                val page = locator.pageIndex()?.takeIf(::isValidPage) ?: return@collectLatest
                 val location = page.toLocation()
                 _currentLocation.value = location
-                if (awaitingInitialObservation) {
-                    awaitingInitialObservation = false
-                    val expected = expectedRestorePage
-                    expectedRestorePage = null
-                    if (expected != null && expected != page) {
-                        restoreFailed = true
-                        failedRestorePage = page
-                        publishReaderRestoreWarning(_restoreWarning, "pdf", "initial_locator_verification")
-                    }
-                    return@collectLatest
-                }
-                if (restoreFailed) {
-                    if (failedRestorePage == page) return@collectLatest
-                    restoreFailed = false
-                    failedRestorePage = null
-                }
                 delay(LOCAL_SAVE_DEBOUNCE_MILLIS)
                 persist(locator, location)
             }
@@ -326,25 +307,19 @@ internal class ReadiumPdfSession(
     }
 
     override fun goPrevious(): Boolean {
-        restoreFailed = false
-        failedRestorePage = null
-        expectedRestorePage = null
+        dismissResumeNotice()
         return navigator?.goBackward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goNext(): Boolean {
-        restoreFailed = false
-        failedRestorePage = null
-        expectedRestorePage = null
+        dismissResumeNotice()
         return navigator?.goForward(animated = navigationAnimationsEnabled()) ?: false
     }
 
     override fun goTo(location: ReaderLocation): Boolean {
         val pdf = location as? PdfReaderLocation ?: return false
         if (!isValidPage(pdf.pageIndex)) return false
-        restoreFailed = false
-        failedRestorePage = null
-        expectedRestorePage = null
+        dismissResumeNotice()
         requestedNavigationTarget = com.ermao.library.shared.modules.reader.ReaderNavigationTargetPdf(pdf.pageIndex)
         return navigator?.go(positions[pdf.pageIndex], animated = navigationAnimationsEnabled()) ?: false
     }
@@ -359,10 +334,42 @@ internal class ReadiumPdfSession(
         shouldAnimateAndroidReaderNavigation(_preferences.value, morphology)
 
     override fun dismissResumeNotice() {
+        remoteTarget = null
         _resumeNotice.value = null
         _resumeActionFailed.value = false
+        progressCoordinator?.dismissRemotePositionNotice()
     }
-    override fun returnToResumeNotice(): Boolean = false
+    override fun returnToResumeNotice(): Boolean {
+        val snapshot = remoteTarget ?: return false
+        val page = pageForPosition(snapshot.position) ?: run {
+            _resumeActionFailed.value = true
+            return false
+        }
+        val moved = runCatching {
+            navigator?.go(positions[page], animated = navigationAnimationsEnabled()) == true
+        }.getOrDefault(false)
+        if (!moved) {
+            _resumeActionFailed.value = true
+            return false
+        }
+        sessionScope?.launch {
+            runCatching {
+                progressCoordinator?.acceptRemotePosition(
+                    ReaderPositionLocalState(
+                        resourceId = source.resourceId,
+                        clientId = deviceIdentity.stableDeviceId(),
+                        capturedAtEpochMillis = snapshot.capturedAtEpochMillis,
+                        position = snapshot.position,
+                    ),
+                    snapshot,
+                )
+            }
+        }
+        lastPersistedLocation = page.toLocation()
+        remoteTarget = null
+        _resumeNotice.value = null
+        return true
+    }
     override fun updatePreferences(updated: ReaderPreferences) {
         val supported = updated
         if (_preferences.value == supported) return
@@ -373,7 +380,6 @@ internal class ReadiumPdfSession(
     override fun removeBookmark(id: String) = Unit
     override fun goToBookmark(id: String): Boolean = false
     override suspend fun flush() {
-        if (restoreFailed) return
         (_currentLocation.value as? PdfReaderLocation)?.let { location ->
             val locator = positions.getOrNull(location.pageIndex) ?: return@let
             persist(locator, location)
@@ -391,11 +397,10 @@ internal class ReadiumPdfSession(
     override fun release() {
         locationJob?.cancel()
         locationJob = null
+        sessionScope = null
         navigator = null
         positions = emptyList()
-        expectedRestorePage = null
-        failedRestorePage = null
-        restoreFailed = false
+        remoteTarget = null
         publication?.close()
         publication = null
         closeNativeDocument()
@@ -431,8 +436,7 @@ internal class ReadiumPdfSession(
         progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (error: Exception) {
-        publishReaderRestoreWarning(_restoreWarning, "pdf", "position_load", error)
+    } catch (_: Exception) {
         null
     }
     private fun pageForPosition(position: ReaderPositionReport): Int? = runCatching {
@@ -457,7 +461,6 @@ internal class ReadiumPdfSession(
     }
 
     private suspend fun persist(locator: Locator, location: PdfReaderLocation) = saveMutex.withLock {
-        if (restoreFailed) return@withLock
         if (lastPersistedLocation == location) return@withLock
         val capturedAt = nowEpochMillis()
         val report = positionReport(locator, location.pageIndex)
@@ -475,7 +478,6 @@ internal class ReadiumPdfSession(
             return@withLock
         }
         lastPersistedLocation = location
-        _restoreWarning.value = null
         val namespace = presentationNamespaceKey ?: return@withLock
         val bookId = source.bookId ?: return@withLock
         publishProgressUpdate(createReaderProgressPresentationUpdate(
@@ -486,6 +488,13 @@ internal class ReadiumPdfSession(
             capturedAtEpochMillis = capturedAt,
         ))
     }
+
+    private fun resumeNotice(snapshot: ReaderProgressSnapshotV5): ReaderResumeNotice = ReaderResumeNotice(
+        capturedAtEpochMillis = snapshot.capturedAtEpochMillis,
+        percent = snapshot.position.presentation.displayPercent,
+        chapterLabel = snapshot.position.presentation.chapter?.title,
+        pageNumber = snapshot.position.presentation.page?.number,
+    )
 
     private companion object { const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L }
 }

@@ -39,6 +39,7 @@ data class Resource(
 data class Asset(
     val id: String,
     val title: String,
+    val path: String?,
     val resourceId: String?,
     val sourceNodeId: String?,
     val role: String?,

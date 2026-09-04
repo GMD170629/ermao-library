@@ -31,6 +31,119 @@ final class ReaderSecurityTests: XCTestCase {
     }
 
     @MainActor
+    func testPhysicalEpubLastPageUploadsTheActualReadiumLocationChangeLocator() async throws {
+        let fixture = try XCTUnwrap(
+            Bundle(for: Self.self).url(
+                forResource: "reader-v2",
+                withExtension: "epub"
+            )
+        )
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reader-v5-physical-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let managedStore = try IosManagedPublicationStore(
+            root: root.appendingPathComponent("Publications", isDirectory: true)
+        )
+        _ = try await managedStore.importPublication(
+            from: fixture,
+            resourceID: "reader-v5-physical",
+            displayTitle: "Reader v5 physical EPUB",
+            sourceFormat: .epub,
+            bookID: "reader-v5-book",
+            assetID: "reader-v5-asset",
+            namespace: "reader-v5-test",
+            parserVersion: "epub-package:1",
+            normalizationVersion: "shuku-epub-locator-dom-v2"
+        )
+        let suite = "reader-v5-physical-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let deviceIdentity = IosReaderDeviceIdentity(defaults: defaults)
+        let namespace = ErmaoShared.PublicKt.createReaderSyncNamespace(
+            serverIdentity: "reader-v5-server",
+            userId: "reader-v5-user",
+            authorizationVersion: 1
+        )
+        let identity = ErmaoShared.PublicKt.createReaderLocalProgressIdentity(
+            namespace: namespace,
+            clientId: deviceIdentity.stableDeviceId(),
+            bookId: "reader-v5-book",
+            resourceId: "reader-v5-physical"
+        )
+        let database = try IosReaderLocalDatabase(
+            identity: identity,
+            databaseURL: root.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let port = PhysicalReaderV5PositionPort()
+        let runtime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
+            stateStore: database,
+            target: ErmaoShared.ReaderProgressSyncTarget(
+                namespace: namespace,
+                bookId: "reader-v5-book",
+                resourceId: "reader-v5-physical",
+                sourceFormat: .epub
+            ),
+            server: port
+        )
+        let session = IosReflowableReaderSession(
+            resourceID: "reader-v5-physical",
+            displayTitle: "Reader v5 physical EPUB",
+            sourceFormat: .epub,
+            managedStore: managedStore,
+            progressStore: runtime.store,
+            namespaceKey: "reader-v5-test",
+            bookID: "reader-v5-book",
+            deviceIdentity: deviceIdentity
+        )
+        addTeardownBlock {
+            try await session.close()
+            runtime.close()
+            await database.close()
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let scene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let originalWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(
+            rootView: IosReflowableReaderView(session: session)
+        )
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            originalWindow?.makeKey()
+        }
+        await session.open()
+        for _ in 0 ..< 100 where session.navigator?.viewport == nil {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertNotNil(session.navigator?.viewport)
+        let movedToLastPage = await session.seekControlProgress(1)
+        XCTAssertTrue(movedToLastPage)
+        try await Task.sleep(for: .milliseconds(750))
+        await session.flushProgress()
+        XCTAssertNil(session.presentationError)
+        let readiumLocator = try XCTUnwrap(session.navigator?.currentLocation)
+        let local = try await database.loadPosition(resourceId: "reader-v5-physical")
+        XCTAssertNotNil(local)
+        try await runtime.store.retryPendingUpload()
+        try await runtime.store.awaitPendingUpload()
+        let durableState = try await runtime.store.syncState()
+        XCTAssertNil(durableState.terminalFailureCode)
+        XCTAssertNil(durableState.pending)
+        let uploaded = try XCTUnwrap(port.lastUploadedPosition)
+
+        XCTAssertEqual(
+            try canonicalJSONObjectData(uploaded.locator.canonicalJson),
+            try canonicalJSONObjectData(readiumLocator.jsonString()),
+            "The upload must contain the same Locator emitted by Readium at the last page"
+        )
+    }
+
+    @MainActor
     func testNativeTextControlsRenderBundledFontsAndThemesOnPhysicalDevice() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("reader-controls-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -128,7 +241,7 @@ final class ReaderSecurityTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(100))
         }
         XCTAssertNotNil(session.navigator?.viewport)
-        let initialProgress = try await progressStore.load(sourceId: "controls")
+        let initialProgress = try await progressStore.load(resourceId: "controls")
         XCTAssertNil(initialProgress, "Opening must not manufacture reading progress")
         XCTAssertEqual(progressUpdateCount, 0)
         preferences.fontSize = 18
@@ -141,10 +254,10 @@ final class ReaderSecurityTests: XCTestCase {
         await session.goNext()
         try await Task.sleep(for: .milliseconds(750))
         await session.flushProgress()
-        let savedProgress = try await progressStore.load(sourceId: "controls")
+        let savedProgress = try await progressStore.load(resourceId: "controls")
         let baseline = try XCTUnwrap(savedProgress, "Normal page navigation must persist an exact location")
-        let progressCodec = ErmaoShared.PublicKt.createReaderProgressJson()
-        let baselinePayload = try progressCodec.encode(progress: baseline)
+        let progressCodec = ErmaoShared.PublicKt.createReaderPositionJson()
+        let baselinePayload = progressCodec.encode(position: baseline)
         let baselineUpdateCount = progressUpdateCount
         XCTAssertGreaterThan(session.progress, 0.4)
         XCTAssertLessThan(session.progress, 0.65)
@@ -166,8 +279,8 @@ final class ReaderSecurityTests: XCTestCase {
             XCTAssertEqual(session.preferences, preferences)
             XCTAssertEqual(preferencesStore.load(), preferences, "The accepted native preferences must be persisted")
             await session.flushProgress()
-            let currentProgress = try await progressStore.load(sourceId: "controls")
-            XCTAssertEqual(try progressCodec.encode(progress: XCTUnwrap(currentProgress)), baselinePayload,
+            let currentProgress = try await progressStore.load(resourceId: "controls")
+            XCTAssertEqual(progressCodec.encode(position: try XCTUnwrap(currentProgress)), baselinePayload,
                            "Preference reflow must not save a synthetic position or timestamp")
             XCTAssertEqual(progressUpdateCount, baselineUpdateCount, "Preference reflow must not publish reading activity")
             XCTAssertNil(session.presentationError)
@@ -266,8 +379,8 @@ final class ReaderSecurityTests: XCTestCase {
         session.activeControlPanel = nil
         await session.enterBackground()
         try await session.close()
-        let finalProgress = try await progressStore.load(sourceId: "controls")
-        XCTAssertEqual(try progressCodec.encode(progress: XCTUnwrap(finalProgress)), baselinePayload,
+        let finalProgress = try await progressStore.load(resourceId: "controls")
+        XCTAssertEqual(progressCodec.encode(position: try XCTUnwrap(finalProgress)), baselinePayload,
                        "Background and close must not persist a preference-only reflow")
         XCTAssertEqual(progressUpdateCount, baselineUpdateCount)
 
@@ -389,11 +502,15 @@ final class ReaderSecurityTests: XCTestCase {
         XCTAssertTrue(reopenedFirstChapter)
         try await expectChapter(0)
         await session.flushProgress()
-        let chapterStartProgress = try await progressStore.load(sourceId: "controls")
-        let chapterStart = try XCTUnwrap(chapterStartProgress?.location as? ErmaoShared.ReflowReaderLocation)
-        XCTAssertEqual(chapterStart.resourceKey, session.tableOfContents[0].href)
-        XCTAssertTrue(chapterStart.textQuote?.exact.contains("第44章") == true,
-                      "A chapter jump must persist the real visible start anchor")
+        let chapterStartProgress = try await progressStore.load(resourceId: "controls")
+        let chapterStart = try XCTUnwrap(chapterStartProgress)
+        let chapterLocator = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(chapterStart.position.locator.canonicalJson.utf8))
+                as? [String: Any]
+        )
+        XCTAssertEqual(chapterLocator["href"] as? String, session.tableOfContents[0].href)
+        XCTAssertNotNil(chapterLocator["locations"],
+                        "A chapter jump must persist the unmodified Readium Locator")
 
         var pagedPreferences = session.preferences
         pagedPreferences.readingMode = .paged
@@ -911,6 +1028,58 @@ final class ReaderSecurityTests: XCTestCase {
             XCTAssertEqual(failure.safeContext["errorCode"], expected.errorCode, file: file, line: line)
         }
     }
+}
+
+private final class PhysicalReaderV5PositionPort: ErmaoShared.ReaderPositionServerPort, @unchecked Sendable {
+    private let lock = NSLock()
+    private var uploads: [ErmaoShared.ReaderPositionUpload] = []
+
+    var lastUploadedPosition: ErmaoShared.ReaderPositionReport? {
+        withLock { uploads.last?.mutation.position }
+    }
+
+    func push(
+        upload: ErmaoShared.ReaderPositionUpload
+    ) async throws -> ErmaoShared.ReaderPositionPushResult {
+        let revision = withLock {
+            uploads.append(upload)
+            return Int64(uploads.count)
+        }
+        let snapshot = ErmaoShared.ReaderProgressSnapshotV5(
+            resourceId: upload.target.resourceId,
+            clientId: upload.mutation.clientId,
+            revision: revision,
+            mutationId: upload.mutation.mutationId,
+            capturedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+            receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+            position: upload.mutation.position
+        )
+        return ErmaoShared.ReaderPositionPushResultAccepted(
+            response: ErmaoShared.ReaderPositionWriteResponse(
+                acceptedMutationId: upload.mutation.mutationId,
+                acceptedRevision: revision,
+                currentSnapshot: snapshot
+            )
+        )
+    }
+
+    func load(
+        target: ErmaoShared.ReaderProgressSyncTarget,
+        etag: String?
+    ) async throws -> ErmaoShared.ReaderPositionQueryResult {
+        ErmaoShared.ReaderPositionQueryResultCurrent(snapshot: nil, etag: etag)
+    }
+
+    private func withLock<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+}
+
+private func canonicalJSONObjectData(_ json: String) throws -> Data {
+    let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
+    return try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
 }
 
 @MainActor

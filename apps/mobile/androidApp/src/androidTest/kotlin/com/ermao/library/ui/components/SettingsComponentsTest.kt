@@ -49,7 +49,6 @@ class SettingsComponentsTest {
             WarmPageTheme {
                 SettingsSaveAction(
                     contentDescription = "Save settings",
-                    label = "Save",
                     enabled = true,
                     working = working.value,
                     onClick = { clickCount++ },

@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class ServerCompatibilityCheckerTest {
-    private val checker = ServerCompatibilityChecker(3, setOf(3), setOf(4), setOf(1))
+    private val checker = ServerCompatibilityChecker(3, setOf(3), setOf(5), setOf(1))
 
     @Test
     fun acceptsTheCurrentProtocol() {
@@ -32,14 +32,14 @@ class ServerCompatibilityCheckerTest {
     }
 
     @Test
-    fun rejectsAServerThatDisablesReaderV4Capability() {
+    fun rejectsAServerThatDisablesReaderV5Capability() {
         val unsupported = compatibility().let { current ->
-            current.copy(capabilities = current.capabilities.copy(readerV4 = false))
+            current.copy(capabilities = current.capabilities.copy(readerV5 = false))
         }
 
         val decision = assertIs<ServerCompatibilityDecision.Incompatible>(checker.check(unsupported))
 
-        assertEquals("READER_V4_REQUIRED", decision.reasonCode)
+        assertEquals("READER_V5_REQUIRED", decision.reasonCode)
     }
 
     @Test
@@ -72,12 +72,12 @@ class ServerCompatibilityCheckerTest {
         serverVersion = "not-used-for-protocol-comparison",
         protocolVersion = protocol,
         minimumSupportedClientVersion = minimumClient,
-        readerSchemaVersion = 4,
+        readerSchemaVersion = 5,
         librarySchemaVersion = librarySchema,
         capabilities = ServerCapabilities(
             setup = true,
             cookieSession = true,
-            readerV4 = true,
+            readerV5 = true,
             mediaRange = true,
             managedOfflineDownloads = true,
             bookResourceAsset = true,

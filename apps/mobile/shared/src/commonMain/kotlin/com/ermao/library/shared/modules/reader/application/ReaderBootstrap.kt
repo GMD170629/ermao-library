@@ -1,6 +1,6 @@
 package com.ermao.library.shared.modules.reader.application
 
-import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV4
+import com.ermao.library.shared.modules.reader.domain.ReaderProgressSnapshotV5
 import com.ermao.library.shared.modules.reader.domain.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.domain.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
@@ -102,7 +102,8 @@ data class ReaderBootstrap(
     val availableResources: List<ReaderBootstrapResource> = emptyList(),
     val assets: List<ReaderBootstrapAsset> = emptyList(),
     val pdfAccess: ReaderPdfAccess? = null,
-    val remoteSnapshot: ReaderProgressSnapshotV4?,
+    /** Reader v5 opaque position returned by the resource bootstrap. */
+    val remoteSnapshot: ReaderProgressSnapshotV5?,
     /** Fixed-layout/audio navigation metadata. Reflowable navigation is always parsed locally. */
     val units: List<ReaderNavigationUnit> = emptyList(),
     val comicPages: List<ReaderComicPage> = emptyList(),

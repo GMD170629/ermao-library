@@ -19,7 +19,7 @@ class ApiEnvelopeTest {
 
         val success = assertIs<ApiResult.Success<ServerCompatibilityWire>>(result)
         assertEquals(3, success.value.protocol.minimumSupportedClientVersion)
-        assertEquals(4, success.value.readerSchemaVersion)
+        assertEquals(5, success.value.readerSchemaVersion)
         assertEquals(1, success.value.librarySchemaVersion)
     }
 
@@ -62,7 +62,7 @@ class ApiEnvelopeTest {
 
     private companion object {
         val COMPATIBILITY_FIXTURE = """
-            {"ok":true,"data":{"service":"ermao-books","serverIdentity":"server_fixture","serverVersion":"1.2.3","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":4,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}
+            {"ok":true,"data":{"service":"ermao-books","serverIdentity":"server_fixture","serverVersion":"1.2.3","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":5,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV5":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}
         """.trimIndent()
     }
 }

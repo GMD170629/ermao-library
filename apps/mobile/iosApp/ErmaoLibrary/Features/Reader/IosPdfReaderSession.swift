@@ -10,8 +10,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     @Published private(set) var navigator: IosPdfiumNavigatorViewController?
     @Published private(set) var pageIndex = 0
     @Published private(set) var presentationError: IosReaderFailureCode?
-    @Published private(set) var restoreWarning: IosReaderFailureCode?
-    @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
+    @Published private(set) var remoteProgressActionFailed = false
     @Published private(set) var tableOfContents: [IosReaderTocEntry] = []
     @Published var controlsVisible = false
     @Published var activeControlPanel: IosReaderPanel?
@@ -29,19 +29,16 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     private let preferencesStore: IosReaderPreferencesStore
 
     private let managedStore: IosManagedPublicationStore
-    private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
+    private let progressStore: any ErmaoShared.ReaderPositionSyncingStore
     private let progressCoordination: IosReaderProgressSessionCoordination?
     private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
     private(set) var pendingLaunchTargetPayload: String?
-    private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
     private let namespaceKey: String
     private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
     private let deviceIdentity: IosReaderDeviceIdentity
     private var pendingSave: Task<Void, Never>?
-    private var expectedRestoredPage: Int?
-    private var hasReadingActivity = false
-    private var suppressNextPersistence = false
     private var didOpen = false
 
     init(
@@ -57,9 +54,9 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         remoteDescriptor: ErmaoShared.DownloadDescriptor? = nil,
         pdfiumMaterializer: IosPdfiumDownloadMaterializer? = nil,
         managedStore: IosManagedPublicationStore,
-        progressStore: any ErmaoShared.ReaderProgressSyncingStore,
+        progressStore: any ErmaoShared.ReaderPositionSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
-        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?,
+        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?,
         initialTarget: (any ErmaoShared.ReaderNavigationTarget)? = nil,
         namespaceKey: String,
         bookID: String,
@@ -103,7 +100,6 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         didOpen = true
         do {
             let document: IosPdfiumDocument
-            let source: ErmaoShared.ReaderSource
             if let remoteSource {
                 guard let rangeCache, let rangeServer else {
                     throw IosReaderFailure(code: .engineError)
@@ -115,7 +111,6 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                     descriptor: remoteDescriptor,
                     materializer: pdfiumMaterializer
                 )
-                source = remoteSource
             } else {
                 let managed = try await managedStore.resolve(
                     resourceID: resourceID,
@@ -125,16 +120,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                     throw IosReaderFailure(code: .corruptFile)
                 }
                 document = try await IosPdfiumDocument.open(publication: managed)
-                source = ErmaoShared.LocalReaderSource(
-                    resourceId: managed.resourceID,
-                    displayTitle: managed.displayTitle,
-                    format: managed.sourceFormat.readerFormat,
-                    bookId: managed.bookID,
-                    assetId: managed.assetID,
-                    sourceFormat: managed.sourceFormat
-                )
             }
-            try await finishOpening(document: document, source: source)
+            try await finishOpening(document: document)
         } catch let failure as IosReaderFailure {
             await releaseRuntime()
             phase = .failed(failure.code)
@@ -168,9 +155,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         }
         guard let navigator else { return false }
         guard await navigator.goToPage(index) else { return false }
-        await verifyCurrentPage(expected: index)
-        if pageIndex == index { pendingLaunchTargetPayload = nil }
-        return pageIndex == index
+        pendingLaunchTargetPayload = nil
+        return true
     }
 
     func goToTOCEntry(_ entry: IosReaderTocEntry) async -> Bool {
@@ -206,37 +192,12 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         navigator?.setZoom(preferences.pdfZoom)
     }
 
-    func verifyRestoredLocationAfterPresentation() async {
+    func applySavedZoomAfterPresentation() {
         applySavedZoom()
-        guard let expected = expectedRestoredPage else { return }
-        expectedRestoredPage = nil
-        try? await Task.sleep(for: .milliseconds(180))
-        await verifyCurrentPage(expected: expected)
     }
 
     func showControls() { controlsVisible = true }
     func dismissPresentationError() { presentationError = nil }
-    func dismissRestoreWarning() { restoreWarning = nil }
-    func dismissRemoteProgressNotice() {
-        progressCoordination?.dismissRemoteNotice()
-        remoteProgressSnapshot = nil
-    }
-
-    func goToRemoteProgress() async {
-        guard let snapshot = remoteProgressSnapshot,
-              let remote = snapshot.locator as? ErmaoShared.PdfPublicationLocation,
-              (0 ..< canonicalPageCount).contains(Int(remote.pageIndex))
-        else { return }
-        let expected = Int(remote.pageIndex)
-        suppressNextPersistence = pageIndex != expected
-        let didNavigate = await goToPage(expected)
-        suppressNextPersistence = false
-        guard didNavigate, pageIndex == expected else { return }
-        guard let progress = makeProgress(index: expected) else { return }
-        try? await progressCoordination?.acceptVerifiedRemote(progress: progress, snapshot: snapshot)
-        remoteProgressSnapshot = nil
-    }
-
     func enterBackground() async {
         phase = .background
         await flushProgress()
@@ -261,6 +222,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         phase = .closing
         pendingSave?.cancel()
         try? await persistCurrentPage(waitForSynchronization: false)
+        try? await progressStore.retryPendingUpload()
+        try? await progressStore.awaitPendingUpload()
         progressCoordination?.close()
         await releaseRuntime()
         phase = .closed
@@ -272,102 +235,99 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     private func restorePage(
-        local: ErmaoShared.ReaderProgress?,
-        remote: ErmaoShared.ReaderProgressSnapshotV4?,
-        source: ErmaoShared.ReaderSource
-    ) throws -> Int? {
+        local: ErmaoShared.ReaderPositionLocalState?,
+        remote: ErmaoShared.ReaderProgressSnapshotV5?
+    ) async throws -> Int? {
         if let initialTarget {
             guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetPdf,
                   (0 ..< canonicalPageCount).contains(Int(target.pageIndex))
             else { throw IosReaderFailure(code: .locationRestoreFailed) }
-            expectedRestoredPage = Int(target.pageIndex)
             return Int(target.pageIndex)
         }
-        let decision = ErmaoShared.PublicKt.decideReaderResume(
-            localProgress: local,
-            remoteSnapshot: remote,
-            openedSource: source
-        )
-        guard let selected = decision.selected else {
-            if local != nil || remote != nil { restoreWarning = .locationRestoreFailed }
-            return nil
-        }
-        let index: Int
-        if let value = selected.localProgress?.location as? ErmaoShared.PdfReaderLocation {
-            guard IosPdfPositionPolicy.accepts(pageProgression: value.pageProgression)
-            else {
-                restoreWarning = .locationRestoreFailed
-                return nil
-            }
-            index = Int(value.pageIndex)
-        } else if let value = selected.remoteSnapshot?.locator as? ErmaoShared.PdfPublicationLocation {
-            guard IosPdfPositionPolicy.accepts(pageProgression: value.pageProgression) else {
-                restoreWarning = .locationRestoreFailed
-                return nil
-            }
-            index = Int(value.pageIndex)
+        let pending = (try? await progressStore.syncState())?.pending
+        let locator: ErmaoShared.ReaderOpaqueLocator?
+        if let pending, pending.resourceId == resourceID {
+            locator = local?.position.locator
+        } else if let remote {
+            locator = remote.position.locator
+        } else if progressCoordination == nil {
+            locator = local?.position.locator
         } else {
-            restoreWarning = .locationRestoreFailed
-            return nil
+            locator = nil
         }
-        guard (0 ..< canonicalPageCount).contains(index) else {
-            restoreWarning = .locationRestoreFailed
-            return nil
-        }
-        expectedRestoredPage = index
+        guard let locator else { return nil }
+        guard let index = pageIndex(from: locator),
+              (0 ..< canonicalPageCount).contains(index)
+        else { return nil }
         return index
     }
 
-    private func verifyCurrentPage(expected: Int) async {
-        try? await Task.sleep(for: .milliseconds(120))
-        guard let navigator, navigator.pageIndex == expected else {
-            restoreWarning = .locationRestoreFailed
-            return
-        }
-        guard await navigator.ensureCurrentPageRendered() else {
-            restoreWarning = .locationRestoreFailed
-            return
-        }
-        pageIndex = expected
-    }
-
     private func persistCurrentPage(waitForSynchronization: Bool = true) async throws {
-        guard hasReadingActivity,
-              phase == .reading || phase == .background || phase == .closing
+        guard phase == .reading || phase == .background || phase == .closing
         else { return }
         guard let index = navigator?.pageIndex else { return }
-        guard let progress = makeProgress(index: index) else { return }
-        let percent = progress.percent?.doubleValue ?? 0
-        try await progressStore.save(progress: progress)
+        guard let position = makePosition(index: index) else { return }
+        try await progressStore.save(position: position)
         if waitForSynchronization {
             await progressCoordination?.refreshAfterSave()
         }
-        remoteProgressSnapshot = progressCoordination?.remoteSnapshot
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
             bookId: bookID,
             resourceId: resourceID,
-            percent: percent,
-            progress: progress,
-            chapterTitle: nil
+            position: position.position,
+            capturedAtEpochMillis: position.capturedAtEpochMillis
         ))
     }
 
-    private func makeProgress(index: Int) -> ErmaoShared.ReaderProgress? {
-        let location = ErmaoShared.PdfReaderLocation(
-            pageIndex: Int32(index),
-            pageProgression: 0,
-            engineLocator: nil
-        )
+    private func makePosition(index: Int) -> ErmaoShared.ReaderPositionLocalState? {
+        guard (0 ..< canonicalPageCount).contains(index) else { return nil }
         let timestamp = Int64(Date().timeIntervalSince1970 * 1_000)
-        let percent = canonicalPageCount <= 1 ? 100 : Double(index) / Double(canonicalPageCount - 1) * 100
-        return ErmaoShared.ReaderProgress(
-            resourceId: resourceID,
-            location: location,
-            updatedAtEpochMillis: timestamp,
-            deviceId: deviceIdentity.stableDeviceId(),
-            percent: KotlinDouble(double: percent)
+        let totalProgression = canonicalPageCount <= 1
+            ? 1
+            : Double(index) / Double(canonicalPageCount - 1)
+        let locatorObject: [String: Any] = [
+            "href": "document.pdf",
+            "type": "application/pdf",
+            "locations": [
+                "position": index + 1,
+                "progression": totalProgression,
+                "totalProgression": totalProgression,
+            ],
+        ]
+        guard JSONSerialization.isValidJSONObject(locatorObject),
+              let data = try? JSONSerialization.data(withJSONObject: locatorObject, options: [.sortedKeys]),
+              let locatorJSON = String(data: data, encoding: .utf8),
+              let locator = try? ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: locatorJSON)
+        else { return nil }
+        let presentation = ErmaoShared.ReaderPositionPresentation(
+            displayPercent: totalProgression * 100,
+            totalProgression: totalProgression,
+            currentHref: "document.pdf",
+            chapter: nil,
+            page: ErmaoShared.ReaderPagePresentation(
+                number: Int32(index + 1),
+                total: KotlinInt(int: Int32(canonicalPageCount))
+            ),
+            playback: nil
         )
+        return ErmaoShared.ReaderPositionLocalState(
+            resourceId: resourceID,
+            clientId: deviceIdentity.stableDeviceId(),
+            capturedAtEpochMillis: timestamp,
+            position: ErmaoShared.ReaderPositionReport(locator: locator, presentation: presentation)
+        )
+    }
+
+    private func pageIndex(from locator: ErmaoShared.ReaderOpaqueLocator) -> Int? {
+        guard let data = locator.canonicalJson.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let locations = root["locations"] as? [String: Any],
+              let position = locations["position"] as? NSNumber
+        else { return nil }
+        let oneBased = position.intValue
+        guard oneBased >= 1 else { return nil }
+        return oneBased - 1
     }
 
     private func releaseRuntime() async {
@@ -378,8 +338,7 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
     }
 
     private func finishOpening(
-        document: IosPdfiumDocument,
-        source: ErmaoShared.ReaderSource
+        document: IosPdfiumDocument
     ) async throws {
         guard document.pageCount > 0 else {
             document.close()
@@ -398,8 +357,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
                 depth: 0
             )
         }
-        let local = try? await progressStore.load(sourceId: resourceID)
-        let initialPage = try restorePage(local: local, remote: remoteSnapshot, source: source) ?? 0
+        let local = try? await progressStore.load(resourceId: resourceID)
+        let initialPage = try await restorePage(local: local, remote: remoteSnapshot) ?? 0
         let navigator = IosPdfiumNavigatorViewController(
             document: document,
             initialPageIndex: initialPage
@@ -430,10 +389,8 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
         self.navigator = navigator
         navigatorOwnsDocument = true
         progressCoordination?.noticeHandler = { [weak self] snapshot in
-            guard snapshot?.locator is ErmaoShared.PdfPublicationLocation else { return }
-            self?.remoteProgressSnapshot = snapshot
+            self?.setRemoteProgress(snapshot)
         }
-        expectedRestoredPage = initialPage
         pageIndex = initialPage
         phase = .reading
         pendingLaunchTargetPayload = nil
@@ -462,17 +419,47 @@ final class IosPdfReaderSession: NSObject, ObservableObject {
             return
         }
         pageIndex = index
-        if suppressNextPersistence {
-            suppressNextPersistence = false
-            return
-        }
-        hasReadingActivity = true
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Self.progressSaveDebounceMilliseconds))
             guard !Task.isCancelled else { return }
             await self?.flushProgress()
         }
+    }
+
+    func dismissRemoteProgressNotice() {
+        progressCoordination?.dismissRemoteNotice()
+        setRemoteProgress(nil)
+    }
+
+    func goToRemoteProgress() async {
+        guard let snapshot = remoteProgressSnapshot,
+              let target = pageIndex(from: snapshot.position.locator),
+              (0 ..< canonicalPageCount).contains(target),
+              let navigator
+        else {
+            remoteProgressActionFailed = true
+            return
+        }
+        remoteProgressActionFailed = false
+        guard await navigator.goToPage(target) else {
+            remoteProgressActionFailed = true
+            return
+        }
+        pageIndex = target
+        let local = ErmaoShared.ReaderPositionLocalState(
+            resourceId: resourceID,
+            clientId: deviceIdentity.stableDeviceId(),
+            capturedAtEpochMillis: snapshot.capturedAtEpochMillis,
+            position: snapshot.position
+        )
+        try? await progressCoordination?.acceptRemote(position: local, snapshot: snapshot)
+        setRemoteProgress(nil)
+    }
+
+    private func setRemoteProgress(_ snapshot: ErmaoShared.ReaderProgressSnapshotV5?) {
+        remoteProgressSnapshot = snapshot
+        remoteProgressActionFailed = false
     }
 
     private func handleKeyCommand(_ command: IosPdfiumKeyCommand) {

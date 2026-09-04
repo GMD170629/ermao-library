@@ -64,6 +64,7 @@ test('maps a direct book resource collection with physical identities', () => {
     assets: [{
       id: 'asset-1',
       title: 'Archive',
+      path: 'Library/Archive.zip',
       resourceId: 'resource-1',
       sourceNodeId: 'asset-source-node',
       role: 'PRIMARY',
@@ -85,7 +86,7 @@ test('maps a direct book resource collection with physical identities', () => {
   assert.equal(book.resources[0]?.assets[0]?.downloadUrl, '/api/assets/asset-1?download=true');
   assert.equal(book.resources[0]?.assets[0]?.sourceFormat, 'ZIP');
   assert.equal(book.resources[0]?.assets[0]?.mtimeMs, 1234);
-  assert.equal('path' in (book.resources[0]?.assets[0] ?? {}), false);
+  assert.equal(book.resources[0]?.assets[0]?.path, 'Library/Archive.zip');
 });
 
 test('retains every exact MOBI-family resource format', () => {

@@ -43,7 +43,6 @@ class ReaderPreferenceSubmissionTest {
         override val capabilities = ReaderCapabilities.Epub
         override val currentLocation = MutableStateFlow<ReaderLocation?>(null)
         override val preferences = MutableStateFlow(ReaderPreferences())
-        override val restoreWarning = MutableStateFlow<ReaderError?>(null)
         override val resumeNotice = MutableStateFlow<ReaderResumeNotice?>(null)
         override val resumeActionFailed = MutableStateFlow(false)
         override val bookmarks = MutableStateFlow<List<ReaderBookmark>>(emptyList())
@@ -58,7 +57,6 @@ class ReaderPreferenceSubmissionTest {
         override fun goNext(): Boolean = error("Settings must not navigate")
         override fun goTo(location: ReaderLocation): Boolean = error("Settings must not restore an anchor")
         override fun goToTotalProgression(totalProgression: Double): Boolean = error("Settings must not seek")
-        override fun dismissRestoreWarning() = Unit
         override fun dismissResumeNotice() = Unit
         override fun returnToResumeNotice(): Boolean = error("Settings must not restore progress")
         override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null

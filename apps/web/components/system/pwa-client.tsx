@@ -510,7 +510,7 @@ function PwaDebugPanel() {
     function recordReaderDebug(event: Event) {
       const detail = (event as CustomEvent<{ level?: DebugLevel; message?: string; data?: unknown }>).detail;
       if (!detail) return;
-      appendLog(detail.level ?? 'info', 'reader-v4', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
+      appendLog(detail.level ?? 'info', 'reader-v5', [detail.message ?? 'event', detail.data].filter((item) => typeof item !== 'undefined'));
     }
 
     appendLog('info', 'pwa', [
@@ -522,9 +522,9 @@ function PwaDebugPanel() {
 
     const readerRuntime = getReaderRuntime();
     void readerRuntime.storage.listDiagnostics(30).then((diagnostics) => {
-      appendLog('info', 'reader-v4/snapshot', [`diagnostics=${diagnostics.length}`]);
-      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v4/${item.code}`, [item.message, item.data]));
-    }).catch((error) => appendLog('warn', 'reader-v4/snapshot', ['读取本地诊断失败', error]));
+      appendLog('info', 'reader-v5/snapshot', [`diagnostics=${diagnostics.length}`]);
+      diagnostics.reverse().forEach((item) => appendLog(item.level === 'warning' ? 'warn' : item.level, `reader-v5/${item.code}`, [item.message, item.data]));
+    }).catch((error) => appendLog('warn', 'reader-v5/snapshot', ['读取本地诊断失败', error]));
 
     navigator.serviceWorker?.getRegistration().then((registration) => {
       appendLog('info', 'service-worker', [

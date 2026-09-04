@@ -5,7 +5,6 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.ComicReaderLocation
@@ -33,7 +32,6 @@ class ReaderCbzInstrumentedTest {
     private val testContext: Context = instrumentation.context
     private val sourceId = "cbz-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private val mismatchedServerHints = listOf(
         ReaderComicPage(0, "server/not-local.png", "image/png", title = "Server title"),
     )
@@ -53,7 +51,9 @@ class ReaderCbzInstrumentedTest {
 
     @After
     fun removeArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderCbzInstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 
@@ -76,9 +76,9 @@ class ReaderCbzInstrumentedTest {
             runBlocking { scenarioActivity(scenario).controllerForTesting?.flush() }
         }
 
-        val persisted = runBlocking { progressStore.load(sourceId) }
-        assertEquals(1, (persisted?.location as? ComicReaderLocation)?.pageIndex)
-        assertEquals("pages/1", (persisted?.location as? ComicReaderLocation)?.resourceHref)
+        val persisted = runBlocking { loadLocalReaderV5Position(context, source) }
+        assertEquals(2, persisted?.position?.presentation?.page?.number)
+        assertEquals("pages/1", persisted?.position?.presentation?.currentHref)
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             scenario.keepReaderTestFixtureVisible()

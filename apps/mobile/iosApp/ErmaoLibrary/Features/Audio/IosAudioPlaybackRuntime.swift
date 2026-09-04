@@ -11,6 +11,8 @@ import SwiftUI
 final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     @Published private(set) var snapshot: AudioPlaybackSnapshot
     @Published private(set) var nowPlayingPresentationRequestID: UUID?
+    @Published private(set) var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
+    @Published private(set) var remoteProgressActionFailed = false
 
     let bootstrapGateway: any AudioBootstrapGateway
     let mediaAdapter: any AudioMediaStreamAdapter
@@ -32,6 +34,7 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     private var localMediaReferences: [String: String] = [:]
     private var isShuttingDown = false
     private var isStopping = false
+    private var pendingRemoteAcceptance: ErmaoShared.ReaderProgressSnapshotV5?
 
     init(
         bootstrapGateway: any AudioBootstrapGateway,
@@ -61,11 +64,16 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
         sharedSnapshot = resolvedStateMachine.snapshot()
         snapshot = .idle()
         nowPlayingPresentationRequestID = nil
+        remoteProgressSnapshot = nil
         render(sharedSnapshot)
         self.engine.eventHandler = { [weak self] event in
             self?.receive(event)
         }
         self.systemMedia.delegate = self
+        (self.progressAdapter as? any AudioRemoteProgressAdapter)?.remoteSnapshotHandler = { [weak self] snapshot in
+            self?.remoteProgressSnapshot = snapshot
+            self?.remoteProgressActionFailed = false
+        }
     }
 
     deinit {
@@ -109,8 +117,15 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
                     namespace: namespace
                 )
                 try Task.checkCancellation()
-                let restored = await self.enqueueProgressRestore { runtime in
-                    await runtime.progressAdapter.configure(bootstrap: envelope)
+                let restored: ErmaoShared.AudioReaderLocation?
+                do {
+                    restored = try await self.enqueueProgressRestore { runtime in
+                        try await runtime.progressAdapter.configure(bootstrap: envelope)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    restored = nil
                 }
                 try Task.checkCancellation()
                 self.apply(self.stateMachine.publicationLoaded(
@@ -182,15 +197,31 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
         apply(request.transition)
         bootstrapTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let restored = await self.enqueueProgressRestore { runtime in
-                await runtime.progressAdapter.configureLocal(publication: publication)
+            let restored: ErmaoShared.AudioReaderLocation?
+            do {
+                do {
+                    restored = try await self.enqueueProgressRestore { runtime in
+                        try await runtime.progressAdapter.configureLocal(publication: publication)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    restored = nil
+                }
+                try Task.checkCancellation()
+                self.apply(self.stateMachine.publicationLoaded(
+                    token: request.token,
+                    publication: publication,
+                    restoredLocation: restored
+                ))
+            } catch is CancellationError {
+                return
+            } catch {
+                self.apply(self.stateMachine.launchFailed(
+                    token: request.token,
+                    error: self.sharedError(for: error)
+                ))
             }
-            guard !Task.isCancelled else { return }
-            self.apply(self.stateMachine.publicationLoaded(
-                token: request.token,
-                publication: publication,
-                restoredLocation: restored
-            ))
         }
         _ = userID // Identity is already carried by ReaderSyncNamespace.
     }
@@ -237,6 +268,33 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     }
     func setSleepTimer(_ mode: ErmaoShared.AudioSleepTimerMode) {
         applyUserCommand { stateMachine.setSleepTimer(mode: mode) }
+    }
+
+    func dismissRemoteProgress() {
+        (progressAdapter as? any AudioRemoteProgressAdapter)?.dismissRemoteProgress()
+        remoteProgressSnapshot = nil
+        remoteProgressActionFailed = false
+    }
+
+    func goToRemoteProgress() {
+        guard let snapshot = remoteProgressSnapshot,
+              let adapter = progressAdapter as? any AudioRemoteProgressAdapter else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let location = try await adapter.remoteLocation(for: snapshot)
+                guard self.snapshot.bootstrap?.tracks.contains(where: { $0.assetID == location.assetId }) == true else {
+                    throw AudioAdapterError.locationRestoreFailed
+                }
+                guard !self.userCommandsLocked else { throw AudioAdapterError.locationRestoreFailed }
+                let transition = self.stateMachine.goToReaderLocation(location: location)
+                guard !transition.effects.isEmpty else { throw AudioAdapterError.locationRestoreFailed }
+                self.pendingRemoteAcceptance = snapshot
+                self.apply(transition)
+            } catch {
+                self.remoteProgressActionFailed = true
+            }
+        }
     }
 
     func stopAndClear() {
@@ -289,6 +347,7 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
         switch phase {
         case .active:
             if snapshot.isPlaying { try? systemMedia.activate() }
+            Task { await (progressAdapter as? any AudioRemoteProgressAdapter)?.checkForRemoteProgress() }
         case .inactive, .background:
             apply(stateMachine.saveProgress(reason: .background))
             if phase == .background && !backgroundPlaybackEnabled {
@@ -299,9 +358,18 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
         }
     }
 
-    func shutdown() {
+    /// Stops the native player, waits for the final local v5 save, then gives
+    /// the progress adapter one last retry/await window before the process is
+    /// torn down.  The pending mutation remains durable when that window
+    /// cannot complete.
+    func shutdown() async {
+        let namespace = snapshot.namespace
         isShuttingDown = true
         stopAndClear()
+        await stopTask?.value
+        if let namespace {
+            await progressAdapter.flush(namespace: namespace)
+        }
     }
 
     private func configureSessionAdapters(_ session: IosAudioSessionContext?) {
@@ -361,6 +429,29 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
             )
         }
         apply(transition)
+        switch event {
+        case .ready, .seekCompleted:
+            if let pending = pendingRemoteAcceptance,
+               let adapter = progressAdapter as? any AudioRemoteProgressAdapter {
+                pendingRemoteAcceptance = nil
+                Task { @MainActor [weak self] in
+                    do {
+                        try await adapter.acceptRemote(pending)
+                        self?.remoteProgressSnapshot = nil
+                        self?.remoteProgressActionFailed = false
+                    } catch {
+                        self?.remoteProgressActionFailed = true
+                    }
+                }
+            }
+        case .seekFailed, .failed:
+            if pendingRemoteAcceptance != nil {
+                pendingRemoteAcceptance = nil
+                remoteProgressActionFailed = true
+            }
+        default:
+            break
+        }
     }
 
     func audioSystemDidBeginInterruption() {
@@ -444,6 +535,8 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
                     resourceID: publication.resource.resourceId,
                     namespace: namespace
                 )
+                await (runtime.progressAdapter as? any AudioRemoteProgressAdapter)?
+                    .checkForRemoteProgress()
             }
         }
         for effect in transition.effects where effect.type == .cancelpreparedsource {
@@ -586,18 +679,19 @@ final class AudioPlaybackRuntime: ObservableObject, AudioSystemMediaDelegate {
     }
 
     private func enqueueProgressRestore(
-        _ operation: @escaping @MainActor (AudioPlaybackRuntime) async -> ErmaoShared.AudioReaderLocation?
-    ) async -> ErmaoShared.AudioReaderLocation? {
+        _ operation: @escaping @MainActor (AudioPlaybackRuntime) async throws -> ErmaoShared.AudioReaderLocation?
+    ) async throws -> ErmaoShared.AudioReaderLocation? {
         let previous = progressOperationTask
-        let restoreTask: Task<ErmaoShared.AudioReaderLocation?, Never> = Task { @MainActor [weak self] in
+        let restoreTask: Task<ErmaoShared.AudioReaderLocation?, Error> = Task { @MainActor [weak self] in
             await previous?.value
-            guard let self, !Task.isCancelled else { return nil }
-            return await operation(self)
+            guard let self else { throw CancellationError() }
+            try Task.checkCancellation()
+            return try await operation(self)
         }
         progressOperationTask = Task { @MainActor in
-            _ = await restoreTask.value
+            _ = try? await restoreTask.value
         }
-        return await restoreTask.value
+        return try await restoreTask.value
     }
 
     private func render(_ shared: ErmaoShared.AudioPlaybackSnapshot) {

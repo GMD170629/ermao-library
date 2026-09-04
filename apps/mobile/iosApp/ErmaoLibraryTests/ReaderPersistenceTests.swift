@@ -1,6 +1,5 @@
 import CryptoKit
 import Foundation
-import SQLite3
 import XCTest
 @preconcurrency import ErmaoShared
 @testable import ErmaoLibrary
@@ -13,7 +12,7 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTFail("iOS Reader tests must run on a connected physical device, never Simulator.")
         #endif
         temporaryRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("reader-store-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("reader-v5-store-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
     }
 
@@ -27,15 +26,12 @@ final class ReaderPersistenceTests: XCTestCase {
             IosReaderTocEntry(id: "two", title: "Two", href: "two.xhtml", depth: 0),
             IosReaderTocEntry(id: "three", title: "Three", href: "three.xhtml", depth: 0),
         ]
-
         let first = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "one.xhtml")
         XCTAssertNil(first.previous)
         XCTAssertEqual(first.next?.id, "two")
-
         let middle = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "two.xhtml")
         XCTAssertEqual(middle.previous?.id, "one")
         XCTAssertEqual(middle.next?.id, "three")
-
         let last = resolveIosReaderAdjacentChapters(entries: chapters, currentHref: "three.xhtml")
         XCTAssertEqual(last.previous?.id, "two")
         XCTAssertNil(last.next)
@@ -45,13 +41,11 @@ final class ReaderPersistenceTests: XCTestCase {
             IosReaderTocEntry(id: "two", title: "Two", href: "book.xhtml#two", depth: 0),
             IosReaderTocEntry(id: "three", title: "Three", href: "book.xhtml#three", depth: 0),
         ]
-
         let adjacent = resolveIosReaderAdjacentChapters(
             entries: fragmentChapters,
             currentHref: "book.xhtml",
             fragments: ["two"]
         )
-
         XCTAssertEqual(adjacent.previous?.id, "one")
         XCTAssertEqual(adjacent.next?.id, "three")
     }
@@ -62,7 +56,6 @@ final class ReaderPersistenceTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let first = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "user-a", defaults: defaults)
         let anotherUser = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "user-b", defaults: defaults)
-
         let initial = first.load()
         XCTAssertEqual(initial.theme, .warm)
         XCTAssertEqual(initial.fontSize, 18)
@@ -71,7 +64,6 @@ final class ReaderPersistenceTests: XCTestCase {
         XCTAssertEqual(initial.readingMode, .paged)
         XCTAssertEqual(initial.readingProgression, .ltr)
         XCTAssertEqual(initial.writingMode, .horizontal)
-
         var changed = initial
         changed.theme = .green
         changed.fontSize = 24
@@ -103,9 +95,9 @@ final class ReaderPersistenceTests: XCTestCase {
         writer.change { $0.fontSize = 24 }
         writer.change { $0.lineHeight = 2.2 }
         await writer.flush()
+        XCTAssertEqual(stored.count, 1)
         XCTAssertEqual(stored.last?.fontSize, 24)
         XCTAssertEqual(stored.last?.lineHeight, 2.2)
-        XCTAssertEqual(stored.count, 1)
         failureState.shouldFail = true
         writer.change { $0.fontSize = 30 }
         await writer.flush()
@@ -121,9 +113,7 @@ final class ReaderPersistenceTests: XCTestCase {
         let store = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "alice", defaults: defaults)
         let other = IosReaderPreferencesStore(serverIdentity: "server-a", userID: "bob", defaults: defaults)
         let digest = SHA256.hash(data: Data("server-a\0alice".utf8))
-        let suffix = digest.map { String(format: "%02x", $0) }.joined()
-        let currentVersion = Int(ErmaoShared.ReaderPreferences.companion.SCHEMA_VERSION)
-        let key = "reader.preferences." + suffix
+        let key = "reader.preferences." + digest.map { String(format: "%02x", $0) }.joined()
         var preferences = IosReaderPreferences()
         preferences.fontSize = 20
         preferences.lineHeight = 1.85
@@ -136,7 +126,7 @@ final class ReaderPersistenceTests: XCTestCase {
         let stored = try XCTUnwrap(defaults.data(forKey: key))
         XCTAssertEqual(other.load(), IosReaderPreferences())
         let document = try XCTUnwrap(JSONSerialization.jsonObject(with: stored) as? [String: Any])
-        XCTAssertEqual(document["schemaVersion"] as? Int, currentVersion)
+        XCTAssertEqual(document["schemaVersion"] as? Int, Int(ErmaoShared.ReaderPreferences.companion.SCHEMA_VERSION))
         XCTAssertEqual((document["epub"] as? [String: Any])?["readingProgression"] as? String, "ltr")
         XCTAssertEqual((document["epub"] as? [String: Any])?["writingMode"] as? String, "horizontal")
         let invalid = Data("{invalid".utf8)
@@ -181,446 +171,348 @@ final class ReaderPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testResetClearsEveryReaderFormat() async {
+    func testResetClearsEveryReaderFormatPreference() async {
         var preferences = IosReaderPreferences()
         preferences.fontSize = 24
         preferences.comicPageGap = 16
         preferences.pdfRotation = 90
         preferences.theme = .night
         var saved: IosReaderPreferences?
-        let editor = IosReaderPreferenceEditor(preferences: preferences) { saved = $0; return true }
+        let editor = IosReaderPreferenceEditor(preferences: preferences) {
+            saved = $0
+            return true
+        }
+
         editor.reset()
         await editor.flush()
+
         XCTAssertEqual(editor.draft, IosReaderPreferences())
         XCTAssertEqual(saved, IosReaderPreferences())
     }
 
-    func testEveryReflowCallbackAndFlushRemainSuppressedUntilUserNavigation() {
-        var gate = IosReaderPersistenceGate()
-        gate.beginUserNavigation()
-        gate.suppressPreferenceReflow()
-        for position in 1 ... 5 {
-            XCTAssertFalse(gate.observeLocationChange(.init(href: "chapter.xhtml", progression: Double(position) / 10, totalProgression: nil, position: position)))
-        }
-        XCTAssertFalse(gate.canPersistCurrentLocation)
-        gate.beginUserNavigation()
-        XCTAssertTrue(gate.canPersistCurrentLocation)
-    }
-
-    func testPreferenceReflowObservationDoesNotBecomeUserNavigation() {
-        var gate = IosReaderPersistenceGate()
-        gate.protectRestoredLocation(.init(
-            href: "chapter.xhtml",
-            progression: 0.5,
-            totalProgression: 0.6,
-            position: 12
-        ))
-        gate.suppressPreferenceReflow()
-
-        XCTAssertFalse(gate.observeLocationChange(.init(
-            href: "chapter.xhtml",
-            progression: 0.45,
-            totalProgression: 0.6,
-            position: 12
-        )))
-        XCTAssertFalse(gate.hasLocalReadingActivity)
-    }
-
-    func testBootstrapLocationCannotBecomeFakeLocalExact() {
-        var gate = IosReaderPersistenceGate()
-        let remote = IosReaderPersistenceGate.LocationSignature(
-            href: "chapter.xhtml",
-            progression: 0.5,
-            totalProgression: 0.6,
-            position: 12
-        )
-        let navigated = IosReaderPersistenceGate.LocationSignature(
-            href: "chapter.xhtml",
-            progression: 0.7,
-            totalProgression: 0.8,
-            position: 13
-        )
-        gate.protectRestoredLocation(remote)
-
-        XCTAssertFalse(gate.observeLocationChange(remote))
-        XCTAssertFalse(gate.observeLocationChange(remote))
-        XCTAssertFalse(gate.hasLocalReadingActivity)
-
-        XCTAssertTrue(gate.observeLocationChange(navigated))
-        XCTAssertTrue(gate.hasLocalReadingActivity)
-    }
-
-    func testExactProgressRoundTripsWithoutCreatingDurableSyncState() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "volume-a"),
-            databaseURL: databaseURL
-        )
-        let progress = try decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456)
-
-        try await store.save(progress: progress)
-        let restored = try await store.load(sourceId: "volume-a")
-
-        XCTAssertEqual(restored?.updatedAtEpochMillis, 1_775_988_123_456)
-        XCTAssertTrue(
-            (restored?.location as? ErmaoShared.ReflowReaderLocation)?
-                .engineLocator?.payload.canonicalJson.contains("chapter.xhtml") == true
-        )
-        XCTAssertTrue(try tableExists("reader_outbox", databaseURL: databaseURL))
-        XCTAssertTrue(try tableExists("reader_sequence_counters", databaseURL: databaseURL))
-    }
-
-    func testExactProgressSurvivesAuthorizationVersionRollover() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let v4 = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "volume-a"),
-            databaseURL: databaseURL
-        )
-        try await v4.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 1_775_988_123_456))
-
-        let v5 = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 5, resourceID: "volume-a"),
-            databaseURL: databaseURL
-        )
-        let restored = try await v5.load(sourceId: "volume-a")
-
-        XCTAssertEqual(restored?.resourceId, "volume-a")
-        XCTAssertEqual(restored?.updatedAtEpochMillis, 1_775_988_123_456)
-    }
-
-    func testExactIdentityIncludesEveryStableLocalOwnerComponentButNotAuthorizationVersion() {
-        let baseline = makeIdentity(authorizationVersion: 4, resourceID: "volume-a")
-        XCTAssertEqual(
-            baseline.stableKey,
-            makeIdentity(authorizationVersion: 5, resourceID: "volume-a").stableKey
-        )
-        XCTAssertNotEqual(
-            baseline.stableKey,
-            makeIdentity(authorizationVersion: 4, resourceID: "volume-a", clientID: "other-client").stableKey
-        )
-        XCTAssertNotEqual(
-            baseline.stableKey,
-            makeIdentity(authorizationVersion: 4, resourceID: "volume-b").stableKey
-        )
-        XCTAssertNotEqual(
-            baseline.stableKey,
-            makeIdentity(authorizationVersion: 4, bookID: "work-b", resourceID: "volume-a").stableKey
-        )
-        XCTAssertNotEqual(
-            baseline.stableKey,
-            makeIdentity(
-                namespace: makeNamespace(
-                    authorizationVersion: 4,
-                    serverIdentity: "server-b"
-                ),
-                resourceID: "volume-a"
-            ).stableKey
-        )
-        XCTAssertNotEqual(
-            baseline.stableKey,
-            makeIdentity(
-                namespace: makeNamespace(
-                    authorizationVersion: 4,
-                    userID: "user-b"
-                ),
-                resourceID: "volume-a"
-            ).stableKey
-        )
-    }
-
-    func testExactIdentitySeparatesClientButKeepsProgressForTheVolume() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let primary = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "volume-a"),
-            databaseURL: databaseURL
-        )
-        try await primary.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 100))
-
-        let anotherClient = try IosReaderLocalDatabase(
-            identity: makeIdentity(
-                authorizationVersion: 4,
-                resourceID: "volume-a",
-                clientID: "ios-installation-d"
-            ),
-            databaseURL: databaseURL
-        )
-        let sameVolume = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "volume-a"),
-            databaseURL: databaseURL
-        )
-
-        let otherClientBeforeSave = try await anotherClient.load(sourceId: "volume-a")
-        let sameVolumeBeforeSave = try await sameVolume.load(sourceId: "volume-a")
-        XCTAssertNil(otherClientBeforeSave)
-        XCTAssertEqual(sameVolumeBeforeSave?.updatedAtEpochMillis, 100)
-
-        try await sameVolume.save(progress: try decodeProgress(
-            sourceID: "volume-a",
-            updatedAt: 200
-        ))
-        let originalRestored = try await primary.load(sourceId: "volume-a")
-        let sameVolumeRestored = try await sameVolume.load(sourceId: "volume-a")
-        XCTAssertEqual(originalRestored?.updatedAtEpochMillis, 200)
-        XCTAssertEqual(sameVolumeRestored?.updatedAtEpochMillis, 200)
-    }
-
-    func testLatestLocalSaveOverwritesEvenWhenWallClockMovesBackward() async throws {
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "volume-a"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        )
-        try await store.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 200))
-        try await store.save(progress: try decodeProgress(sourceID: "volume-a", updatedAt: 100))
-
-        let restored = try await store.load(sourceId: "volume-a")
-        XCTAssertEqual(restored?.updatedAtEpochMillis, 100)
-    }
-
-    func testCurrentExactProgressSurvivesMissingContractMetadata() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let identity = makeIdentity(authorizationVersion: 4, resourceID: "current-resource")
-        try createIncompleteExactDatabase(at: databaseURL, ownerKey: identity.stableKey,
-            sourceID: "current-resource", payload: progressPayload(sourceID: "current-resource", updatedAt: 777))
-        let store = try IosReaderLocalDatabase(identity: identity, databaseURL: databaseURL)
-        let restored = try await store.load(sourceId: "current-resource")
-        XCTAssertEqual(restored?.updatedAtEpochMillis, 777)
-    }
-
-    func testLegacyR4SQLiteIsPreservedWithSyncTables() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let namespace = makeNamespace(authorizationVersion: 4)
-        try createLegacyR4Database(
-            at: databaseURL,
-            namespaceKey: namespace.stableKey,
-            sourceID: "legacy-r4-volume",
-            payload: progressPayload(sourceID: "legacy-r4-volume", updatedAt: 1_775_988_323_456)
-        )
-
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(namespace: namespace, resourceID: "legacy-r4-volume"),
-            databaseURL: databaseURL
-        )
-        let migrated = try await store.load(sourceId: "legacy-r4-volume")
-
-        XCTAssertNil(migrated)
-        XCTAssertTrue(try tableExists("reader_local_exact", databaseURL: databaseURL))
-        XCTAssertTrue(try tableExists("reader_progress", databaseURL: databaseURL))
-        XCTAssertTrue(try tableExists("reader_outbox", databaseURL: databaseURL))
-        XCTAssertTrue(try tableExists("reader_sequence_counters", databaseURL: databaseURL))
-
-        let reauthenticated = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 5, resourceID: "legacy-r4-volume"),
-            databaseURL: databaseURL
-        )
-        let afterReauthentication = try await reauthenticated.load(sourceId: "legacy-r4-volume")
-        XCTAssertNil(afterReauthentication)
-    }
-
-    func testIncompleteExactKeyRemainsIsolatedAtTheUnionBoundary() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let oldOwnerKey = "8:server-a6:user-a"
-        try createIncompleteExactDatabase(
-            at: databaseURL,
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            payload: progressPayload(sourceID: "preview-volume", updatedAt: 444)
-        )
-
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 9, resourceID: "preview-volume"),
-            databaseURL: databaseURL
-        )
-        let migrated = try await store.load(sourceId: "preview-volume")
-
-        XCTAssertNil(migrated)
-        XCTAssertTrue(try exactRowExists(
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            databaseURL: databaseURL
-        ))
-    }
-
-    func testIncompleteExactKeyFromAnotherClientIsPreservedWithoutReassigningIdentity() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let oldOwnerKey = "8:server-a6:user-a"
-        try createIncompleteExactDatabase(
-            at: databaseURL,
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            payload: progressPayload(
-                sourceID: "preview-volume",
-                updatedAt: 444,
-                clientID: "another-installation"
-            )
-        )
-
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 9, resourceID: "preview-volume"),
-            databaseURL: databaseURL
-        )
-        let migrated = try await store.load(sourceId: "preview-volume")
-
-        XCTAssertNil(migrated)
-        XCTAssertTrue(try exactRowExists(
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            databaseURL: databaseURL
-        ))
-    }
-
-    func testIncompleteExactKeyIsPreservedWithoutReassigningIdentity() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        let oldOwnerKey = "8:server-a6:user-a"
-        try createIncompleteExactDatabase(
-            at: databaseURL,
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            payload: progressPayload(
-                sourceID: "preview-volume",
-                updatedAt: 444
-            )
-        )
-
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 9, resourceID: "preview-volume"),
-            databaseURL: databaseURL
-        )
-        let migrated = try await store.load(sourceId: "preview-volume")
-
-        XCTAssertNil(migrated)
-        XCTAssertTrue(try exactRowExists(
-            ownerKey: oldOwnerKey,
-            sourceID: "preview-volume",
-            databaseURL: databaseURL
-        ))
-    }
-
-    func testUnrecognizedLegacyR4ExactTableIsPreservedWithoutReassigningIdentity() async throws {
-        let databaseURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        try createLegacyR4Database(
-            at: databaseURL,
-            namespaceKey: "not-a-length-prefixed-namespace",
-            sourceID: "legacy-r4-volume",
-            payload: progressPayload(sourceID: "legacy-r4-volume", updatedAt: 1_775_988_323_456)
-        )
-
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 5, resourceID: "legacy-r4-volume"),
-            databaseURL: databaseURL
-        )
-        _ = try await store.load(sourceId: "legacy-r4-volume")
-
-        XCTAssertTrue(try tableExists("reader_progress", databaseURL: databaseURL))
-    }
-
-    func testLegacyProgressFileIsPreservedWithoutReassigningIdentity() async throws {
-        let legacyRoot = temporaryRoot.appendingPathComponent("Progress", isDirectory: true)
-        try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
-        let legacyURL = legacyProgressURL(sourceID: "legacy-volume", root: legacyRoot)
-        try Data(progressPayload(sourceID: "legacy-volume", updatedAt: 1_775_988_323_456).utf8)
-            .write(to: legacyURL)
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "legacy-volume"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3"),
-            legacyProgressRoot: legacyRoot
-        )
-
-        let migrated = try await store.load(sourceId: "legacy-volume")
-
-        XCTAssertNil(migrated)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
-    }
-
-    func testInvalidLegacyProgressFileIsPreservedWithoutReassigningIdentity() async throws {
-        let legacyRoot = temporaryRoot.appendingPathComponent("Progress", isDirectory: true)
-        try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
-        let legacyURL = legacyProgressURL(sourceID: "expected-volume", root: legacyRoot)
-        try Data(progressPayload(sourceID: "another-volume", updatedAt: 1_775_988_323_456).utf8)
-            .write(to: legacyURL)
-        let store = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "expected-volume"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3"),
-            legacyProgressRoot: legacyRoot
-        )
-
-        let loaded = try await store.load(sourceId: "expected-volume")
-        XCTAssertNil(loaded)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
-    }
-
-    func testUploadFailureKeepsDurableExactPendingMutation() async throws {
-        let namespace = makeNamespace(authorizationVersion: 4)
+    func testV5PositionRoundTripsWithoutCreatingPendingMutation() async throws {
+        let databaseURL = temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
         let database = try IosReaderLocalDatabase(
-            identity: makeIdentity(namespace: namespace, resourceID: "upload-volume"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: databaseURL
         )
-        let port = RecordingReaderProgressPort(failure: TestUploadFailure.expected)
-        let runtime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
-            stateStore: database,
-            target: makeTarget(namespace: namespace, resourceID: "upload-volume"),
-            server: port
-        )
-        let store = runtime.store
-        let progress = try decodeProgress(sourceID: "upload-volume", updatedAt: 1_775_988_523_456)
+        let position = try makePosition(resourceID: "resource-a", capturedAt: 1_786_500_000_000, percent: 99)
 
-        try await store.save(progress: progress)
-        try await store.awaitPendingUpload()
-        let restored = try await store.load(sourceId: "upload-volume")
-        let state = try await store.syncState()
+        try await database.savePosition(position: position)
+        let restored = try await database.loadPosition(resourceId: "resource-a")
+        let state = try await database.loadPositionSyncState()
 
-        XCTAssertEqual(restored?.updatedAtEpochMillis, progress.updatedAtEpochMillis)
-        XCTAssertEqual(port.uploadCount, 1)
-        XCTAssertNotNil(state.pending)
-        XCTAssertEqual(state.pending?.capturedAtEpochMillis, progress.updatedAtEpochMillis)
-        XCTAssertTrue(port.lastLocatorPayload?.contains("chapter.xhtml") == true)
-        runtime.close()
-        await database.close()
-    }
-
-    func testLocalOnlyProgressStorePersistsWithoutCreatingPendingUpload() async throws {
-        let database = try IosReaderLocalDatabase(
-            identity: makeIdentity(authorizationVersion: 4, resourceID: "offline-volume"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
-        )
-        let store = IosLocalOnlyReaderProgressStore(database: database)
-        let progress = try decodeProgress(sourceID: "offline-volume", updatedAt: 1_775_988_623_456)
-
-        try await store.save(progress: progress)
-        try await store.retryPendingUpload()
-        try await store.awaitPendingUpload()
-
-        let restored = try await store.load(sourceId: "offline-volume")
-        let state = try await store.syncState()
-        XCTAssertEqual(restored?.updatedAtEpochMillis, progress.updatedAtEpochMillis)
+        XCTAssertEqual(restored?.capturedAtEpochMillis, position.capturedAtEpochMillis)
+        XCTAssertEqual(restored?.position.presentation.displayPercent, 99)
+        XCTAssertEqual(restored?.position.locator.canonicalJson, position.position.locator.canonicalJson)
         XCTAssertNil(state.pending)
         await database.close()
     }
 
-    func testSingleFlightUploadKeepsOnlyLatestWaitingLocation() async throws {
-        let namespace = makeNamespace(authorizationVersion: 4)
-        let database = try IosReaderLocalDatabase(
-            identity: makeIdentity(namespace: namespace, resourceID: "single-flight-volume"),
-            databaseURL: temporaryRoot.appendingPathComponent("Reader.sqlite3")
+    func testV5PositionSurvivesAuthorizationVersionRollover() async throws {
+        let databaseURL = temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        let first = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 4, resourceID: "resource-a"),
+            databaseURL: databaseURL
         )
-        let port = BlockingReaderProgressPort()
-        let runtime = ErmaoShared.PublicKt.createReaderProgressSyncRuntime(
+        try await first.savePosition(position: makePosition(resourceID: "resource-a", capturedAt: 100, percent: 25))
+        await first.close()
+        let reauthenticated = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: databaseURL
+        )
+        let restored = try await reauthenticated.loadPosition(resourceId: "resource-a")
+        XCTAssertEqual(restored?.position.presentation.displayPercent, 25)
+        await reauthenticated.close()
+    }
+
+    func testV5IdentityIncludesStableOwnerComponentsButNotAuthorizationVersion() {
+        let baseline = makeIdentity(authorizationVersion: 4, resourceID: "resource-a")
+        XCTAssertEqual(
+            baseline.stableKey,
+            makeIdentity(authorizationVersion: 5, resourceID: "resource-a").stableKey
+        )
+        XCTAssertNotEqual(
+            baseline.stableKey,
+            makeIdentity(
+                authorizationVersion: 5,
+                resourceID: "resource-a",
+                clientID: "other-client"
+            ).stableKey
+        )
+        XCTAssertNotEqual(
+            baseline.stableKey,
+            makeIdentity(authorizationVersion: 5, resourceID: "resource-b").stableKey
+        )
+        XCTAssertNotEqual(
+            baseline.stableKey,
+            makeIdentity(
+                authorizationVersion: 5,
+                bookID: "book-b",
+                resourceID: "resource-a"
+            ).stableKey
+        )
+        XCTAssertNotEqual(
+            baseline.stableKey,
+            makeIdentity(
+                namespace: makeNamespace(
+                    authorizationVersion: 5,
+                    serverIdentity: "server-b"
+                ),
+                resourceID: "resource-a"
+            ).stableKey
+        )
+        XCTAssertNotEqual(
+            baseline.stableKey,
+            makeIdentity(
+                namespace: makeNamespace(
+                    authorizationVersion: 5,
+                    userID: "user-b"
+                ),
+                resourceID: "resource-a"
+            ).stableKey
+        )
+    }
+
+    func testV5IdentitySeparatesInstallationsButSharesOneInstallationVolume() async throws {
+        let databaseURL = temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        let primary = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: databaseURL
+        )
+        try await primary.savePosition(position: makePosition(
+            resourceID: "resource-a", capturedAt: 100, percent: 10
+        ))
+
+        let anotherInstallation = try IosReaderLocalDatabase(
+            identity: makeIdentity(
+                authorizationVersion: 5,
+                resourceID: "resource-a",
+                clientID: "ios-installation-d"
+            ),
+            databaseURL: databaseURL
+        )
+        let sameInstallation = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: databaseURL
+        )
+
+        let otherInstallationPosition = try await anotherInstallation.loadPosition(
+            resourceId: "resource-a"
+        )
+        XCTAssertNil(otherInstallationPosition)
+        let sameInstallationPosition = try await sameInstallation.loadPosition(
+            resourceId: "resource-a"
+        )
+        XCTAssertEqual(
+            sameInstallationPosition?.capturedAtEpochMillis,
+            100
+        )
+        try await sameInstallation.savePosition(position: makePosition(
+            resourceID: "resource-a", capturedAt: 200, percent: 20
+        ))
+        let primaryPosition = try await primary.loadPosition(resourceId: "resource-a")
+        XCTAssertEqual(primaryPosition?.capturedAtEpochMillis, 200)
+
+        await sameInstallation.close()
+        await anotherInstallation.close()
+        await primary.close()
+    }
+
+    func testLatestLocalSaveWinsEvenWhenClientClockMovesBackward() async throws {
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        try await database.savePosition(position: makePosition(resourceID: "resource-a", capturedAt: 200, percent: 99))
+        try await database.savePosition(position: makePosition(resourceID: "resource-a", capturedAt: 100, percent: 25))
+        let restored = try await database.loadPosition(resourceId: "resource-a")
+        XCTAssertEqual(restored?.capturedAtEpochMillis, 100)
+        XCTAssertEqual(restored?.position.presentation.displayPercent, 25)
+        await database.close()
+    }
+
+    func testFreshV5DatabaseDoesNotReadSiblingV4Files() async throws {
+        let oldURL = temporaryRoot.appendingPathComponent("Reader.sqlite3")
+        try Data("legacy-v4-do-not-read".utf8).write(to: oldURL)
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let position = try await database.loadPosition(resourceId: "resource-a")
+        XCTAssertNil(position)
+        XCTAssertEqual(try Data(contentsOf: oldURL), Data("legacy-v4-do-not-read".utf8))
+        await database.close()
+    }
+
+    func testReaderV5DoesNotDeleteLegacyPdfRangeCache() async throws {
+        let caches = temporaryRoot.appendingPathComponent("Caches", isDirectory: true)
+        let legacyRanges = caches
+            .appendingPathComponent("reader", isDirectory: true)
+            .appendingPathComponent("pdf-range-v1", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyRanges, withIntermediateDirectories: true)
+        let marker = legacyRanges.appendingPathComponent("marker")
+        try Data("legacy-range-cache".utf8).write(to: marker)
+
+        let fileManager = ReaderPersistenceTestFileManager(cachesURL: caches)
+        let store = try IosManagedPublicationStore(
+            root: temporaryRoot.appendingPathComponent("Publications", isDirectory: true),
+            fileManager: fileManager
+        )
+        try await store.removeAutomaticReplica(
+            resourceID: "resource-without-replica",
+            assetID: "asset",
+            namespace: "server|user|5"
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertEqual(try Data(contentsOf: marker), Data("legacy-range-cache".utf8))
+    }
+
+    @MainActor
+    func testDetailPresentationLoaderReturnsLocalV5ValueAheadOfServerRefresh() async throws {
+        let databaseURL = temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        let namespace = makeNamespace(authorizationVersion: 5)
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(namespace: namespace, resourceID: "resource-a"),
+            databaseURL: databaseURL
+        )
+        try await database.savePosition(position: makePosition(
+            resourceID: "resource-a",
+            capturedAt: 1_786_500_000_000,
+            percent: 99
+        ))
+        await database.close()
+
+        let suite = "reader-v5-detail-overlay-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("ios-installation-c", forKey: "reader.installation.device-id")
+        let context = ContentRequestContext(
+            profileID: "profile-a",
+            profileDisplayName: "Server A",
+            serverIdentity: "server-a",
+            userID: "user-a",
+            authorizationVersion: 5,
+            baseURL: "https://library.example",
+            acceptsInsecureTLS: false
+        )
+
+        let updates = await ReaderProgressPresentationCenter.shared.loadLocalUpdates(
+            context: context,
+            bookID: "book-a",
+            resourceIDs: ["resource-a"],
+            deviceIdentity: IosReaderDeviceIdentity(defaults: defaults),
+            databaseURL: databaseURL
+        )
+
+        XCTAssertEqual(updates.count, 1)
+        XCTAssertEqual(updates.first?.position.presentation.displayPercent, 99)
+        XCTAssertEqual(updates.first?.position.presentation.totalProgression, 0.99)
+    }
+
+    func testUploadFailureKeepsExactV5MutationBody() async throws {
+        let namespace = makeNamespace(authorizationVersion: 5)
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(namespace: namespace, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let port = RecordingReaderPositionPort(failure: TestUploadFailure.expected)
+        let runtime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
             stateStore: database,
-            target: makeTarget(namespace: namespace, resourceID: "single-flight-volume"),
+            target: makeTarget(namespace: namespace, resourceID: "resource-a"),
             server: port
         )
-        let store = runtime.store
+        let position = try makePosition(resourceID: "resource-a", capturedAt: 300, percent: 99)
+        try await runtime.store.save(position: position)
+        try await runtime.store.awaitPendingUpload()
+        let state = try await runtime.store.syncState()
+        XCTAssertEqual(port.uploadCount, 1)
+        XCTAssertEqual(state.pending?.position.locator.canonicalJson, position.position.locator.canonicalJson)
+        XCTAssertEqual(state.pending?.position.presentation.displayPercent, 99)
+        runtime.close()
+        await database.close()
+    }
 
-        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 100))
+    func testLocalOnlyStoreCreatesNoPendingUpload() async throws {
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let store = IosLocalOnlyReaderProgressStore(database: database)
+        let position = try makePosition(resourceID: "resource-a", capturedAt: 400, percent: 99)
+        try await store.save(position: position)
+        let restored = try await store.load(resourceId: "resource-a")
+        let state = try await store.syncState()
+        XCTAssertEqual(restored?.position.presentation.displayPercent, 99)
+        XCTAssertNil(state.pending)
+        await database.close()
+    }
+
+    func testOlderAcknowledgementCannotClearNewerPendingMutation() async throws {
+        let namespace = makeNamespace(authorizationVersion: 5)
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(namespace: namespace, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let port = BlockingReaderPositionPort()
+        let runtime = ErmaoShared.PublicKt.createReaderPositionSyncRuntime(
+            stateStore: database,
+            target: makeTarget(namespace: namespace, resourceID: "resource-a"),
+            server: port
+        )
+        try await runtime.store.save(position: makePosition(resourceID: "resource-a", capturedAt: 100, percent: 10))
         await port.waitUntilFirstUploadStarts()
-        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 200))
-        try await store.save(progress: try decodeProgress(sourceID: "single-flight-volume", updatedAt: 300))
+        try await runtime.store.save(position: makePosition(resourceID: "resource-a", capturedAt: 200, percent: 20))
+        try await runtime.store.save(position: makePosition(resourceID: "resource-a", capturedAt: 300, percent: 99))
         port.releaseFirstUpload()
-        try await store.awaitPendingUpload()
+        try await runtime.store.awaitPendingUpload()
 
         XCTAssertEqual(port.uploadedTimestamps, [100, 300])
-        let restored = try await store.load(sourceId: "single-flight-volume")
-        XCTAssertEqual(restored?.updatedAtEpochMillis, 300)
+        let state = try await runtime.store.syncState()
+        let restored = try await runtime.store.load(resourceId: "resource-a")
+        XCTAssertNil(state.pending)
+        XCTAssertEqual(restored?.position.presentation.displayPercent, 99)
         runtime.close()
+        await database.close()
+    }
+
+    func testAcknowledgementTracksTheServerCurrentSnapshotRevision() async throws {
+        let database = try IosReaderLocalDatabase(
+            identity: makeIdentity(authorizationVersion: 5, resourceID: "resource-a"),
+            databaseURL: temporaryRoot.appendingPathComponent("ReaderV5.sqlite3")
+        )
+        let position = try makePosition(resourceID: "resource-a", capturedAt: 400, percent: 99)
+        let mutationID = "f4743f84-16dc-4202-ab50-729e4d036d16"
+        let mutation = ErmaoShared.ReaderProgressMutationV5(
+            resourceId: position.resourceId,
+            clientId: position.clientId,
+            mutationId: mutationID,
+            capturedAtEpochMillis: position.capturedAtEpochMillis,
+            position: position.position
+        )
+        try await database.commitPositionAndPending(position: position, pending: mutation)
+        let currentSnapshot = ErmaoShared.ReaderProgressSnapshotV5(
+            resourceId: position.resourceId,
+            clientId: "android-other-installation",
+            revision: 9,
+            mutationId: "58a3ac3c-52d0-41ed-9c85-0524b532f25b",
+            capturedAtEpochMillis: 300,
+            receivedAtEpochMillis: 500,
+            position: position.position
+        )
+        try await database.acknowledgePosition(
+            mutationId: mutationID,
+            response: ErmaoShared.ReaderPositionWriteResponse(
+                acceptedMutationId: mutationID,
+                acceptedRevision: 4,
+                currentSnapshot: currentSnapshot
+            )
+        )
+
+        let state = try await database.loadPositionSyncState()
+        XCTAssertEqual(state.confirmedRevision, 9)
+        XCTAssertNil(state.pending)
         await database.close()
     }
 
@@ -638,7 +530,7 @@ final class ReaderPersistenceTests: XCTestCase {
 
     private func makeIdentity(
         authorizationVersion: Int64,
-        bookID: String = "work-a",
+        bookID: String = "book-a",
         resourceID: String,
         clientID: String = "ios-installation-c"
     ) -> ErmaoShared.ReaderLocalProgressIdentity {
@@ -652,7 +544,7 @@ final class ReaderPersistenceTests: XCTestCase {
 
     private func makeIdentity(
         namespace: ErmaoShared.ReaderSyncNamespace,
-        bookID: String = "work-a",
+        bookID: String = "book-a",
         resourceID: String,
         clientID: String = "ios-installation-c"
     ) -> ErmaoShared.ReaderLocalProgressIdentity {
@@ -664,156 +556,45 @@ final class ReaderPersistenceTests: XCTestCase {
         )
     }
 
-    private func decodeProgress(
-        sourceID: String,
-        updatedAt: Int64,
-        clientID: String = "ios-installation-c"
-    ) throws -> ErmaoShared.ReaderProgress {
-        try ErmaoShared.PublicKt.createReaderProgressJson().decode(payload: progressPayload(
-            sourceID: sourceID,
-            updatedAt: updatedAt,
-            clientID: clientID
-        ))
-    }
-
     private func makeTarget(
         namespace: ErmaoShared.ReaderSyncNamespace,
         resourceID: String
     ) -> ErmaoShared.ReaderProgressSyncTarget {
         ErmaoShared.ReaderProgressSyncTarget(
             namespace: namespace,
-            bookId: "work-a",
+            bookId: "book-a",
             resourceId: resourceID,
             sourceFormat: .epub
         )
     }
 
-    private func progressPayload(
-        sourceID: String,
-        updatedAt: Int64,
-        clientID: String = "ios-installation-c"
-    ) -> String {
-        ##"{"schema":"ermao.reader-progress","version":7,"resourceId":"\##(sourceID)","location":{"kind":"reflow","resourceKey":"chapter.xhtml","progression":0.5,"engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"chapter.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":"#reader-block","progression":0.5},"text":{"highlight":"Reader block"}}}},"updatedAtEpochMillis":\##(updatedAt),"deviceId":"\##(clientID)","percent":50.0}"##
-    }
-
-    private func legacyProgressURL(sourceID: String, root: URL) -> URL {
-        let key = SHA256.hash(data: Data(sourceID.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return root.appendingPathComponent(key).appendingPathExtension("json")
-    }
-
-    private func createLegacyR4Database(
-        at url: URL,
-        namespaceKey: String,
-        sourceID: String,
-        payload: String
-    ) throws {
-        var database: OpaquePointer?
-        guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
-        defer { sqlite3_close(database) }
-        try execute(
-            "CREATE TABLE reader_progress(namespace_key TEXT NOT NULL, source_id TEXT NOT NULL, progress_document TEXT NOT NULL, PRIMARY KEY(namespace_key, source_id))",
-            database: database
+    private func makePosition(
+        resourceID: String,
+        capturedAt: Int64,
+        percent: Double
+    ) throws -> ErmaoShared.ReaderPositionLocalState {
+        let locatorJSON = #"{"href":"OEBPS/Text/backcover.xhtml","type":"application/xhtml+xml","locations":{"cssSelector":".cover","totalProgression":0.25,"vendor":{"nullable":null}},"text":{"highlight":""}}"#
+        let presentation = ErmaoShared.ReaderPositionPresentation(
+            displayPercent: percent,
+            totalProgression: percent / 100,
+            currentHref: "OEBPS/Text/backcover.xhtml",
+            chapter: ErmaoShared.ReaderChapterPresentation(
+                href: "OEBPS/Text/backcover.xhtml",
+                title: "封底",
+                index: KotlinInt(int: 19)
+            ),
+            page: nil,
+            playback: nil
         )
-        try execute(
-            "CREATE TABLE reader_outbox(namespace_key TEXT PRIMARY KEY NOT NULL, outbox_document TEXT NOT NULL)",
-            database: database
+        return ErmaoShared.ReaderPositionLocalState(
+            resourceId: resourceID,
+            clientId: "ios-installation-c",
+            capturedAtEpochMillis: capturedAt,
+            position: ErmaoShared.ReaderPositionReport(
+                locator: try ErmaoShared.PublicKt.createReaderOpaqueLocator(payloadJson: locatorJSON),
+                presentation: presentation
+            )
         )
-        try execute(
-            "CREATE TABLE reader_sequence_counters(identity_key TEXT PRIMARY KEY NOT NULL, last_client_sequence INTEGER NOT NULL)",
-            database: database
-        )
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            database,
-            "INSERT INTO reader_progress(namespace_key, source_id, progress_document) VALUES(?, ?, ?)",
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK, let statement else { throw IosReaderFailure(code: .persistenceFailed) }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, namespaceKey, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(statement, 2, sourceID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(statement, 3, payload, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw IosReaderFailure(code: .persistenceFailed) }
-    }
-
-    private func createIncompleteExactDatabase(
-        at url: URL,
-        ownerKey: String,
-        sourceID: String,
-        payload: String
-    ) throws {
-        var database: OpaquePointer?
-        guard sqlite3_open(url.path, &database) == SQLITE_OK, let database else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
-        defer { sqlite3_close(database) }
-        try execute(
-            "CREATE TABLE reader_local_exact(owner_key TEXT NOT NULL, source_id TEXT NOT NULL, progress_document TEXT NOT NULL, updated_at_epoch_millis INTEGER NOT NULL, PRIMARY KEY(owner_key, source_id))",
-            database: database
-        )
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            database,
-            "INSERT INTO reader_local_exact(owner_key, source_id, progress_document, updated_at_epoch_millis) VALUES(?, ?, ?, 444)",
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK, let statement else { throw IosReaderFailure(code: .persistenceFailed) }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, ownerKey, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(statement, 2, sourceID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(statement, 3, payload, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw IosReaderFailure(code: .persistenceFailed) }
-    }
-
-    private func exactRowExists(ownerKey: String, sourceID: String, databaseURL: URL) throws -> Bool {
-        var database: OpaquePointer?
-        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
-        defer { sqlite3_close(database) }
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            database,
-            "SELECT 1 FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK, let statement else { throw IosReaderFailure(code: .persistenceFailed) }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, ownerKey, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        sqlite3_bind_text(statement, 2, sourceID, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        return sqlite3_step(statement) == SQLITE_ROW
-    }
-
-    private func tableExists(_ name: String, databaseURL: URL) throws -> Bool {
-        var database: OpaquePointer?
-        guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
-        defer { sqlite3_close(database) }
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(
-            database,
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            -1,
-            &statement,
-            nil
-        ) == SQLITE_OK, let statement else { throw IosReaderFailure(code: .persistenceFailed) }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
-        return sqlite3_step(statement) == SQLITE_ROW
-    }
-
-    private func execute(_ sql: String, database: OpaquePointer) throws {
-        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
-            throw IosReaderFailure(code: .persistenceFailed)
-        }
     }
 }
 
@@ -821,44 +602,26 @@ private enum TestUploadFailure: Error {
     case expected
 }
 
-private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressServerPort, @unchecked Sendable {
+private final class RecordingReaderPositionPort: ErmaoShared.ReaderPositionServerPort, @unchecked Sendable {
     private let lock = NSLock()
     private let failure: Error?
-    private var uploads: [ErmaoShared.ReaderProgressUpload] = []
+    private var uploads: [ErmaoShared.ReaderPositionUpload] = []
 
-    init(failure: Error? = nil) {
-        self.failure = failure
-    }
+    init(failure: Error? = nil) { self.failure = failure }
 
     var uploadCount: Int { withLock { uploads.count } }
-    var lastLocatorPayload: String? {
-        withLock {
-            (uploads.last?.mutation.locator as? ErmaoShared.ReflowablePublicationLocation)?
-                .readiumEnvelope.payload.canonicalJson
-        }
-    }
 
-    func push(upload: ErmaoShared.ReaderProgressUpload) async throws -> ErmaoShared.ReaderProgressPushResult {
+    func push(upload: ErmaoShared.ReaderPositionUpload) async throws -> ErmaoShared.ReaderPositionPushResult {
         withLock { uploads.append(upload) }
         if let failure { throw failure }
-        return ErmaoShared.ReaderProgressPushResultAccepted(
-            snapshot: ErmaoShared.ReaderProgressSnapshotV4(
-                resourceId: upload.target.resourceId,
-                clientId: upload.mutation.clientId,
-                revision: upload.mutation.baseRevision + 1,
-                locator: upload.mutation.locator,
-                displayPercent: 50,
-                receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
-                capturedAtEpochMillis: KotlinLong(longLong: upload.mutation.capturedAtEpochMillis)
-            )
-        )
+        return accepted(upload: upload, revision: Int64(uploadCount))
     }
 
     func load(
         target: ErmaoShared.ReaderProgressSyncTarget,
         etag: String?
-    ) async throws -> ErmaoShared.ReaderProgressQueryResult {
-        ErmaoShared.ReaderProgressQueryResultCurrent(snapshot: nil, etag: etag)
+    ) async throws -> ErmaoShared.ReaderPositionQueryResult {
+        ErmaoShared.ReaderPositionQueryResultCurrent(snapshot: nil, etag: etag)
     }
 
     private func withLock<T>(_ operation: () -> T) -> T {
@@ -868,16 +631,16 @@ private final class RecordingReaderProgressPort: ErmaoShared.ReaderProgressServe
     }
 }
 
-private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServerPort, @unchecked Sendable {
+private final class BlockingReaderPositionPort: ErmaoShared.ReaderPositionServerPort, @unchecked Sendable {
     private let lock = NSLock()
-    private var uploads: [Int64] = []
+    private var uploads: [ErmaoShared.ReaderPositionUpload] = []
     private var firstContinuation: CheckedContinuation<Void, Never>?
 
-    var uploadedTimestamps: [Int64] { withLock { uploads } }
+    var uploadedTimestamps: [Int64] { withLock { uploads.map(\.mutation.capturedAtEpochMillis) } }
 
-    func push(upload: ErmaoShared.ReaderProgressUpload) async throws -> ErmaoShared.ReaderProgressPushResult {
+    func push(upload: ErmaoShared.ReaderPositionUpload) async throws -> ErmaoShared.ReaderPositionPushResult {
         let shouldBlock = withLock {
-            uploads.append(upload.mutation.capturedAtEpochMillis)
+            uploads.append(upload)
             return uploads.count == 1
         }
         if shouldBlock {
@@ -885,24 +648,14 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServer
                 withLock { firstContinuation = continuation }
             }
         }
-        return ErmaoShared.ReaderProgressPushResultAccepted(
-            snapshot: ErmaoShared.ReaderProgressSnapshotV4(
-                resourceId: upload.target.resourceId,
-                clientId: upload.mutation.clientId,
-                revision: upload.mutation.baseRevision + 1,
-                locator: upload.mutation.locator,
-                displayPercent: 50,
-                receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
-                capturedAtEpochMillis: KotlinLong(longLong: upload.mutation.capturedAtEpochMillis)
-            )
-        )
+        return accepted(upload: upload, revision: Int64(withLock { uploads.count }))
     }
 
     func load(
         target: ErmaoShared.ReaderProgressSyncTarget,
         etag: String?
-    ) async throws -> ErmaoShared.ReaderProgressQueryResult {
-        ErmaoShared.ReaderProgressQueryResultCurrent(snapshot: nil, etag: etag)
+    ) async throws -> ErmaoShared.ReaderPositionQueryResult {
+        ErmaoShared.ReaderPositionQueryResultCurrent(snapshot: nil, etag: etag)
     }
 
     func waitUntilFirstUploadStarts() async {
@@ -925,5 +678,48 @@ private final class BlockingReaderProgressPort: ErmaoShared.ReaderProgressServer
     }
 }
 
+private final class ReaderPersistenceTestFileManager: FileManager {
+    private let cachesURL: URL
+
+    init(cachesURL: URL) {
+        self.cachesURL = cachesURL
+        super.init()
+    }
+
+    override func url(
+        for directory: SearchPathDirectory,
+        in domain: SearchPathDomainMask,
+        appropriateFor url: URL?,
+        create shouldCreate: Bool
+    ) throws -> URL {
+        if directory == .cachesDirectory { return cachesURL }
+        return try super.url(for: directory, in: domain, appropriateFor: url, create: shouldCreate)
+    }
+}
+
+private func accepted(
+    upload: ErmaoShared.ReaderPositionUpload,
+    revision: Int64
+) -> ErmaoShared.ReaderPositionPushResult {
+    let snapshot = ErmaoShared.ReaderProgressSnapshotV5(
+        resourceId: upload.target.resourceId,
+        clientId: upload.mutation.clientId,
+        revision: revision,
+        mutationId: upload.mutation.mutationId,
+        capturedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+        receivedAtEpochMillis: upload.mutation.capturedAtEpochMillis,
+        position: upload.mutation.position
+    )
+    return ErmaoShared.ReaderPositionPushResultAccepted(
+        response: ErmaoShared.ReaderPositionWriteResponse(
+            acceptedMutationId: upload.mutation.mutationId,
+            acceptedRevision: revision,
+            currentSnapshot: snapshot
+        )
+    )
+}
+
 @MainActor
-private final class PreferenceFailureState { var shouldFail = false }
+private final class PreferenceFailureState {
+    var shouldFail = false
+}

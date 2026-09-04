@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "clientId": "web-fixture",
+  "mutationId": "5b736a29-dd65-4394-8ed4-88f00e988712",
+  "capturedAtEpochMillis": 1786500000200,
+  "position": {
+    "locator": {
+      "href": "pages/0042.jpg",
+      "type": "image/jpeg",
+      "locations": {
+        "position": 42,
+        "progression": 0,
+        "totalProgression": 0.42
+      }
+    },
+    "presentation": {
+      "displayPercent": 42,
+      "totalProgression": 0.42,
+      "currentHref": "pages/0042.jpg",
+      "chapter": null,
+      "page": {
+        "number": 42,
+        "total": 100
+      },
+      "playback": null
+    }
+  }
+}

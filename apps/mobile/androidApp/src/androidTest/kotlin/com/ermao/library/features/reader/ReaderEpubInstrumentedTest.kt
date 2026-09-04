@@ -10,25 +10,20 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.Lifecycle
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
-import com.ermao.library.shared.modules.reader.EngineLocator
-import com.ermao.library.shared.modules.reader.EngineLocatorPayload
-import com.ermao.library.shared.modules.reader.ReaderEngine
-import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderAppearancePreferences
 import com.ermao.library.shared.modules.reader.ReaderEpubPreferences
-import com.ermao.library.shared.modules.reader.ReaderProgress
+import com.ermao.library.shared.modules.reader.ReaderOpaqueLocator
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentation
+import com.ermao.library.shared.modules.reader.ReaderPositionReport
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
-import com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
-import com.ermao.library.shared.modules.reader.TextQuote
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -57,7 +52,6 @@ class ReaderEpubInstrumentedTest {
     private val context: Context = instrumentation.targetContext
     private val sourceId = "instrumented-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
     @Before
@@ -73,7 +67,9 @@ class ReaderEpubInstrumentedTest {
 
     @After
     fun removeReaderArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderEpubInstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 
@@ -122,7 +118,7 @@ class ReaderEpubInstrumentedTest {
             waitForReader(scenario)
             scenario.onActivity { activity -> assertFalse(activity.controlsVisibleForTesting) }
             val initial = currentLocation(scenario)
-            assertNotNull(initial.engineLocator)
+            assertNotNull(initial.resourceKey)
             assertTrue(renderedText(scenario).contains("第一章"))
             val tableOfContents = runBlocking { controller(scenario).loadTableOfContents() }
 
@@ -337,7 +333,7 @@ class ReaderEpubInstrumentedTest {
             assertNotNull(moved.totalProgression)
             assertTrue(checkNotNull(moved.totalProgression) > initialTotal)
             runBlocking { activeController.flush() }
-            val persisted = runBlocking { progressStore.load(sourceId) }?.location as? ReflowReaderLocation
+            val persisted = runBlocking { loadLocalReaderV5Position(context, source) }?.position?.presentation
             assertTrue(checkNotNull(persisted?.totalProgression) > initialTotal)
         }
     }
@@ -355,7 +351,7 @@ class ReaderEpubInstrumentedTest {
             waitUntil(scenario, "saved chapter location") {
                 currentLocationOrNull(it)?.let { location ->
                     location.resourceKey?.contains("chapter2.xhtml") == true &&
-                        ReadiumLocatorEnvelope.from(location) != null
+                        location.totalProgression != null
                 } == true
             }
             waitUntilValue("saved chapter rendering") { renderedText(scenario).contains("第二章") }
@@ -363,9 +359,10 @@ class ReaderEpubInstrumentedTest {
 
             scenario.moveToState(Lifecycle.State.CREATED)
             waitUntilValue("background progress flush") {
-                (runBlocking { progressStore.load(sourceId) }
-                    ?.location as? ReflowReaderLocation)
-                    ?.resourceKey
+                runBlocking { loadLocalReaderV5Position(context, source) }
+                    ?.position
+                    ?.presentation
+                    ?.currentHref
                     ?.contains("chapter2.xhtml") == true
             }
             scenario.moveToState(Lifecycle.State.RESUMED)
@@ -408,40 +405,36 @@ class ReaderEpubInstrumentedTest {
             val restored = currentLocation(reopened)
             assertEquals(saved.resourceKey, restored.resourceKey)
             assertNotEquals(0.0, restored.totalProgression ?: 0.0, 0.0001)
-            assertNotNull(restored.engineLocator)
+            assertNotNull(restored.resourceKey)
         }
     }
 
     @Test
-    fun rejectsSavedProgressWhenTheExactResourceNoLongerExists() = runBlocking {
+    fun ignoresSavedProgressWhenTheExactResourceNoLongerExists() = runBlocking {
         val removedResource = "legacy/removed-chapter.xhtml"
-        progressStore.save(
-            ReaderProgress(
-                resourceId = sourceId,
-                location = ReflowReaderLocation(
-                    resourceKey = removedResource,
-                    progression = 0.5,
-                    textQuote = TextQuote(exact = "这是第二章，用于验证下一页或目录跳转后的阅读器状态。"),
-                    engineLocator = EngineLocator(
-                        engine = ReaderEngine.Readium,
-                        platform = ReaderEnginePlatform.Android,
-                        version = "readium-kotlin:3.3.0",
-                        payload = EngineLocatorPayload.parse(
-                            """{"href":"$removedResource","type":"application/xhtml+xml","locations":{"cssSelector":"body","progression":0.5},"text":{"highlight":"这是第二章，用于验证下一页或目录跳转后的阅读器状态。"}}""",
-                        ),
-                    ),
+        saveLocalReaderV5Position(
+            context = context,
+            source = source,
+            position = ReaderPositionReport(
+                locator = ReaderOpaqueLocator.parse(
+                    """{"href":"$removedResource","type":"application/xhtml+xml","locations":{"progression":0.5},"text":{"highlight":"这是第二章，用于验证下一页或目录跳转后的阅读器状态。"}}""",
                 ),
-                updatedAtEpochMillis = 1L,
-                deviceId = "legacy-test-device",
+                presentation = ReaderPositionPresentation(
+                    displayPercent = 50.0,
+                    totalProgression = 0.5,
+                    currentHref = removedResource,
+                    chapter = null,
+                    page = null,
+                    playback = null,
+                ),
             ),
+            capturedAtEpochMillis = 1L,
         )
 
         ActivityScenario.launch<ReaderActivity>(ReaderActivity.createIntent(context, source)).use { scenario ->
             scenario.keepReaderTestFixtureVisible()
             waitForReader(scenario)
-            waitUntil(scenario, "missing exact resource warning") {
-                it.controllerForTesting?.restoreWarning?.value?.code == ReaderErrorCode.LocationRestoreFailed
-            }
+            waitUntil(scenario, "reader default location") { currentLocationOrNull(it) != null }
             assertFalse(currentLocation(scenario).resourceKey.orEmpty().contains("chapter2.xhtml"))
         }
     }
@@ -467,9 +460,7 @@ class ReaderEpubInstrumentedTest {
                 val location = currentLocationOrNull(activity)
                 diagnostic.set(
                     "orientation=${activity.resources.configuration.orientation}, " +
-                        "resource=${location?.resourceKey}, " +
-                        "exact=${location?.let(ReadiumLocatorEnvelope::from) != null}, " +
-                        "warning=${activity.controllerForTesting?.restoreWarning?.value?.code}",
+                        "resource=${location?.resourceKey}",
                 )
             }
             if (matched.get()) return

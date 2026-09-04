@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.authorization import (
@@ -17,19 +17,28 @@ from app.models import (
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
-    ReaderResourceProgress,
 )
 from app.modules.library.application.bookshelf import (
     BookshelfItemQueryPort,
     BookshelfItemSummary,
 )
 from app.modules.library.infrastructure.book_covers import effective_book_cover_path
-from app.modules.reader.public import ResourceReadingState, choose_continue_resource_id
+from app.modules.reader.public import (
+    ReaderV5LibraryPresentationQueryPort,
+    ResourceReadingState,
+    choose_continue_resource_id,
+)
 
 
 class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
+    ) -> None:
         self._db = db
+        self._reader_queries = reader_queries
 
     def list_items(
         self,
@@ -69,21 +78,12 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryReadableResource.book_id,
                 LibraryReadableResource.id.label("resource_id"),
                 LibraryReadableResourceMetadata.resource_index,
-                ReaderResourceProgress.percent,
-                ReaderResourceProgress.updated_at.label("progress_updated_at"),
             )
             .select_from(LibraryReadableResource)
             .join(
                 LibraryReadableResourceMetadata,
                 LibraryReadableResourceMetadata.resource_id
                 == LibraryReadableResource.id,
-            )
-            .outerjoin(
-                ReaderResourceProgress,
-                and_(
-                    ReaderResourceProgress.resource_id == LibraryReadableResource.id,
-                    ReaderResourceProgress.user_id == context.user_id,
-                ),
             )
             .where(
                 LibraryReadableResource.book_id.in_(visible_book_ids),
@@ -95,19 +95,27 @@ class SqlAlchemyBookshelfItemQueries(BookshelfItemQueryPort):
                 LibraryReadableResource.id.asc(),
             )
         ).all()
+        progress_by_resource = self._reader_queries.list_presentations(
+            user_id=context.user_id,
+            resource_ids=[str(row.resource_id) for row in rows],
+        )
         states_by_book: dict[str, list[ResourceReadingState]] = defaultdict(list)
         percent_by_resource: dict[str, float] = {}
         for row in rows:
             book_id = str(row.book_id)
-            percent = min(100.0, max(0.0, float(row.percent or 0)))
             resource_id = str(row.resource_id)
+            progress = progress_by_resource.get(resource_id)
+            percent = min(
+                100.0,
+                max(0.0, float(progress.display_percent if progress else 0)),
+            )
             percent_by_resource[resource_id] = percent
             states_by_book[book_id].append(
                 ResourceReadingState(
                     resource_id=resource_id,
                     sort_order=int(row.resource_index or 0),
                     percent=int(percent),
-                    last_read_at=row.progress_updated_at,
+                    last_read_at=progress.updated_at if progress else None,
                 )
             )
 

@@ -44,14 +44,6 @@ actor IosManagedPublicationStore {
 
     /// Metadata proves ownership. Ambiguous files and local imports remain untouched.
     func removeAutomaticReplica(resourceID: String, assetID: String, namespace: String) throws {
-        let caches = try fileManager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-        let obsoleteRanges = caches.appendingPathComponent("reader/pdf-range-v1", isDirectory: true)
-        if fileManager.fileExists(atPath: obsoleteRanges.path) {
-            guard obsoleteRanges.resolvingSymlinksInPath().path.hasPrefix(caches.resolvingSymlinksInPath().path + "/") else {
-                throw IosReaderFailure(code: .persistenceFailed)
-            }
-            try fileManager.removeItem(at: obsoleteRanges)
-        }
         let key = opaqueKey(resourceID)
         let metadataURL = root.appendingPathComponent(key).appendingPathExtension("json")
         try requireContained(metadataURL)

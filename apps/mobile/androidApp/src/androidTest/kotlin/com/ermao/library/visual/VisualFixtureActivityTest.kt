@@ -210,7 +210,7 @@ class VisualFixtureActivityTest {
             composeRule.waitUntil(CAPTURE_READY_TIMEOUT_MILLIS) { fixtureActivity.isCaptureReady }
             val fullPath = "/library/三体系列/第二卷 黑暗森林.epub"
             composeRule.onNodeWithTag("work-detail-list").performScrollToIndex(5)
-            composeRule.onNodeWithText(fullPath).performScrollTo().performClick()
+            composeRule.onNodeWithText(fullPath).performScrollTo().performTouchInput { longClick() }
             awaitTextDisplayed(scenario.localizedString(pathVariant, R.string.work_metadata_file_path_full_title))
         }
     }

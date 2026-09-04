@@ -35,12 +35,12 @@ from app.models import (
     LibraryReadableResource,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
 )
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.library.application.filter_ast import FilterCondition, FilterExpression
 from app.modules.library.domain.authors import UNKNOWN_AUTHOR_PLACEHOLDER
 from app.modules.library.infrastructure.book_covers import effective_book_cover_exists
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 BOOK_TEXT_FIELDS = {
     "title": LibraryBookMetadata.title,
@@ -218,54 +218,26 @@ def reading_status_predicate(
     context: AuthorizationContext,
     user_id: str,
     status: str,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> ColumnElement[bool]:
-    resource = aliased(LibraryReadableResource)
-    progress = aliased(ReaderResourceProgress)
-    visible = and_(
-        resource_visibility_predicate(context, resource),
-        resource.book_id == LibraryBook.id,
-    )
-    has_resource = exists(select(resource.id).where(visible).correlate(LibraryBook))
-    started = exists(
-        select(progress.id)
-        .where(
-            progress.user_id == user_id,
-            progress.percent > 0,
-            exists(
-                select(resource.id)
-                .where(
-                    visible,
-                    resource.id == progress.resource_id,
-                )
-                .correlate(LibraryBook, progress)
-            ),
-        )
-        .correlate(LibraryBook)
-    )
-    completed = exists(
-        select(progress.id)
-        .where(
-            progress.user_id == user_id,
-            progress.resource_id == resource.id,
-            progress.percent >= 100,
-        )
-        .correlate(resource)
-    )
-    unfinished = exists(
-        select(resource.id).where(visible, ~completed).correlate(LibraryBook)
-    )
-    normalized = status.upper()
-    return (
-        and_(has_resource, ~unfinished)
-        if normalized == "FINISHED"
-        else and_(started, unfinished)
-        if normalized == "READING"
-        else ~started
+    return typing_cast(
+        ColumnElement[bool],
+        reader_queries.reading_status_expression(
+            context=context,
+            user_id=user_id,
+            book_id_expression=LibraryBook.id,
+            status=status,
+        ),
     )
 
 
 def _reading_status(
-    context: AuthorizationContext, user_id: str, condition: FilterCondition
+    context: AuthorizationContext,
+    user_id: str,
+    condition: FilterCondition,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> ColumnElement[bool]:
     resource = aliased(LibraryReadableResource)
     has_resource = exists(
@@ -282,6 +254,7 @@ def _reading_status(
         context,
         user_id,
         str(condition.value or "UNREAD"),
+        reader_queries=reader_queries,
     )
     return not_(predicate) if condition.operator == "not_equals" else predicate
 
@@ -293,11 +266,14 @@ def _condition(
     user_id: str | None,
     shelf_owner_user_id: str | None,
     library_roots: Mapping[str, str],
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> ColumnElement[bool]:
     del library_roots
     field = condition.field
     if field == "readingStatus" and user_id:
-        return _reading_status(context, user_id, condition)
+        return _reading_status(
+            context, user_id, condition, reader_queries=reader_queries
+        )
     if field == "author":
         return _text(
             LibraryBookMetadata.author,
@@ -368,25 +344,20 @@ def _condition(
         )
 
     if field in {"progress", "lastReadAt"}:
-        progress = aliased(ReaderResourceProgress)
-        statement = (
-            select(progress)
-            .join(resource, resource.id == progress.resource_id)
-            .where(visible)
-        )
-        if user_id:
-            statement = statement.where(progress.user_id == user_id)
         if field == "progress":
-            value = (
-                statement.with_only_columns(progress.percent)
-                .order_by(progress.updated_at.desc())
-                .limit(1)
-                .scalar_subquery()
+            value = reader_queries.progress_expression(
+                context=context,
+                user_id=user_id,
+                book_id_expression=LibraryBook.id,
+                field="display_percent",
             )
             return _number(value, condition)
-        value = statement.with_only_columns(
-            func.max(progress.updated_at)
-        ).scalar_subquery()
+        value = reader_queries.progress_expression(
+            context=context,
+            user_id=user_id,
+            book_id_expression=LibraryBook.id,
+            field="updated_at",
+        )
         return _date(value, condition)
     if field == "hasCover":
         cover_value = effective_book_cover_exists(LibraryBook.id)
@@ -401,6 +372,7 @@ def compile_filter_expression(
     user_id: str | None = None,
     shelf_owner_user_id: str | None = None,
     library_roots: Mapping[str, str] | None = None,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> ColumnElement[bool] | None:
     predicates = [
         _condition(
@@ -409,6 +381,7 @@ def compile_filter_expression(
             user_id=user_id,
             shelf_owner_user_id=shelf_owner_user_id,
             library_roots=library_roots or {},
+            reader_queries=reader_queries,
         )
         for condition in expression.conditions
     ]

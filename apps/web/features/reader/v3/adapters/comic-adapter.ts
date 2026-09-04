@@ -6,7 +6,8 @@ import type {
   ReaderCapabilities,
   ReaderCommand,
   ReaderCommandAck,
-  ReaderPreferences
+  ReaderPreferences,
+  ReaderPositionReport
 } from '@shuku/reader-core';
 import { readerThemeSurfaces } from '../../reader-theme';
 import { isReaderControlTarget } from '../input-router';
@@ -16,6 +17,12 @@ import { ReaderAdapterBase, StaleReaderOperationError, errorMessage, isAbortErro
 import { ComicSpreadTrackDriver, type ComicTrackSpread, type ComicTrackView } from './comic-track';
 import { ComicContinuousController } from './comic-continuous';
 import { effectiveReaderPageWidth } from '../page-width';
+import {
+  createStandardReaderLocator,
+  LOCATION_RESTORE_FAILED,
+  parseStandardReaderLocator,
+  standardLocatorPosition
+} from '../../../../lib/reader/v5-locator';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import {
   comicAdjacentSpreadPage,
@@ -273,14 +280,19 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       }
       if (pageCount <= 0) throw new Error('漫画资源没有可读取页面');
       this.pages = comicOrderedPages(pageCount);
-      const initialPage = context.initialLocation?.kind === 'comic' ? context.initialLocation.pageIndex : 0;
+      const restoredPage = this.pageFromPosition(context.initialPosition);
+      const validRestoredPage = restoredPage !== null && restoredPage >= 0 && restoredPage < pageCount
+        ? restoredPage
+        : null;
+      const initialPage = validRestoredPage
+        ?? (context.initialLocation?.kind === 'comic' ? context.initialLocation.pageIndex : 0);
       this.currentPage = comicNormalizePage(this.pages, clampPage(initialPage, pageCount), this.comicMode(context.preferences), this.pairingPolicy(context.preferences));
       this.assertActive(generation, signal);
       this.status = 'ready';
       this.track.recenter();
       this.emitLocation(context.operation);
       this.emitView();
-      this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.location() }, context.operation);
+      this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.location(), position: this.positionReport() }, context.operation);
     } catch (reason) {
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError) return;
       this.status = 'error';
@@ -288,7 +300,13 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
       this.emitView();
       this.emit({
         type: 'error',
-        error: { code: 'COMIC_OPEN_FAILED', message: this.error, recoverable: true }
+        error: {
+          code: reason instanceof Error && reason.message === LOCATION_RESTORE_FAILED
+            ? LOCATION_RESTORE_FAILED
+            : 'COMIC_OPEN_FAILED',
+          message: this.error,
+          recoverable: true
+        }
       }, context.operation);
       throw reason;
     } finally {
@@ -313,6 +331,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
           operation: context.operation,
           signal: context.signal,
           initialLocation: this.location(),
+          initialPosition: this.positionReport(),
           preferences
         });
         return context.signal.aborted
@@ -356,12 +375,13 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     else if (command.type === 'last') nextPage = comicLastSpreadPage(this.pages, this.comicMode(), this.pairingPolicy());
     else if (command.type === 'go-to-progress') nextPage = comicNormalizePage(this.pages, comicPageForProgress(command.progression, this.pages), this.comicMode(), this.pairingPolicy());
     else if (command.type === 'go-to-index') nextPage = comicNormalizePage(this.pages, clampPage(command.index, this.pages.length), this.comicMode(), this.pairingPolicy());
-    else if (command.type === 'go-to-location') {
-      if (command.location.kind !== 'comic') return this.failOperation(context, 'location-kind-mismatch');
-      if (command.location.resourceId !== this.openContext.source.resourceId) {
-        return this.failOperation(context, 'resource-switch-requires-new-session');
+    else if (command.type === 'go-to-position') {
+      const page = this.pageFromPosition(command.position);
+      if (page === null || page < 0 || page >= this.pages.length) throw new Error(LOCATION_RESTORE_FAILED);
+      if (page === this.currentPage) {
+        return this.ack(context.operation, true, { location: this.location(), position: this.positionReport() });
       }
-      nextPage = comicNormalizePage(this.pages, clampPage(command.location.pageIndex, this.pages.length), this.comicMode(), this.pairingPolicy());
+      nextPage = comicNormalizePage(this.pages, clampPage(page, this.pages.length), this.comicMode(), this.pairingPolicy());
     } else if (command.type === 'retry') {
       comicSpreadPages(this.pages, this.currentPage, this.comicMode(), this.pairingPolicy()).forEach((page) => {
         this.retryCounts.set(page, (this.retryCounts.get(page) ?? 0) + 1);
@@ -379,7 +399,7 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     if (this.preferences.comic.flow === 'scrolled') this.continuous.scrollToPage(this.currentPage);
     else this.track.recenter(true);
     this.emitLocation(context.operation);
-    return this.ack(context.operation, true, { location: this.location() });
+    return this.ack(context.operation, true, { location: this.location(), position: this.positionReport() });
   }
 
   async applyPreferences(preferences: ReaderPreferences, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
@@ -516,7 +536,8 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
     this.emit({
       type: 'location-changed',
       location: this.location(),
-      percent: comicPagePercent(this.currentPage, this.pages, this.comicMode(), this.pairingPolicy())
+      percent: comicPagePercent(this.currentPage, this.pages, this.comicMode(), this.pairingPolicy()),
+      position: this.positionReport()
     }, operation);
     this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, operation);
   }
@@ -532,6 +553,39 @@ export class ComicReaderAdapter extends ReaderAdapterBase implements ReaderAdapt
         ? { resourceHref: this.pageMeta.get(this.currentPage)?.resourceHref }
         : {})
     };
+  }
+
+  private positionReport(): ReaderPositionReport {
+    const resourceId = this.openContext?.source.resourceId;
+    if (!resourceId) throw new Error('comic-resource-id-missing');
+    const percent = comicPagePercent(this.currentPage, this.pages, this.comicMode(), this.pairingPolicy());
+    const resourceHref = this.pageMeta.get(this.currentPage)?.resourceHref ?? null;
+    const page = this.pageMeta.get(this.currentPage);
+    return {
+      locator: {
+        ...createStandardReaderLocator({
+          href: resourceHref ?? `pages/${this.currentPage}`,
+          type: page?.mimeType ?? 'image/jpeg',
+          position: this.currentPage + 1,
+          progression: 0,
+          totalProgression: Math.max(0, Math.min(1, percent / 100))
+        })
+      },
+      presentation: {
+        displayPercent: percent,
+        totalProgression: Math.max(0, Math.min(1, percent / 100)),
+        currentHref: resourceHref,
+        chapter: null,
+        page: { number: this.currentPage + 1, total: this.pages.length || null },
+        playback: null
+      }
+    };
+  }
+
+  private pageFromPosition(position: ReaderPositionReport | null | undefined): number | null {
+    const locator = parseStandardReaderLocator(position?.locator);
+    const page = locator ? standardLocatorPosition(locator) : null;
+    return page === null ? null : page - 1;
   }
 
   private viewModel(): ComicViewModel {

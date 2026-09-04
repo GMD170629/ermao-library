@@ -16,7 +16,7 @@ class KtorServerProbe(
     private val compatibilityChecker: ServerCompatibilityChecker = ServerCompatibilityChecker(
         clientProtocolVersion = 3,
         supportedServerProtocolVersions = setOf(3),
-        supportedReaderSchemaVersions = setOf(4),
+        supportedReaderSchemaVersions = setOf(5),
         supportedLibrarySchemaVersions = setOf(1),
     ),
     private val clientProvider: (ServerProfile) -> ApiClient,

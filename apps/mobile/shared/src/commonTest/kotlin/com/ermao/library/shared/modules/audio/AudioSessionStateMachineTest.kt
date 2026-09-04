@@ -14,6 +14,7 @@ import com.ermao.library.shared.modules.audio.domain.AudioResource
 import com.ermao.library.shared.modules.audio.domain.AudioSleepTimerMode
 import com.ermao.library.shared.modules.audio.domain.AudioSourcePreparationStage
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
+import com.ermao.library.shared.modules.reader.AudioReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -277,6 +278,22 @@ class AudioSessionStateMachineTest {
         val ended = state.engineEnded(secondSource)
         assertEquals(AudioPlaybackStage.Ended, ended.snapshot.stage)
         assertEquals(AudioProgressSaveReason.Completed, ended.effects.single().progressReason)
+    }
+
+    @Test
+    fun remoteReaderLocationSelectsTrackAndPlaybackPositionInOneTransition() {
+        val state = AudioPlaybackStateMachine()
+        val publication = publication("resource-1", twoTracks = true)
+        commit(state, publication, autoplay = false)
+
+        val navigation = state.goToReaderLocation(AudioReaderLocation("asset-2", null, 12_000))
+
+        assertEquals(AudioPlaybackEffectType.PrepareSource, navigation.effects.last().type)
+        val candidate = requireNotNull(navigation.snapshot.pendingSourceId)
+        state.enginePrepared(candidate, 60_000)
+        state.engineCommitted(candidate)
+        assertEquals("asset-2", state.snapshot().currentAssetId)
+        assertEquals(12_000, state.snapshot().positionMillis)
     }
 
     @Test

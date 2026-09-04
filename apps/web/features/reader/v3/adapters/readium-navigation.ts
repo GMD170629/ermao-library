@@ -184,13 +184,6 @@ export function readiumTotalProgression(
     ?? resourcePoints[0];
   if (!lower) return unitProgression(current.locations.totalProgression);
 
-  const nativeTotal = current.locations.totalProgression;
-  if (
-    typeof nativeTotal === 'number'
-    && Number.isFinite(nativeTotal)
-    && Math.abs(nativeTotal - lower.total) > Number.EPSILON
-  ) return unitProgression(nativeTotal);
-
   const upperInResource = resourcePoints.find((point) => point.resource > resourceProgression);
   const finalMatchingIndex = matchingIndexes.at(-1) ?? -1;
   const nextResource = positions.slice(finalMatchingIndex + 1)

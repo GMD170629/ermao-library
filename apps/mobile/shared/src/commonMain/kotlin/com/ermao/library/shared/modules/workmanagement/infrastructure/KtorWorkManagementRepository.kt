@@ -347,7 +347,7 @@ class KtorWorkManagementRepository(
     ): WorkManagementResult<Unit> = callUnit(
         context,
         ApiMethod.Put,
-        "/api/reader/v4/resources/${resourceId.encodeURLPathPart()}/reading-status",
+        "/api/reader/v5/resources/${resourceId.encodeURLPathPart()}/reading-status",
         encoder.encodeToString(ReadingStatusRequest(status.wireValue)),
     )
 

@@ -35,12 +35,14 @@ class ResourceDetailResource:
     current_href: str | None
     current_page_number: int | None
     current_position: int | None
+    current_chapter_index: int | None = None
+    current_chapter_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ResourceCurrentChapter:
     index: int
-    title: str
+    title: str | None
     sort_order: int
     href: str | None
 
@@ -203,12 +205,13 @@ class ListResourceDetails:
                 replace(unit, level=_navigation_level(unit.metadata_json))
                 for unit in units
             )
-            current_chapter = self._queries.resolve_current_chapter(
-                resource_id=resource_id,
-                asset_id=asset_id,
-                current_href=resource.current_href,
-                current_position=resource.current_position,
-            )
+            if resource.current_chapter_index is not None:
+                current_chapter = ResourceCurrentChapter(
+                    index=resource.current_chapter_index,
+                    title=resource.current_chapter_title,
+                    sort_order=resource.current_chapter_index,
+                    href=resource.current_href,
+                )
         elif source_format in {"CBZ", "ZIP", "CBR", "RAR"}:
             units, total = self._queries.list_navigation_units(
                 resource_id=resource_id,

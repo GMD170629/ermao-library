@@ -27,7 +27,7 @@ import com.ermao.library.shared.modules.workmanagement.KtorWorkManagementReposit
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrl
 import com.ermao.library.shared.modules.servers.domain.ServerBaseUrlParseResult
 import com.ermao.library.shared.modules.servers.domain.TlsMode
-import com.ermao.library.shared.modules.reader.application.ReaderProgressServerPort
+import com.ermao.library.shared.modules.reader.application.ReaderPositionServerPort
 import com.ermao.library.shared.modules.reader.application.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.application.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.application.ComicPageServerPort
@@ -37,7 +37,7 @@ import com.ermao.library.shared.modules.reader.infrastructure.KtorComicPageServe
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBootstrapGateway
 import com.ermao.library.shared.modules.audio.AudioMediaTransport
 import com.ermao.library.shared.modules.audio.infrastructure.KtorAudioMediaTransport
-import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderPositionSyncPort
 import com.ermao.library.shared.modules.reader.infrastructure.KtorReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 
@@ -106,7 +106,7 @@ fun createIosAdministrativeSettingsRepository(
         ApiClientFactory(SerializedCookieVault(cookieStore)),
     )
 
-/** Shared Reader v4 metadata mapper. */
+/** Shared Reader v5 metadata mapper. */
 fun createIosReaderBootstrapGateway(
     cookieStore: SecureCookiePayloadStore,
 ): ReaderBootstrapGateway =
@@ -138,12 +138,12 @@ fun createIosComicPageServerPort(
     ApiClientFactory(SerializedCookieVault(cookieStore)),
 )
 
-/** Shared Reader v4 best-effort progress wire; exact local storage remains native. */
-fun createIosReaderProgressSyncPort(
+/** Reader v5 opaque position wire; exact local storage remains native. */
+fun createIosReaderPositionSyncPort(
     cookieStore: SecureCookiePayloadStore,
     profile: ServerProfile,
-): ReaderProgressServerPort =
-    KtorReaderProgressSyncPort(
+): ReaderPositionServerPort =
+    KtorReaderPositionSyncPort(
         clients = ApiClientFactory(SerializedCookieVault(cookieStore)),
         profile = profile,
     )

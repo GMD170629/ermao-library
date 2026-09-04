@@ -8,7 +8,8 @@ import {
   readerSafetyAcceptsMimeType,
   type ReaderAdapter,
   type ReaderCommand,
-  type ReaderPreferences
+  type ReaderPreferences,
+  type ReaderPositionReport
 } from '@shuku/reader-core';
 import { LoaderCircle, LockKeyhole, RotateCcw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
@@ -45,7 +46,7 @@ type ReaderEngineRuntimeProps = {
   onOriginalProgress: (progress: OriginalDownloadProgress | null) => void;
   onReady: () => void;
   onStorageWarning: (message: string) => void;
-  externalNavigation?: { id: number; location: import('@shuku/reader-core').ReaderLocation } | null;
+  externalNavigation?: { id: number; position: ReaderPositionReport } | null;
   onExternalNavigationResult?: (id: number, accepted: boolean) => void;
 };
 
@@ -124,7 +125,6 @@ function readerErrorMessage(code: string | undefined, translate: (source: string
   if (code === 'ORIGINAL_NAMESPACE_INVALID') return translate('阅读缓存的账号信息无效。');
   if (code === 'READER_ENGINE_ERROR') return translate('阅读引擎失败，未提供详细原因。');
   if (code === 'PUBLICATION_CHANGED' || code === 'PUBLICATION_RESOURCE_CHANGED') return translate('出版物已更新，请重新打开。');
-  if (code === 'READER_EXACT_RESTORE_UNVERIFIED') return translate('无法精确恢复到另一设备的位置');
   if (code === 'NOVEL_UNSUPPORTED_FORMAT') return translate('当前小说格式暂不受支持。');
   if (code === 'NOVEL_DRM_PROTECTED') return translate('文件可能受 DRM 保护，无法打开。');
   if (code === 'NOVEL_PARSE_FAILED') return translate('小说文件无法解析，请检查文件完整性和格式。');
@@ -309,6 +309,7 @@ export function ReaderEngineRuntime({
     adapter,
     source: bootstrap.source,
     initialLocation: bootstrap.initialLocation,
+    initialPosition: bootstrap.initialPosition,
     preferences: runtimePreferences,
     onLocationChange,
     onPreferencesRejected: (restored) => {
@@ -348,7 +349,7 @@ export function ReaderEngineRuntime({
   useEffect(() => {
     if (!externalNavigation || session.state.lifecycle !== 'ready') return;
     let active = true;
-    void sessionExecute({ type: 'go-to-location', location: externalNavigation.location })
+    void sessionExecute({ type: 'go-to-position', position: externalNavigation.position })
       .then((accepted) => { if (active) onExternalNavigationResult?.(externalNavigation.id, accepted); })
       .catch(() => { if (active) onExternalNavigationResult?.(externalNavigation.id, false); });
     return () => { active = false; };
@@ -365,7 +366,8 @@ export function ReaderEngineRuntime({
   const totalHint = bootstrap.readerType === 'reflowable'
     ? null
     : (session.state.totalPages ?? bootstrap.resource.pageCount ?? bootstrap.pages.length) || null;
-  const currentPercent = session.state.location ? session.state.percent : bootstrap.progressPercent;
+  const currentPercent = session.state.position?.presentation.displayPercent
+    ?? (session.state.location ? session.state.percent : bootstrap.progressPercent);
   const progress = locationProgress(session.state.location ?? bootstrap.initialLocation, currentPercent, totalHint);
   const progressExtra = locationExtra(session.state.location ?? bootstrap.initialLocation);
   const currentLocation = session.state.location ?? bootstrap.initialLocation;
@@ -460,26 +462,22 @@ export function ReaderEngineRuntime({
   }, [bootstrap.resource.title, currentLocation, items, progress.label, progress.percent]);
 
   const toggleCurrentBookmark = useCallback(() => {
-    if (!currentLocation) return;
+    const currentPosition = session.state.position;
+    if (!currentPosition) return;
     persistBookmarks((current) => toggleReaderBookmark(current, {
-        location: currentLocation,
+        position: currentPosition,
         label: currentBookmarkLabel,
-        percent: progress.percent,
         createdAt: new Date().toISOString()
       }));
-  }, [currentBookmarkLabel, currentLocation, persistBookmarks, progress.percent]);
+  }, [currentBookmarkLabel, persistBookmarks, session.state.position]);
 
   const removeBookmark = useCallback((id: string) => {
     persistBookmarks((current) => removeReaderBookmark(current, id));
   }, [persistBookmarks]);
 
   const jumpToBookmark = useCallback(async (bookmark: ReaderBookmark) => {
-    if (bookmark.location.kind === 'comic' && bookmark.location.resourceId !== bootstrap.resource.id) {
-      onSelectResource(bookmark.location.resourceId, bookmark.location.pageIndex);
-      return;
-    }
-    await sessionExecute({ type: 'go-to-location', location: bookmark.location });
-  }, [bootstrap.resource.id, onSelectResource, sessionExecute]);
+    await sessionExecute({ type: 'go-to-position', position: bookmark.position });
+  }, [sessionExecute]);
 
   const controls: ReaderControls = useMemo(() => ({
     next: () => sessionControls.next(),
@@ -538,10 +536,10 @@ export function ReaderEngineRuntime({
       horizontalPaging={horizontalPaging}
       navigationItems={items}
       resourceNavigation={resourceNavigation}
-      bookmarkActive={hasReaderBookmark(bookmarks, currentLocation)}
-      currentBookmarkId={readerBookmarkId(currentLocation)}
+      bookmarkActive={hasReaderBookmark(bookmarks, session.state.position)}
+      currentBookmarkId={readerBookmarkId(session.state.position)}
       bookmarks={bookmarks}
-      canBookmark={Boolean(currentLocation)}
+      canBookmark={Boolean(currentLocation && session.state.position)}
       onToggleBookmark={toggleCurrentBookmark}
       onJumpBookmark={jumpToBookmark}
       onRemoveBookmark={removeBookmark}

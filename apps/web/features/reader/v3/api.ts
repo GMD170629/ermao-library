@@ -10,6 +10,7 @@ import {
   readerFormatCapability,
   type ReaderLocation,
   type ReaderOriginalResource,
+  type ReaderPositionReport,
   type ReaderSource,
   type ReflowableFormat,
   type SupportedReaderSourceFormat
@@ -17,7 +18,7 @@ import {
 import { readBoundedResponse, ResponseLimitError } from '../../../shared/api/bounded-response';
 import { withBasePath } from '../../../lib/base-path';
 import { fetchLibraryResource } from '../../books/public';
-import { parseReaderV4ProgressSnapshot, v4LocationToDomain, type ReaderProgressSnapshot } from '../../../lib/reader';
+import { parseReaderV5PositionReport, parseReaderV5ProgressSnapshot, type ReaderV5ProgressSnapshot } from '../../../lib/reader';
 import type { ReaderBookmark } from './bookmarks';
 import {
   readerSafetyFailure,
@@ -68,7 +69,7 @@ export type ReaderPage = Readonly<{
 }>;
 
 export type ReaderBootstrap = Readonly<{
-  schemaVersion: 4;
+  schemaVersion: 5;
   userId: string;
   readerType: VisualReaderType;
   sourceFormat: SupportedReaderSourceFormat;
@@ -82,9 +83,11 @@ export type ReaderBootstrap = Readonly<{
   comicRevision: string | null;
   capabilities: import('@shuku/reader-core').ReaderCapabilities;
   progressPercent: number;
-  serverProgressSnapshot: ReaderProgressSnapshot | null;
+  serverProgressSnapshot: ReaderV5ProgressSnapshot | null;
+  resourceUrl: string;
   source: ReaderSource;
   initialLocation: ReaderLocation | null;
+  initialPosition: ReaderPositionReport | null;
   serverPreferences: Readonly<{ settings: import('@shuku/reader-core').ReaderPreferences; updatedAt: string | null }>;
 }>;
 
@@ -266,7 +269,7 @@ async function fetchComicManifest(
 }
 
 export async function fetchReaderBootstrap(resourceId: string, signal: AbortSignal): Promise<ReaderBootstrap> {
-  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
+  const response = await fetch(`/api/reader/v5/resources/${encodeURIComponent(resourceId)}/bootstrap`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   const envelope = record(payload);
   if (!response.ok || envelope.ok !== true) {
@@ -278,12 +281,17 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
     );
   }
   const data = record(envelope.data);
-  if (data.schemaVersion !== 4) throw new Error('当前客户端不支持该阅读协议');
+  if (data.schemaVersion !== 5) throw new Error('当前客户端不支持该阅读协议');
   const readerType = visualReaderType(data.readerType);
   const resource = mapResource(data.resource);
   const book = record(data.book);
   const bookId = stringValue(book.id).trim();
   if (!readerType || !resource || !bookId) throw new Error('阅读器启动信息不完整');
+  const resourceUrl = stringValue(data.resourceUrl).trim();
+  const expectedResourceUrl = `/api/reader/v5/resources/${encodeURIComponent(resource.id)}/publication`;
+  if (resourceUrl !== expectedResourceUrl) {
+    throw new ReaderBootstrapError('READER_PUBLICATION_PROTOCOL_INVALID', '阅读器内容资源地址无效');
+  }
   const format = parseSupportedReaderSourceFormat(data.sourceFormat);
   if (!format) throw new ReaderBootstrapError('RESOURCE_FORMAT_UNSUPPORTED', '当前文件格式不受阅读器支持');
   if (readerFormatCapability(format).readerKind !== readerType) {
@@ -332,8 +340,8 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
   const capabilities = record(data.capabilities);
   const comicManifestUrl = readerType === 'comic' ? nullableString(publicationAccess.manifestUrl) : null;
   const comicPageUrlTemplate = readerType === 'comic' ? nullableString(publicationAccess.pageUrlTemplate) : null;
-  const expectedComicManifestUrl = `/api/reader/v4/resources/${encodeURIComponent(resource.id)}/comic/manifest`;
-  const expectedComicPageTemplate = `/api/reader/v4/resources/${encodeURIComponent(resource.id)}/comic/pages/{pageIndex}`;
+  const expectedComicManifestUrl = `/api/reader/v5/resources/${encodeURIComponent(resource.id)}/comic/manifest`;
+  const expectedComicPageTemplate = `/api/reader/v5/resources/${encodeURIComponent(resource.id)}/comic/pages/{pageIndex}`;
   if (readerType === 'comic' && (
     publicationAccess.kind !== 'comic'
     || comicManifestUrl !== expectedComicManifestUrl
@@ -352,11 +360,14 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
       ?? units.find((unit) => unit.metadata.pageIndex === page.pageIndex)?.title
       ?? String(page.pageIndex + 1)
   }));
-  const serverProgressSnapshot = data.progressSnapshot === null || data.progressSnapshot === undefined
+  if (data.schemaVersion !== 5 || !Object.prototype.hasOwnProperty.call(data, 'progressSnapshot')) {
+    throw new ReaderBootstrapError('READER_PROGRESS_RESPONSE_INVALID', '阅读器启动信息缺少有效的 v5 阅读进度');
+  }
+  const serverProgressSnapshot = data.progressSnapshot === null
     ? null
-    : parseReaderV4ProgressSnapshot(data.progressSnapshot);
-  if (data.progressSnapshot !== null && data.progressSnapshot !== undefined && !serverProgressSnapshot) {
-    throw new Error('阅读器启动信息包含无效的 Reader v4 进度快照');
+    : parseReaderV5ProgressSnapshot(data.progressSnapshot);
+  if (data.progressSnapshot !== null && !serverProgressSnapshot) {
+    throw new ReaderBootstrapError('READER_PROGRESS_RESPONSE_INVALID', '阅读器启动信息包含无效的 v5 阅读进度');
   }
   let source: ReaderSource;
   if (readerType === 'reflowable') {
@@ -376,7 +387,7 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
       resourceId: resource.id,
       kind: 'comic',
       sourceFormat: format as 'cbz' | 'zip' | 'cbr' | 'rar' | 'image_dir',
-      contentUrl: contentAsset?.url ?? '',
+      contentUrl: withBasePath(resourceUrl),
       comicManifestUrl: withBasePath(comicManifestUrl ?? ''),
       comicPageUrlTemplate: withBasePath(comicPageUrlTemplate ?? ''),
       totalPages: pages.length
@@ -386,12 +397,12 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
       bookId,
       resourceId: resource.id,
       kind: 'pdf',
-      contentUrl: contentAsset?.url ?? '',
+      contentUrl: withBasePath(resourceUrl),
       totalPages: resource.pageCount
     };
   }
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     userId: stringValue(data.userId),
     readerType,
     sourceFormat: format,
@@ -416,69 +427,44 @@ export async function fetchReaderBootstrap(resourceId: string, signal: AbortSign
       supportsSpreads: capabilities.supportsSpreads === true,
       readingDirection: 'ltr'
     },
-    progressPercent: serverProgressSnapshot?.displayPercent ?? 0,
+    progressPercent: serverProgressSnapshot?.position.presentation.displayPercent ?? 0,
     serverProgressSnapshot,
+    resourceUrl: withBasePath(resourceUrl),
     source,
-    initialLocation: v4LocationToDomain(
-      serverProgressSnapshot?.locator ?? null,
-      resource.id,
-      readerType === 'reflowable' ? format as ReflowableFormat : null
-    ),
+    initialLocation: null,
+    initialPosition: serverProgressSnapshot?.position ?? null,
     serverPreferences: { settings: normalizeReaderPreferences({}), updatedAt: null }
   };
 }
 
 export function readerBookmarkFromWire(
   value: unknown,
-  resourceId: string,
-  format: ReflowableFormat | null
+  _resourceId: string,
+  _format: ReflowableFormat | null
 ): ReaderBookmark | null {
   const item = record(value);
   const id = stringValue(item.id).trim();
   const label = stringValue(item.label);
   const createdAt = stringValue(item.createdAt);
-  const percent = Math.max(0, Math.min(100, numberValue(item.percent)));
-  const wireLocation = record(item.location);
-  const resourceKey = stringValue(wireLocation.resourceKey).trim();
-  const resourceProgression = typeof wireLocation.progression === 'number'
-    && Number.isFinite(wireLocation.progression)
-    && wireLocation.progression >= 0
-    && wireLocation.progression <= 1
-    ? wireLocation.progression
-    : undefined;
-  const location: ReaderLocation | null = wireLocation.kind === 'reflow' && resourceKey && format
-    ? {
-        kind: 'reflowable',
-        format,
-        href: resourceKey,
-        ...(resourceProgression !== undefined ? { resourceProgression } : {})
-      }
-    : null;
-  if (!id || !createdAt || !location) return null;
-  return { id, label, createdAt, location, percent };
+  const position = parseReaderV5PositionReport(item.position);
+  if (!id || !createdAt || !position) return null;
+  // A v5 bookmark is a complete opaque position. Its presentation is for
+  // labels/sorting only; no legacy ReaderLocation is derived for navigation.
+  return { id, label, createdAt, position };
 }
 
 export function readerBookmarkToWire(entry: ReaderBookmark) {
-  const exact = entry.location.kind === 'reflowable' ? entry.location.exactLocator : null;
-  const resourceKey = entry.location.kind === 'reflowable'
-    ? entry.location.href ?? exact?.payload.href
-    : null;
-  const progression = entry.location.kind === 'reflowable'
-    ? entry.location.resourceProgression ?? exact?.payload.locations.progression
-    : null;
-  if (!resourceKey) throw new Error('书签缺少可同步的位置锚点');
+  if (!entry.position) throw new Error('书签缺少 Reader v5 位置');
   return {
-    ...entry,
-    location: {
-      kind: 'reflow' as const,
-      resourceKey,
-      ...(typeof progression === 'number' ? { progression } : {})
-    }
+    id: entry.id,
+    position: entry.position,
+    label: entry.label,
+    createdAt: entry.createdAt
   };
 }
 
 export async function fetchReaderBookmarks(resourceId: string, format: ReflowableFormat | null, signal?: AbortSignal): Promise<ReaderBookmark[]> {
-  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bookmarks`, { credentials: 'same-origin', cache: 'no-store', signal });
+  const response = await fetch(`/api/reader/v5/resources/${encodeURIComponent(resourceId)}/bookmarks`, { credentials: 'same-origin', cache: 'no-store', signal });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);
@@ -488,7 +474,7 @@ export async function fetchReaderBookmarks(resourceId: string, format: Reflowabl
 
 export async function saveReaderBookmarks(resourceId: string, format: ReflowableFormat | null, bookmarks: ReaderBookmark[]): Promise<ReaderBookmark[]> {
   const wireBookmarks = bookmarks.map(readerBookmarkToWire);
-  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarks: wireBookmarks }) });
+  const response = await fetch(`/api/reader/v5/resources/${encodeURIComponent(resourceId)}/bookmarks`, { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookmarks: wireBookmarks }) });
   const payload: unknown = await response.json().catch(() => null);
   const root = record(payload);
   const data = record(root.data);

@@ -10,7 +10,7 @@ test('protected API failures trigger session-expiry handling', () => {
   assert.equal(shouldHandleUnauthorizedPath('/api/auth/me'), true);
   assert.equal(shouldHandleUnauthorizedPath('/api/auth/session/refresh'), true);
   assert.equal(shouldHandleUnauthorizedPath('/api/books'), true);
-  assert.equal(shouldHandleUnauthorizedPath('/app/shuku/api/reader/v4/progress'), true);
+  assert.equal(shouldHandleUnauthorizedPath('/app/shuku/api/reader/v5/progress'), true);
 });
 
 test('expected authentication failures stay on their public forms', () => {

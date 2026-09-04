@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from app.bootstrap.reader import reader_v5_library_queries
 from app.core.config import Settings
 from app.modules.imports.infrastructure.readable_resource.adapter_registry import (
     RegistryResourceAdapterExecutor,
@@ -72,6 +73,7 @@ def bulk_covers(db: Session, settings: Settings) -> ExecuteBulkCovers:
         SqlAlchemyBulkBookOperations(
             db,
             storage_root=settings.resolved_storage_root,
+            reader_queries=reader_v5_library_queries(db),
         ),
         db,
         RegenerateBulkBookCovers(

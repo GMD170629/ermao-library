@@ -3,8 +3,8 @@
 import {
   READER_SAFETY_RULES,
   READER_SAFETY_RULE_IDS,
-  comparePublicationLocations,
   publicationNavigationHref,
+  type ReaderPositionReport,
   type ReaderLocation,
   type ReaderPreferences
 } from '@shuku/reader-core';
@@ -14,15 +14,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   activateReaderUser,
-  currentReaderServerIdentity,
   emitReaderDebug,
   getReaderRuntime,
-  publicationLocationFromDomain,
-  syncStateKey,
-  v4LocationToDomain,
-  type ReaderProgressSnapshot,
-  type RemoteProgressNotice
+  positionReportsEqual,
+  type ReaderV5RemoteProgressNotice
 } from '../../../lib/reader';
+import { currentReaderServerIdentity } from '../../../lib/reader/v5-storage';
 import {
   READER_DEVICE_PREFERENCES_KEY,
   clearDeviceReaderPreferences,
@@ -35,7 +32,7 @@ import { DEFAULT_READER_THEME, readerThemeSurfaces, resolveReaderTheme } from '.
 import { fetchReaderBootstrap, ReaderBootstrapError, type ReaderBootstrap } from './api';
 import { requestedPdfPage } from './direct-page-target';
 import { resolveRequestedPublicationHref } from './publication-direct-target';
-import { decidePendingVsServer, resolveStartupResume } from './local-resume';
+import { resolveV5StartupResume } from './local-resume';
 import { ReaderEngineRuntime } from './reader-engine-runtime';
 import { useReaderPwaSurface } from './use-reader-pwa-surface';
 import { I18nText, type I18nContextValue } from '@/i18n/provider';
@@ -101,22 +98,20 @@ function readOpeningContext(resourceId: string): OpeningContext | null {
 }
 
 function remoteProgressLabel(
-  bootstrap: ReaderBootstrap,
-  notice: RemoteProgressNotice,
+  notice: ReaderV5RemoteProgressNotice,
   formatNumber: (input: number, options?: Intl.NumberFormatOptions) => string,
   translate: I18nContextValue['t']
 ) {
-  const locator = notice.locator;
-  if (locator.kind === 'pdf' || locator.kind === 'comic') {
-    return translate('第 {value0} 页', { value0: formatNumber(locator.pageIndex + 1) });
+  const presentation = notice.position.presentation;
+  if (presentation.page) {
+    return translate('第 {value0} 页', { value0: formatNumber(presentation.page.number) });
   }
-  if (locator.kind === 'audio') {
-    const seconds = Math.floor(locator.positionMillis / 1_000);
+  if (presentation.playback) {
+    const seconds = Math.floor(presentation.playback.positionMillis / 1_000);
     return `${formatNumber(Math.floor(seconds / 60))}:${formatNumber(seconds % 60, { minimumIntegerDigits: 2 })}`;
   }
-  const href = locator.engineLocator.payload.href;
-  const chapter = bootstrap.units.find((unit) => unit.href === href);
-  return chapter?.title ?? `${formatNumber(notice.displayPercent, { maximumFractionDigits: 1 })}%`;
+  return presentation.chapter?.title
+    ?? `${formatNumber(presentation.displayPercent, { maximumFractionDigits: 1 })}%`;
 }
 
 function OpeningCover({ context, ready, background, color, indexProgress, originalProgress, onCancel }: {
@@ -238,7 +233,7 @@ function OpeningCover({ context, ready, background, color, indexProgress, origin
   );
 }
 
-export function ReaderV4Page({ resourceId }: { resourceId: string }) {
+export function ReaderV5Page({ resourceId }: { resourceId: string }) {
   const { t: translate, formatDateTime, formatNumber } = useAttributeI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -250,16 +245,14 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
   const [indexProgress, setIndexProgress] = useState<{ completed: number; total: number; percent: number } | null>(null);
   const [originalProgress, setOriginalProgress] = useState<OriginalDownloadProgress | null>(null);
   const [storageError, setStorageError] = useState('');
-  const [remoteNotice, setRemoteNotice] = useState<RemoteProgressNotice | null>(null);
-  const [externalNavigation, setExternalNavigation] = useState<{ id: number; location: ReaderLocation } | null>(null);
+  const [remoteNotice, setRemoteNotice] = useState<ReaderV5RemoteProgressNotice | null>(null);
+  const [externalNavigation, setExternalNavigation] = useState<{ id: number; position: ReaderPositionReport } | null>(null);
+  const remoteNavigationInFlightRef = useRef(false);
   const [systemDark, setSystemDark] = useState(false);
   const [openingContext] = useState<OpeningContext | null>(() => readOpeningContext(resourceId));
   const requestSequenceRef = useRef(0);
   const pendingLocationWriteRef = useRef<Promise<unknown>>(Promise.resolve());
-  const currentExactRef = useRef<import('@shuku/reader-core').PublicationLocation | null>(null);
-  const startupRemoteAcceptanceRef = useRef<{ pendingKey: string; snapshot: ReaderProgressSnapshot } | null>(null);
-  const remoteJumpRef = useRef<ReaderProgressSnapshot | null>(null);
-  const acceptedRemoteExactRef = useRef<import('@shuku/reader-core').PublicationLocation | null>(null);
+  const currentPositionRef = useRef<ReaderPositionReport | null>(null);
   const runtime = getReaderRuntime();
   const effectivePreferences = useMemo(() => state.preferences
     ? {
@@ -301,7 +294,6 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     setReaderReady(false);
     setIndexProgress(null);
     setStorageError('');
-    startupRemoteAcceptanceRef.current = null;
     setRemoteNotice(null);
     dispatch({ type: 'load', requestId });
 
@@ -315,8 +307,9 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         const navigationHref = publicationNavigationHref(sourceFormat, targetHref);
         if (navigationHref) {
           bootstrap = {
-            ...bootstrap,
-            initialLocation: { kind: 'reflowable', format: sourceFormat, href: navigationHref }
+          ...bootstrap,
+            initialLocation: { kind: 'reflowable', format: sourceFormat, href: navigationHref },
+            initialPosition: null
           };
           hasDirectTarget = true;
         } else {
@@ -331,6 +324,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
           bootstrap = {
             ...bootstrap,
             initialLocation: { kind: 'comic', resourceId: bootstrap.resource.id, pageIndex },
+            initialPosition: null,
             progressPercent: Math.round(progression * 100)
           };
           hasDirectTarget = true;
@@ -342,7 +336,8 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         if (pageNumber !== null) {
           bootstrap = {
             ...bootstrap,
-            initialLocation: { kind: 'pdf', pageIndex: pageNumber - 1, pageProgression: 0 }
+            initialLocation: { kind: 'pdf', pageIndex: pageNumber - 1, pageProgression: 0 },
+            initialPosition: null
           };
           hasDirectTarget = true;
         } else {
@@ -350,88 +345,33 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         }
       }
       const clientId = await runtime.storage.getClientId();
-      const localExact = await runtime.storage.getExactProgress({
+      const identity = {
         serverIdentity: currentReaderServerIdentity(),
         userId: bootstrap.userId,
         clientId,
         bookId: bootstrap.book.id,
         resourceId: bootstrap.resource.id
-      }).catch(() => null);
-      const pending = await runtime.storage.getPendingProgressForIdentity({
-        serverIdentity: currentReaderServerIdentity(),
-        userId: bootstrap.userId,
-        clientId,
-        bookId: bootstrap.book.id,
-        resourceId: bootstrap.resource.id
-      }).catch(() => null);
-      const pendingDecision = decidePendingVsServer({
-        localExact,
-        pending,
-        serverSnapshot: bootstrap.serverProgressSnapshot,
-        bookId: bootstrap.book.id,
-        resourceId: bootstrap.resource.id
-      });
-      if (pendingDecision.kind === 'server' && pendingDecision.discardPendingMutationId && pending) {
-        await runtime.storage.deletePendingProgress(pending.key, pendingDecision.discardPendingMutationId);
-      }
-      const startupResume = resolveStartupResume({
-        localExact: pendingDecision.kind === 'server' && pendingDecision.discardPendingMutationId ? null : localExact,
-        serverSnapshot: bootstrap.serverProgressSnapshot,
-        context: bootstrap.readerType === 'reflowable' ? {
-          readerKind: 'reflowable',
-          sourceFormat: requireReflowableSourceFormat(bootstrap)
-        } : {
-          readerKind: bootstrap.readerType
-        },
-        serverLocation: bootstrap.initialLocation,
-        serverPercent: bootstrap.progressPercent,
+      } as const;
+      const pending = await runtime.storage.getV5PendingProgressForIdentity(identity).catch(() => null);
+      const startupResume = resolveV5StartupResume({
         hasDirectTarget,
-        bookId: bootstrap.book.id,
-        resourceId: bootstrap.resource.id
+        directPosition: hasDirectTarget ? bootstrap.initialPosition : null,
+        pending,
+        serverSnapshot: bootstrap.serverProgressSnapshot
       });
-      const pendingResume = pendingDecision.kind === 'local-pending' ? pendingDecision.localExact : null;
-      if (pendingResume && !hasDirectTarget) {
-        const localLocation = v4LocationToDomain(
-          pendingResume.locator,
-          bootstrap.resource.id,
-          bootstrap.readerType === 'reflowable' ? requireReflowableSourceFormat(bootstrap) : null
-        );
+      if (startupResume.position && !hasDirectTarget) {
         bootstrap = {
           ...bootstrap,
-          initialLocation: localLocation,
-          progressPercent: pendingResume.displayPercent ?? bootstrap.progressPercent
+          initialLocation: null,
+          initialPosition: startupResume.position,
+          progressPercent: startupResume.position.presentation.displayPercent
         };
-        emitReaderDebug('info', '启动时恢复尚未上传的本机精确阅读位置', {
+        emitReaderDebug('info', startupResume.source === 'local-pending'
+          ? '启动时恢复尚未上传的本机阅读位置'
+          : '启动时恢复服务端阅读位置', {
           resourceId: bootstrap.resource.id,
-          capturedAtEpochMillis: pendingResume.capturedAtEpochMillis
+          capturedAtEpochMillis: pending?.capturedAtEpochMillis ?? bootstrap.serverProgressSnapshot?.capturedAtEpochMillis
         });
-      } else if (startupResume.source === 'local-exact') {
-        bootstrap = {
-          ...bootstrap,
-          initialLocation: startupResume.location,
-          progressPercent: startupResume.percent
-        };
-        emitReaderDebug('info', '启动时自动恢复较新的本机精确阅读位置', {
-          resourceId: bootstrap.resource.id,
-          capturedAtEpochMillis: startupResume.localExact?.capturedAtEpochMillis
-        });
-      }
-      if (pendingDecision.kind === 'local-pending' && pendingDecision.rebaseRevision !== null) {
-        await runtime.progress.continueStartupWithLocal(
-          pendingDecision.pending,
-          pendingDecision.rebaseRevision
-        );
-      } else if (
-        pendingDecision.kind === 'server'
-        && pendingDecision.discardPendingMutationId
-        && pending
-        && pendingDecision.snapshot
-        && startupResume.source === 'server'
-      ) {
-        startupRemoteAcceptanceRef.current = {
-          pendingKey: pending.key,
-          snapshot: pendingDecision.snapshot
-        };
       }
       const preferences = readDeviceReaderPreferences(
         bootstrap.userId,
@@ -439,7 +379,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
       );
       if (controller.signal.aborted) return;
       activateReaderUser(bootstrap.userId);
-      emitReaderDebug('info', 'Reader v4 启动完成', {
+      emitReaderDebug('info', 'Reader v5 启动完成', {
         resourceId: bootstrap.resource.id,
         bookId: bootstrap.book.id,
         preferences: 'device-default'
@@ -477,9 +417,12 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     }
   }, [state.bootstrap]);
 
-  useEffect(() => runtime.progress.subscribeRemoteProgress((changedResourceId, notice) => {
-    if (changedResourceId === resourceId) setRemoteNotice(notice);
-  }), [runtime.progress, resourceId]);
+  useEffect(() => {
+    const unsubscribe = runtime.progress.subscribeRemoteProgress((changedResourceId, notice) => {
+      if (changedResourceId === resourceId) setRemoteNotice(notice);
+    });
+    return () => { unsubscribe(); };
+  }, [runtime.progress, resourceId]);
 
   useEffect(() => {
     const bootstrap = state.bootstrap;
@@ -487,15 +430,12 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     let active = true;
     void runtime.storage.getClientId().then((clientId) => {
       if (!active) return;
-      const initialExact = bootstrap.initialLocation
-        ? publicationLocationFromDomain(bootstrap.initialLocation)
-        : bootstrap.serverProgressSnapshot?.locator ?? null;
-      currentExactRef.current = initialExact;
+      currentPositionRef.current = bootstrap.initialPosition;
       runtime.progress.beginSession(
         bootstrap.resource.id,
         clientId,
         bootstrap.serverProgressSnapshot,
-        initialExact
+        bootstrap.initialPosition
       );
     });
     return () => {
@@ -549,99 +489,52 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     };
   }, [state.bootstrap]);
 
-  const saveLocation = useCallback((location: Parameters<ReaderV4PageLocationHandler>[0], percent: number) => {
+  const saveLocation = useCallback((_location: ReaderLocation, _percent: number, position?: ReaderPositionReport) => {
     const bootstrap = state.bootstrap;
-    if (!bootstrap) return;
-    const exactLocation = publicationLocationFromDomain(location);
-    if (!exactLocation) {
-      setStorageError(translate('当前阅读位置尚未形成可跨端验证的精确锚点'));
-      return;
-    }
-    const previousExact = currentExactRef.current;
-    currentExactRef.current = exactLocation;
-    const startupRemoteAcceptance = startupRemoteAcceptanceRef.current;
-    if (startupRemoteAcceptance && comparePublicationLocations(startupRemoteAcceptance.snapshot.locator, exactLocation).precision === 'exact') {
-      startupRemoteAcceptanceRef.current = null;
-      acceptedRemoteExactRef.current = startupRemoteAcceptance.snapshot.locator;
-      pendingLocationWriteRef.current = runtime.progress.acceptVerifiedRemote({
-        serverIdentity: currentReaderServerIdentity(),
-        userId: bootstrap.userId,
-        bookId: bootstrap.book.id,
-        resourceId: bootstrap.resource.id,
-        pendingKey: startupRemoteAcceptance.pendingKey,
-        snapshot: startupRemoteAcceptance.snapshot
-      });
-      return;
-    }
-    if (remoteJumpRef.current) return;
-    const acceptedRemoteExact = acceptedRemoteExactRef.current;
-    if (acceptedRemoteExact) {
-      if (comparePublicationLocations(acceptedRemoteExact, exactLocation).precision === 'exact') return;
-      acceptedRemoteExactRef.current = null;
-    }
-    // Readium can emit the verified destination again after a programmatic
-    // navigation callback has completed. Repeated capture of the same exact
-    // block is not a genuine reading movement and must never create a second
-    // mutation (in particular after accepting a remote progress notice).
-    if (previousExact
-      && comparePublicationLocations(previousExact, exactLocation).precision === 'exact') return;
+    if (!bootstrap || !position) return;
+    const previousPosition = currentPositionRef.current;
+    currentPositionRef.current = position;
+    if (remoteNavigationInFlightRef.current) return;
+    if (previousPosition && positionReportsEqual(previousPosition, position)) return;
     const write = runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       bookId: bootstrap.book.id,
       resourceId: bootstrap.resource.id,
-      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.resource.id)?.revision
-        ?? bootstrap.serverProgressSnapshot?.revision ?? 0,
-      locator: exactLocation,
-      displayPercent: percent
+      position
     }).catch((reason) => {
       setStorageError(reason instanceof Error ? reason.message : '阅读进度无法写入本机');
     });
     pendingLocationWriteRef.current = write;
-  }, [runtime.progress, state.bootstrap, translate]);
+  }, [runtime.progress, state.bootstrap]);
 
   const jumpToRemoteProgress = useCallback(() => {
     const bootstrap = state.bootstrap;
     const notice = remoteNotice;
     if (!bootstrap || !notice) return;
-    const sourceFormat = bootstrap.readerType === 'reflowable' ? requireReflowableSourceFormat(bootstrap) : null;
-    const location = v4LocationToDomain(notice.locator, bootstrap.resource.id, sourceFormat);
-    if (!location) return;
-    const snapshot: ReaderProgressSnapshot = {
-      schemaVersion: 4,
-      clientId: notice.sourceClientId,
-      revision: notice.revision,
-      locator: notice.locator,
-      displayPercent: notice.displayPercent,
-      receivedAtEpochMillis: notice.receivedAtEpochMillis,
-      ...(notice.capturedAtEpochMillis === undefined ? {} : { capturedAtEpochMillis: notice.capturedAtEpochMillis })
-    };
-    remoteJumpRef.current = snapshot;
-    setExternalNavigation((current) => ({ id: (current?.id ?? 0) + 1, location }));
+    remoteNavigationInFlightRef.current = true;
+    setExternalNavigation((current) => ({ id: (current?.id ?? 0) + 1, position: notice.position }));
   }, [remoteNotice, state.bootstrap]);
 
   const handleExternalNavigationResult = useCallback((id: number, accepted: boolean) => {
     if (externalNavigation?.id !== id) return;
-    const snapshot = remoteJumpRef.current;
     const bootstrap = state.bootstrap;
     setExternalNavigation(null);
-    remoteJumpRef.current = null;
-    if (!accepted || !snapshot || !bootstrap || !currentExactRef.current
-      || comparePublicationLocations(snapshot.locator, currentExactRef.current).precision !== 'exact') {
-      setStorageError(translate('无法精确恢复到另一设备的位置'));
+    remoteNavigationInFlightRef.current = false;
+    if (!accepted || !bootstrap) {
+      setStorageError(translate('无法跳转到另一设备的阅读位置'));
       return;
     }
-    acceptedRemoteExactRef.current = snapshot.locator;
-    const clientIdPromise = runtime.storage.getClientId();
-    pendingLocationWriteRef.current = clientIdPromise.then((clientId) => runtime.progress.acceptVerifiedRemote({
+    const notice = remoteNotice;
+    if (!notice) return;
+    currentPositionRef.current = notice.position;
+    void runtime.progress.acceptRemoteProgress({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       bookId: bootstrap.book.id,
-      resourceId: bootstrap.resource.id,
-      pendingKey: syncStateKey({ serverIdentity: currentReaderServerIdentity(), userId: bootstrap.userId, clientId, bookId: bootstrap.book.id, resourceId: bootstrap.resource.id }),
-      snapshot
-    }));
-  }, [externalNavigation, runtime.progress, runtime.storage, state.bootstrap, translate]);
+      resourceId: bootstrap.resource.id
+    }, notice).catch(() => undefined);
+  }, [externalNavigation, remoteNotice, runtime.progress, state.bootstrap, translate]);
 
   useEffect(() => {
     const handleBeforePwaUpdate = (event: Event) => {
@@ -711,7 +604,7 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
         <div className="fixed inset-x-3 bottom-[calc(1rem+var(--shuku-safe-area-bottom))] z-[105] mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-black/10 bg-white/95 px-4 py-3 text-[#2D2926] shadow-xl backdrop-blur" aria-live="polite">
           <button type="button" className="min-w-0 flex-1 text-left" onClick={jumpToRemoteProgress}>
             <span className="block text-sm font-medium">
-              {translate('其他设备已阅读至 {value0}', { value0: remoteProgressLabel(bootstrap, remoteNotice, formatNumber, translate) })}
+              {translate('其他设备已阅读至 {value0}', { value0: remoteProgressLabel(remoteNotice, formatNumber, translate) })}
             </span>
             <span className="mt-0.5 block text-xs text-[#746E68]">
               {formatDateTime(remoteNotice.capturedAtEpochMillis ?? remoteNotice.receivedAtEpochMillis)}
@@ -735,5 +628,3 @@ export function ReaderV4Page({ resourceId }: { resourceId: string }) {
     </>
   );
 }
-
-type ReaderV4PageLocationHandler = (location: import('@shuku/reader-core').ReaderLocation, percent: number) => void;

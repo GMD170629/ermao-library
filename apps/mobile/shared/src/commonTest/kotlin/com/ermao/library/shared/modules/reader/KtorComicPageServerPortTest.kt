@@ -31,7 +31,7 @@ class KtorComicPageServerPortTest {
     @Test
     fun sendsManifestRevisionOnEveryPageRequestAndChecksResponseRevision() = runBlocking {
         val port = port { request ->
-            assertEquals("/api/reader/v4/resources/resource-1/comic/pages/0", request.url.encodedPath)
+            assertEquals("/api/reader/v5/resources/resource-1/comic/pages/0", request.url.encodedPath)
             assertEquals(REVISION, request.url.parameters["revision"])
             assertEquals("original", request.url.parameters["imageVariant"])
             respond(
@@ -114,8 +114,8 @@ class KtorComicPageServerPortTest {
         assetId = "asset-1",
         namespace = ReaderSyncNamespace("server-1", "user-1", 3),
         sourceFormat = ReaderSourceFormat.Cbz,
-        manifestApiPath = "/api/reader/v4/resources/resource-1/comic/manifest",
-        pageApiPathTemplate = "/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}",
+        manifestApiPath = "/api/reader/v5/resources/resource-1/comic/manifest",
+        pageApiPathTemplate = "/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}",
         revision = REVISION,
         pages = listOf(RemoteComicPage(0, "pages/0", "image/jpeg", 1200, 1800)),
     )

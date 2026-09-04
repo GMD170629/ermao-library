@@ -13,11 +13,14 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
+    ReaderResourceProgressV5,
 )
 from app.models.auth import User
 from app.modules.library.application.bookshelf import ListBookshelfItems
 from app.modules.library.infrastructure.bookshelf import SqlAlchemyBookshelfItemQueries
+from app.modules.reader.infrastructure.v5_library_queries import (
+    SqlAlchemyReaderV5LibraryPresentationQueries,
+)
 
 
 def _node(node_id: str, path: str, *, directory: bool = False) -> LibrarySourceNode:
@@ -143,40 +146,55 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
     db_session.flush()
     db_session.add_all(
         [
-            ReaderResourceProgress(
+            ReaderResourceProgressV5(
                 id="bookshelf-progress-current-1",
                 user_id=current_user.id,
                 resource_id=first_resource.id,
-                reader_type="reflowable",
-                position="first",
-                percent=35.5,
-                extra="{}",
-                progressed_at=now,
-                created_at=now,
+                client_id="bookshelf-client",
+                mutation_id="00000000-0000-4000-8000-000000000011",
+                locator_json="{}",
+                presentation_json=(
+                    '{"chapter":null,"currentHref":null,"displayPercent":35.5,'
+                    '"page":null,"playback":null,"totalProgression":0.355}'
+                ),
+                display_percent=35.5,
+                total_progression=0.355,
+                captured_at=now,
+                revision=1,
                 updated_at=now,
             ),
-            ReaderResourceProgress(
+            ReaderResourceProgressV5(
                 id="bookshelf-progress-current-2",
                 user_id=current_user.id,
                 resource_id=second_resource.id,
-                reader_type="reflowable",
-                position="second",
-                percent=100,
-                extra="{}",
-                progressed_at=now + timedelta(minutes=1),
-                created_at=now,
+                client_id="bookshelf-client",
+                mutation_id="00000000-0000-4000-8000-000000000012",
+                locator_json="{}",
+                presentation_json=(
+                    '{"chapter":null,"currentHref":null,"displayPercent":100,'
+                    '"page":null,"playback":null,"totalProgression":1.0}'
+                ),
+                display_percent=100,
+                total_progression=1.0,
+                captured_at=now + timedelta(minutes=1),
+                revision=1,
                 updated_at=now + timedelta(minutes=1),
             ),
-            ReaderResourceProgress(
+            ReaderResourceProgressV5(
                 id="bookshelf-progress-other",
                 user_id=other_user.id,
                 resource_id=first_resource.id,
-                reader_type="reflowable",
-                position="other",
-                percent=88,
-                extra="{}",
-                progressed_at=now,
-                created_at=now,
+                client_id="other-bookshelf-client",
+                mutation_id="00000000-0000-4000-8000-000000000013",
+                locator_json="{}",
+                presentation_json=(
+                    '{"chapter":null,"currentHref":null,"displayPercent":88,'
+                    '"page":null,"playback":null,"totalProgression":0.88}'
+                ),
+                display_percent=88,
+                total_progression=0.88,
+                captured_at=now,
+                revision=1,
                 updated_at=now,
             ),
         ]
@@ -191,9 +209,12 @@ def test_bookshelf_projection_uses_current_users_continue_resource_progress(
         library_ids=(),
         authz_version=1,
     )
-    result = ListBookshelfItems(SqlAlchemyBookshelfItemQueries(db_session)).execute(
-        context=context, book_ids=(book.id,)
-    )
+    result = ListBookshelfItems(
+        SqlAlchemyBookshelfItemQueries(
+            db_session,
+            reader_queries=SqlAlchemyReaderV5LibraryPresentationQueries(db_session),
+        )
+    ).execute(context=context, book_ids=(book.id,))
 
     assert len(result) == 1
     assert result[0].id == book.id

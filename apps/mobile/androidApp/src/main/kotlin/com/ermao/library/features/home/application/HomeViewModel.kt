@@ -14,7 +14,11 @@ import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.shared.modules.library.ContentResult
 import com.ermao.library.shared.core.network.AppErrorKind
+import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
+import com.ermao.library.features.reader.infrastructure.AndroidReaderV5PresentationQuery
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentationSnapshot
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,10 +38,13 @@ class HomeViewModel(
     private val context: ContentRequestContext,
     private val appContext: Context,
     private val onSessionUnauthorized: () -> Unit,
+    private val durablePresentationQuery: AndroidReaderV5PresentationQuery =
+        AndroidReaderV5PresentationQuery(appContext.applicationContext),
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = mutableUiState.asStateFlow()
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
+    private val durablePresentationsByResourceId = mutableMapOf<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -77,9 +84,8 @@ class HomeViewModel(
             try {
                 when (val result = repository.loadHome(context)) {
                     is ContentResult.Content -> {
-                        val content = latestProgressUpdatesByResourceId.values.fold(result.value.toUiContent()) {
-                            current, update -> current.applying(update)
-                        }
+                        loadDurablePresentations()
+                        val content = applyLocalPresentations(result.value.toUiContent())
                         mutableUiState.update { it.copy(
                             isLoading = false,
                             isRefreshing = false,
@@ -102,6 +108,41 @@ class HomeViewModel(
         }
     }
 
+    private suspend fun loadDurablePresentations() {
+        val snapshots = runCatching {
+            durablePresentationQuery.load(
+                namespace = ReaderSyncNamespace(
+                    context.namespace.serverIdentity,
+                    context.namespace.userId,
+                    context.namespace.authorizationVersion,
+                ),
+                clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
+            )
+        }.getOrDefault(emptyList())
+        snapshots.forEach { snapshot ->
+            val previous = durablePresentationsByResourceId[snapshot.resourceId]
+            if (previous == null || previous.capturedAtEpochMillis <= snapshot.capturedAtEpochMillis) {
+                durablePresentationsByResourceId[snapshot.resourceId] = snapshot
+            }
+        }
+    }
+
+    private fun applyLocalPresentations(content: HomeContent): HomeContent {
+        val inMemory = latestProgressUpdatesByResourceId.values.map { update ->
+            ReaderPositionPresentationSnapshot(
+                bookId = update.bookId,
+                resourceId = update.resourceId,
+                capturedAtEpochMillis = update.capturedAtEpochMillis,
+                presentation = update.presentation,
+            )
+        }
+        return (durablePresentationsByResourceId.values + inMemory)
+            .groupBy(ReaderPositionPresentationSnapshot::resourceId)
+            .values
+            .mapNotNull { values -> values.maxByOrNull(ReaderPositionPresentationSnapshot::capturedAtEpochMillis) }
+            .fold(content) { current, snapshot -> current.applying(snapshot) }
+    }
+
     companion object {
         fun factory(
             repository: ContentRepository,
@@ -115,16 +156,27 @@ class HomeViewModel(
 }
 
 internal fun HomeContent.applying(update: ReaderProgressPresentationUpdate): HomeContent {
+    return applying(
+        ReaderPositionPresentationSnapshot(
+            bookId = update.bookId,
+            resourceId = update.resourceId,
+            capturedAtEpochMillis = update.capturedAtEpochMillis,
+            presentation = update.presentation,
+        ),
+    )
+}
+
+internal fun HomeContent.applying(snapshot: ReaderPositionPresentationSnapshot): HomeContent {
     val current = continueReading ?: return this
-    if (current.book.id != update.bookId || current.resumeResourceId != update.resourceId) return this
-    val progress = update.percent.toInt().coerceIn(0, 100).takeIf { it > 0 }
+    if (current.book.id != snapshot.bookId || current.resumeResourceId != snapshot.resourceId) return this
+    val progress = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100).takeIf { it > 0 }
     return copy(
         continueReading = current.copy(book = current.book.copy(progressPercent = progress)),
         recentReading = recentReading.map { book ->
-            if (book.id == update.bookId) book.copy(progressPercent = progress) else book
+            if (book.id == snapshot.bookId) book.copy(progressPercent = progress) else book
         },
         recentAdded = recentAdded.map { book ->
-            if (book.id == update.bookId) book.copy(progressPercent = progress) else book
+            if (book.id == snapshot.bookId) book.copy(progressPercent = progress) else book
         },
     )
 }

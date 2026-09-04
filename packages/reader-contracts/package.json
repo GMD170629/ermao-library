@@ -5,7 +5,9 @@
   "scripts": {
     "generate:safety": "python3 generate-reader-safety-policy.py",
     "check:safety": "python3 generate-reader-safety-policy.py --check && python3 check-reader-safety-boundaries.py",
-    "test:safety": "python3 -m unittest discover -s tests -p 'test_*.py'"
+    "test:v5": "python3 -m unittest tests.test_reader_v5_contract",
+    "test:safety": "python3 -m unittest discover -s tests -p 'test_*.py'",
+    "test": "python3 -m unittest discover -s tests -p 'test_*.py'"
   },
   "files": [
     "reader-safety-policy.json",

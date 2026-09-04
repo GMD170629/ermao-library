@@ -57,7 +57,6 @@ internal interface ReaderScreenController {
     val presentationProgress: StateFlow<Double?>? get() = null
     val preferences: StateFlow<ReaderPreferences>
     val contentError: StateFlow<ReaderError?>? get() = null
-    val restoreWarning: StateFlow<ReaderError?>
     val resumeNotice: StateFlow<ReaderResumeNotice?>
     val resumeActionFailed: StateFlow<Boolean>
     val bookmarks: StateFlow<List<ReaderBookmark>>
@@ -93,8 +92,6 @@ internal interface ReaderScreenController {
     }
 
     fun goToTotalProgression(totalProgression: Double): Boolean
-
-    fun dismissRestoreWarning()
 
     fun dismissResumeNotice()
 
@@ -179,9 +176,11 @@ private fun ReaderLocation.matches(target: ReaderNavigationTarget): Boolean {
     is ReaderNavigationTargetReflowable -> {
         val reflow = this as? com.ermao.library.shared.modules.reader.ReflowReaderLocation ?: return false
         val current = reflow.resourceKey ?: return false
-        val anchor = com.ermao.library.shared.modules.reader.ReadiumLocatorEnvelope.from(reflow)?.exactAnchorOrNull()
         com.ermao.library.shared.modules.reader.matchesReaderNavigationHref(
-            current, target.href, anchor?.fragments.orEmpty(), anchor?.cssSelector,
+            current,
+            target.href,
+            fragments = emptySet(),
+            cssSelector = null,
         )
     }
     is ReaderNavigationTargetPdf ->

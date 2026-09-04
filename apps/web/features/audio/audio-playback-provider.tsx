@@ -8,8 +8,11 @@ import {
   type ReaderSafetyFailure
 } from '@shuku/reader-core';
 import { UNAUTHORIZED_EVENT } from '../../lib/auth-session';
-import { activateReaderUser, currentReaderServerIdentity, getReaderRuntime } from '../../lib/reader';
+import { activateReaderUser, getReaderRuntime, type ReaderV5RemoteProgressNotice } from '../../lib/reader';
+import { currentReaderServerIdentity } from '../../lib/reader/v5-storage';
+import type { ReaderPositionReport } from '@shuku/reader-core';
 import { withBasePath } from '../../lib/base-path';
+import { createStandardReaderLocator, parseStandardReaderLocator, standardLocatorPosition, standardLocatorProgression, standardLocatorTimeSeconds } from '../../lib/reader/v5-locator';
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
 import { fetchAudioBootstrap } from './api';
@@ -38,6 +41,7 @@ import type {
   AudioTrack,
   LoadAudioResourceOptions
 } from './types';
+import { useI18n as useAttributeI18n } from '@/i18n/provider';
 
 const PLAYBACK_CHANNEL = 'shuku-audio-playback';
 const PLAYBACK_CLAIM_KEY = 'shuku:audio:playback-claim';
@@ -109,8 +113,57 @@ function mediaErrorMessage(
   }
 }
 
+export function audioLocationFromPosition(position: ReaderPositionReport | null | undefined, bootstrap: AudioBootstrap) {
+  const locator = parseStandardReaderLocator(position?.locator);
+  const trackIndex = locator ? (standardLocatorPosition(locator) ?? 0) - 1 : -1;
+  const track = trackIndex >= 0 ? bootstrap.tracks[trackIndex] : undefined;
+  if (!locator || !track) return null;
+  const timeSeconds = standardLocatorTimeSeconds(locator);
+  const progression = standardLocatorProgression(locator);
+  const positionMs = Math.round((timeSeconds ?? (progression ?? 0) * track.durationMs) * (timeSeconds === null ? 1 : 1000));
+  return {
+    type: 'audio' as const,
+    resourceId: bootstrap.resource.id,
+    assetId: track.assetId,
+    chapterId: chapterAt(bootstrap.chapters, track.assetId, positionMs)?.id ?? null,
+    positionMs: Math.max(0, positionMs)
+  };
+}
+
+export function audioPositionReport(
+  bootstrap: AudioBootstrap,
+  track: AudioTrack,
+  chapter: AudioBootstrap['chapters'][number] | null,
+  positionMs: number,
+  displayPercent: number
+): ReaderPositionReport {
+  const chapterIndex = chapter ? bootstrap.chapters.findIndex((candidate) => candidate.id === chapter.id) : -1;
+  const trackIndex = bootstrap.tracks.findIndex((candidate) => candidate.assetId === track.assetId);
+  return {
+    locator: createStandardReaderLocator({
+      href: track.url,
+      type: track.mimeType,
+      position: trackIndex + 1,
+      progression: track.durationMs > 0 ? positionMs / track.durationMs : 0,
+      totalProgression: Math.max(0, Math.min(1, displayPercent / 100)),
+      timeSeconds: Math.max(0, positionMs / 1000)
+    }),
+    presentation: {
+      displayPercent: Math.max(0, Math.min(100, displayPercent)),
+      totalProgression: Math.max(0, Math.min(1, displayPercent / 100)),
+      currentHref: track.url,
+      chapter: chapter ? { href: track.url, title: chapter.title, index: chapterIndex >= 0 ? chapterIndex : null } : null,
+      page: null,
+      playback: { positionMillis: Math.max(0, Math.round(positionMs)), durationMillis: Math.max(0, Math.round(track.durationMs)) }
+    }
+  };
+}
+
 export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AudioPlaybackState>(initialState);
+  const [remoteNotice, setRemoteNotice] = useState<ReaderV5RemoteProgressNotice | null>(null);
+  const [remoteJumpFailed, setRemoteJumpFailed] = useState(false);
+  const { t: translate } = useAttributeI18n();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stateRef = useRef(state);
   const bootstrapRef = useRef<AudioBootstrap | null>(null);
@@ -163,22 +216,15 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       ? bootstrap.totalDurationMs
       : absolutePositionForTrack(bootstrap.tracks, trackIndex, positionMs);
     const location = audioLocation(track, chapter, positionMs, bootstrap.resource.id);
-    const exactLocation = {
-      kind: 'audio' as const,
-      assetId: location.assetId,
-      ...(location.chapterId ? { chapterId: location.chapterId } : {}),
-      positionMillis: Math.max(0, Math.round(location.positionMs))
-    };
+    const displayPercent = audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed);
+    const position = audioPositionReport(bootstrap, track, chapter, location.positionMs, displayPercent);
     lastProgressEnqueueRef.current = Date.now();
     return runtime.progress.enqueue({
       serverIdentity: currentReaderServerIdentity(),
       userId: bootstrap.userId,
       bookId: bootstrap.book.id,
       resourceId: bootstrap.resource.id,
-      baseRevision: runtime.progress.getLatestServerSnapshot(bootstrap.resource.id)?.revision
-        ?? bootstrap.progressRevision,
-      locator: exactLocation,
-      displayPercent: audioProgressPercent(absolutePositionMs, bootstrap.totalDurationMs, completed)
+      position
     }).then(() => flush ? runtime.progress.flushNow() : undefined).catch(() => undefined);
   }, [runtime.progress]);
 
@@ -365,37 +411,14 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         failedLoadRef.current = null;
         activateReaderUser(bootstrap.userId);
         const clientId = await runtime.storage.getClientId();
-        const localExact = await runtime.storage.getExactProgress({
+        const pending = await runtime.storage.getV5PendingProgressForIdentity({
           serverIdentity: currentReaderServerIdentity(),
           userId: bootstrap.userId,
           clientId,
           bookId: bootstrap.book.id,
           resourceId: bootstrap.resource.id
         }).catch(() => null);
-        const localAudioLocation = localExact?.locator.kind === 'audio' ? localExact.locator : null;
-        if (
-          localAudioLocation?.kind === 'audio'
-          && (
-            bootstrap.serverUpdatedAtEpochMillis === null
-            || (localExact?.capturedAtEpochMillis ?? -1) >= bootstrap.serverUpdatedAtEpochMillis
-          )
-        ) {
-          bootstrap = {
-            ...bootstrap,
-            resumeLocation: {
-              type: 'audio',
-              resourceId: bootstrap.resource.id,
-              assetId: localAudioLocation.assetId,
-              chapterId: localAudioLocation.chapterId ?? null,
-              positionMs: localAudioLocation.positionMillis
-            },
-            progressPercent: localExact?.displayPercent ?? bootstrap.progressPercent
-          };
-        }
-        bootstrapRef.current = bootstrap;
-        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.book.id);
-        const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
-        const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
+        const localPosition = pending?.position ?? null;
         const requestedChapter = request.chapterId
           ? bootstrap.chapters.find((chapter) => chapter.id === request.chapterId)
           : null;
@@ -404,6 +427,35 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
           : request.assetId
             ? bootstrap.tracks.findIndex((track) => track.assetId === request.assetId)
             : -1;
+        const hasExplicitTarget = requestedTrackIndex >= 0;
+        const localAudioLocation = hasExplicitTarget
+          ? null
+          : audioLocationFromPosition(localPosition, bootstrap);
+        if (!hasExplicitTarget && localPosition && localAudioLocation) {
+          bootstrap = {
+            ...bootstrap,
+            resumeLocation: {
+              type: 'audio',
+              resourceId: bootstrap.resource.id,
+              assetId: localAudioLocation.assetId,
+              chapterId: localAudioLocation.chapterId ?? null,
+              positionMs: localAudioLocation.positionMs
+            },
+            resumePosition: localPosition,
+            progressPercent: localPosition.presentation.displayPercent
+          };
+        } else if (!hasExplicitTarget && localPosition && !localAudioLocation) {
+          bootstrap = {
+            ...bootstrap,
+            resumeLocation: null,
+            resumePosition: localPosition,
+            progressPercent: localPosition.presentation.displayPercent
+          };
+        }
+        bootstrapRef.current = bootstrap;
+        const preferences = readAudioDevicePreferences(bootstrap.userId, bootstrap.book.id);
+        const playbackRate = clamp(preferences.playbackRate ?? bootstrap.preferences.playbackRate, 0.75, 3);
+        const volume = clamp(preferences.volume ?? bootstrap.preferences.volume, 0, 1);
         const resume = requestedTrackIndex >= 0
           ? { trackIndex: requestedTrackIndex, positionMs: requestedChapter?.startMs ?? 0 }
           : normalizeResumeTarget(bootstrap);
@@ -529,6 +581,61 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       configureTrack(trackIndex, chapter.startMs, autoplay || !audioRef.current?.paused);
     }
   }, [configureTrack, persistProgress, playCurrentAudio, seekTo]);
+
+  useEffect(() => {
+    const bootstrap = state.bootstrap;
+    if (!bootstrap) return undefined;
+    let active = true;
+    const unsubscribe = runtime.progress.subscribeRemoteProgress((resourceId, notice) => {
+      if (active && resourceId === bootstrap.resource.id) {
+        setRemoteNotice(notice);
+        setRemoteJumpFailed(false);
+      }
+    });
+    void runtime.storage.getClientId().then((clientId) => {
+      if (!active) return;
+      runtime.progress.beginSession(
+        bootstrap.resource.id,
+        clientId,
+        bootstrap.serverProgressSnapshot,
+        bootstrap.resumePosition
+      );
+      return runtime.progress.checkRemoteProgress(bootstrap.resource.id);
+    }).catch(() => undefined);
+    const check = () => { void runtime.progress.checkRemoteProgress(bootstrap.resource.id).catch(() => undefined); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('online', check);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      active = false;
+      unsubscribe();
+      window.removeEventListener('online', check);
+      document.removeEventListener('visibilitychange', onVisibility);
+      runtime.progress.endSession(bootstrap.resource.id);
+    };
+  }, [runtime.progress, runtime.storage, state.bootstrap]);
+
+  const jumpToRemoteAudioProgress = useCallback(() => {
+    const bootstrap = bootstrapRef.current;
+    const notice = remoteNotice;
+    if (!bootstrap || !notice) return;
+    const location = audioLocationFromPosition(notice.position, bootstrap);
+    const trackIndex = location
+      ? bootstrap.tracks.findIndex((track) => track.assetId === location.assetId)
+      : -1;
+    if (!location || trackIndex < 0) {
+      setRemoteJumpFailed(true);
+      return;
+    }
+    setRemoteJumpFailed(false);
+    configureTrack(trackIndex, location.positionMs, !audioRef.current?.paused);
+    void runtime.progress.acceptRemoteProgress({
+      serverIdentity: currentReaderServerIdentity(),
+      userId: bootstrap.userId,
+      bookId: bootstrap.book.id,
+      resourceId: bootstrap.resource.id
+    }, notice).catch(() => setRemoteJumpFailed(true));
+  }, [configureTrack, remoteNotice, runtime.progress]);
 
   const previousChapter = useCallback(() => {
     const bootstrap = bootstrapRef.current;
@@ -1017,6 +1124,26 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     <AudioPlaybackContext.Provider value={value}>
       {children}
       <audio ref={audioRef} preload="metadata" className="hidden" aria-hidden="true" />
+      {remoteNotice && state.bootstrap ? (
+        <div className="fixed inset-x-3 bottom-[calc(1rem+var(--shuku-safe-area-bottom))] z-[105] mx-auto flex max-w-xl items-center gap-3 rounded-2xl border border-black/10 bg-white/95 px-4 py-3 text-[#2D2926] shadow-xl backdrop-blur" aria-live="polite">
+          <button type="button" className="min-w-0 flex-1 text-left" onClick={jumpToRemoteAudioProgress}>
+            <span className="block text-sm font-medium">
+              {translate('其他设备已阅读至 {value0}', { value0: `${Math.round(remoteNotice.position.presentation.displayPercent)}%` })}
+            </span>
+            {remoteJumpFailed ? <span className="mt-0.5 block text-xs text-red-700">{translate('无法跳转到另一设备的阅读位置')}</span> : null}
+          </button>
+          <button type="button" className="min-h-10 shrink-0 rounded-lg px-3 text-sm font-medium" onClick={jumpToRemoteAudioProgress}>{translate('跳转')}</button>
+          <button
+            type="button"
+            className="grid size-10 shrink-0 place-items-center rounded-lg"
+            aria-label={translate('关闭其他设备阅读进度提示')}
+            onClick={() => {
+              const bootstrap = bootstrapRef.current;
+              if (bootstrap) runtime.progress.dismissRemoteProgress(bootstrap.resource.id);
+            }}
+          >×</button>
+        </div>
+      ) : null}
     </AudioPlaybackContext.Provider>
   );
 }

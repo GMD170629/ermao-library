@@ -7,28 +7,29 @@ import Network
 /// Durable mutations remain owned by the shared coordinator/runtime.
 @MainActor
 final class IosReaderProgressSessionCoordination: ObservableObject {
-    @Published private(set) var remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4? {
+    @Published private(set) var remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5? {
         didSet { noticeHandler?(remoteSnapshot) }
     }
-    var noticeHandler: ((ErmaoShared.ReaderProgressSnapshotV4?) -> Void)?
+    var noticeHandler: ((ErmaoShared.ReaderProgressSnapshotV5?) -> Void)?
 
-    let runtime: ErmaoShared.ReaderProgressSyncRuntime
+    let runtime: ErmaoShared.ReaderPositionSyncRuntime
     private let database: IosReaderLocalDatabase
     private let target: ErmaoShared.ReaderProgressSyncTarget
-    private let server: ErmaoShared.ReaderProgressServerPort
+    private let server: ErmaoShared.ReaderPositionServerPort
     private let clientID: String
     private var etag: String?
     private let networkMonitor = NWPathMonitor()
     private var lifecycleTask: Task<Void, Never>?
     private var isClosed = false
+    private var networkMonitorStarted = false
 
     init(
-        runtime: ErmaoShared.ReaderProgressSyncRuntime,
+        runtime: ErmaoShared.ReaderPositionSyncRuntime,
         database: IosReaderLocalDatabase,
         target: ErmaoShared.ReaderProgressSyncTarget,
-        server: ErmaoShared.ReaderProgressServerPort,
+        server: ErmaoShared.ReaderPositionServerPort,
         clientID: String,
-        bootstrapSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+        bootstrapSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
     ) {
         self.runtime = runtime
         self.database = database
@@ -40,7 +41,6 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in self?.beginDeferredSynchronization() }
         }
-        networkMonitor.start(queue: DispatchQueue(label: "reader.progress.network"))
     }
 
     deinit {
@@ -51,6 +51,7 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
 
     func beginDeferredSynchronization() {
         guard !isClosed else { return }
+        startNetworkMonitorIfNeeded()
         lifecycleTask?.cancel()
         lifecycleTask = Task { @MainActor [weak self] in
             await self?.recoverPendingAndCheckRemote()
@@ -68,80 +69,87 @@ final class IosReaderProgressSessionCoordination: ObservableObject {
 
     func checkForRemoteProgress() async {
         guard !isClosed, !Task.isCancelled else { return }
-        let result: ErmaoShared.ReaderProgressQueryResult
+        defer { startNetworkMonitorIfNeeded() }
+        let result: ErmaoShared.ReaderPositionQueryResult
         do {
             result = try await server.load(target: target, etag: etag)
         } catch {
             return
         }
         guard !isClosed, !Task.isCancelled else { return }
-        if let current = result as? ErmaoShared.ReaderProgressQueryResultCurrent {
+        if let current = result as? ErmaoShared.ReaderPositionQueryResultCurrent {
             etag = current.etag
             guard let snapshot = current.snapshot else { return }
-            let local = try? await database.load(resourceId: target.resourceId)
-            _ = try? await runtime.coordinator.observeRemoteProgress(
+            _ = try? await runtime.coordinator.observeRemotePosition(
                 snapshot: snapshot,
-                currentClientId: clientID,
-                currentProgress: local
+                currentClientId: clientID
             )
-            remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
-        } else if let unchanged = result as? ErmaoShared.ReaderProgressQueryResultUnchanged {
+            remoteSnapshot = runtime.coordinator.remotePositionNotice()?.snapshot
+        } else if let unchanged = result as? ErmaoShared.ReaderPositionQueryResultUnchanged {
             etag = unchanged.etag ?? etag
         }
     }
 
     func recoverPendingAndCheckRemote() async {
         guard !isClosed, !Task.isCancelled else { return }
+        startNetworkMonitorIfNeeded()
         try? await runtime.store.retryPendingUpload()
         try? await runtime.store.awaitPendingUpload()
         guard !isClosed, !Task.isCancelled else { return }
-        remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
+        remoteSnapshot = runtime.coordinator.remotePositionNotice()?.snapshot
         await checkForRemoteProgress()
     }
 
-    /// Waits for the single-flight slot so a 409 becomes visible before the
-    /// next user gesture. Network failures return without clearing pending.
+    /// Waits for the single-flight slot. Network failures return without
+    /// clearing the latest pending v5 mutation.
     func refreshAfterSave() async {
         guard !isClosed, !Task.isCancelled else { return }
         try? await runtime.coordinator.awaitIdle()
         guard !isClosed, !Task.isCancelled else { return }
-        remoteSnapshot = runtime.coordinator.remoteProgressNotice()?.snapshot
+        remoteSnapshot = runtime.coordinator.remotePositionNotice()?.snapshot
     }
 
     func dismissRemoteNotice() {
-        runtime.coordinator.dismissRemoteProgressNotice()
+        runtime.coordinator.dismissRemotePositionNotice()
         remoteSnapshot = nil
     }
 
-    func acceptVerifiedRemote(
-        progress: ErmaoShared.ReaderProgress,
-        snapshot: ErmaoShared.ReaderProgressSnapshotV4
+    func acceptRemote(
+        position: ErmaoShared.ReaderPositionLocalState,
+        snapshot: ErmaoShared.ReaderProgressSnapshotV5
     ) async throws {
-        try await runtime.coordinator.acceptVerifiedRemoteProgress(progress: progress, snapshot: snapshot)
+        try await runtime.coordinator.acceptRemotePosition(position: position, snapshot: snapshot)
         remoteSnapshot = nil
+    }
+
+    /// The first network recovery is intentionally deferred until a Reader
+    /// session has finished selecting its startup location.  Starting the
+    /// monitor in init could acknowledge the durable pending mutation while
+    /// restore() was still reading it, making an older bootstrap snapshot win
+    /// the explicit v5 priority on a cold open.
+    private func startNetworkMonitorIfNeeded() {
+        guard !networkMonitorStarted, !isClosed else { return }
+        networkMonitorStarted = true
+        networkMonitor.start(queue: DispatchQueue(label: "reader.progress.network"))
     }
 
 }
 
 /// Reader content remains usable when progress persistence or synchronization
 /// cannot be initialized. This store intentionally keeps those concerns inert.
-final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
-    func load(resourceId _: String) async throws -> ErmaoShared.ReaderProgress? { nil }
+final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderPositionSyncingStore, @unchecked Sendable {
+    func load(resourceId _: String) async throws -> ErmaoShared.ReaderPositionLocalState? { nil }
 
-    func load(sourceId _: String) async throws -> ErmaoShared.ReaderProgress? { nil }
-
-    func save(progress _: ErmaoShared.ReaderProgress) async throws {}
+    func save(position _: ErmaoShared.ReaderPositionLocalState) async throws {}
 
     func delete(resourceId _: String) async throws {}
-
-    func delete(sourceId _: String) async throws {}
 
     func awaitPendingUpload() async throws {}
 
     func retryPendingUpload() async throws {}
 
-    func syncState() async throws -> ErmaoShared.ReaderProgressDurableState {
-        ErmaoShared.ReaderProgressDurableState(
+    func syncState() async throws -> ErmaoShared.ReaderPositionDurableState {
+        ErmaoShared.ReaderPositionDurableState(
             confirmedRevision: 0,
             pending: nil,
             terminalFailureCode: nil
@@ -152,39 +160,31 @@ final class IosNonBlockingReaderProgressStore: ErmaoShared.ReaderProgressSyncing
 /// Persists exact Reader positions without creating any remote synchronization
 /// work. Download Center uses this store so a verified original remains fully
 /// usable when the server is unreachable.
-final class IosLocalOnlyReaderProgressStore: ErmaoShared.ReaderProgressSyncingStore, @unchecked Sendable {
+final class IosLocalOnlyReaderProgressStore: ErmaoShared.ReaderPositionSyncingStore, @unchecked Sendable {
     private let database: IosReaderLocalDatabase
 
     init(database: IosReaderLocalDatabase) {
         self.database = database
     }
 
-    func load(resourceId: String) async throws -> ErmaoShared.ReaderProgress? {
-        try await database.load(resourceId: resourceId)
+    func load(resourceId: String) async throws -> ErmaoShared.ReaderPositionLocalState? {
+        try await database.loadPosition(resourceId: resourceId)
     }
 
-    func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
-        try await database.load(sourceId: sourceId)
-    }
-
-    func save(progress: ErmaoShared.ReaderProgress) async throws {
-        try await database.save(progress: progress)
+    func save(position: ErmaoShared.ReaderPositionLocalState) async throws {
+        try await database.savePosition(position: position)
     }
 
     func delete(resourceId: String) async throws {
-        try await database.delete(resourceId: resourceId)
-    }
-
-    func delete(sourceId: String) async throws {
-        try await database.delete(sourceId: sourceId)
+        try await database.deletePosition(resourceId: resourceId)
     }
 
     func awaitPendingUpload() async throws {}
 
     func retryPendingUpload() async throws {}
 
-    func syncState() async throws -> ErmaoShared.ReaderProgressDurableState {
-        try await database.loadSyncState()
+    func syncState() async throws -> ErmaoShared.ReaderPositionDurableState {
+        try await database.loadPositionSyncState()
     }
 }
 

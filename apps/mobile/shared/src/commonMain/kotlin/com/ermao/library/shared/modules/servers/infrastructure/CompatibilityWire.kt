@@ -26,7 +26,7 @@ data class ServerProtocolWire(
 data class ServerCapabilitiesWire(
     val setup: Boolean,
     val cookieSession: Boolean,
-    val readerV4: Boolean,
+    val readerV5: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
     val bookResourceAsset: Boolean,
@@ -44,7 +44,7 @@ fun ServerCompatibilityWire.toDomain(): ServerCompatibility = ServerCompatibilit
     capabilities = ServerCapabilities(
         setup = capabilities.setup,
         cookieSession = capabilities.cookieSession,
-        readerV4 = capabilities.readerV4,
+        readerV5 = capabilities.readerV5,
         mediaRange = capabilities.mediaRange,
         managedOfflineDownloads = capabilities.managedOfflineDownloads,
         bookResourceAsset = capabilities.bookResourceAsset,

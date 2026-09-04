@@ -56,8 +56,9 @@ export type AudioLaunchSummary = {
 };
 
 export type AudioBootstrap = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   userId: string;
+  resourceUrl: string;
   readerType: 'audio';
   progressRevision: number;
   book: AudioBookSummary;
@@ -68,6 +69,8 @@ export type AudioBootstrap = {
   chapters: AudioChapter[];
   totalDurationMs: number;
   resumeLocation: AudioLocation | null;
+  resumePosition: ReaderPositionReport | null;
+  serverProgressSnapshot: import('../../lib/reader/v5-wire').ReaderV5ProgressSnapshot | null;
   progressPercent: number;
   serverUpdatedAtEpochMillis: number | null;
   preferences: {
@@ -134,3 +137,4 @@ export type AudioPlaybackContextValue = AudioPlaybackState & {
   setSleepTimer: (value: number | 'chapter' | null) => void;
 };
 import type { ReaderSafetyFailure } from '@shuku/reader-core';
+import type { ReaderPositionReport } from '@shuku/reader-core';

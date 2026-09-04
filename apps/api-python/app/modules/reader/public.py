@@ -1,5 +1,7 @@
 """Stable reader capability contracts."""
 
+from __future__ import annotations
+
 from app.modules.reader.application.dto import (
     ReaderAccessScope,
     ReaderExternalProgressDto,
@@ -10,6 +12,11 @@ from app.modules.reader.application.resource_reader import (
     ReaderResourceNotFound,
     ResourceReaderService,
     SaveExternalProgressCommand,
+)
+from app.modules.reader.application.v5_library_queries import (
+    ReaderV5LibraryPresentationQueryPort,
+    ReaderV5PresentationView,
+    ReaderV5StatusView,
 )
 from app.modules.reader.domain.progress import (
     normalize_reader_href,
@@ -33,6 +40,9 @@ __all__ = [
     "ReaderProgressDateConflict",
     "ReaderResourceFormatUnsupported",
     "ReaderResourceNotFound",
+    "ReaderV5LibraryPresentationQueryPort",
+    "ReaderV5PresentationView",
+    "ReaderV5StatusView",
     "ResourceReaderService",
     "ResourceReadingState",
     "SaveExternalProgressCommand",

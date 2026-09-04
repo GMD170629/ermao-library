@@ -191,6 +191,12 @@ def create_app(
     )
     app.state.session_factory = runtime_factory
     app.state.close_factory_sessions = True
+    # Reader delivery resolves its application service through app state.  The
+    # composition root owns the concrete factory, while the capability
+    # presentation stays independent of this module.
+    from app.bootstrap.reader import reader_v5_service as build_reader_v5_service
+
+    app.state.reader_v5_service_factory = build_reader_v5_service
     if session_factory is not None:
 
         def get_runtime_db() -> Generator[Session, None, None]:

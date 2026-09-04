@@ -31,11 +31,11 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
-/** Resource-first Reader v4 gateway. It deliberately rejects the retired Work/Version/Volume wire. */
+/** Resource-first Reader v5 gateway. Retired Reader v4 bootstrap data is ignored. */
 class KtorReaderBootstrapGateway internal constructor(
     private val createClient: (com.ermao.library.shared.modules.servers.domain.ServerProfile) -> ApiClient,
     private val json: Json = Json { encodeDefaults = true; explicitNulls = false; ignoreUnknownKeys = false },
-    private val progressMapper: ReaderServerWireMapper = ReaderServerWireMapper(),
+    private val progressMapper: ReaderV5ServerWireMapper = ReaderV5ServerWireMapper(),
 ) : com.ermao.library.shared.modules.reader.application.ReaderBootstrapGateway {
     constructor(clients: ApiClientFactory) : this(clients::create)
 
@@ -45,7 +45,7 @@ class KtorReaderBootstrapGateway internal constructor(
             when (val result = client.execute(
                 ApiRequest(
                     ApiMethod.Get,
-                    "/api/reader/v4/resources/${encodePathSegment(request.resourceId)}/bootstrap",
+                    "/api/reader/v5/resources/${encodePathSegment(request.resourceId)}/bootstrap",
                     JsonObject.serializer(),
                 ),
             )) {
@@ -120,7 +120,7 @@ class KtorReaderBootstrapGateway internal constructor(
                 ReaderBootstrapResult.Failure("READER_BOOTSTRAP_USER_MISMATCH", recoverable = false),
             )
         }
-        val expectedResourcePath = "/api/resources/${encodePathSegment(request.resourceId)}"
+        val expectedResourcePath = "/api/reader/v5/resources/${encodePathSegment(request.resourceId)}/publication"
         if (book.id.isBlank() || resource.id != request.resourceId || resource.bookId != book.id ||
             resource.sourceNodeId.isBlank() || resourceUrl != expectedResourcePath ||
             (book.coverUrl != null && !book.coverUrl.isSafeReaderMetadataApiPath()) ||
@@ -154,7 +154,7 @@ class KtorReaderBootstrapGateway internal constructor(
             ?: return ReaderBootstrapPreflight.Failure(
                 ReaderBootstrapResult.Failure("READER_COMIC_MANIFEST_INVALID", recoverable = false),
             )
-        val readerPath = "/api/reader/v4/resources/${encodePathSegment(request.resourceId)}/comic"
+        val readerPath = "/api/reader/v5/resources/${encodePathSegment(request.resourceId)}/comic"
         if (access.kind != "comic" || access.positionsUrl != null ||
             access.manifestUrl != "$readerPath/manifest" ||
             access.pageUrlTemplate != "$readerPath/pages/{pageIndex}" ||
@@ -351,7 +351,7 @@ class KtorReaderBootstrapGateway internal constructor(
     }
 
     private companion object {
-        const val READER_SERVER_SCHEMA_VERSION = 4
+        const val READER_SERVER_SCHEMA_VERSION = 5
         const val HEX = "0123456789ABCDEF"
     }
 }
@@ -368,7 +368,8 @@ private fun String.isSafeReaderMediaApiPath(): Boolean =
     startsWith("/api/") && !contains('#') && !contains('?') && !contains("//") &&
         split('/').none { it == "." || it == ".." } &&
         (matches(Regex("^/api/assets/[^/?#]+$")) ||
-            matches(Regex("^/api/resources/[^/?#]+/asset$")))
+            matches(Regex("^/api/resources/[^/?#]+/asset$")) ||
+            matches(Regex("^/api/reader/v5/resources/[^/?#]+/publication$")))
 
 private fun String.isSafeReaderMetadataApiPath(): Boolean =
     startsWith("/api/") && !contains('#') && !contains('?') && !contains("//") &&

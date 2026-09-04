@@ -44,6 +44,11 @@ import { resourceDetailPageSize, type ResourceDetailPage } from './model/resourc
 import type { BookContentLayout, BookContentSort, BookContentsPage } from './model/book-contents';
 import type { BookContentEntry } from './model/book-contents';
 import { currentPositionLabel } from './model/current-position-label';
+import { latestLocalV5Progress, localV5ProgressPercent } from './local-reader-progress';
+import { getReaderRuntime } from '../../lib/reader';
+import { currentReaderServerIdentity } from '../../lib/reader/v5-storage';
+import { READER_V5_PROGRESS_CHANGED_EVENT } from '../../lib/reader/v5-sync-coordinator';
+import { parseReaderV5PositionReport, type ReaderV5ProgressRecord } from '../../lib/reader/v5-wire';
 import { BookContentBrowser } from './ui/book-content-browser';
 import { ResourceDetailView } from './ui/resource-detail-view';
 import { SourceNodeMetadataEditor, SourceNodeMetadataRecognitionDialog } from './ui/source-node-metadata-dialogs';
@@ -182,6 +187,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   const { t } = useI18n();
   const session = useAppSession();
   const audioPlayback = useAudioPlayback();
+  const readerRuntime = getReaderRuntime();
   const canManage = session?.authorization?.canManageSystem === true;
   const [book, setBook] = useState<BookView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -277,11 +283,20 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
   }, [bookId, contentPage, contentSort, contentSourceNodeId, contentsRevision, t]);
 
   const resources = useMemo(() => book ? allVisibleResources(book) : [], [book]);
+  const [localProgressByResource, setLocalProgressByResource] = useState<Record<string, ReaderV5ProgressRecord>>({});
+  const displayedResources = useMemo(() => resources.map((resource) => {
+    const local = localProgressByResource[resource.id];
+    return local ? { ...resource, progress: local.position.presentation.displayPercent } : resource;
+  }), [localProgressByResource, resources]);
   const singleReadableResource = book ? singleReadableResourceForBook(book) : null;
-  const selectedBookResource = book ? selectedResourceForBook(book, requestedResourceId) : null;
+  const selectedBookResource = book
+    ? displayedResources.find((resource) => resource.id === selectedResourceForBook(book, requestedResourceId)?.id) ?? null
+    : null;
   const requestedResource = requestedResourceId
-    ? resources.find((resource) => resource.id === requestedResourceId && resource.readable) ?? null
-    : singleReadableResource;
+    ? displayedResources.find((resource) => resource.id === requestedResourceId && resource.readable) ?? null
+    : singleReadableResource
+      ? displayedResources.find((resource) => resource.id === singleReadableResource.id) ?? null
+      : null;
   const nestedNode = contentSourceNodeId
     ? contents?.currentNode?.sourceNodeId === contentSourceNodeId
       ? contents.currentNode
@@ -290,7 +305,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
         : null
     : null;
   const nestedResources = nestedNode ? (contents?.currentResourceIds ?? []).flatMap((id) => {
-    const resource = resources.find((candidate) => candidate.id === id);
+    const resource = displayedResources.find((candidate) => candidate.id === id);
     return resource ? [resource] : [];
   }) : [];
   const activeResource = nestedNode
@@ -299,11 +314,98 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
       ?? nestedResources[0]
       ?? null
     : selectedBookResource;
-  const bookResumeResource = book ? resumeResourceForBook(book) : null;
+  const serverResumeResource = book ? resumeResourceForBook(book) : null;
+  const latestLocalProgress = latestLocalV5Progress(Object.values(localProgressByResource));
+  const bookResumeResource = serverResumeResource
+    ? displayedResources.find((resource) => resource.id === latestLocalProgress?.resourceId)
+      ?? displayedResources.find((resource) => resource.id === serverResumeResource.id)
+      ?? serverResumeResource
+    : displayedResources.find((resource) => resource.id === latestLocalProgress?.resourceId) ?? null;
   const bookCopy = bookResumeResource ? consumptionCopy(bookResumeResource.readerType) : null;
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!book || !userId) { setLocalProgressByResource({}); return undefined; }
+    let active = true;
+    const readableResources = book.resources.filter((resource) => !resource.hidden && resource.readable);
+    const applyLocalProgress = (records: ReaderV5ProgressRecord[]) => {
+      if (active) setLocalProgressByResource((current) => {
+        const next = { ...current };
+        records.forEach((record) => {
+          const previous = next[record.resourceId];
+          if (!previous || previous.capturedAtEpochMillis <= record.capturedAtEpochMillis) next[record.resourceId] = record;
+        });
+        return next;
+      });
+    };
+    void readerRuntime.storage.getClientId().then(async (clientId) => {
+      const records = await Promise.all(readableResources.map(async (resource) => readerRuntime.storage.getV5Progress({
+        serverIdentity: currentReaderServerIdentity(),
+        userId,
+        clientId,
+        bookId: book.id,
+        resourceId: resource.id
+      })));
+      applyLocalProgress(records.filter((record): record is ReaderV5ProgressRecord => record !== null));
+    }).catch(() => { if (active) setLocalProgressByResource({}); });
+
+    const handleProgressChanged = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail = event.detail as unknown;
+      if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return;
+      const value = detail as Record<string, unknown>;
+      const position = parseReaderV5PositionReport(value.position);
+      if (!position || value.userId !== userId || value.bookId !== book.id || typeof value.resourceId !== 'string'
+        || typeof value.clientId !== 'string' || typeof value.serverIdentity !== 'string' || typeof value.key !== 'string'
+        || typeof value.mutationId !== 'string' || typeof value.capturedAtEpochMillis !== 'number'
+        || !Number.isSafeInteger(value.capturedAtEpochMillis)) return;
+      const revision = typeof value.revision === 'number' && Number.isSafeInteger(value.revision) && value.revision >= 0
+        ? value.revision
+        : 0;
+      const record: ReaderV5ProgressRecord = {
+        serverIdentity: value.serverIdentity,
+        userId,
+        clientId: value.clientId,
+        bookId: book.id,
+        resourceId: value.resourceId,
+        key: value.key,
+        schemaVersion: 5,
+        mutationId: value.mutationId,
+        revision,
+        capturedAtEpochMillis: value.capturedAtEpochMillis,
+        position
+      };
+      setLocalProgressByResource((current) => {
+        const previous = current[record.resourceId];
+        if (previous && previous.capturedAtEpochMillis > record.capturedAtEpochMillis) return current;
+        return { ...current, [record.resourceId]: record };
+      });
+    };
+    window.addEventListener(READER_V5_PROGRESS_CHANGED_EVENT, handleProgressChanged);
+    return () => {
+      active = false;
+      window.removeEventListener(READER_V5_PROGRESS_CHANGED_EVENT, handleProgressChanged);
+    };
+  }, [book, readerRuntime.storage, session?.user?.id]);
+  const requestedLocalPresentation = requestedResource
+    ? localProgressByResource[requestedResource.id]?.position.presentation ?? null
+    : null;
+  const localResumePresentation = bookResumeResource
+    ? localProgressByResource[bookResumeResource.id]?.position.presentation ?? null
+    : null;
+  const displayedResourceDetail = resourceDetail && requestedLocalPresentation
+    ? {
+        ...resourceDetail,
+        progress: requestedLocalPresentation.displayPercent,
+        currentHref: requestedLocalPresentation.currentHref,
+        currentChapterIndex: requestedLocalPresentation.chapter?.index ?? null,
+        currentChapterTitle: requestedLocalPresentation.chapter?.title ?? null,
+        currentChapterSortOrder: null,
+        currentPageNumber: requestedLocalPresentation.page?.number ?? null
+      }
+    : resourceDetail;
   const bookProgress = book?.completed
     ? 100
-    : book?.continueResourceProgress ?? bookResumeResource?.progress ?? 0;
+    : localV5ProgressPercent(book?.continueResourceProgress ?? bookResumeResource?.progress ?? 0, latestLocalProgress);
   const bookStatus = book ? bookReadingStatus(book) : 'UNREAD';
 
   const playAudioResource = (resource: ReadableResourceView, assetId?: string, chapterTitle?: string) => {
@@ -549,7 +651,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
           {book.description ? <p data-i18n-skip className={hasBookMetadata ? "mt-4 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600" : "mt-5 line-clamp-3 max-w-3xl whitespace-pre-line text-sm leading-7 text-stone-600"}>{book.description}</p> : <p className={hasBookMetadata ? "mt-4 text-sm text-stone-400" : "mt-5 text-sm text-stone-400"}><I18nText>暂无简介</I18nText></p>}
           {bookCopy ? <div className="mt-7 max-w-3xl">
             <div className="flex items-center gap-4"><span className="shrink-0 text-sm font-medium text-stone-700">{t(bookCopy.progress)}</span><div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[#ff4f26]" style={{ width: `${bookProgress}%` }} /></div><span className="w-14 text-right text-sm font-medium tabular-nums text-stone-700">{Math.round(bookProgress)}%</span></div>
-            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(bookCopy.position)}</span><span data-i18n-skip className="text-stone-800">{bookResumeResource ? currentPositionLabel(bookResumeResource, requestedResource?.id === bookResumeResource.id ? resourceDetail : null, t) : ''}</span></div>
+          <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium text-stone-700">{t(bookCopy.position)}</span><span data-i18n-skip className="text-stone-800">{bookResumeResource ? currentPositionLabel(bookResumeResource, requestedResource?.id === bookResumeResource.id ? displayedResourceDetail : null, t, localResumePresentation) : ''}</span></div>
           </div> : null}
           {error ? <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         </div>
@@ -567,7 +669,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
 
     {requestedResource ? <ResourceDetailView
       resource={requestedResource}
-      detail={resourceDetail}
+      detail={displayedResourceDetail}
       loading={resourceDetailLoading}
       error={resourceDetailError}
       requestedPage={requestedResourcePage}
@@ -577,7 +679,7 @@ export function BookDetailPage({ bookId }: { bookId: string }) {
     /> : <BookContentBrowser
       book={book}
       contents={contents}
-      resources={resources}
+      resources={displayedResources}
       loading={contentsLoading}
       error={contentsError}
       layout={contentLayout}

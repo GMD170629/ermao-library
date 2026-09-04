@@ -8,6 +8,7 @@ import {
   type ReaderAdapterEvent,
   type ReaderCommand,
   type ReaderLocation,
+  type ReaderPositionReport,
   type ReaderOperationKind,
   type ReaderPreferences,
   type ReaderSource
@@ -20,8 +21,9 @@ type ReaderSessionOptions = {
   adapter: ReaderAdapter | null;
   source: ReaderSource;
   initialLocation: ReaderLocation | null;
+  initialPosition: ReaderPositionReport | null;
   preferences: ReaderPreferences;
-  onLocationChange: (location: ReaderLocation, percent: number) => void;
+  onLocationChange: (location: ReaderLocation, percent: number, position?: ReaderPositionReport) => void;
   onPreferencesRejected: (restored: ReaderPreferences) => void;
   onExternalLink?: (href: string) => void;
   onPasswordRequired?: (reason: 'need-password' | 'incorrect-password') => void;
@@ -149,6 +151,7 @@ export function useReaderSession({
   adapter,
   source,
   initialLocation,
+  initialPosition,
   preferences,
   onLocationChange,
   onPreferencesRejected,
@@ -239,7 +242,7 @@ export function useReaderSession({
         && event.operation.kind !== 'preferences'
         && (event.operation.kind !== 'bootstrap' || adapterReady)
       ) {
-        callbacksRef.current.onLocationChange(event.location, event.percent);
+        if (event.position) callbacksRef.current.onLocationChange(event.location, event.percent, event.position);
       } else if (event.type === 'external-link') {
         callbacksRef.current.onExternalLink?.(event.href);
       } else if (event.type === 'password-required') {
@@ -253,6 +256,7 @@ export function useReaderSession({
       signal,
       source,
       initialLocation,
+      initialPosition,
       preferences: initialPreferencesRef.current
     }).catch((reason) => {
       if (signal.aborted) return;
@@ -274,7 +278,7 @@ export function useReaderSession({
       void adapter.dispose();
       dispatch({ type: 'session/dispose' });
     };
-  }, [adapter, beginOperation, finishOperation, initialLocation, isAcceptedEvent, source]);
+  }, [adapter, beginOperation, finishOperation, initialLocation, initialPosition, isAcceptedEvent, source]);
 
   useEffect(() => {
     if (!adapter || openedAdapterRef.current !== adapter || appliedPreferencesRef.current === preferences) return;
@@ -335,7 +339,9 @@ export function useReaderSession({
         type: 'session/fail',
         operation: context.operation,
         error: {
-          code: 'READER_COMMAND_FAILED',
+          code: reason instanceof Error && /^[A-Z][A-Z0-9_]+$/.test(reason.message)
+            ? reason.message
+            : 'READER_COMMAND_FAILED',
           message: reason instanceof Error ? reason.message : '阅读操作失败',
           recoverable: true
         }

@@ -24,8 +24,8 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressDatabase
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
+import com.ermao.library.features.reader.infrastructure.AndroidReaderV5Database
+import com.ermao.library.features.reader.infrastructure.AndroidReaderV5LocalStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPreferencesStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderBookmarkStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
@@ -42,6 +42,8 @@ import com.ermao.library.shared.modules.reader.PdfRangeMemory
 import com.ermao.library.features.reader.infrastructure.AndroidRemotePdfiumSessionConfiguration
 import com.ermao.library.features.reader.infrastructure.ReadiumLocatorMapper
 import com.ermao.library.features.reader.infrastructure.ReadiumPreferencesMapper
+import com.ermao.library.features.reader.application.ReaderStartupPositionSource
+import com.ermao.library.features.reader.application.selectReaderStartupPositionSource
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderSource
 import com.ermao.library.shared.modules.reader.RemoteByteRangeReaderSource
@@ -52,25 +54,21 @@ import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import com.ermao.library.shared.modules.reader.BootstrapReaderPublication
-import com.ermao.library.shared.modules.reader.LocalFirstReaderProgressStore
+import com.ermao.library.shared.modules.reader.LocalFirstReaderPositionStore
 import com.ermao.library.shared.modules.reader.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.ReaderBootstrapContent
 import com.ermao.library.shared.modules.reader.ReaderBootstrapFailure
-import com.ermao.library.shared.modules.reader.ReaderProgressStore
 import com.ermao.library.shared.modules.reader.ReaderComicPage
 import com.ermao.library.shared.modules.reader.ReaderPdfPage
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
-import com.ermao.library.shared.modules.reader.ReaderProgressSyncCoordinator
-import com.ermao.library.shared.modules.reader.ReaderProgressSyncingStore
-import com.ermao.library.shared.modules.reader.ReaderProgressQueryPort
-import com.ermao.library.shared.modules.reader.application.ReaderProgressQueryResult as ProgressQueryResult
+import com.ermao.library.shared.modules.reader.ReaderPositionSyncCoordinator
+import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
+import com.ermao.library.shared.modules.reader.ReaderPositionQueryPort
+import com.ermao.library.shared.modules.reader.application.ReaderPositionQueryResult as PositionQueryResult
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
-import com.ermao.library.shared.modules.reader.ReaderProgress
-import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
-import com.ermao.library.shared.modules.reader.decidePendingVsServerStartup
-import com.ermao.library.shared.modules.reader.application.PendingVsServerDecision
+import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.ReaderTapZones
 import com.ermao.library.shared.modules.reader.ReaderMorphology
@@ -82,7 +80,7 @@ import com.ermao.library.shared.modules.reader.ReaderNavigationPolicy
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapContent
 import com.ermao.library.shared.modules.reader.ReaderPublicationBootstrapFailure
 import com.ermao.library.ErmaoLibraryApplication
-import com.ermao.library.shared.createAndroidReaderProgressSyncPort
+import com.ermao.library.shared.createAndroidReaderPositionSyncPort
 import com.ermao.library.shared.createAndroidReaderBookmarkSyncPort
 import com.ermao.library.shared.createAndroidReaderBootstrapGateway
 import com.ermao.library.shared.createAndroidPdfRangeServerPort
@@ -124,9 +122,9 @@ class ReaderActivity : AppCompatActivity() {
     private var launchNamespace: com.ermao.library.shared.modules.auth.domain.PrivateDataNamespace? = null
     private var accountObservation: com.ermao.library.shared.modules.auth.Observation? = null
     private val navigationCache by lazy { AndroidReaderNavigationCache(applicationContext) }
-    private var syncingProgressStore: ReaderProgressSyncingStore? = null
-    private var progressCoordinator: ReaderProgressSyncCoordinator? = null
-    private var progressQueryPort: ReaderProgressQueryPort? = null
+    private var syncingProgressStore: ReaderPositionSyncingStore? = null
+    private var progressCoordinator: ReaderPositionSyncCoordinator? = null
+    private var progressQueryPort: ReaderPositionQueryPort? = null
     private var progressSyncTarget: ReaderProgressSyncTarget? = null
     private var progressClientId: String? = null
     private var progressEtag: String? = null
@@ -166,7 +164,8 @@ class ReaderActivity : AppCompatActivity() {
             readerTitle = source.displayTitle
             session = createSession(
                 source,
-                AndroidReaderProgressStore(applicationContext),
+                createLocalOnlyProgressStore(source),
+                startupPositionSource = ReaderStartupPositionSource.LocalOnly,
                 comicPages = intent.comicPagesOrEmpty(),
                 pdfPages = intent.pdfPagesOrEmpty(),
                 pageCount = intent.getIntExtra(EXTRA_PAGE_COUNT, -1).takeIf { it > 0 },
@@ -389,17 +388,13 @@ class ReaderActivity : AppCompatActivity() {
         val coordinator = progressCoordinator ?: return
         val clientId = progressClientId ?: return
         when (val result = query.load(target, progressEtag)) {
-            is ProgressQueryResult.Current -> {
+            is PositionQueryResult.Current -> {
                 progressEtag = result.etag ?: progressEtag
                 val snapshot = result.snapshot ?: return
-                coordinator.observeRemoteProgress(
-                    snapshot,
-                    clientId,
-                    syncingProgressStore?.load(target.resourceId),
-                )
+                coordinator.observeRemotePosition(snapshot, clientId)
             }
-            is ProgressQueryResult.Unchanged -> progressEtag = result.etag ?: progressEtag
-            is ProgressQueryResult.Failure -> Unit
+            is PositionQueryResult.Unchanged -> progressEtag = result.etag ?: progressEtag
+            is PositionQueryResult.Failure -> Unit
         }
     }
 
@@ -572,12 +567,18 @@ class ReaderActivity : AppCompatActivity() {
                     showOpenError(ReaderErrorCode.UnsupportedFormat)
                     return
                 }
-                var sessionProgressStore: ReaderProgressStore = NonBlockingReaderProgressStore
+                var sessionProgressStore: ReaderPositionSyncingStore = NonBlockingReaderPositionStore
                 var startupRemoteSnapshot = result.bootstrap.remoteSnapshot
-                var sessionCoordinator: ReaderProgressSyncCoordinator? = null
+                var startupPositionSource = selectReaderStartupPositionSource(
+                    hasExplicitTarget = request.initialTarget != null,
+                    hasLocalPending = false,
+                    hasServerSnapshot = result.bootstrap.remoteSnapshot != null,
+                    localOnlySource = false,
+                )
+                var sessionCoordinator: ReaderPositionSyncCoordinator? = null
                 try {
                     val clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId()
-                    val database = AndroidReaderProgressDatabase(
+                    val database = AndroidReaderV5Database(
                         applicationContext,
                         ReaderLocalProgressIdentity(
                             namespace = namespace,
@@ -586,34 +587,34 @@ class ReaderActivity : AppCompatActivity() {
                             resourceId = source.resourceId,
                         ),
                     )
-                    val startupDecision = decidePendingVsServerStartup(
-                        database.load(source.resourceId),
-                        database.loadSyncState(),
-                        result.bootstrap.remoteSnapshot,
-                        source,
-                    )
-                    val progressServer = createAndroidReaderProgressSyncPort(
+                    val progressServer = createAndroidReaderPositionSyncPort(
                         applicationContext,
                         authenticated.profile,
                     )
-                    val coordinator = ReaderProgressSyncCoordinator(database, progressServer, lifecycleScope)
-                    val syncingStore = LocalFirstReaderProgressStore(
+                    val coordinator = ReaderPositionSyncCoordinator(database, progressServer, lifecycleScope)
+                    val syncingStore = LocalFirstReaderPositionStore(
                         database,
                         result.bootstrap.target,
                         coordinator,
                     )
+                    val durableState = database.loadPositionSyncState()
                     progressCoordinator = coordinator
                     sessionCoordinator = coordinator
                     coordinator.beginSession(result.bootstrap.remoteSnapshot)
                     progressQueryPort = progressServer
                     progressSyncTarget = result.bootstrap.target
                     progressClientId = clientId
-                    progressEtag = result.bootstrap.remoteSnapshot?.revision?.let { "\"reader-progress-$it\"" }
-                        ?: "\"reader-progress-0\""
-                    if (startupDecision is PendingVsServerDecision.UseLocalPending) {
-                        startupRemoteSnapshot = null
+                    progressEtag = result.bootstrap.remoteSnapshot?.revision?.let(::readerProgressEtag)
+                        ?: readerProgressEtag(0)
+                    if (durableState.pending != null) {
+                        // A pending v5 mutation is the local restore owner. Keep
+                        // its exact body and let the single coordinator retry it.
+                        if (request.initialTarget == null) {
+                            startupPositionSource = ReaderStartupPositionSource.LocalPending
+                            startupRemoteSnapshot = null
+                        }
+                        coordinator.retryPending(result.bootstrap.target)
                     }
-                    coordinator.applyStartupDecision(result.bootstrap.target, startupDecision)
                     syncingProgressStore = syncingStore
                     sessionProgressStore = syncingStore
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -621,7 +622,6 @@ class ReaderActivity : AppCompatActivity() {
                 } catch (failure: Exception) {
                     LOGGER.log(Level.WARNING, "reader_progress_startup_ignored", failure)
                     clearProgressRuntime()
-                    startupRemoteSnapshot = null
                 }
                 readerTitle = source.displayTitle
                 session = createSession(
@@ -642,6 +642,7 @@ class ReaderActivity : AppCompatActivity() {
                     ),
                     namespaceKey = namespace.presentationKey(),
                     initialTarget = request.initialTarget,
+                    startupPositionSource = startupPositionSource,
                     comicPages = result.bootstrap.comicPages,
                     pdfPages = result.bootstrap.pdfPages,
                     pageCount = result.bootstrap.pageCount,
@@ -808,12 +809,12 @@ class ReaderActivity : AppCompatActivity() {
         val pdfPages: List<ReaderPdfPage> = cachedNavigation?.pdfPages.orEmpty()
         val pageCount: Int? = cachedNavigation?.pageCount
         // Verified Downloads are a local entry. Progress synchronization runs after opening.
-        val progressStore = createBestEffortManagedProgressStore(activeSession, request, source, exactSourceFormat)
+        val progressSetup = createBestEffortManagedProgressStore(activeSession, request, source, exactSourceFormat)
         readerTitle = source.displayTitle
         session = createSession(
             source,
-            progressStore,
-            null,
+            progressSetup.store,
+            progressSetup.remoteSnapshot,
             progressCoordinator,
             preferencesStore,
             AndroidReaderBookmarkStore(
@@ -832,6 +833,7 @@ class ReaderActivity : AppCompatActivity() {
             ),
             namespaceKey = readerNamespace.presentationKey(),
             initialTarget = request.initialTarget,
+            startupPositionSource = progressSetup.startupPositionSource,
             comicPages = comicPages,
             pdfPages = pdfPages,
             pageCount = pageCount,
@@ -877,12 +879,18 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    private data class ManagedProgressStoreSetup(
+        val store: ReaderPositionSyncingStore,
+        val startupPositionSource: ReaderStartupPositionSource,
+        val remoteSnapshot: ReaderProgressSnapshotV5?,
+    )
+
     private suspend fun createOfflineManagedProgressStore(
         activeSession: ActiveReaderSession,
         request: ManagedDownloadReaderRequest,
         source: LocalReaderSource,
         sourceFormat: ReaderSourceFormat,
-    ): ReaderProgressStore {
+    ): ManagedProgressStoreSetup {
         val privateNamespace = activeSession.identity.namespace
         val namespace = ReaderSyncNamespace(
             privateNamespace.serverIdentity,
@@ -896,31 +904,57 @@ class ReaderActivity : AppCompatActivity() {
             resourceId = source.resourceId,
             sourceFormat = sourceFormat.readerFormat,
         )
-        val database = AndroidReaderProgressDatabase(
+        val database = AndroidReaderV5Database(
             applicationContext,
             ReaderLocalProgressIdentity(namespace, clientId, request.bookId, source.resourceId),
         )
-        val progressServer = createAndroidReaderProgressSyncPort(applicationContext, activeSession.profile)
-        val coordinator = ReaderProgressSyncCoordinator(database, progressServer, lifecycleScope)
-        val syncingStore = LocalFirstReaderProgressStore(database, target, coordinator)
-        val durableState = database.loadSyncState()
-        val startupDecision = decidePendingVsServerStartup(
-            database.load(source.resourceId),
-            durableState,
-            remoteSnapshot = null,
-            openedSource = source,
-        )
+        val progressServer = createAndroidReaderPositionSyncPort(applicationContext, activeSession.profile)
+        val coordinator = ReaderPositionSyncCoordinator(database, progressServer, lifecycleScope)
+        val syncingStore = LocalFirstReaderPositionStore(database, target, coordinator)
+        val durableState = database.loadPositionSyncState()
+        progressEtag = readerProgressEtag(durableState.confirmedRevision)
 
-        coordinator.beginSession(snapshot = null)
+        val remoteSnapshot = try {
+            // A managed local artifact does not have a bootstrap snapshot. Ask
+            // for the body unconditionally so an unchanged response cannot
+            // accidentally look like the empty/start state.
+            when (val result = progressServer.load(target, null)) {
+                is PositionQueryResult.Current -> {
+                    progressEtag = result.etag ?: progressEtag
+                    result.snapshot
+                }
+                is PositionQueryResult.Unchanged -> {
+                    progressEtag = result.etag ?: progressEtag
+                    null
+                }
+                is PositionQueryResult.Failure -> null
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
+        coordinator.beginSession(snapshot = remoteSnapshot)
         progressCoordinator = coordinator
         progressQueryPort = progressServer
         progressSyncTarget = target
         progressClientId = clientId
-        progressEtag = "\"reader-progress-${durableState.confirmedRevision}\""
         syncingProgressStore = syncingStore
 
-        coordinator.applyStartupDecision(target, startupDecision)
-        return syncingStore
+        val startupPositionSource = selectReaderStartupPositionSource(
+            hasExplicitTarget = request.initialTarget != null,
+            hasLocalPending = durableState.pending != null,
+            hasServerSnapshot = remoteSnapshot != null,
+            localOnlySource = false,
+        )
+        if (durableState.pending != null) coordinator.retryPending(target)
+        return ManagedProgressStoreSetup(
+            store = syncingStore,
+            startupPositionSource = startupPositionSource,
+            remoteSnapshot = remoteSnapshot.takeIf {
+                startupPositionSource != ReaderStartupPositionSource.LocalPending
+            },
+        )
     }
 
     private suspend fun createBestEffortManagedProgressStore(
@@ -928,14 +962,23 @@ class ReaderActivity : AppCompatActivity() {
         request: ManagedDownloadReaderRequest,
         source: LocalReaderSource,
         sourceFormat: ReaderSourceFormat,
-    ): ReaderProgressStore = try {
+    ): ManagedProgressStoreSetup = try {
         createOfflineManagedProgressStore(activeSession, request, source, sourceFormat)
     } catch (cancelled: kotlinx.coroutines.CancellationException) {
         throw cancelled
     } catch (failure: Exception) {
         LOGGER.log(Level.WARNING, "reader_progress_store_unavailable", failure)
         clearProgressRuntime()
-        NonBlockingReaderProgressStore
+        ManagedProgressStoreSetup(
+            store = NonBlockingReaderPositionStore,
+            startupPositionSource = selectReaderStartupPositionSource(
+                hasExplicitTarget = request.initialTarget != null,
+                hasLocalPending = false,
+                hasServerSnapshot = false,
+                localOnlySource = false,
+            ),
+            remoteSnapshot = null,
+        )
     }
 
     private fun clearProgressRuntime() {
@@ -1011,15 +1054,16 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun createSession(
         source: ReaderSource,
-        progressStore: ReaderProgressStore,
-        remoteSnapshot: com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4? = null,
-        progressCoordinator: ReaderProgressSyncCoordinator? = null,
+        progressStore: ReaderPositionSyncingStore,
+        remoteSnapshot: ReaderProgressSnapshotV5? = null,
+        progressCoordinator: ReaderPositionSyncCoordinator? = null,
         preferencesStore: AndroidReaderPreferencesStore? = null,
         bookmarkStore: AndroidReaderBookmarkStore? = null,
         bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
         bookmarkSyncTarget: ReaderBookmarkSyncTarget? = null,
         namespaceKey: String? = null,
         initialTarget: com.ermao.library.shared.modules.reader.ReaderNavigationTarget? = null,
+        startupPositionSource: ReaderStartupPositionSource = ReaderStartupPositionSource.Start,
         comicPages: List<ReaderComicPage> = emptyList(),
         pdfPages: List<ReaderPdfPage> = emptyList(),
         pageCount: Int? = null,
@@ -1069,6 +1113,7 @@ class ReaderActivity : AppCompatActivity() {
                 comicPageServer = comicPageServer,
                 remoteSnapshot = remoteSnapshot,
                 initialTarget = initialTarget,
+                startupPositionSource = startupPositionSource,
                 progressCoordinator = progressCoordinator,
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1089,6 +1134,7 @@ class ReaderActivity : AppCompatActivity() {
                 remotePdfium = remotePdfium,
                 remoteSnapshot = remoteSnapshot,
                 initialTarget = initialTarget,
+                startupPositionSource = startupPositionSource,
                 progressCoordinator = progressCoordinator,
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1110,6 +1156,7 @@ class ReaderActivity : AppCompatActivity() {
             preferencesMapper = ReadiumPreferencesMapper(resources),
             remoteSnapshot = remoteSnapshot,
             initialTarget = initialTarget,
+            startupPositionSource = startupPositionSource,
             progressCoordinator = progressCoordinator,
             initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                 ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
@@ -1122,6 +1169,22 @@ class ReaderActivity : AppCompatActivity() {
             presentationNamespaceKey = namespaceKey,
             publishProgressUpdate = (application as ErmaoLibraryApplication)
                 .readerProgressPresentationCenter::publish,
+        )
+    }
+
+    private fun createLocalOnlyProgressStore(source: ReaderSource): ReaderPositionSyncingStore {
+        val namespace = ReaderSyncNamespace(LOCAL_READER_SERVER, LOCAL_READER_USER, 0)
+        val clientId = AndroidReaderDeviceIdentity(applicationContext).stableDeviceId()
+        return AndroidReaderV5LocalStore(
+            AndroidReaderV5Database(
+                applicationContext,
+                ReaderLocalProgressIdentity(
+                    namespace = namespace,
+                    clientId = clientId,
+                    bookId = source.bookId ?: "local-${source.resourceId}",
+                    resourceId = source.resourceId,
+                ),
+            ),
         )
     }
 
@@ -1186,6 +1249,8 @@ class ReaderActivity : AppCompatActivity() {
         private const val EXTRA_COMIC_PAGE_MEDIA_TYPES = "reader.comic-page-media-types"
         private const val EXTRA_PDF_PAGE_TITLES = "reader.pdf-page-titles"
         private const val EXTRA_PAGE_COUNT = "reader.page-count"
+        private const val LOCAL_READER_SERVER = "local-reader"
+        private const val LOCAL_READER_USER = "local-user"
         private const val SYNC_FLUSH_TIMEOUT_MILLIS = 2_500L
 
         fun createIntent(
@@ -1335,8 +1400,13 @@ private fun String.isSupportedManagedSourceFormat(): Boolean =
         "CBZ", "ZIP", "CBR", "RAR", "IMAGE_DIR", "PDF",
     )
 
-private object NonBlockingReaderProgressStore : ReaderProgressStore {
-    override suspend fun load(resourceId: String): ReaderProgress? = null
-    override suspend fun save(progress: ReaderProgress) = Unit
+private fun readerProgressEtag(revision: Long): String = "\"reader-v5-progress-$revision\""
+
+private object NonBlockingReaderPositionStore : ReaderPositionSyncingStore {
+    override suspend fun load(resourceId: String): com.ermao.library.shared.modules.reader.ReaderPositionLocalState? = null
+    override suspend fun save(position: com.ermao.library.shared.modules.reader.ReaderPositionLocalState) = Unit
     override suspend fun delete(resourceId: String) = Unit
+    override suspend fun awaitPendingUpload() = Unit
+    override suspend fun retryPendingUpload() = Unit
+    override suspend fun syncState() = com.ermao.library.shared.modules.reader.ReaderPositionDurableState()
 }

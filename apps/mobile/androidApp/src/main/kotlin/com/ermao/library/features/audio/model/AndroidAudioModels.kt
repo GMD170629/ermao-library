@@ -52,6 +52,8 @@ data class AndroidAudioTrack(
     val assetId: String,
     val title: String,
     val sourceUri: String,
+    /** Stable publication/API href for the v5 audio Locator. */
+    val apiPath: String? = null,
     val mimeType: String? = null,
     val durationMillis: Long? = null,
     val chapters: List<AndroidAudioChapter> = emptyList(),
@@ -134,6 +136,7 @@ data class AndroidAudioLaunchIntent(
                         assetId = asset.assetId,
                         title = asset.title,
                         sourceUri = sourceUriForAsset(asset),
+                        apiPath = asset.apiPath,
                         mimeType = asset.mimeType,
                         durationMillis = asset.durationMillis,
                         chapters = publication.chapters

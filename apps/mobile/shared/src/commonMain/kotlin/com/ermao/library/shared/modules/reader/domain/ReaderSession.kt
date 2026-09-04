@@ -131,6 +131,15 @@ data class ReaderError(
     val cause: Throwable? = null,
 )
 
+/**
+ * A persisted opaque Locator existed, but the active engine could not parse or
+ * map it to the opened publication.  Callers must surface this as
+ * [ReaderErrorCode.LocationRestoreFailed]; they must not silently start at
+ * zero or try a lower-priority candidate.
+ */
+class ReaderLocationRestoreException(cause: Throwable? = null) :
+    IllegalStateException(ReaderErrorCode.LocationRestoreFailed.wireValue, cause)
+
 data class ReaderSession(
     val sessionId: String,
     val source: ReaderSource,

@@ -1,32 +1,20 @@
-import type { ReaderLocation } from '@shuku/reader-core';
+import type { ReaderPositionReport } from '@shuku/reader-core';
+import { parseReaderV5PositionReport, readerPositionDigest } from '../../../lib/reader/v5-wire';
 
 export type ReaderBookmark = {
   id: string;
-  location: ReaderLocation;
+  position: ReaderPositionReport;
   label: string;
-  percent: number;
   createdAt: string;
 };
 
 export function readerBookmarkStorageKey(userId: string, resourceId: string) {
-  return ['shuku', 'reader-bookmarks', 'v4', userId, resourceId].join(':');
+  return ['shuku', 'reader-bookmarks', 'v5', userId, resourceId].join(':');
 }
 
-export function readerBookmarkId(location: ReaderLocation | null | undefined) {
-  if (!location) return null;
-  if (location.kind === 'comic') return `comic:${location.resourceId}:${location.pageIndex}`;
-  if (location.kind === 'pdf') return `pdf:${location.pageIndex}`;
-  if (location.kind === 'reflowable') {
-    if (location.cfi) return `reflowable:${location.format}:cfi:${location.cfi}`;
-    const progression = typeof location.progression === 'number'
-      ? Math.round(location.progression * 10_000) / 10_000
-      : '';
-    if (location.href || progression !== '') {
-      return `reflowable:${location.format}:position:${location.href ?? ''}:${progression}`;
-    }
-    return null;
-  }
-  return null;
+export function readerBookmarkId(position: ReaderPositionReport | null | undefined) {
+  const parsed = parseReaderV5PositionReport(position);
+  return parsed ? readerPositionDigest(parsed) : null;
 }
 
 export function readReaderBookmarks(raw: string | null): ReaderBookmark[] {
@@ -37,12 +25,12 @@ export function readReaderBookmarks(raw: string | null): ReaderBookmark[] {
     return parsed.filter((item): item is ReaderBookmark => {
       if (!item || typeof item !== 'object') return false;
       const candidate = item as Partial<ReaderBookmark>;
+      const position = parseReaderV5PositionReport(candidate.position);
       return typeof candidate.id === 'string'
         && typeof candidate.label === 'string'
-        && typeof candidate.percent === 'number'
-        && Number.isFinite(candidate.percent)
         && typeof candidate.createdAt === 'string'
-        && readerBookmarkId(candidate.location) === candidate.id;
+        && position !== null
+        && readerBookmarkId(position) === candidate.id;
     });
   } catch {
     return [];
@@ -55,11 +43,14 @@ export function mergeReaderBookmarks(...groups: ReaderBookmark[][]) {
     const existing = merged.get(bookmark.id);
     if (!existing || bookmark.createdAt > existing.createdAt) merged.set(bookmark.id, bookmark);
   });
-  return [...merged.values()].sort((left, right) => left.percent - right.percent || left.createdAt.localeCompare(right.createdAt));
+  return [...merged.values()].sort((left, right) => (
+    left.position.presentation.displayPercent - right.position.presentation.displayPercent
+    || left.createdAt.localeCompare(right.createdAt)
+  ));
 }
 
 export function toggleReaderBookmark(bookmarks: ReaderBookmark[], next: Omit<ReaderBookmark, 'id'>) {
-  const id = readerBookmarkId(next.location);
+  const id = readerBookmarkId(next.position);
   if (!id) return bookmarks;
   if (bookmarks.some((bookmark) => bookmark.id === id)) {
     return bookmarks.filter((bookmark) => bookmark.id !== id);
@@ -67,8 +58,8 @@ export function toggleReaderBookmark(bookmarks: ReaderBookmark[], next: Omit<Rea
   return [...bookmarks, { ...next, id }];
 }
 
-export function hasReaderBookmark(bookmarks: ReaderBookmark[], location: ReaderLocation | null | undefined) {
-  const id = readerBookmarkId(location);
+export function hasReaderBookmark(bookmarks: ReaderBookmark[], position: ReaderPositionReport | null | undefined) {
+  const id = readerBookmarkId(position);
   return Boolean(id && bookmarks.some((bookmark) => bookmark.id === id));
 }
 

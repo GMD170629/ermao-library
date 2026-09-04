@@ -2,11 +2,13 @@ import {
   READER_SAFETY_BUDGETS,
   READER_SAFETY_PROFILES,
   READER_SAFETY_RULE_IDS,
-  parsePublicationLocation
+  type ReaderPositionReport
 } from '@shuku/reader-core';
 import { withBasePath } from '../../lib/base-path';
 import { readBoundedResponse, ResponseLimitError } from '../../shared/api/bounded-response';
 import { rejectReaderSafety } from '../reader/v3/security/reader-safety-policy';
+import { parseReaderV5ProgressSnapshot } from '../../lib/reader/v5-wire';
+import { parseStandardReaderLocator, standardLocatorPosition, standardLocatorProgression, standardLocatorTimeSeconds } from '../../lib/reader/v5-locator';
 import { clamp, orderedChapters, orderedTracks } from './audio-model';
 import type { AudioBootstrap, AudioChapter, AudioLocation, AudioResourceSummary, AudioTrack } from './types';
 
@@ -108,13 +110,18 @@ function normalizeResource(value: unknown, index: number, bookId: string): Audio
 export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''): AudioBootstrap {
   const root = record(input);
   const raw = root.ok === true ? record(root.data) : root;
-  if (raw.schemaVersion !== 4) throw new Error('当前客户端不支持该有声书协议');
+  if (raw.schemaVersion !== 5) throw new Error('当前客户端不支持该有声书协议');
   if (raw.readerType !== 'audio') throw new Error('该资源不是可播放的有声书');
   const book = record(raw.book);
   const bookId = stringValue(book.id).trim();
   const resource = normalizeResource(raw.resource, 0, bookId);
   if (!bookId || !resource || (requestedResourceId && resource.id !== requestedResourceId)) {
     throw new Error('有声书启动信息缺少资源或图书标识');
+  }
+  const resourceUrl = stringValue(raw.resourceUrl).trim();
+  const expectedResourceUrl = `/api/reader/v5/resources/${encodeURIComponent(resource.id)}/publication`;
+  if (resourceUrl !== expectedResourceUrl) {
+    throw new Error('有声书内容资源地址无效');
   }
   const tracks = orderedTracks(
     (Array.isArray(raw.assets) ? raw.assets : [])
@@ -145,22 +152,40 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
     if (!Number.isSafeInteger(total)) rejectReaderSafety(READER_SAFETY_RULE_IDS.AUDIO_TRACK_AND_CHAPTER_BOUNDS);
     return total;
   }, 0);
-  const progressSnapshot = record(raw.progressSnapshot);
-  const resume = parsePublicationLocation(progressSnapshot.locator);
-  if (raw.progressSnapshot !== null && raw.progressSnapshot !== undefined && !resume) {
-    throw new Error('阅读器启动信息包含无效的 Reader v4 进度快照');
+  if (!Object.prototype.hasOwnProperty.call(raw, 'progressSnapshot')) {
+    throw new Error('READER_PROGRESS_RESPONSE_INVALID');
   }
-  const resumeLocation: AudioLocation | null = resume?.kind === 'audio'
-    ? { type: 'audio', resourceId: resource.id, assetId: resume.assetId, chapterId: resume.chapterId ?? null, positionMs: resume.positionMillis }
+  const progressSnapshot = raw.progressSnapshot === null
+    ? null
+    : parseReaderV5ProgressSnapshot(raw.progressSnapshot);
+  if (raw.progressSnapshot !== null && !progressSnapshot) {
+    throw new Error('READER_PROGRESS_RESPONSE_INVALID');
+  }
+  const resumePosition: ReaderPositionReport | null = progressSnapshot?.position ?? null;
+  const resumeLocator = parseStandardReaderLocator(resumePosition?.locator);
+  const resumeTrackIndex = resumeLocator ? (standardLocatorPosition(resumeLocator) ?? 0) - 1 : -1;
+  const resumeTrack = resumeTrackIndex >= 0 ? tracks[resumeTrackIndex] : undefined;
+  const resumeTimeSeconds = resumeLocator ? standardLocatorTimeSeconds(resumeLocator) : null;
+  const resumeProgression = resumeLocator ? standardLocatorProgression(resumeLocator) : null;
+  const resumePositionMs = resumeTrack
+    ? Math.round((resumeTimeSeconds ?? (resumeProgression ?? 0) * resumeTrack.durationMs) * (resumeTimeSeconds === null ? 1 : 1000))
+    : null;
+  const resumeChapter = resumeTrack && resumePositionMs !== null
+    ? chapters.find((chapter) => chapter.assetId === resumeTrack.assetId
+      && resumePositionMs >= chapter.startMs && resumePositionMs < chapter.endMs)
+    : undefined;
+  const resumeLocation: AudioLocation | null = resumeTrack && resumePositionMs !== null
+    ? { type: 'audio', resourceId: resource.id, assetId: resumeTrack.assetId, chapterId: resumeChapter?.id ?? null, positionMs: resumePositionMs }
     : null;
   const availableResources = (Array.isArray(raw.availableResources) ? raw.availableResources : [])
     .map((item, index) => normalizeResource(item, index, bookId))
     .filter((item): item is AudioResourceSummary => item !== null);
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     userId: stringValue(raw.userId),
+    resourceUrl: withBasePath(resourceUrl),
     readerType: 'audio',
-    progressRevision: Math.max(0, numberValue(progressSnapshot.revision)),
+    progressRevision: Math.max(0, progressSnapshot?.revision ?? 0),
     book: {
       id: bookId,
       title: stringValue(book.title, '未命名有声书'),
@@ -174,8 +199,10 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
     chapters,
     totalDurationMs: Math.max(resource.durationMs, calculatedDuration),
     resumeLocation,
-    progressPercent: clamp(numberValue(progressSnapshot.displayPercent), 0, 100),
-    serverUpdatedAtEpochMillis: typeof progressSnapshot.receivedAtEpochMillis === 'number'
+    resumePosition,
+    serverProgressSnapshot: progressSnapshot,
+    progressPercent: clamp(progressSnapshot?.position.presentation.displayPercent ?? 0, 0, 100),
+    serverUpdatedAtEpochMillis: typeof progressSnapshot?.receivedAtEpochMillis === 'number'
       ? numberValue(progressSnapshot.receivedAtEpochMillis)
       : null,
     preferences: { playbackRate: 1, skipBackwardSeconds: 15, skipForwardSeconds: 30, volume: 1 }
@@ -183,7 +210,7 @@ export function normalizeAudioBootstrap(input: unknown, requestedResourceId = ''
 }
 
 export async function fetchAudioBootstrap(resourceId: string, signal?: AbortSignal): Promise<AudioBootstrap> {
-  const response = await fetch(`/api/reader/v4/resources/${encodeURIComponent(resourceId)}/bootstrap`, {
+  const response = await fetch(`/api/reader/v5/resources/${encodeURIComponent(resourceId)}/bootstrap`, {
     credentials: 'same-origin',
     cache: 'no-store',
     redirect: 'error',

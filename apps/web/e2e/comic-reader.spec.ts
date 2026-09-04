@@ -25,11 +25,12 @@ function bootstrap() {
     resourceCompleted: false, lastReadAt: null
   };
   return { ok: true, data: {
-    schemaVersion: 4, userId: 'user-e2e', readerType: 'comic', sourceFormat: 'image_dir',
+    schemaVersion: 5, userId: 'user-e2e', readerType: 'comic', sourceFormat: 'image_dir',
+    resourceUrl: '/api/reader/v5/resources/comic-resource/publication',
     publication: {
       kind: 'comic',
-      manifestUrl: '/api/reader/v4/resources/comic-resource/comic/manifest',
-      pageUrlTemplate: '/api/reader/v4/resources/comic-resource/comic/pages/{pageIndex}',
+      manifestUrl: '/api/reader/v5/resources/comic-resource/comic/manifest',
+      pageUrlTemplate: '/api/reader/v5/resources/comic-resource/comic/pages/{pageIndex}',
       imageVariants: ['original', 'data-saver']
     },
     book: { id: 'comic-book', title: 'Comic E2E', author: 'Test', coverUrl: null },
@@ -87,14 +88,23 @@ async function installRoutes(page: Page) {
     }
     if (pathname.endsWith('/progress')) {
       if (request.method() === 'GET') {
-        return route.fulfill({ json: { ok: true, data: { schemaVersion: 4, progressSnapshot: null } } });
+        return route.fulfill({ json: { ok: true, data: { schemaVersion: 5, progressSnapshot: null } } });
       }
       const body: unknown = request.postDataJSON();
       writes.push(body);
-      const item = body as { clientId: string; locator: Record<string, unknown>; baseRevision: number };
+      const item = body as { clientId: string; mutationId: string; capturedAtEpochMillis: number; position: Record<string, unknown> };
       return route.fulfill({ json: { ok: true, data: {
-        schemaVersion: 4, clientId: item.clientId, revision: item.baseRevision + 1,
-        locator: item.locator, displayPercent: 100, receivedAtEpochMillis: Date.now()
+        acceptedMutationId: item.mutationId,
+        acceptedRevision: 1,
+        currentSnapshot: {
+          schemaVersion: 5,
+          revision: 1,
+          clientId: item.clientId,
+          mutationId: item.mutationId,
+          capturedAtEpochMillis: item.capturedAtEpochMillis,
+          receivedAtEpochMillis: Date.now(),
+          position: item.position
+        }
       } } });
     }
     if (pathname === '/api/auth/me') {
@@ -125,8 +135,8 @@ test('IMAGE_DIR comic paging streams PAGE images, avoids assets, and returns fro
   await expect(currentPage).toBeVisible();
   await expect(currentPage.locator('[data-comic-page-placeholder="1"]')).toHaveText('加载中');
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { locator: { kind: string; pageIndex: number; resourceHref: string } };
-  expect(write.locator).toMatchObject({ kind: 'comic', pageIndex: 1, resourceHref: 'pages/1' });
+  const write = writes.at(-1) as { position: { locator: { href: string; locations: { position: number } } } };
+  expect(write.position.locator).toMatchObject({ href: 'pages/1', locations: { position: 2 } });
 
   releaseSecondPage();
   await expect(currentPage.locator('img')).toHaveCSS('visibility', 'visible');
@@ -139,7 +149,7 @@ test('IMAGE_DIR comic paging streams PAGE images, avoids assets, and returns fro
   await expect(firstPage.locator('img')).toHaveCSS('visibility', 'visible');
   await expectComicPixel(page, 0, [48, 96, 224, 255]);
   await expect.poll(
-    () => writes.some((body) => (body as { locator?: { pageIndex?: number } }).locator?.pageIndex === 0)
+    () => writes.some((body) => (body as { position?: { locator?: { locations?: { position?: number } } } }).position?.locator?.locations?.position === 1)
   ).toBe(true);
   expect(requests.some((pathname) => pathname.includes('/api/assets/'))).toBe(false);
 });

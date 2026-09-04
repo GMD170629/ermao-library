@@ -1,4 +1,5 @@
 import type { ReadableResourceView } from '../../../types/book';
+import type { ReaderPositionPresentation } from '@shuku/reader-core';
 import { formatDuration } from '../book-detail';
 import type { ResourceDetailPage } from './resource-detail';
 
@@ -11,8 +12,19 @@ type Translate = (
 export function currentPositionLabel(
   resource: ReadableResourceView,
   detail: ResourceDetailPage | null,
-  translate: Translate
+  translate: Translate,
+  presentation: ReaderPositionPresentation | null = null
 ): string {
+  if (resource.readerType === 'audio' && presentation?.playback) {
+    return formatDuration(presentation.playback.positionMillis);
+  }
+  if (presentation?.page) {
+    return translate('第 {value0} 页', { value0: presentation.page.number });
+  }
+  if (presentation?.chapter?.title) return presentation.chapter.title;
+  if (presentation?.chapter?.index !== null && presentation?.chapter?.index !== undefined) {
+    return translate('第 {value0} 章', { value0: presentation.chapter.index + 1 });
+  }
   if (resource.readerType === 'audio' && resource.durationMs) {
     return formatDuration(resource.durationMs * resource.progress / 100);
   }

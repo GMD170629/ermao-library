@@ -20,7 +20,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
+    ReaderResourceProgressV5,
 )
 from app.models.auth import User
 from app.modules.library.application.catalog import CatalogBookFilter, ListCatalogBooks
@@ -357,27 +357,37 @@ def test_book_list_filters_by_the_three_supported_reading_states(
     now = datetime.now(UTC)
     db_session.add_all(
         [
-            ReaderResourceProgress(
+            ReaderResourceProgressV5(
                 id="reading-progress",
                 user_id=user.id,
                 resource_id="reading-book-resource",
-                reader_type="reflowable",
-                position="chapter-1",
-                percent=50,
-                extra="{}",
-                progressed_at=now,
-                source_protocol="SHUKU_WEB",
+                client_id="smart-filter-client",
+                mutation_id="00000000-0000-4000-8000-000000000001",
+                locator_json="{}",
+                presentation_json=(
+                    '{"chapter":null,"currentHref":null,"displayPercent":50,'
+                    '"page":null,"playback":null,"totalProgression":0.5}'
+                ),
+                display_percent=50,
+                total_progression=0.5,
+                captured_at=now,
+                revision=1,
             ),
-            ReaderResourceProgress(
+            ReaderResourceProgressV5(
                 id="finished-progress",
                 user_id=user.id,
                 resource_id="finished-book-resource",
-                reader_type="reflowable",
-                position="chapter-2",
-                percent=100,
-                extra="{}",
-                progressed_at=now,
-                source_protocol="SHUKU_WEB",
+                client_id="smart-filter-client",
+                mutation_id="00000000-0000-4000-8000-000000000002",
+                locator_json="{}",
+                presentation_json=(
+                    '{"chapter":null,"currentHref":null,"displayPercent":100,'
+                    '"page":null,"playback":null,"totalProgression":1.0}'
+                ),
+                display_percent=100,
+                total_progression=1.0,
+                captured_at=now,
+                revision=1,
             ),
         ]
     )

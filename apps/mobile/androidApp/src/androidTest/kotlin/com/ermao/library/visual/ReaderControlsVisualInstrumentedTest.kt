@@ -20,7 +20,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.R
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
+import com.ermao.library.features.reader.deleteLocalReaderV5Position
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.keepReaderTestFixtureVisible
 import com.ermao.library.features.reader.presentation.READER_CONTENTS_TEST_TAG
@@ -60,7 +60,6 @@ class ReaderControlsVisualInstrumentedTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private val comicResourceId = "visual-comic-${UUID.randomUUID()}"
     private val pdfResourceId = "visual-pdf-${UUID.randomUUID()}"
     private val epubResourceId = "visual-epub-${UUID.randomUUID()}"
@@ -97,9 +96,15 @@ class ReaderControlsVisualInstrumentedTest {
 
     @After
     fun removeLocalVisualPublications() = runBlocking {
-        progressStore.delete(comicResourceId)
-        progressStore.delete(pdfResourceId)
-        progressStore.delete(epubResourceId)
+        if (this@ReaderControlsVisualInstrumentedTest::comicSource.isInitialized) {
+            deleteLocalReaderV5Position(context, comicSource)
+        }
+        if (this@ReaderControlsVisualInstrumentedTest::pdfSource.isInitialized) {
+            deleteLocalReaderV5Position(context, pdfSource)
+        }
+        if (this@ReaderControlsVisualInstrumentedTest::epubSource.isInitialized) {
+            deleteLocalReaderV5Position(context, epubSource)
+        }
         publicationStore.delete(comicResourceId)
         publicationStore.delete(pdfResourceId)
         publicationStore.delete(epubResourceId)

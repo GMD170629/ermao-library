@@ -5,7 +5,6 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.infrastructure.TxtReadiumPublicationFactory
 import com.ermao.library.features.reader.presentation.ReaderActivity
@@ -36,7 +35,6 @@ class ReaderTxtInstrumentedTest {
     private val context: Context = instrumentation.targetContext
     private val sourceId = "txt-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
     @Before
@@ -55,7 +53,9 @@ class ReaderTxtInstrumentedTest {
 
     @After
     fun removeArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderTxtInstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 
@@ -94,7 +94,7 @@ class ReaderTxtInstrumentedTest {
             assertTrue(renderedText(scenario).contains("Second chapter"))
             scenario.onActivity { activity ->
                 val location = activity.controllerForTesting?.currentLocation?.value as? ReflowReaderLocation
-                assertNotNull(location?.engineLocator)
+                assertNotNull(location?.resourceKey)
                 checkNotNull(activity.controllerForTesting).updatePreferences(
                     ReaderPreferences(epub = ReaderEpubPreferences(fontSize = 23)),
                 )

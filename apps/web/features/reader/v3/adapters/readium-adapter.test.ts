@@ -54,6 +54,18 @@ test('Readium live progress interpolates within a resource instead of staying at
   }, positions), 0.9);
 });
 
+test('Readium presentation uses publication positions when the native locator total is stale', () => {
+  const positions = [
+    { href: 'chapter-1.xhtml', locations: { progression: 0, totalProgression: 0.25 } },
+    { href: 'chapter-1.xhtml', locations: { progression: 1, totalProgression: 0.99 } }
+  ];
+
+  assert.equal(readiumTotalProgression({
+    href: 'chapter-1.xhtml',
+    locations: { progression: 1, totalProgression: 0.25 }
+  }, positions), 0.99);
+});
+
 test('Readium href resolver keeps fragments and publication-relative paths', () => {
   assert.equal(resolveReadiumHref('#note', 'text/chapter.xhtml'), 'text/chapter.xhtml#note');
   assert.equal(resolveReadiumHref('../notes.xhtml#n1', 'text/chapter.xhtml'), 'notes.xhtml#n1');

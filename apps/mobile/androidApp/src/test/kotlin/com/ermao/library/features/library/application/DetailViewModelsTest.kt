@@ -5,11 +5,11 @@ import com.ermao.library.features.content.model.BookCard
 import com.ermao.library.features.content.model.ResourceContent
 import com.ermao.library.features.content.model.ReadingUnitContent
 import com.ermao.library.features.content.model.BookDetailContent
-import com.ermao.library.shared.modules.reader.ReaderEngine
-import com.ermao.library.shared.modules.reader.ReaderEnginePlatform
+import com.ermao.library.shared.modules.reader.ReaderChapterPresentation
+import com.ermao.library.shared.modules.reader.ReaderOpaqueLocator
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentation
+import com.ermao.library.shared.modules.reader.ReaderPositionReport
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
-import com.ermao.library.shared.modules.reader.ReflowablePublicationLocation
-import com.ermao.library.shared.modules.reader.createEngineLocator
 import kotlin.test.assertEquals
 import org.junit.Test
 
@@ -44,16 +44,23 @@ class DetailViewModelsTest {
             namespaceKey = "server:user",
             bookId = "book-1",
             resourceId = "resource-1",
-            percent = 42.0,
-            location = ReflowablePublicationLocation(
-                engineLocator = createEngineLocator(
-                    engine = ReaderEngine.Readium,
-                    platform = ReaderEnginePlatform.Android,
-                    version = "readium-kotlin:test",
-                    payloadJson = """{"href":"text/part0008_split_001.html","type":"application/xhtml+xml","locations":{"cssSelector":"body","fragments":["visible"],"position":11}}""",
+            position = ReaderPositionReport(
+                locator = ReaderOpaqueLocator.parse(
+                    """{"href":"text/part0008_split_001.html","type":"application/xhtml+xml","locations":{"cssSelector":"body","fragments":["visible"],"position":11}}""",
+                ),
+                presentation = ReaderPositionPresentation(
+                    displayPercent = 42.0,
+                    totalProgression = 0.42,
+                    currentHref = "text/part0008_split_001.html",
+                    chapter = ReaderChapterPresentation(
+                        href = "text/part0008_split_000.html",
+                        title = "Chapter 2",
+                        index = 1,
+                    ),
+                    page = null,
+                    playback = null,
                 ),
             ),
-            chapterTitle = "Chapter 2",
             capturedAtEpochMillis = 123,
         )
         val updated = content.applying(update, selectedResourceId = "resource-1")

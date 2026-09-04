@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import cast
 
@@ -56,7 +57,12 @@ def _validation_input_summary(value: object) -> ValidationInputSummary:
     if isinstance(value, int):
         return ValidationInputSummary(kind="integer", value=value)
     if isinstance(value, float):
-        return ValidationInputSummary(kind="number", value=value)
+        # JSONResponse uses the strict JSON encoder.  Pydantic correctly
+        # rejects NaN/Infinity at the v5 boundary, but retaining such a value
+        # in the diagnostic envelope would turn the intended 422 into a 500.
+        return ValidationInputSummary(
+            kind="number", value=value if math.isfinite(value) else None
+        )
     if isinstance(value, str):
         return ValidationInputSummary(
             kind="string",

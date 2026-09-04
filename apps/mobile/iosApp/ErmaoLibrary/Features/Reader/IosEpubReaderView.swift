@@ -42,7 +42,7 @@ struct IosReflowableReaderView: View {
                 if session.phase == .reading || session.phase == .background {
                     IosReaderControls(session: session, onClose: close)
                 }
-                if session.resumePrompt != nil || session.restoreWarning != nil {
+                if session.resumePrompt != nil {
                     resumeNotice
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                         .zIndex(2)
@@ -57,7 +57,6 @@ struct IosReflowableReaderView: View {
         .task {
             session.refreshSystemAppearance(colorScheme == .dark ? .dark : .light)
             await session.open()
-            await session.verifyRestoredLocationAfterPresentation()
             updateIdleTimer()
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -107,19 +106,11 @@ struct IosReflowableReaderView: View {
                             Task { await session.returnToResumeAlternative() }
                         }
                         .font(.subheadline.weight(.semibold))
-                    } else {
-                        Text("reader.restore.warning.message")
-                            .font(.subheadline)
-                            .foregroundStyle(palette.foreground)
                     }
                 }
                 Spacer(minLength: 4)
                 Button {
-                    if session.resumePrompt != nil {
-                        session.dismissResumePrompt()
-                    } else {
-                        session.dismissRestoreWarning()
-                    }
+                    session.dismissResumePrompt()
                 } label: {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
@@ -138,8 +129,9 @@ struct IosReflowableReaderView: View {
     private func resumePromptText(_ prompt: IosReaderResumePrompt) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(prompt.capturedAtEpochMillis) / 1_000)
         let time = date.formatted(date: .abbreviated, time: .shortened)
-        let trimmedChapter = prompt.chapterLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let position = trimmedChapter.flatMap { $0.isEmpty ? nil : $0 }
+        let chapter = prompt.chapterLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let position = chapter.flatMap { $0.isEmpty ? nil : $0 }
+            ?? prompt.pageNumber.map(String.init)
             ?? String(format: "%d%%", Int(prompt.percent.rounded()))
         return String(
             format: String(localized: "reader.remote.notice.format"),

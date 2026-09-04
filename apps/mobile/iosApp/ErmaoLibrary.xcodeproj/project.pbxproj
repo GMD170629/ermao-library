@@ -181,6 +181,11 @@
 		C22200000000000000000222 /* reader-normalization-v3.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = D22200000000000000000222; };
 		C22300000000000000000223 /* reader-normalization-v3.json in Resources */ = {isa = PBXBuildFile; fileRef = D22300000000000000000223; };
 		C22400000000000000000224 /* reader-normalization-v3.sha256 in Resources */ = {isa = PBXBuildFile; fileRef = D22400000000000000000224; };
+		C22500000000000000000225 /* reader-v5-reflowable-empty-highlight.json in Resources */ = {isa = PBXBuildFile; fileRef = D22500000000000000000225; };
+		C22600000000000000000226 /* reader-v5-pdf.json in Resources */ = {isa = PBXBuildFile; fileRef = D22600000000000000000226; };
+		C22700000000000000000227 /* reader-v5-comic.json in Resources */ = {isa = PBXBuildFile; fileRef = D22700000000000000000227; };
+		C22800000000000000000228 /* reader-v5-audio.json in Resources */ = {isa = PBXBuildFile; fileRef = D22800000000000000000228; };
+		C22900000000000000000229 /* reader-v5-physical.epub in Resources */ = {isa = PBXBuildFile; fileRef = D22900000000000000000229; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -371,6 +376,11 @@
 		D22200000000000000000222 /* reader-normalization-v3.xhtml */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-normalization-v3.xhtml"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/chapter.xhtml"; sourceTree = SOURCE_ROOT; };
 		D22300000000000000000223 /* reader-normalization-v3.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-normalization-v3.json"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/projection.json"; sourceTree = SOURCE_ROOT; };
 		D22400000000000000000224 /* reader-normalization-v3.sha256 */ = {isa = PBXFileReference; lastKnownFileType = text; name = "reader-normalization-v3.sha256"; path = "../../../packages/reader-contracts/fixtures/normalization-v3/projection.sha256"; sourceTree = SOURCE_ROOT; };
+		D22500000000000000000225 /* reader-v5-reflowable-empty-highlight.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-v5-reflowable-empty-highlight.json"; path = "../../../packages/reader-contracts/fixtures/reader-v5/reflowable-empty-highlight.json"; sourceTree = SOURCE_ROOT; };
+		D22600000000000000000226 /* reader-v5-pdf.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-v5-pdf.json"; path = "../../../packages/reader-contracts/fixtures/reader-v5/pdf.json"; sourceTree = SOURCE_ROOT; };
+		D22700000000000000000227 /* reader-v5-comic.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-v5-comic.json"; path = "../../../packages/reader-contracts/fixtures/reader-v5/comic.json"; sourceTree = SOURCE_ROOT; };
+		D22800000000000000000228 /* reader-v5-audio.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "reader-v5-audio.json"; path = "../../../packages/reader-contracts/fixtures/reader-v5/audio.json"; sourceTree = SOURCE_ROOT; };
+		D22900000000000000000229 /* reader-v5-physical.epub */ = {isa = PBXFileReference; lastKnownFileType = file; name = "reader-v5-physical.epub"; path = "../../../test-data/library/epub/reader-v2.epub"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -908,6 +918,11 @@
 				C22200000000000000000222 /* reader-normalization-v3.xhtml in Resources */,
 				C22300000000000000000223 /* reader-normalization-v3.json in Resources */,
 				C22400000000000000000224 /* reader-normalization-v3.sha256 in Resources */,
+				C22500000000000000000225 /* reader-v5-reflowable-empty-highlight.json in Resources */,
+				C22600000000000000000226 /* reader-v5-pdf.json in Resources */,
+				C22700000000000000000227 /* reader-v5-comic.json in Resources */,
+				C22800000000000000000228 /* reader-v5-audio.json in Resources */,
+				C22900000000000000000229 /* reader-v5-physical.epub in Resources */,
 				B09000000000000000000090 /* 01-basic-mobi6.mobi in Resources */,
 				B09100000000000000000091 /* 11-upstream-huff-cdic.mobi in Resources */,
 				B09200000000000000000092 /* negative-synthetic-drm-header.mobi in Resources */,

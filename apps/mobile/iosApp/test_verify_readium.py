@@ -1,4 +1,4 @@
-"""Prove accidental dependency and diagnostic rollbacks fail the build gate."""
+"""Prove accidental dependency and Reader v5 Locator regressions fail the build gate."""
 
 import shutil
 import tempfile
@@ -34,7 +34,7 @@ class ReadiumPinTests(unittest.TestCase):
                 "f7d10d2bf5876408feae14d634416f69d1473fd8",
             ),
             (gate.LOCK, gate.REVISION, "f7d10d2bf5876408feae14d634416f69d1473fd8"),
-            (gate.MAPPER, f"readium-swift:{gate.VERSION}", "readium-swift:3.8.0"),
+            (gate.MAPPER, "locator.jsonString()", "wrappedLocatorJSON()"),
             (gate.POLICY, gate.REVISION, "unapproved"),
             (
                 gate.PROJECT / "project.pbxproj",
@@ -54,6 +54,16 @@ class ReadiumPinTests(unittest.TestCase):
                         gate.verify(self.root)
                 finally:
                     path.write_text(original, encoding="utf-8")
+
+    def test_engine_metadata_wrapper_fails(self) -> None:
+        path = self.root / gate.MAPPER
+        original = path.read_text(encoding="utf-8")
+        path.write_text(
+            original + '\nlet diagnostic = "readium-swift:3.9.0"\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "must not wrap or reconcile"):
+            gate.verify(self.root)
 
 
 if __name__ == "__main__":

@@ -101,7 +101,7 @@ sealed interface ComicNavigationCommand {
     data object Previous : ComicNavigationCommand
     data class GoToIndex(val pageIndex: Int) : ComicNavigationCommand
     data class GoToProgress(val progression: Double) : ComicNavigationCommand
-    data class RestoreLocation(val location: ComicPublicationLocation) : ComicNavigationCommand
+    data class RestoreLocation(val location: ComicReaderLocation) : ComicNavigationCommand
     data object Retry : ComicNavigationCommand
 }
 
@@ -170,7 +170,7 @@ class ComicReaderRuntime(input: ComicPresentationInput) {
         return ComicNavigationResult(outcome, nextPlan)
     }
 
-    private fun canRestore(location: ComicPublicationLocation): Boolean {
+    private fun canRestore(location: ComicReaderLocation): Boolean {
         val expectedHref = inputState.resourceHrefs.getOrNull(location.pageIndex) ?: return false
         return expectedHref == location.resourceHref
     }

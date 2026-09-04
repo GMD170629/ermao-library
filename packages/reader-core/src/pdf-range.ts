@@ -24,6 +24,11 @@ export type PdfReaderErrorCode =
 
 export type PdfByteRange = Readonly<{ begin: number; end: number }>;
 
+/** Quantizes a PDF page's intra-page progression to the shared wire precision. */
+export function quantizePageProgression(value: number): number {
+  return Math.round(Math.max(0, Math.min(1, value)) * 10_000) / 10_000;
+}
+
 /** Returns aligned, end-exclusive requests capped at one MiB. */
 export function planPdfByteRanges(begin: number, end: number, length: number): PdfByteRange[] {
   if (!Number.isInteger(begin) || !Number.isInteger(end) || !Number.isInteger(length)

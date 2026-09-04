@@ -774,6 +774,13 @@ final class BookDetailStore: ObservableObject {
                     query: BookDetailQuery(bookID: bookID, resourceID: activeResourceID)
                 )
                 guard requestGeneration == generation else { return }
+                let localUpdates = await ReaderProgressPresentationCenter.shared.loadLocalUpdates(
+                    context: context,
+                    bookID: bookID,
+                    resourceIDs: value.resources.map(\.id) + [activeResourceID].compactMap { $0 }
+                )
+                guard requestGeneration == generation else { return }
+                localUpdates.forEach(apply)
                 let presented = applyingLatestProgress(to: value)
                 state = .ready(presented)
                 await loadContentBrowser(generation: generation)
@@ -833,11 +840,17 @@ final class BookDetailStore: ObservableObject {
                     page: nextPage,
                     pageSize: pageSize
                 )
+                let localUpdates = await ReaderProgressPresentationCenter.shared.loadLocalUpdates(
+                    context: context,
+                    bookID: bookID,
+                    resourceIDs: page.resources.map(\.id)
+                )
+                localUpdates.forEach(apply)
                 guard case .ready(let current) = state else {
                     isLoadingMoreResources = false
                     return
                 }
-                state = .ready(current.appending(page))
+                state = .ready(applyingLatestProgress(to: current.appending(page)))
                 hasMoreResources = page.page < page.totalPages && !page.resources.isEmpty
                 isLoadingMoreResources = false
             } catch {
@@ -1083,13 +1096,14 @@ private extension BookDetailContent {
 
     func applying(_ update: ErmaoShared.ReaderProgressPresentationUpdate, activeResourceID: String?) -> BookDetailContent {
         guard book.id == update.bookId else { return self }
+        let percent = update.presentation.displayPercent
         let updatesSelected = activeResourceID == update.resourceId
         let updatedBook = BookCard(
             id: book.id,
             title: book.title,
             author: book.author,
             cover: book.cover,
-            progress: updatesSelected ? update.percent : book.progress
+            progress: updatesSelected ? percent : book.progress
         )
         let updatedResources = resources.map { resource in
             guard resource.id == update.resourceId else { return resource }
@@ -1104,7 +1118,7 @@ private extension BookDetailContent {
                 resourceIndex: resource.resourceIndex,
                 cover: resource.cover,
                 sizeLabel: resource.sizeLabel,
-                progress: update.percent,
+                progress: percent,
                 isReadable: resource.isReadable,
                 isSelected: resource.isSelected,
                 sortOrder: resource.sortOrder,
@@ -1121,18 +1135,18 @@ private extension BookDetailContent {
                 importStatus: resource.importStatus
             )
         }
-        let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromLocation(
+        let states = ErmaoShared.PublicKt.resolveReaderChapterStatesFromPresentation(
             units: chapters.map { ErmaoShared.ReaderChapterUnit(
                 href: $0.href, sortOrder: Int32($0.sortOrder),
                 readingOrderPosition: $0.readingOrderPosition.map { KotlinInt(int: Int32($0)) }
             ) },
-            location: update.location, progressPercent: update.percent
+            presentation: update.presentation
         )
         let updatedChapters = chapters.enumerated().map { index, chapter in
             let state: ChapterReadingState = states[index] == .current ? .current : (states[index] == .read ? .read : .unread)
             return BookChapter(
                 id: chapter.id, title: chapter.title,
-                progress: state == .current ? update.percent : nil,
+                progress: state == .current ? percent : nil,
                 isCurrent: state == .current, href: chapter.href, sortOrder: chapter.sortOrder,
                 readingOrderPosition: chapter.readingOrderPosition, state: state
             )
@@ -1146,7 +1160,7 @@ private extension BookDetailContent {
             authorFacets: authorFacets,
             resources: updatedResources,
             selectedResourceID: selectedResourceID,
-            readingStatus: updatesSelected ? (update.percent >= 100 ? .finished : .reading) : readingStatus,
+            readingStatus: updatesSelected ? (percent >= 100 ? .finished : .reading) : readingStatus,
             chapters: updatesSelected ? updatedChapters : chapters,
             rootSourceNodeID: rootSourceNodeID,
             continueResourceID: update.resourceId

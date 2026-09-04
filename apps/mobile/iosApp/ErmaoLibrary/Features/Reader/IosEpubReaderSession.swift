@@ -244,14 +244,14 @@ final class IosReaderPreferencesStore: @unchecked Sendable {
 
 struct IosReaderBookmarkRecord: Codable, Equatable, Identifiable, Sendable {
     let id: String
-    let resourceKey: String
-    let progression: Double?
-    let totalProgression: Double?
-    let position: Int?
-    let exactLocatorJSON: String?
+    let positionDocument: String
     let label: String
-    let percent: Double
     let createdAt: String
+
+    var percent: Double {
+        (try? ErmaoShared.PublicKt.createReaderPositionReportJson()
+            .decode(payload: positionDocument))?.presentation.displayPercent ?? 0
+    }
 }
 
 private struct IosReaderBookmarkState: Codable, Equatable {
@@ -274,7 +274,7 @@ final class IosReaderBookmarkStore: @unchecked Sendable {
             .map { String(format: "%02x", $0) }.joined()
         let resourceDigest = SHA256.hash(data: Data(resourceID.utf8))
             .map { String(format: "%02x", $0) }.joined()
-        key = "reader.bookmarks.v2.\(accountDigest).\(resourceDigest)"
+        key = "reader.bookmarks.v5.\(accountDigest).\(resourceDigest)"
     }
 
     fileprivate func load() -> IosReaderBookmarkState {
@@ -298,7 +298,7 @@ final class IosReaderBookmarkStore: @unchecked Sendable {
     ) {
         let accountDigest = SHA256.hash(data: Data("\(serverIdentity)\0\(userID)".utf8))
             .map { String(format: "%02x", $0) }.joined()
-        let prefix = "reader.bookmarks.v2.\(accountDigest)."
+        let prefix = "reader.bookmarks.v5.\(accountDigest)."
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
             defaults.removeObject(forKey: key)
         }
@@ -319,7 +319,7 @@ private final class IosReaderBookmarkRemote: @unchecked Sendable {
     }
 
     func replace(_ bookmarks: [IosReaderBookmarkRecord]) async throws -> ErmaoShared.ReaderBookmarkSyncResponse {
-        let outgoing = bookmarks.map(IosReflowableReaderSession.sharedBookmark)
+        let outgoing = try bookmarks.map(IosReflowableReaderSession.sharedBookmark)
         return try await port.replace(target: target, bookmarks: outgoing)
     }
 }
@@ -331,16 +331,6 @@ struct IosReaderTocEntry: Identifiable, Equatable, Sendable {
     let depth: Int
 }
 
-struct IosReaderResumePrompt: Identifiable {
-    let id = UUID()
-    let capturedAtEpochMillis: Int64
-    let percent: Double
-    let chapterLabel: String?
-    fileprivate let locator: Locator
-    fileprivate let expectedEnvelope: ErmaoShared.ReadiumLocatorEnvelope
-    fileprivate let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
-}
-
 enum IosReaderSessionPhase: Equatable, Sendable {
     case opening
     case reading
@@ -350,62 +340,6 @@ enum IosReaderSessionPhase: Equatable, Sendable {
     case failed(IosReaderFailureCode)
 }
 
-struct IosReaderPersistenceGate: Equatable, Sendable {
-    struct LocationSignature: Equatable, Sendable {
-        let href: String
-        let progression: Double?
-        let totalProgression: Double?
-        let position: Int?
-
-        func representsSamePosition(as other: Self) -> Bool {
-            href == other.href &&
-                position == other.position &&
-                Self.approximatelyEqual(progression, other.progression) &&
-                Self.approximatelyEqual(totalProgression, other.totalProgression)
-        }
-
-        private static func approximatelyEqual(_ lhs: Double?, _ rhs: Double?) -> Bool {
-            switch (lhs, rhs) {
-            case (nil, nil): true
-            case let (lhs?, rhs?): abs(lhs - rhs) < 0.000_001
-            default: false
-            }
-        }
-    }
-
-    private(set) var hasLocalReadingActivity = false
-    private var protectedRestoredLocation: LocationSignature?
-    private var suppressNextObservation = false
-    var canPersistCurrentLocation: Bool { hasLocalReadingActivity && !suppressNextObservation }
-
-    mutating func protectRestoredLocation(_ signature: LocationSignature?) {
-        protectedRestoredLocation = signature
-    }
-
-    mutating func suppressPreferenceReflow() {
-        suppressNextObservation = true
-    }
-
-    mutating func beginUserNavigation() {
-        protectedRestoredLocation = nil
-        suppressNextObservation = false
-        hasLocalReadingActivity = true
-    }
-
-    mutating func observeLocationChange(_ signature: LocationSignature) -> Bool {
-        if suppressNextObservation {
-            protectedRestoredLocation = signature
-            return false
-        }
-        if protectedRestoredLocation?.representsSamePosition(as: signature) == true {
-            return false
-        }
-        protectedRestoredLocation = nil
-        hasLocalReadingActivity = true
-        return true
-    }
-}
-
 @MainActor
 final class IosReflowableReaderSession: NSObject, ObservableObject {
     private static let progressSaveDebounceMilliseconds = 500
@@ -413,10 +347,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     @Published private(set) var navigator: EPUBNavigatorViewController?
     @Published private(set) var progress = 0.0
     @Published private(set) var chapterTitle: String?
-    @Published private(set) var restoreWarning: IosReaderFailureCode?
     @Published private(set) var resumePrompt: IosReaderResumePrompt?
     @Published private(set) var resumeActionFailed = false
-    private var returningToResumeAlternative = false
     @Published private(set) var presentationError: IosReaderFailureCode?
     @Published private(set) var tableOfContents: [IosReaderTocEntry] = []
     @Published private(set) var bookmarks: [IosReaderBookmarkRecord] = []
@@ -430,7 +362,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     let sourceFormat: ErmaoShared.ReaderSourceFormat
 
     private let managedStore: IosManagedPublicationStore
-    private let progressStore: any ErmaoShared.ReaderProgressSyncingStore
+    private let progressStore: any ErmaoShared.ReaderPositionSyncingStore
     private let progressCoordination: IosReaderProgressSessionCoordination?
     private let runtime: IosReadiumRuntime
     private let mapper: ReadiumSwiftLocatorMapper
@@ -440,7 +372,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private let bookmarkRemote: IosReaderBookmarkRemote?
     private let initialTarget: (any ErmaoShared.ReaderNavigationTarget)?
     private(set) var pendingLaunchTargetPayload: String?
-    private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    private let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
     private let namespaceKey: String
     private let bookID: String
     private let publishProgressUpdate: @MainActor (ErmaoShared.ReaderProgressPresentationUpdate) -> Void
@@ -449,9 +381,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private(set) var supportsTextDirectionPreferences = true
     private var openedPublication: IosOpenedReadiumPublication?
     private var pendingSave: Task<Void, Never>?
+    private var latestLocationChange: Locator?
+    private var remoteProgressSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
     private var bookmarkSyncTask: Task<Void, Never>?
-    private var persistenceGate = IosReaderPersistenceGate()
-    private var expectedRestoredEnvelope: ErmaoShared.ReadiumLocatorEnvelope?
+    private var suppressNextPreferenceLocationChange = false
     private var didOpen = false
     private let navigationQueue = IosReaderNavigationQueue()
     private var lastHandledTapAt = TimeInterval.zero
@@ -463,13 +396,13 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         canonicalNavigation: [IosReaderTocEntry] = [],
         preferences: IosReaderPreferences = IosReaderPreferences(),
         managedStore: IosManagedPublicationStore,
-        progressStore: any ErmaoShared.ReaderProgressSyncingStore,
+        progressStore: any ErmaoShared.ReaderPositionSyncingStore,
         progressCoordination: IosReaderProgressSessionCoordination? = nil,
         preferencesStore: IosReaderPreferencesStore? = nil,
         bookmarkStore: IosReaderBookmarkStore? = nil,
         bookmarkSyncPort: ErmaoShared.ReaderBookmarkSyncPort? = nil,
         bookmarkSyncTarget: ErmaoShared.ReaderBookmarkSyncTarget? = nil,
-        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4? = nil,
+        remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5? = nil,
         initialTarget: (any ErmaoShared.ReaderNavigationTarget)? = nil,
         namespaceKey: String = "local",
         bookID: String = "local",
@@ -520,15 +453,10 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
             let managed = try await managedStore.resolve(resourceID: resourceID, namespace: namespaceKey)
             guard managed.sourceFormat == sourceFormat else { throw IosReaderFailure(code: .corruptFile) }
             let openedPublication = try await runtime.open(managed)
-            let openedSource = ErmaoShared.LocalReaderSource(
-                resourceId: managed.resourceID, displayTitle: managed.displayTitle,
-                format: managed.sourceFormat.readerFormat, bookId: managed.bookID,
-                assetId: managed.assetID, sourceFormat: managed.sourceFormat
-            )
             let publication = openedPublication.publication
             supportsTextDirectionPreferences = publication.metadata.layout != .fixed
             self.openedPublication = openedPublication
-            let saved = try? await progressStore.load(sourceId: resourceID)
+            let saved = try? await progressStore.load(resourceId: resourceID)
             let initial: Locator?
             if let initialTarget {
                 guard let target = initialTarget as? ErmaoShared.ReaderNavigationTargetReflowable,
@@ -537,7 +465,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 else { throw IosReaderFailure(code: .locationRestoreFailed) }
                 initial = locator
             } else {
-                initial = await restore(local: saved, remote: remoteSnapshot, in: publication, openedSource: openedSource)
+                initial = await restore(local: saved, remote: remoteSnapshot)
             }
             let navigator = try makeIosReflowableNavigator(
                 publication: publication,
@@ -547,10 +475,6 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 ),
                 location: initial
             )
-            let restoredLocation = initial ?? navigator.currentLocation
-            persistenceGate.protectRestoredLocation(
-                restoredLocation.map { locationSignature($0) }
-            )
             self.publication = publication
             installControlNavigator(navigator)
             submittedControlPreferences = preferences.readium(
@@ -558,7 +482,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
                 appliesTextDirectionPreferences: supportsTextDirectionPreferences
             )
             progressCoordination?.noticeHandler = { [weak self] snapshot in
-                self?.showRemoteProgress(snapshot)
+                self?.setRemoteProgress(snapshot)
             }
             tableOfContents = await mergedNavigation(publication: publication)
             phase = .reading
@@ -819,17 +743,12 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private func verifyNavigation(to target: Locator, in navigator: EPUBNavigatorViewController) async -> Bool {
         for _ in 0 ..< 40 {
             guard !Task.isCancelled else { return false }
-            if let expected = try? mapper.exactEnvelope(from: target),
-               let visible = await navigator.firstVisibleElementLocator(),
-               let actual = try? mapper.exactEnvelope(from: visible),
-               ErmaoShared.PublicKt.compareExactProgressReadiumLocators(expected: expected, recaptured: actual) == .exact {
-                return true
-            }
-            if target.locations.fragments.isEmpty, target.text.highlight == nil,
-               navigator.currentLocation?.href.normalized == target.href.normalized {
+            if let visible = await navigator.firstVisibleElementLocator(),
+               visible.href.normalized == target.href.normalized {
                 if let position = target.locations.position, navigator.viewport?.positions?.contains(position) == true { return true }
                 if let progression = target.locations.progression,
                    navigator.viewport?.resources.first(where: { $0.href.isEquivalentTo(target.href) })?.progression.contains(progression) == true { return true }
+                return true
             }
             do { try await Task.sleep(for: .milliseconds(75)) } catch { return false }
         }
@@ -888,7 +807,7 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         )
         if native != submittedControlPreferences {
             pendingSave?.cancel()
-            persistenceGate.suppressPreferenceReflow()
+            suppressNextPreferenceLocationChange = true
             // Readium owns reflow and location retention. A changed first-visible
             // paragraph after pagination is not a failed settings submission.
             navigator.submitPreferences(native)
@@ -899,37 +818,38 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     var currentBookmarkActive: Bool {
-        guard let locator = navigator?.currentLocation else { return false }
-        return bookmarks.contains { record in
-            record.resourceKey == locator.href.string &&
-                abs((record.progression ?? 0) - (locator.locations.progression ?? 0)) < 0.0001
-        }
+        guard let locator = latestLocationChange,
+              let id = bookmarkID(locator)
+        else { return false }
+        return bookmarks.contains { $0.id == id }
     }
 
     func toggleCurrentBookmark() async {
-        guard let locator = await navigator?.firstVisibleElementLocator(),
+        guard let locator = latestLocationChange,
               !(await isUnreadablePage(locator))
         else { return }
-        let exactJSON: String
-        do { exactJSON = try locator.jsonString() }
+        let positionDocument: String
+        do {
+            let position = try makePosition(from: locator).position
+            positionDocument = ErmaoShared.PublicKt.createReaderPositionReportJson()
+                .encode(position: position)
+        }
         catch {
             presentationError = .persistenceFailed
             return
         }
-        let id = bookmarkID(locator)
+        guard let id = bookmarkID(locator) else {
+            presentationError = .persistenceFailed
+            return
+        }
         let next: [IosReaderBookmarkRecord]
         if bookmarks.contains(where: { $0.id == id }) {
             next = bookmarks.filter { $0.id != id }
         } else {
             next = bookmarks + [IosReaderBookmarkRecord(
                 id: id,
-                resourceKey: locator.href.string,
-                progression: locator.locations.progression,
-                totalProgression: locator.locations.totalProgression,
-                position: locator.locations.position,
-                exactLocatorJSON: exactJSON,
+                positionDocument: positionDocument,
                 label: locator.title ?? chapterTitle ?? displayTitle,
-                percent: min(100, max(0, (locator.locations.totalProgression ?? progress) * 100)),
                 createdAt: ISO8601DateFormatter().string(from: Date())
             )]
         }
@@ -948,75 +868,14 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         guard let record = bookmarks.first(where: { $0.id == id }),
               let publication, let navigator
         else { return false }
-        if let exactJSON = record.exactLocatorJSON,
-           let exact = try? Locator(jsonString: exactJSON),
-           publication.linkWithHREF(exact.href) != nil {
-            beginUserNavigation()
-            guard await navigator.go(to: exact, options: navigationOptions) else { return false }
-            return await verifyNavigation(to: exact, in: navigator)
-        }
-        guard let href = RelativeURL(string: record.resourceKey),
-              let link = publication.linkWithHREF(href),
-              let base = await publication.locate(link)
+        guard let position = try? ErmaoShared.PublicKt.createReaderPositionReportJson()
+            .decode(payload: record.positionDocument),
+              let exact = try? mapper.locator(from: position.locator),
+              publication.linkWithHREF(exact.href) != nil
         else { return false }
-        let target = base.copy(locations: { locations in
-            locations.progression = record.progression
-            locations.position = record.position
-        })
         beginUserNavigation()
-        guard await navigator.go(to: target, options: navigationOptions) else { return false }
-        return await verifyNavigation(to: target, in: navigator)
-    }
-
-    func dismissRestoreWarning() {
-        restoreWarning = nil
-    }
-
-    func dismissResumePrompt() {
-        resumePrompt = nil
-        resumeActionFailed = false
-    }
-
-    func returnToResumeAlternative() async {
-        guard let prompt = resumePrompt, let navigator else { return }
-        resumeActionFailed = false
-        returningToResumeAlternative = true
-        defer { returningToResumeAlternative = false }
-        beginUserNavigation(dismissResumePrompt: false)
-        persistenceGate.suppressPreferenceReflow()
-        _ = await navigator.go(to: prompt.locator, options: navigationOptions)
-        try? await Task.sleep(for: .milliseconds(120))
-        if let recaptured = await navigator.firstVisibleElementLocator(),
-           publication != nil,
-           let actual = try? mapper.exactEnvelope(from: recaptured),
-           ErmaoShared.PublicKt.compareExactProgressReadiumLocators(
-               expected: prompt.expectedEnvelope,
-               recaptured: actual
-           ) == .exact {
-            if let snapshot = prompt.remoteSnapshot,
-               let progress = try? makeProgress(from: recaptured) {
-                try? await progressCoordination?.acceptVerifiedRemote(progress: progress, snapshot: snapshot)
-            }
-            dismissResumePrompt()
-            return
-        }
-        resumeActionFailed = true
-    }
-
-    func verifyRestoredLocationAfterPresentation() async {
-        guard let expected = expectedRestoredEnvelope,
-              let navigator,
-              publication != nil
-        else { return }
-        expectedRestoredEnvelope = nil
-        try? await Task.sleep(for: .milliseconds(160))
-        guard let recaptured = await navigator.firstVisibleElementLocator(),
-              let actual = try? mapper.exactEnvelope(from: recaptured)
-        else { return }
-        let match = ErmaoShared.PublicKt.compareExactProgressReadiumLocators(expected: expected, recaptured: actual)
-        if match == ErmaoShared.ExactBlockMatch.resourcemismatch {
-            restoreWarning = .locationRestoreFailed
-        }
+        guard await navigator.go(to: exact, options: navigationOptions) else { return false }
+        return await verifyNavigation(to: exact, in: navigator)
     }
 
     func dismissPresentationError() {
@@ -1048,7 +907,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
 
     func enterBackground() async {
         phase = .background
-        await flushProgress()
+        pendingSave?.cancel()
+        try? await persistCurrentLocation(waitForSynchronization: false)
         try? await progressStore.retryPendingUpload()
         try? await progressStore.awaitPendingUpload()
     }
@@ -1071,6 +931,8 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         pendingSave?.cancel()
         bookmarkSyncTask?.cancel()
         try? await persistCurrentLocation(waitForSynchronization: false)
+        try? await progressStore.retryPendingUpload()
+        try? await progressStore.awaitPendingUpload()
         progressCoordination?.close()
         navigator?.delegate = nil
         if let controlInputToken { navigator?.removeObserver(controlInputToken) }
@@ -1109,115 +971,31 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     private func restore(
-        local: ErmaoShared.ReaderProgress?,
-        remote: ErmaoShared.ReaderProgressSnapshotV4?,
-        in publication: Publication,
-        openedSource: any ErmaoShared.ReaderSource
+        local: ErmaoShared.ReaderPositionLocalState?,
+        remote: ErmaoShared.ReaderProgressSnapshotV5?
     ) async -> Locator? {
-        let decision = ErmaoShared.PublicKt.decideReaderResume(
-            localProgress: local,
-            remoteSnapshot: remote,
-            openedSource: openedSource
-        )
-        if let alternative = decision.alternative {
-            resumePrompt = makeResumePrompt(alternative, publication: publication)
-        }
-        guard let selected = decision.selected else {
-            if local != nil || remote != nil { restoreWarning = .locationRestoreFailed }
-            return nil
-        }
-        if let selectedLocal = selected.localProgress {
-            return await restoreLocal(selectedLocal)
-        }
-        if let selectedRemote = selected.remoteSnapshot {
-            return await restoreRemote(selectedRemote, in: publication)
-        }
-        return nil
-    }
-
-    private func showRemoteProgress(_ snapshot: ErmaoShared.ReaderProgressSnapshotV4?) {
-        guard let snapshot, let publication else {
-            if progressCoordination?.remoteSnapshot == nil { dismissResumePrompt() }
-            return
-        }
-        resumePrompt = makeResumePrompt(snapshot, publication: publication)
-        resumeActionFailed = false
-    }
-
-    private func makeResumePrompt(
-        _ snapshot: ErmaoShared.ReaderProgressSnapshotV4,
-        publication: Publication
-    ) -> IosReaderResumePrompt? {
-        guard let location = snapshot.locator as? ErmaoShared.ReflowablePublicationLocation,
-              let locator = try? mapper.exactLocator(from: location.readiumEnvelope, publication: publication)
-        else { return nil }
-        return IosReaderResumePrompt(
-            capturedAtEpochMillis: snapshot.effectiveCapturedAtEpochMillis,
-            percent: snapshot.displayPercent,
-            chapterLabel: locator.title,
-            locator: locator,
-            expectedEnvelope: location.readiumEnvelope,
-            remoteSnapshot: snapshot
-        )
-    }
-
-    private func makeResumePrompt(
-        _ target: ErmaoShared.ReaderResumeTarget,
-        publication: Publication
-    ) -> IosReaderResumePrompt? {
-        let locator: Locator?
-        let envelope: ErmaoShared.ReadiumLocatorEnvelope?
-        if let local = target.localProgress,
-           let location = local.location as? ErmaoShared.ReflowReaderLocation {
-            locator = try? mapper.exactLocator(from: location)
-            envelope = ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location)
-        } else if let remote = target.remoteSnapshot {
-            let reflowable = remote.locator as? ErmaoShared.ReflowablePublicationLocation
-            locator = reflowable.flatMap {
-                try? mapper.exactLocator(from: $0.readiumEnvelope, publication: publication)
-            }
-            envelope = reflowable?.readiumEnvelope
+        let pending = (try? await progressStore.syncState())?.pending
+        let selected: ErmaoShared.ReaderPositionReport?
+        if let pending, pending.resourceId == resourceID {
+            selected = pending.position
+        } else if let remote {
+            selected = remote.position
+        } else if progressCoordination == nil {
+            // Local-only test/import sessions have no server synchronization
+            // authority; their local v5 report is the only possible source.
+            selected = local?.position
         } else {
+            selected = nil
+        }
+        guard let selected else { return nil }
+        do {
+            guard let locator = try mapper.locator(from: selected.locator) else {
+                throw IosReaderFailure(code: .locationRestoreFailed)
+            }
+            return locator
+        } catch {
             return nil
         }
-        guard let locator, let envelope else { return nil }
-        return IosReaderResumePrompt(
-            capturedAtEpochMillis: target.capturedAtEpochMillis,
-            percent: target.displayPercent,
-            chapterLabel: locator.title,
-            locator: locator,
-            expectedEnvelope: envelope,
-            remoteSnapshot: target.remoteSnapshot
-        )
-    }
-
-    private func restoreLocal(_ saved: ErmaoShared.ReaderProgress) async -> Locator? {
-        guard let location = saved.location as? ErmaoShared.ReflowReaderLocation else { return nil }
-        guard let envelope = ErmaoShared.ReadiumLocatorEnvelope.companion.from(location: location),
-              let exact = try? mapper.exactLocator(from: location)
-        else {
-            restoreWarning = .locationRestoreFailed
-            return nil
-        }
-        expectedRestoredEnvelope = envelope
-        return exact
-    }
-
-    private func restoreRemote(
-        _ snapshot: ErmaoShared.ReaderProgressSnapshotV4,
-        in publication: Publication
-    ) async -> Locator? {
-        guard let reflowable = snapshot.locator as? ErmaoShared.ReflowablePublicationLocation,
-              let exact = try? mapper.exactLocator(
-                  from: reflowable.readiumEnvelope,
-                  publication: publication
-              )
-        else {
-            restoreWarning = .locationRestoreFailed
-            return nil
-        }
-        expectedRestoredEnvelope = reflowable.readiumEnvelope
-        return exact
     }
 
     private func navigationHrefMatches(_ expected: String) async -> Bool {
@@ -1293,24 +1071,22 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         }
     }
 
-    private func bookmarkID(_ locator: Locator) -> String {
-        let progression = resolvedTotalProgression(locator) ?? 0
-        var wire = String(format: "%.4f", (progression * 10_000).rounded() / 10_000)
-        while wire.last == "0" { wire.removeLast() }
-        if wire.last == "." { wire.removeLast() }
-        if wire.isEmpty { wire = "0" }
-        return "reflowable:epub:position:\(locator.href.string):\(wire)"
+    private func bookmarkID(_ locator: Locator) -> String? {
+        guard let opaque = try? mapper.opaqueLocator(from: locator) else { return nil }
+        let digest = SHA256.hash(data: Data(opaque.canonicalJson.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "reader-v5:\(digest)"
     }
 
-    nonisolated fileprivate static func sharedBookmark(_ value: IosReaderBookmarkRecord) -> ErmaoShared.ReaderBookmark {
+    nonisolated fileprivate static func sharedBookmark(
+        _ value: IosReaderBookmarkRecord
+    ) throws -> ErmaoShared.ReaderBookmark {
         ErmaoShared.ReaderBookmark(
             id: value.id,
-            location: ErmaoShared.ReaderBookmarkLocation.companion.reflow(
-                resourceKey: value.resourceKey,
-                progression: value.progression.map(KotlinDouble.init(double:))
-            ),
+            position: try ErmaoShared.PublicKt.createReaderPositionReportJson()
+                .decode(payload: value.positionDocument),
             label: value.label,
-            percent: value.percent,
             createdAt: value.createdAt
         )
     }
@@ -1318,13 +1094,9 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     private static func localBookmark(_ value: ErmaoShared.ReaderBookmark) -> IosReaderBookmarkRecord {
         IosReaderBookmarkRecord(
             id: value.id,
-            resourceKey: value.location.resourceKey,
-            progression: value.location.progression?.doubleValue,
-            totalProgression: nil,
-            position: nil,
-            exactLocatorJSON: nil,
+            positionDocument: ErmaoShared.PublicKt.createReaderPositionReportJson()
+                .encode(position: value.position),
             label: value.label,
-            percent: value.percent,
             createdAt: value.createdAt
         )
     }
@@ -1336,19 +1108,27 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
     }
 
     private func locationChanged(_ locator: Locator) {
+        latestLocationChange = locator
         reflectLocation(locator)
-        guard persistenceGate.observeLocationChange(locationSignature(locator)) else { return }
+        if suppressNextPreferenceLocationChange {
+            suppressNextPreferenceLocationChange = false
+            return
+        }
         pendingSave?.cancel()
         pendingSave = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(Self.progressSaveDebounceMilliseconds))
             guard !Task.isCancelled else { return }
-            await self?.flushProgress()
+            guard let self else { return }
+            do {
+                try await self.persistCurrentLocation()
+            } catch {
+                self.presentationError = .persistenceFailed
+            }
         }
     }
 
     private func reflectLocation(_ locator: Locator) {
         progress = resolvedTotalProgression(locator)
-            ?? remoteSnapshot.map { min(1, max(0, $0.displayPercent / 100)) }
             ?? progress
         chapterTitle = locator.title
     }
@@ -1362,51 +1142,100 @@ final class IosReflowableReaderSession: NSObject, ObservableObject {
         )?.doubleValue
     }
 
-    private func beginUserNavigation(dismissResumePrompt: Bool = true) {
-        persistenceGate.beginUserNavigation()
+    private func beginUserNavigation() {
+        suppressNextPreferenceLocationChange = false
     }
 
-    private func locationSignature(_ locator: Locator) -> IosReaderPersistenceGate.LocationSignature {
-        IosReaderPersistenceGate.LocationSignature(
-            href: locator.href.normalized.string,
-            progression: locator.locations.progression,
-            totalProgression: locator.locations.totalProgression,
-            position: locator.locations.position
+    func dismissResumePrompt() {
+        progressCoordination?.dismissRemoteNotice()
+        setRemoteProgress(nil)
+    }
+
+    func returnToResumeAlternative() async {
+        guard let snapshot = remoteProgressSnapshot,
+              let navigator,
+              let locator = try? mapper.locator(from: snapshot.position.locator)
+        else {
+            resumeActionFailed = true
+            return
+        }
+        resumeActionFailed = false
+        guard await navigator.go(to: locator, options: navigationOptions) else {
+            resumeActionFailed = true
+            return
+        }
+        let local = ErmaoShared.ReaderPositionLocalState(
+            resourceId: resourceID,
+            clientId: deviceIdentity.stableDeviceId(),
+            capturedAtEpochMillis: snapshot.capturedAtEpochMillis,
+            position: snapshot.position
+        )
+        try? await progressCoordination?.acceptRemote(position: local, snapshot: snapshot)
+        latestLocationChange = locator
+        reflectLocation(locator)
+        setRemoteProgress(nil)
+    }
+
+    private func setRemoteProgress(_ snapshot: ErmaoShared.ReaderProgressSnapshotV5?) {
+        remoteProgressSnapshot = snapshot
+        resumeActionFailed = false
+        guard let snapshot else {
+            resumePrompt = nil
+            return
+        }
+        let presentation = snapshot.position.presentation
+        resumePrompt = IosReaderResumePrompt(
+            capturedAtEpochMillis: snapshot.capturedAtEpochMillis,
+            percent: presentation.displayPercent,
+            chapterLabel: presentation.chapter?.title,
+            pageNumber: presentation.page.map { Int($0.number) }
         )
     }
 
     private func persistCurrentLocation(waitForSynchronization: Bool = true) async throws {
-        guard persistenceGate.canPersistCurrentLocation,
-              let navigator
-        else { return }
-        guard let locator = await navigator.firstVisibleElementLocator() else { return }
+        guard let locator = latestLocationChange else { return }
         guard !(await isUnreadablePage(locator)) else { return }
-        let progress = try makeProgress(from: locator)
-        guard progress.location is ErmaoShared.ReflowReaderLocation else { return }
-        try await progressStore.save(progress: progress)
+        let position = try makePosition(from: locator)
+        try await progressStore.save(position: position)
         if waitForSynchronization {
             await progressCoordination?.refreshAfterSave()
         }
-        if progressCoordination?.remoteSnapshot == nil { dismissResumePrompt() }
         publishProgressUpdate(ErmaoShared.PublicKt.createReaderProgressPresentationUpdate(
             namespaceKey: namespaceKey,
             bookId: bookID,
             resourceId: resourceID,
-            percent: min(100, max(0, self.progress * 100)),
-            progress: progress,
-            chapterTitle: chapterTitle
+            position: position.position,
+            capturedAtEpochMillis: position.capturedAtEpochMillis
         ))
     }
 
-    private func makeProgress(from locator: Locator) throws -> ErmaoShared.ReaderProgress {
+    private func makePosition(from locator: Locator) throws -> ErmaoShared.ReaderPositionLocalState {
         guard publication != nil else { throw IosReaderFailure(code: .persistenceFailed) }
-        let location = try mapper.sharedLocation(from: locator)
-        return ErmaoShared.ReaderProgress(
+        let totalProgression = min(1, max(0, self.progress))
+        let chapterIndex = canonicalNavigation.firstIndex(where: { entry in
+            guard let href = entry.href else { return false }
+            return locator.href.normalized.string == href
+        })
+        let presentation = ErmaoShared.ReaderPositionPresentation(
+            displayPercent: totalProgression * 100,
+            totalProgression: totalProgression,
+            currentHref: locator.href.normalized.string,
+            chapter: ErmaoShared.ReaderChapterPresentation(
+                href: locator.href.normalized.string,
+                title: locator.title ?? chapterTitle,
+                index: chapterIndex.map { KotlinInt(int: Int32($0)) }
+            ),
+            page: nil,
+            playback: nil
+        )
+        return ErmaoShared.ReaderPositionLocalState(
             resourceId: resourceID,
-            location: location,
-            updatedAtEpochMillis: Int64(Date().timeIntervalSince1970 * 1_000),
-            deviceId: deviceIdentity.stableDeviceId(),
-            percent: KotlinDouble(double: min(100, max(0, self.progress * 100)))
+            clientId: deviceIdentity.stableDeviceId(),
+            capturedAtEpochMillis: Int64(Date().timeIntervalSince1970 * 1_000),
+            position: ErmaoShared.ReaderPositionReport(
+                locator: try mapper.opaqueLocator(from: locator),
+                presentation: presentation
+            )
         )
     }
 

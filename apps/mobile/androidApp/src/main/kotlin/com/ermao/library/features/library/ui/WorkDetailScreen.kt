@@ -629,7 +629,7 @@ private fun WorkDetailBody(
                     onRetry = onRetrySurface,
                 )
             }
-        } else {
+        } else if (RESOURCE_PREVIEW_IS_VISIBLE) {
             selectedResource?.let { resource ->
                 item {
                     WorkResourceDetail(
@@ -1878,6 +1878,7 @@ private fun formatWorkDuration(durationMillis: Long?): String {
 
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SelectedResourceMetadata(resource: ResourceContent) {
     val locale = LocalConfiguration.current.locales[0]
@@ -1903,7 +1904,10 @@ private fun SelectedResourceMetadata(resource: ResourceContent) {
                 .heightIn(min = theme.components.controls.minimumTouchTarget)
                 .then(
                     if (isFilePath && rawValue?.isNotBlank() == true) {
-                        Modifier.clickable { fullPath = value }
+                        Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = { fullPath = value },
+                        )
                     } else {
                         Modifier
                     },
@@ -2255,6 +2259,9 @@ internal fun workDetailMediaControlWidth(optionCount: Int): Dp =
     WORK_DETAIL_MEDIA_OPTION_WIDTH * optionCount.coerceIn(1, 3)
 
 private const val WORK_DETAIL_STACKED_LAYOUT_FONT_SCALE = 1.5f
+// Keep the existing chapter, page, and track preview implementation available
+// while the product surface is temporarily hidden.
+private const val RESOURCE_PREVIEW_IS_VISIBLE = false
 private val WORK_DETAIL_MIN_INLINE_WIDTH = 328.dp
 private val WORK_DETAIL_MEDIA_OPTION_WIDTH = 80.dp
 internal val WORK_DETAIL_SELECTED_VOLUME_BORDER_WIDTH = 3.dp

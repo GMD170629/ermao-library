@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "clientId": "android-fixture",
+  "mutationId": "ba4e1b37-e325-4843-8d47-cf8b5778620c",
+  "capturedAtEpochMillis": 1786500000100,
+  "position": {
+    "locator": {
+      "href": "document.pdf",
+      "type": "application/pdf",
+      "locations": {
+        "position": 190,
+        "progression": 1,
+        "totalProgression": 1
+      }
+    },
+    "presentation": {
+      "displayPercent": 100,
+      "totalProgression": 1,
+      "currentHref": "document.pdf",
+      "chapter": null,
+      "page": {
+        "number": 190,
+        "total": 190
+      },
+      "playback": null
+    }
+  }
+}

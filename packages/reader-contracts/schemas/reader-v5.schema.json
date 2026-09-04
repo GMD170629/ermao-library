@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shuku.app/contracts/reader-v5.schema.json",
+  "title": "Shuku Reader v5 opaque position contract",
+  "type": "object",
+  "$defs": {
+    "opaqueLocator": {
+      "type": "object",
+      "description": "Reader-owned Locator JSON. Consumers must preserve every JSON value and must not inspect its fields. The compact UTF-8 representation is limited to 65536 bytes.",
+      "x-maxSerializedUtf8Bytes": 65536,
+      "additionalProperties": true
+    },
+    "chapterPresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["href", "title", "index"],
+      "properties": {
+        "href": {
+          "oneOf": [
+            {"type": "string", "maxLength": 8192},
+            {"type": "null"}
+          ]
+        },
+        "title": {
+          "oneOf": [
+            {"type": "string", "maxLength": 4096},
+            {"type": "null"}
+          ]
+        },
+        "index": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "pagePresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["number", "total"],
+      "properties": {
+        "number": {"type": "integer", "minimum": 1},
+        "total": {
+          "oneOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "playbackPresentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["positionMillis", "durationMillis"],
+      "properties": {
+        "positionMillis": {"type": "integer", "minimum": 0},
+        "durationMillis": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "displayPercent",
+        "totalProgression",
+        "currentHref",
+        "chapter",
+        "page",
+        "playback"
+      ],
+      "properties": {
+        "displayPercent": {"type": "number", "minimum": 0, "maximum": 100},
+        "totalProgression": {"type": "number", "minimum": 0, "maximum": 1},
+        "currentHref": {
+          "oneOf": [
+            {"type": "string", "maxLength": 8192},
+            {"type": "null"}
+          ]
+        },
+        "chapter": {
+          "oneOf": [
+            {"$ref": "#/$defs/chapterPresentation"},
+            {"type": "null"}
+          ]
+        },
+        "page": {
+          "oneOf": [
+            {"$ref": "#/$defs/pagePresentation"},
+            {"type": "null"}
+          ]
+        },
+        "playback": {
+          "oneOf": [
+            {"$ref": "#/$defs/playbackPresentation"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "positionReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["locator", "presentation"],
+      "properties": {
+        "locator": {"$ref": "#/$defs/opaqueLocator"},
+        "presentation": {"$ref": "#/$defs/presentation"}
+      }
+    },
+    "progressPutRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "clientId",
+        "mutationId",
+        "capturedAtEpochMillis",
+        "position"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 5},
+        "clientId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
+        "mutationId": {"type": "string", "format": "uuid"},
+        "capturedAtEpochMillis": {"type": "integer", "minimum": 0},
+        "position": {"$ref": "#/$defs/positionReport"}
+      }
+    },
+    "progressSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "revision",
+        "clientId",
+        "mutationId",
+        "capturedAtEpochMillis",
+        "receivedAtEpochMillis",
+        "position"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 5},
+        "revision": {"type": "integer", "minimum": 1},
+        "clientId": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S"},
+        "mutationId": {"type": "string", "format": "uuid"},
+        "capturedAtEpochMillis": {"type": "integer", "minimum": 0},
+        "receivedAtEpochMillis": {"type": "integer", "minimum": 0},
+        "position": {"$ref": "#/$defs/positionReport"}
+      }
+    },
+    "progressState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": {"const": true},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "progressSnapshot"],
+          "properties": {
+            "schemaVersion": {"const": 5},
+            "progressSnapshot": {
+              "oneOf": [
+                {"$ref": "#/$defs/progressSnapshot"},
+                {"type": "null"}
+              ]
+            }
+          }
+        }
+      }
+    },
+    "progressWriteSuccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "data"],
+      "properties": {
+        "ok": {"const": true},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["acceptedMutationId", "acceptedRevision", "currentSnapshot"],
+          "properties": {
+            "acceptedMutationId": {"type": "string", "format": "uuid"},
+            "acceptedRevision": {"type": "integer", "minimum": 1},
+            "currentSnapshot": {"$ref": "#/$defs/progressSnapshot"}
+          }
+        }
+      }
+    },
+    "bookmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "position", "label", "createdAt"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 5000},
+        "position": {"$ref": "#/$defs/positionReport"},
+        "label": {"type": "string", "maxLength": 500},
+        "createdAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "mutationReuseError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["message", "code"],
+          "properties": {
+            "message": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "code": {"const": "READER_PROGRESS_MUTATION_REUSE"}
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/progressPutRequest"},
+    {"$ref": "#/$defs/progressSnapshot"},
+    {"$ref": "#/$defs/progressState"},
+    {"$ref": "#/$defs/progressWriteSuccess"},
+    {"$ref": "#/$defs/bookmark"},
+    {"$ref": "#/$defs/mutationReuseError"}
+  ]
+}

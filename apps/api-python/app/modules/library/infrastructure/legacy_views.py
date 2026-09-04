@@ -22,7 +22,6 @@ from app.models import (
     LibraryResourceAsset,
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
-    ReaderResourceProgress,
 )
 from app.modules.library.application.bookshelf import BookshelfItemSummary
 from app.modules.library.domain.asset_titles import (
@@ -30,6 +29,10 @@ from app.modules.library.domain.asset_titles import (
     resolve_asset_display_titles,
 )
 from app.modules.library.infrastructure import books as library_books
+from app.modules.reader.public import (
+    ReaderV5LibraryPresentationQueryPort,
+    ReaderV5PresentationView,
+)
 
 
 def _dt(value: object) -> datetime | None:
@@ -153,7 +156,7 @@ def _resource_view(
     resource: LibraryReadableResource,
     metadata: LibraryReadableResourceMetadata | None,
     *,
-    progress: ReaderResourceProgress | None = None,
+    progress: ReaderV5PresentationView | None = None,
     include_assets: bool = True,
     sort_order: int = 0,
 ) -> dict[str, Any]:
@@ -231,9 +234,9 @@ def _resource_view(
         "coverStatus": metadata.cover_status if metadata else "PENDING",
         "coverPath": metadata.cover_path if metadata else None,
         "coverUrl": _cover_url("resources", resource.id),
-        "progress": float(progress.percent if progress else 0),
+        "progress": float(progress.display_percent if progress else 0),
         "lastReadAt": _dt(progress.updated_at) if progress else None,
-        "resourceCompleted": bool(progress and progress.percent >= 100),
+        "resourceCompleted": bool(progress and progress.display_percent >= 100),
         "hidden": resource.enablement_state != "ENABLED",
         "readable": resource.import_state == "READY" and bool(asset_views),
         "assets": asset_views,
@@ -251,24 +254,25 @@ def _format_bytes(value: int | None) -> str:
 
 
 def book_view(
-    db: Session, book: dict[str, Any], user_id: str | None = None
+    db: Session,
+    book: dict[str, Any],
+    user_id: str | None = None,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any]:
     book_id = str(book["id"])
-    progress_by_resource: dict[str, ReaderResourceProgress] = {}
+    progress_by_resource: dict[str, ReaderV5PresentationView] = {}
     if user_id:
         resource_ids = [
             resource.id for resource, _metadata in _resource_rows(db, book_id)
         ]
         if resource_ids:
-            progress_by_resource = {
-                row.resource_id: row
-                for row in db.scalars(
-                    select(ReaderResourceProgress).where(
-                        ReaderResourceProgress.user_id == user_id,
-                        ReaderResourceProgress.resource_id.in_(resource_ids),
-                    )
-                ).all()
-            }
+            progress_by_resource = dict(
+                reader_queries.list_presentations(
+                    user_id=user_id,
+                    resource_ids=resource_ids,
+                )
+            )
     resources = [
         _resource_view(
             db,
@@ -312,6 +316,8 @@ def resource_view(
     db: Session,
     resource_id: str,
     user_id: str | None = None,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any] | None:
     row = db.execute(
         select(LibraryReadableResource, LibraryReadableResourceMetadata)
@@ -325,11 +331,9 @@ def resource_view(
         return None
     progress = None
     if user_id:
-        progress = db.scalar(
-            select(ReaderResourceProgress).where(
-                ReaderResourceProgress.user_id == user_id,
-                ReaderResourceProgress.resource_id == resource_id,
-            )
+        progress = reader_queries.get_presentation(
+            user_id=user_id,
+            resource_id=resource_id,
         )
     return _resource_view(db, row[0], row[1], progress=progress)
 
@@ -341,6 +345,7 @@ def list_resource_views(
     *,
     page: int,
     page_size: int,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     """Return one deterministic Resource page with actor-scoped progress."""
 
@@ -351,17 +356,14 @@ def list_resource_views(
     start = (normalized_page - 1) * normalized_size
     selected = rows[start : start + normalized_size]
     resource_ids = [resource.id for resource, _metadata in selected]
-    progress_by_resource: dict[str, ReaderResourceProgress] = {}
+    progress_by_resource: dict[str, ReaderV5PresentationView] = {}
     if user_id and resource_ids:
-        progress_by_resource = {
-            row.resource_id: row
-            for row in db.scalars(
-                select(ReaderResourceProgress).where(
-                    ReaderResourceProgress.user_id == user_id,
-                    ReaderResourceProgress.resource_id.in_(resource_ids),
-                )
-            ).all()
-        }
+        progress_by_resource = dict(
+            reader_queries.list_presentations(
+                user_id=user_id,
+                resource_ids=resource_ids,
+            )
+        )
     offset = start
     return (
         [

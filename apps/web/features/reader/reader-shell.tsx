@@ -279,7 +279,10 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
   const wakeLockPort = typeof navigator === 'undefined' ? null : readerWakeLockPort(navigator);
   const wakeLockSupported = wakeLockPort !== null;
   const navItems = navigationItems ?? [];
-  const orderedBookmarks = [...bookmarks].sort((left, right) => left.percent - right.percent || left.createdAt.localeCompare(right.createdAt));
+  const orderedBookmarks = [...bookmarks].sort((left, right) => (
+    left.position.presentation.displayPercent - right.position.presentation.displayPercent
+    || left.createdAt.localeCompare(right.createdAt)
+  ));
   const [progressScrubPercent, setProgressScrubPercent] = useState<number | null>(null);
   const dark = isDarkReaderTheme(settings.theme);
   const themeSurface = readerThemeSurfaces[settings.theme];
@@ -1016,7 +1019,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                               >
                                 <span className="block truncate text-sm font-medium">{i18nAttribute(bookmark.label)}</span>
                                 <span className="mt-0.5 flex items-center gap-2 text-[11px] opacity-55">
-                                  <span className="tabular-nums">{clampPercent(bookmark.percent)}%</span>
+                                  <span className="tabular-nums">{clampPercent(bookmark.position.presentation.displayPercent)}%</span>
                                   {dateLabel ? <span>{dateLabel}</span> : null}
                                   {active ? <span><I18nText>当前位置</I18nText></span> : null}
                                 </span>

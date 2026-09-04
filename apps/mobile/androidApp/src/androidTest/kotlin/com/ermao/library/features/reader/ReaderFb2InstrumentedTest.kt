@@ -5,7 +5,6 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.infrastructure.Fb2ReadiumPublicationFactory
 import com.ermao.library.features.reader.presentation.ReaderActivity
@@ -35,7 +34,6 @@ class ReaderFb2InstrumentedTest {
     private val context: Context = instrumentation.targetContext
     private val sourceId = "fb2-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
     @Before
@@ -52,7 +50,9 @@ class ReaderFb2InstrumentedTest {
 
     @After
     fun removeArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderFb2InstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 
@@ -91,7 +91,7 @@ class ReaderFb2InstrumentedTest {
             assertTrue(renderedText(scenario).contains("脚注正文"))
             scenario.onActivity { activity ->
                 val location = activity.controllerForTesting?.currentLocation?.value as? ReflowReaderLocation
-                assertNotNull(location?.engineLocator)
+                assertNotNull(location?.resourceKey)
                 checkNotNull(activity.controllerForTesting).updatePreferences(
                     ReaderPreferences(epub = ReaderEpubPreferences(fontSize = 23)),
                 )

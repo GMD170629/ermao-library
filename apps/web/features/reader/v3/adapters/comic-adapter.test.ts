@@ -8,6 +8,7 @@ import {
 } from '@shuku/reader-core';
 import { ComicReaderAdapter } from './comic-adapter';
 import { readerSafetyFailure } from '../security/reader-safety-policy';
+import comicFixture from '../../../../../../packages/reader-contracts/fixtures/reader-v5/comic.json';
 
 const COMIC_REVISION = `sha256:${'a'.repeat(64)}`;
 
@@ -253,8 +254,8 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
       bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
       resourceId: 'resource-1',
       totalPages: 3
@@ -344,20 +345,6 @@ test('comic adapter commits programmatic and pointer navigation once while reusi
   assert.equal(progressZero.accepted, true);
   assert.equal(adapter.getViewModel().currentPage, 0);
 
-  await adapter.execute({ type: 'next' }, {
-    operation: operation(++sequence),
-    signal: new AbortController().signal
-  });
-  const locationZero = await adapter.execute({
-    type: 'go-to-location',
-    location: { kind: 'comic', resourceId: 'resource-1', pageIndex: 0 }
-  }, {
-    operation: operation(++sequence),
-    signal: new AbortController().signal
-  });
-  assert.equal(locationZero.accepted, true);
-  assert.equal(adapter.getViewModel().currentPage, 0);
-
   const swipeDisabled = {
     ...DEFAULT_READER_PREFERENCES,
     interaction: {
@@ -402,8 +389,8 @@ test('comic navigation promotes immediately while the native image is still load
       bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
       resourceId: 'resource-1',
       totalPages: 2
@@ -438,6 +425,61 @@ test('comic navigation promotes immediately while the native image is still load
   adapter.dispose();
 });
 
+test('comic adapter restores the standard one-based Locator position without presentation fallback', async () => {
+  const ownerDocument = new FakeDocument();
+  const container = new FakeElement(ownerDocument);
+  const pageCount = 42;
+  const adapter = new ComicReaderAdapter({
+    container: container as unknown as HTMLElement,
+    revision: COMIC_REVISION,
+    initialPages: Array.from({ length: pageCount }, (_, pageIndex) => ({
+      pageIndex,
+      resourceHref: `pages/${String(pageIndex + 1).padStart(4, '0')}.jpg`,
+      mimeType: 'image/jpeg',
+      width: 600,
+      height: 900
+    }))
+  });
+
+  try {
+    await adapter.open({
+      sessionId: 'comic-v5-session',
+      operation: operation(1, 'bootstrap'),
+      signal: new AbortController().signal,
+      source: {
+        bookId: 'book-1',
+        kind: 'comic',
+        sourceFormat: 'cbz',
+        comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+        comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
+        contentUrl: '/api/reader/v5/resources/resource-1/publication',
+        resourceId: 'resource-1',
+        totalPages: pageCount
+      },
+      initialLocation: null,
+      initialPosition: comicFixture.position,
+      preferences: DEFAULT_READER_PREFERENCES
+    });
+
+    assert.equal(adapter.getViewModel().currentPage, pageCount - 1);
+    const restored = await adapter.execute({ type: 'go-to-position', position: comicFixture.position }, {
+      operation: { sessionId: 'comic-v5-session', kind: 'navigation', sequence: 2 },
+      signal: new AbortController().signal
+    });
+    assert.equal(restored.accepted, true);
+    assert.equal(restored.position?.presentation.page?.number, pageCount);
+    await assert.rejects(
+      adapter.execute({
+        type: 'go-to-position',
+        position: { ...comicFixture.position, locator: {} }
+      }, { operation: { sessionId: 'comic-v5-session', kind: 'navigation', sequence: 3 }, signal: new AbortController().signal }),
+      (reason: unknown) => reason instanceof Error && reason.message === 'LOCATION_RESTORE_FAILED'
+    );
+  } finally {
+    adapter.dispose();
+  }
+});
+
 test('comic policy blocks one unsafe page without requesting it or rejecting the publication', async () => {
   const ownerDocument = new FakeDocument();
   const container = new FakeElement(ownerDocument);
@@ -461,8 +503,8 @@ test('comic policy blocks one unsafe page without requesting it or rejecting the
       bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
       resourceId: 'resource-1',
       totalPages: 1
@@ -515,8 +557,8 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
       bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
       resourceId: 'resource-1',
       totalPages: 3
@@ -541,9 +583,9 @@ test('comic continuous flow keeps every lazy image mounted and only explicit nav
   assert.deepEqual(slots.map((slot) => slot.style.width), ['800px', '800px', '800px']);
   assert.deepEqual(images.map((image) => image.loading), ['lazy', 'lazy', 'lazy']);
   assert.deepEqual(images.map((image) => image.src), [
-    `/api/reader/v4/resources/resource-1/comic/pages/0?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
-    `/api/reader/v4/resources/resource-1/comic/pages/1?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
-    `/api/reader/v4/resources/resource-1/comic/pages/2?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`
+    `/api/reader/v5/resources/resource-1/comic/pages/0?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
+    `/api/reader/v5/resources/resource-1/comic/pages/1?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`,
+    `/api/reader/v5/resources/resource-1/comic/pages/2?imageVariant=original&revision=${encodeURIComponent(COMIC_REVISION)}`
   ]);
   const preloadObserver = FakeIntersectionObserver.latest as FakeIntersectionObserver | null;
   assert.ok(preloadObserver);
@@ -620,8 +662,8 @@ test('comic viewport resize interrupts a drag and recenters the committed spread
       bookId: 'book-1',
       kind: 'comic',
       sourceFormat: 'cbz',
-      comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-      comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+      comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+      comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
       contentUrl: '/comic',
       resourceId: 'resource-1',
       totalPages: 2
@@ -705,8 +747,8 @@ test('comic signal fallback removes source listeners after abort and session boo
         bookId: 'book-1',
         kind: 'comic',
         sourceFormat: 'cbz',
-        comicManifestUrl: '/api/reader/v4/resources/resource-1/comic/manifest',
-        comicPageUrlTemplate: '/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}',
+        comicManifestUrl: '/api/reader/v5/resources/resource-1/comic/manifest',
+        comicPageUrlTemplate: '/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}',
         contentUrl: '/comic',
         resourceId: 'resource-1',
         totalPages: 3

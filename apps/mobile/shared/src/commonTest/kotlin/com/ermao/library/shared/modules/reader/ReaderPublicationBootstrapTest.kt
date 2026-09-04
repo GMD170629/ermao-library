@@ -29,8 +29,8 @@ class ReaderPublicationBootstrapTest {
                 pdfAccess = if (format == ReaderSourceFormat.Pdf) ReaderPdfAccess("/api/assets/asset-1", 25L * 1024 * 1024) else null,
                 comicPages = if (format.isComic) listOf(ReaderComicPage(0, "pages/0", "image/png")) else emptyList(),
                 comicAccess = if (format.isComic) ReaderComicAccess(
-                    "/api/reader/v4/resources/resource-1/comic/manifest",
-                    "/api/reader/v4/resources/resource-1/comic/pages/{pageIndex}",
+                    "/api/reader/v5/resources/resource-1/comic/manifest",
+                    "/api/reader/v5/resources/resource-1/comic/pages/{pageIndex}",
                     setOf("original", "data-saver"),
                     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 ) else null,

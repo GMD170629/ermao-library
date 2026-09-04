@@ -84,7 +84,7 @@ if (missingRefs.size) throw new Error(`Reader schemas reference excluded models:
 
 const generated = [
   '/* eslint-disable */',
-  '// AUTO-GENERATED from the Reader v4 FastAPI OpenAPI contract.',
+  '// AUTO-GENERATED from the Reader v5 FastAPI OpenAPI contract.',
   '// Run `pnpm --filter @shuku/web generate:reader-api`; do not edit by hand.',
   '',
   ...includedNames.flatMap((name) => [`export type ${typeName(name)} = ${typeExpression(schemas[name])};`, ''])

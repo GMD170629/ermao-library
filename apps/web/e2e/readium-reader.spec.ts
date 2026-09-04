@@ -30,33 +30,59 @@ async function createEpub(items: readonly EpubFixtureItem[] = [
   return writer.close();
 }
 
-function exactLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
+function readiumLocator(cssSelector: string, highlight: string, progression = 0, href = 'chapter1.xhtml', position = 1) {
   return {
-    kind: 'reflowable',
-    engineLocator: {
-      engine: 'readium', platform: 'web', version: 'readium-ts:2.8.2',
-      payload: { href, type: 'application/xhtml+xml', locations: { cssSelector, fragments: [cssSelector.slice(1)], progression, position }, text: { highlight } }
+    href,
+    type: 'application/xhtml+xml',
+    locations: { cssSelector, fragments: [cssSelector.slice(1)], progression, position },
+    text: { highlight }
+  } as const;
+}
+
+function positionReport(locator: ReturnType<typeof readiumLocator>, displayPercent: number) {
+  return {
+    locator,
+    presentation: {
+      displayPercent,
+      totalProgression: displayPercent / 100,
+      currentHref: locator.href,
+      chapter: null,
+      page: null,
+      playback: null
     }
   } as const;
 }
 
-function readerBootstrap(progressSnapshot: Record<string, unknown> | null, legacyPercent = 0) {
-  const resource = { id: 'epub-resource', bookId: 'book-epub', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: legacyPercent, lastReadAt: null };
+function progressSnapshot(locator: ReturnType<typeof readiumLocator>, displayPercent: number, clientId = 'web-e2e', revision = 1) {
+  return {
+    schemaVersion: 5,
+    revision,
+    clientId,
+    mutationId: '00000000-0000-4000-8000-000000000001',
+    capturedAtEpochMillis: 100,
+    receivedAtEpochMillis: 100,
+    position: positionReport(locator, displayPercent)
+  };
+}
+
+function readerBootstrap(progressSnapshotValue: Record<string, unknown> | null, fallbackPercent = 0) {
+  const resource = { id: 'epub-resource', bookId: 'book-epub', title: '全本', resourceIndex: null, sortOrder: 0, format: 'EPUB', readerType: 'reflowable', pageCount: null, chapterCount: 2, durationMs: null, trackCount: null, progress: fallbackPercent, lastReadAt: null };
   return { ok: true, data: {
-    schemaVersion: 4, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
+    schemaVersion: 5, userId: 'user-e2e', readerType: 'reflowable', sourceFormat: 'epub',
+    resourceUrl: '/api/reader/v5/resources/epub-resource/publication',
     book: { id: 'book-epub', title: 'Readium E2E', author: 'Test', coverUrl: null },
     resourceCompleted: false,
     resource, availableResources: [resource],
     assets: [{ id: 'epub-asset', kind: 'CONTENT', mimeType: 'application/epub+zip', sizeBytes: 100, durationMs: null, discNumber: null, trackNumber: null, sortOrder: 0, url: '/api/assets/epub-asset' }],
     units: [],
     capabilities: { canGoNext: true, canGoPrevious: false, canJumpToProgress: false, canJumpToHref: true, canJumpToIndex: true, canZoom: false, canSelectText: true, supportsPagination: true, supportsScrolling: true, supportsSpreads: true },
-    progressSnapshot, progressPercent: legacyPercent
+    progressSnapshot: progressSnapshotValue, progressPercent: fallbackPercent
   } };
 }
 
-async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null, legacyPercent: number, writes: unknown[], epub: Uint8Array) {
+async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null, fallbackPercent: number, writes: unknown[], epub: Uint8Array) {
   const request = route.request(); const pathname = new URL(request.url()).pathname;
-  if (pathname.endsWith('/bootstrap')) return route.fulfill({ json: readerBootstrap(snapshot, legacyPercent) });
+  if (pathname.endsWith('/bootstrap')) return route.fulfill({ json: readerBootstrap(snapshot, fallbackPercent) });
   if (pathname === '/api/resources/epub-resource') return route.fulfill({ json: { ok: true, data: { resource: {
     id: 'epub-resource', bookId: 'book-epub', sourceNodeId: 'source-epub', title: '全本', format: 'EPUB', readerType: 'reflowable',
     sortOrder: 0, importStatus: 'READY', coverUrl: '', sizeBytes: epub.byteLength, readable: true, kindleSendAvailable: false,
@@ -66,15 +92,27 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
   if (pathname.endsWith('/progress')) {
     if (request.method() === 'GET') {
       const revision = typeof snapshot?.revision === 'number' ? snapshot.revision : 0;
-      const etag = `"reader-progress-${revision}"`;
+      const etag = `"reader-v5-progress-${revision}"`;
       return route.fulfill({
         headers: { ETag: etag },
-        json: { ok: true, data: { schemaVersion: 4, progressSnapshot: snapshot } }
+        json: { ok: true, data: { schemaVersion: 5, progressSnapshot: snapshot } }
       });
     }
     const body: unknown = request.postDataJSON(); writes.push(body);
-    const item = body as { clientId: string; locator: Record<string, unknown>; baseRevision: number };
-    return route.fulfill({ json: { ok: true, data: { schemaVersion: 4, clientId: item.clientId, revision: item.baseRevision + 1, locator: item.locator, displayPercent: 0, receivedAtEpochMillis: Date.now() } } });
+    const item = body as { clientId: string; mutationId: string; capturedAtEpochMillis: number; position: Record<string, unknown> };
+    return route.fulfill({ json: { ok: true, data: {
+      acceptedMutationId: item.mutationId,
+      acceptedRevision: 1,
+      currentSnapshot: {
+        schemaVersion: 5,
+        revision: 1,
+        clientId: item.clientId,
+        mutationId: item.mutationId,
+        capturedAtEpochMillis: item.capturedAtEpochMillis,
+        receivedAtEpochMillis: Date.now(),
+        position: item.position
+      }
+    } } });
   }
   if (pathname === '/api/auth/me') return route.fulfill({ json: { ok: true, data: { user: { id: 'user-e2e', email: 'e2e@example.com', name: 'E2E', role: 'admin' }, authorization: { isAdmin: true, canManageSystem: true, allLibraryScopes: true, libraryIds: [], canViewManualImports: true, authzVersion: 1 } } } });
   return route.fulfill({ json: { ok: true, data: {} } });
@@ -83,13 +121,13 @@ async function fulfillApi(route: Route, snapshot: Record<string, unknown> | null
 async function installReaderRoutes(
   page: Page,
   snapshot: Record<string, unknown> | null = null,
-  legacyPercent = 0,
+  fallbackPercent = 0,
   items?: readonly EpubFixtureItem[],
   language: string | null = 'zh-CN'
 ) {
   const writes: unknown[] = [];
   const epub = await createEpub(items, language);
-  await page.route('**/api/**', (route) => fulfillApi(route, snapshot, legacyPercent, writes, epub));
+  await page.route('**/api/**', (route) => fulfillApi(route, snapshot, fallbackPercent, writes, epub));
   return writes;
 }
 
@@ -104,11 +142,9 @@ test('Readium opens a cached original EPUB without manifest, positions or chapte
   const writes = await installReaderRoutes(page); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.engineLocator.engine).toBe('readium');
-  expect(write.locator.kind).toBe('reflowable');
-  expect(write.locator.engineLocator.payload.href).toBe('chapter1.xhtml');
-  expect(write.locator.engineLocator.payload.locations.cssSelector || write.locator.engineLocator.payload.locations.fragments?.length || write.locator.engineLocator.payload.text?.highlight).toBeTruthy();
+  const write = writes.at(-1) as { position: { locator: ReturnType<typeof readiumLocator> } };
+  expect(write.position.locator.href).toBe('chapter1.xhtml');
+  expect(write.position.locator.locations.cssSelector || write.position.locator.locations.fragments?.length || write.position.locator.text?.highlight).toBeTruthy();
   expect(requests.filter((path) => /\/publication\/(?:manifest|positions|chapter)/.test(path))).toEqual([]);
   expect(requests.filter((path) => path === '/api/assets/epub-asset')).toHaveLength(1);
 });
@@ -384,38 +420,32 @@ test('Readium centers a constrained paginated surface instead of pinning it to t
   })).toEqual({ centered: true, width: 600 });
 });
 
-test('an exact paragraph restore stays non-fatal when a preceding block shares the page', async ({ page }) => {
-  const target = exactLocator('#target', '跨端恢复目标正文。', 0.8, 'chapter1.xhtml', 1);
+test('an opaque Readium Locator restores the requested paragraph without a percent fallback', async ({ page }) => {
+  const target = readiumLocator('#target', '跨端恢复目标正文。', 0.8, 'chapter1.xhtml', 1);
   await installReaderRoutes(page, {
-    schemaVersion: 4,
-    clientId: 'ios-e2e',
-    revision: 11,
-    locator: target,
-    displayPercent: 40,
-    receivedAtEpochMillis: 100
+    ...progressSnapshot(target, 40, 'ios-e2e', 11),
   });
 
   await page.goto('/reader/epub-resource');
   let frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#target')).toBeVisible();
-  await expect(page.getByText('无法精确恢复到另一设备的位置')).toHaveCount(0);
+  await expect(page.getByText('阅读器加载失败')).toHaveCount(0);
 
   await frame.contentFrame().locator('body').press('PageDown');
   frame = await visibleReadiumFrame(page);
   await expect(page.getByText('阅读器加载失败')).toHaveCount(0);
 });
 
-test('Readium restore is accepted only after re-capturing the same exact DOM block', async ({ page }) => {
-  const target = exactLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2);
-  const writes = await installReaderRoutes(page, { schemaVersion: 4, clientId: 'android-e2e', revision: 7, locator: target, displayPercent: 70, receivedAtEpochMillis: 100 });
+test('Readium restore uses the opaque Locator and does not emit a corrective write', async ({ page }) => {
+  const target = readiumLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2);
+  const writes = await installReaderRoutes(page, progressSnapshot(target, 70, 'android-e2e', 7));
   await page.goto('/reader/epub-resource'); const frame = await visibleReadiumFrame(page);
   await expect(frame.contentFrame().locator('#chapter-two')).toBeVisible();
-  await expect(page.locator('[data-reader-exact-restore="verified"]')).toHaveCount(1);
   expect(writes).toHaveLength(0);
-  await expect(page.getByText('无法精确恢复到另一设备的位置')).toHaveCount(0);
+  await expect(page.getByText('阅读器加载失败')).toHaveCount(0);
 });
 
-test('an in-session remote update stays non-modal and jumps only after exact verification', async ({ page }) => {
+test('an in-session remote update stays non-modal and jumps only after explicit user action', async ({ page }) => {
   const writes: unknown[] = [];
   let currentSnapshot: Record<string, unknown> | null = null;
   const epub = await createEpub();
@@ -424,14 +454,7 @@ test('an in-session remote update stays non-modal and jumps only after exact ver
   await visibleReadiumFrame(page);
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
 
-  currentSnapshot = {
-    schemaVersion: 4,
-    clientId: 'ios-e2e',
-    revision: 7,
-    locator: exactLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2),
-    displayPercent: 70,
-    receivedAtEpochMillis: Date.now()
-  };
+  currentSnapshot = progressSnapshot(readiumLocator('#chapter-two', '第二章', 0, 'chapter2.xhtml', 2), 70, 'ios-e2e', 7);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await expect(page.getByText(/其他设备已阅读至/)).toBeVisible();
   const writesBeforeJump = writes.length;
@@ -447,9 +470,9 @@ test('whole-publication percentage is display-only and never an automatic restor
   const writes = await installReaderRoutes(page, null, 88); await page.goto('/reader/epub-resource');
   const frame = await visibleReadiumFrame(page); await expect(frame.contentFrame().locator('#chapter-title')).toBeVisible();
   await expect.poll(() => writes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  const write = writes.at(-1) as { locator: ReturnType<typeof exactLocator> };
-  expect(write.locator.engineLocator.payload.locations.cssSelector).toBeTruthy();
-  expect(write.locator.engineLocator.payload.locations.progression).not.toBe(0.88);
+  const write = writes.at(-1) as { position: { locator: ReturnType<typeof readiumLocator> } };
+  expect(write.position.locator.locations.cssSelector).toBeTruthy();
+  expect(write.position.locator.locations.progression).not.toBe(0.88);
 });
 
 test('Readium settings expose scrolling, auto spread and publisher styles with truthful context states', async ({ page }) => {

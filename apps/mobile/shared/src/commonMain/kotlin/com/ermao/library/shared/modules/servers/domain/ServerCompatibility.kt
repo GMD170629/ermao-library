@@ -14,7 +14,7 @@ data class ServerCompatibility(
 data class ServerCapabilities(
     val setup: Boolean,
     val cookieSession: Boolean,
-    val readerV4: Boolean,
+    val readerV5: Boolean,
     val mediaRange: Boolean,
     val managedOfflineDownloads: Boolean,
     val bookResourceAsset: Boolean,

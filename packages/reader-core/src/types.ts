@@ -1,6 +1,6 @@
 export const READER_PREFERENCES_VERSION = 6 as const;
 
-export const READER_SCHEMA_VERSION = 4 as const;
+export const READER_SCHEMA_VERSION = 5 as const;
 
 export type ReflowableFormat = 'epub' | 'mobi' | 'azw' | 'azw3' | 'prc' | 'fb2' | 'txt';
 export type ReaderKind = 'reflowable' | 'comic' | 'pdf';
@@ -29,8 +29,6 @@ export type ReflowableLocation = {
   };
   /** Whole-book fraction used only as the final approximate fallback. */
   progression?: number;
-  /** Cross-platform position. Only this verified Readium envelope may auto-sync. */
-  exactLocator?: ReadiumLocatorEnvelope;
 };
 
 export type ComicLocation = {
@@ -50,6 +48,46 @@ export type PdfLocation = {
 };
 
 export type ReaderLocation = ReflowableLocation | ComicLocation | PdfLocation;
+
+/**
+ * A serialized position owned by the active reader engine.
+ *
+ * The reader core deliberately does not inspect Locator fields.  Concrete
+ * adapters may deserialize their own value when restoring a session, while
+ * transport and persistence layers carry this object unchanged.
+ */
+export type ReaderOpaqueLocator = Readonly<Record<string, unknown>>;
+
+export type ReaderChapterPresentation = Readonly<{
+  href: string | null;
+  title: string | null;
+  index: number | null;
+}>;
+
+export type ReaderPagePresentation = Readonly<{
+  number: number;
+  total: number | null;
+}>;
+
+export type ReaderPlaybackPresentation = Readonly<{
+  positionMillis: number;
+  durationMillis: number | null;
+}>;
+
+/** Presentation facts are independent from the opaque engine Locator. */
+export type ReaderPositionPresentation = Readonly<{
+  displayPercent: number;
+  totalProgression: number;
+  currentHref: string | null;
+  chapter: ReaderChapterPresentation | null;
+  page: ReaderPagePresentation | null;
+  playback: ReaderPlaybackPresentation | null;
+}>;
+
+export type ReaderPositionReport = Readonly<{
+  locator: ReaderOpaqueLocator;
+  presentation: ReaderPositionPresentation;
+}>;
 
 export type ReaderNavigationEntry = {
   id: string;
@@ -180,7 +218,7 @@ export type ReaderCapabilities = {
   supportsPagination: boolean;
   supportsScrolling: boolean;
   supportsSpreads: boolean;
-  /** Setting controls truthfully consumed by the active local adapter. Omitted by Reader v4 server payloads. */
+  /** Setting controls truthfully consumed by the active local adapter. */
   supportedControls?: readonly string[];
 };
 
@@ -192,7 +230,7 @@ export type ReaderCommand =
   | { type: 'go-to-progress'; progression: number }
   | { type: 'go-to-href'; href: string }
   | { type: 'go-to-index'; index: number }
-  | { type: 'go-to-location'; location: ReaderLocation }
+  | { type: 'go-to-position'; position: ReaderPositionReport }
   | { type: 'set-zoom'; zoom: number }
   | { type: 'set-fit'; fit: 'width' | 'page' }
   | { type: 'retry' }
@@ -202,6 +240,7 @@ export type ReaderCommandAck = {
   operation: OperationToken;
   accepted: boolean;
   location?: ReaderLocation;
+  position?: ReaderPositionReport;
   reason?: string;
 };
 
@@ -221,15 +260,14 @@ type ReaderAdapterEventBase = {
 };
 
 export type ReaderAdapterEvent =
-  | (ReaderAdapterEventBase & { type: 'ready'; capabilities: ReaderCapabilities; location: ReaderLocation | null })
+  | (ReaderAdapterEventBase & { type: 'ready'; capabilities: ReaderCapabilities; location: ReaderLocation | null; position?: ReaderPositionReport | null })
   | (ReaderAdapterEventBase & { type: 'capabilities-changed'; capabilities: ReaderCapabilities })
   | (ReaderAdapterEventBase & { type: 'metadata-changed'; totalPages: number | null })
   | (ReaderAdapterEventBase & { type: 'navigation-changed'; items: ReaderNavigationEntry[] })
-  | (ReaderAdapterEventBase & { type: 'location-changed'; location: ReaderLocation; percent: number })
+  | (ReaderAdapterEventBase & { type: 'location-changed'; location: ReaderLocation; percent: number; position?: ReaderPositionReport })
   | (ReaderAdapterEventBase & { type: 'phase-changed'; phase: 'loading-content' | 'loading-font' | 'generating-pagination' | 'rendering' | null })
   | (ReaderAdapterEventBase & { type: 'pagination-progress'; completed: number; total: number; percent: number })
   | (ReaderAdapterEventBase & { type: 'activity' })
   | (ReaderAdapterEventBase & { type: 'external-link'; href: string })
   | (ReaderAdapterEventBase & { type: 'password-required'; reason: 'need-password' | 'incorrect-password' })
   | (ReaderAdapterEventBase & { type: 'error'; error: ReaderError });
-import type { ReadiumLocatorEnvelope } from './exact-locator';

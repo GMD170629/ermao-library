@@ -5,7 +5,6 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.application.ReaderScreenController
 import com.ermao.library.features.reader.presentation.ReaderActivity
@@ -33,7 +32,6 @@ class ReaderMobiInstrumentedTest {
     private val context: Context = instrumentation.targetContext
     private val sourceId = "instrumented-mobi-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
     @Before
@@ -50,7 +48,9 @@ class ReaderMobiInstrumentedTest {
 
     @After
     fun removeReaderArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderMobiInstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 

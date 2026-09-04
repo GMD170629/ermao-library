@@ -197,8 +197,6 @@ internal fun ReaderScreen(
     val contentError by controller?.contentError?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<ReaderError?>(null) }
     val displayedError = openError ?: contentError
-    val restoreWarning by controller?.restoreWarning?.collectAsStateWithLifecycle()
-        ?: remember { mutableStateOf<ReaderError?>(null) }
     val resumeNotice by controller?.resumeNotice?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf<com.ermao.library.features.reader.application.ReaderResumeNotice?>(null) }
     val resumeActionFailed by controller?.resumeActionFailed?.collectAsStateWithLifecycle()
@@ -208,12 +206,6 @@ internal fun ReaderScreen(
     val bookmarkSyncPending by controller?.bookmarkSyncPending?.collectAsStateWithLifecycle()
         ?: remember { mutableStateOf(false) }
 
-    LaunchedEffect(controller, restoreWarning) {
-        if (restoreWarning?.code == ReaderErrorCode.LocationRestoreFailed) {
-            delay(RESTORE_WARNING_AUTO_DISMISS_MILLIS)
-            controller?.dismissRestoreWarning()
-        }
-    }
     val capabilities = controller?.capabilities ?: ReaderCapabilities.epub(
         supportsVolumeKeys = true,
         supportsCustomFonts = false,
@@ -437,33 +429,6 @@ internal fun ReaderScreen(
                     },
                     onHide = { onControlsVisibleChange(false) },
                 )
-            }
-
-            if (restoreWarning?.code == ReaderErrorCode.LocationRestoreFailed) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(16.dp)
-                        .fillMaxWidth()
-                        .testTag(READER_RESTORE_WARNING_TEST_TAG)
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                    color = colors.accentSoft,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.reader_restore_warning),
-                            Modifier.weight(1f).padding(start = 12.dp, top = 12.dp, bottom = 12.dp),
-                        )
-                        IconButton(onClick = { controller?.dismissRestoreWarning() }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.reader_restore_warning_dismiss),
-                            )
-                        }
-                    }
-                }
             }
 
             resumeNotice?.let { notice ->
@@ -1714,7 +1679,7 @@ private fun ReaderNotesSheet(
                                 Column(Modifier.fillMaxWidth()) {
                                     Text(bookmark.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(
-                                        stringResource(R.string.reader_progress_percent, bookmark.percent.toInt()),
+                                        stringResource(R.string.reader_progress_percent, bookmark.displayPercent.toInt()),
                                         style = MaterialTheme.typography.labelSmall,
                                     )
                                 }
@@ -1953,8 +1918,11 @@ private fun ReaderSheetHeader(
 private fun currentBookmark(bookmarks: List<ReaderBookmark>, location: ReaderLocation?): Boolean {
     val current = location as? ReflowReaderLocation ?: return false
     return bookmarks.any { bookmark ->
-        bookmark.location.resourceKey == current.resourceKey &&
-            kotlin.math.abs((bookmark.location.progression ?: 0.0) - (current.progression ?: 0.0)) < 0.0001
+        bookmark.position.presentation.currentHref == current.resourceKey &&
+            kotlin.math.abs(
+                bookmark.position.presentation.totalProgression -
+                    (current.totalProgression ?: current.progression ?: 0.0),
+            ) < 0.0001
     }
 }
 
@@ -2088,11 +2056,9 @@ internal const val READER_CONTENTS_LOADING_TEST_TAG = "reader-contents-loading"
 internal const val READER_SETTINGS_TEST_TAG = "reader-settings"
 internal const val READER_PROGRESS_TEST_TAG = "reader-progress"
 internal const val READER_PASSIVE_STATUS_TEST_TAG = "reader-passive-status"
-internal const val READER_RESTORE_WARNING_TEST_TAG = "reader-restore-warning"
 internal const val READER_LINE_HEIGHT_TEST_TAG = "reader-line-height"
 internal const val READER_PREFERENCES_SCROLL_TEST_TAG = "reader-preferences-scroll"
 internal const val READER_SHEET_TEST_TAG = "reader-sheet"
 private const val PROGRESS_SEEK_FEEDBACK_TIMEOUT_MILLIS = 4_000L
-internal const val RESTORE_WARNING_AUTO_DISMISS_MILLIS = 5_000L
 private const val SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE = 0.5f
 private val READER_WIDE_VIEWPORT_MIN_WIDTH = 640.dp

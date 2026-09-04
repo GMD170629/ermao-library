@@ -73,4 +73,10 @@ tasks.withType<Test>().configureEach {
             "../../packages/reader-contracts/fixtures/comic-reader-semantics-v1.json",
         ).asFile.absolutePath,
     )
+    systemProperty(
+        "readerV5FixtureRoot",
+        rootProject.layout.projectDirectory.dir(
+            "../../packages/reader-contracts/fixtures/reader-v5",
+        ).asFile.absolutePath,
+    )
 }

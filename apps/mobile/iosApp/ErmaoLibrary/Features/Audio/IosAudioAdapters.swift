@@ -45,6 +45,7 @@ enum AudioAdapterError: Error, Equatable, Sendable {
     case invalidResponse
     case codecUnsupported
     case resourceUnavailable
+    case locationRestoreFailed
     case cancelled
 
     var errorCode: AudioRecoverableErrorCode {
@@ -54,6 +55,7 @@ enum AudioAdapterError: Error, Equatable, Sendable {
         case .retryableNetwork, .cancelled: .networkRetryable
         case .codecUnsupported: .codecUnsupported
         case .resourceUnavailable: .resourceUnavailable
+        case .locationRestoreFailed: .locationRestoreFailed
         }
     }
 }
@@ -90,7 +92,7 @@ struct AudioMediaProbe: Equatable, Sendable {
 
 struct AudioBootstrapEnvelope {
     let publication: ErmaoShared.AudioPublication
-    let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV4?
+    let remoteSnapshot: ErmaoShared.ReaderProgressSnapshotV5?
 }
 
 /// The shared/KMP media owner supplies an incremental stream. It owns Cookie
@@ -120,12 +122,23 @@ protocol AudioBootstrapGateway: AnyObject {
 /// Platform composition for the KMP-owned restore/save use case.
 @MainActor
 protocol AudioProgressAdapter: AnyObject {
-    func configure(bootstrap: AudioBootstrapEnvelope) async -> ErmaoShared.AudioReaderLocation?
-    func configureLocal(publication: ErmaoShared.AudioPublication) async -> ErmaoShared.AudioReaderLocation?
+    func configure(bootstrap: AudioBootstrapEnvelope) async throws -> ErmaoShared.AudioReaderLocation?
+    func configureLocal(publication: ErmaoShared.AudioPublication) async throws -> ErmaoShared.AudioReaderLocation?
     func commitPrepared(resourceID: String, namespace: String)
     func discardPrepared(resourceID: String, namespace: String)
     func save(_ effect: ErmaoShared.AudioPlaybackEffect) async throws
     func flush(namespace: String) async
+}
+
+@MainActor
+protocol AudioRemoteProgressAdapter: AudioProgressAdapter {
+    var remoteSnapshotHandler: ((ErmaoShared.ReaderProgressSnapshotV5?) -> Void)? { get set }
+    func checkForRemoteProgress() async
+    func dismissRemoteProgress()
+    func remoteLocation(
+        for snapshot: ErmaoShared.ReaderProgressSnapshotV5
+    ) async throws -> ErmaoShared.AudioReaderLocation
+    func acceptRemote(_ snapshot: ErmaoShared.ReaderProgressSnapshotV5) async throws
 }
 
 @MainActor

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { READER_SAFETY_RULE_IDS, ReaderSafetyPolicyError } from '@shuku/reader-core';
-import { fetchReaderBootstrap } from './api';
+import { fetchReaderBootstrap, ReaderBootstrapError } from './api';
 
 const cases = [
   ['epub', 'EPUB', 'application/epub+zip'],
@@ -15,7 +15,8 @@ const cases = [
 
 function bootstrapPayload(sourceFormat: string) {
   return { ok: true, data: {
-    schemaVersion: 4, userId: 'user-1', readerType: 'reflowable', sourceFormat,
+    schemaVersion: 5, userId: 'user-1', readerType: 'reflowable', sourceFormat,
+    resourceUrl: '/api/reader/v5/resources/resource-1/publication',
     book: { id: 'book-1', title: 'Book' },
     resource: { id: 'resource-1', bookId: 'book-1', title: 'Resource', format: sourceFormat, readerType: 'reflowable', sortOrder: 0, resourceCompleted: false },
     availableResources: [], assets: [], units: [], capabilities: {}, progressSnapshot: null
@@ -87,10 +88,11 @@ test('PDF and comic remain streamed while audio never enters the Reader download
         const format = readerType === 'pdf' ? 'pdf' : 'cbz';
         const mimeType = readerType === 'pdf' ? 'application/pdf' : 'application/vnd.comicbook+zip';
         return Response.json({ ok: true, data: {
-          schemaVersion: 4,
+          schemaVersion: 5,
           userId: 'user-1',
           readerType,
           sourceFormat: format,
+          resourceUrl: `/api/reader/v5/resources/${resourceId}/publication`,
           book: { id: 'book-1', title: 'Book' },
           resource: { id: resourceId, bookId: 'book-1', title: 'Resource', format, readerType, sortOrder: 0 },
           availableResources: [],
@@ -98,8 +100,8 @@ test('PDF and comic remain streamed while audio never enters the Reader download
           units: readerType === 'comic' ? [{ id: 'page-0', index: 0, title: '1', metadata: { pageIndex: 0 } }] : [],
           publication: readerType === 'comic' ? {
             kind: 'comic',
-            manifestUrl: `/api/reader/v4/resources/${resourceId}/comic/manifest`,
-            pageUrlTemplate: `/api/reader/v4/resources/${resourceId}/comic/pages/{pageIndex}`,
+            manifestUrl: `/api/reader/v5/resources/${resourceId}/comic/manifest`,
+            pageUrlTemplate: `/api/reader/v5/resources/${resourceId}/comic/pages/{pageIndex}`,
             imageVariants: ['original', 'data-saver']
           } : undefined,
           capabilities: {},
@@ -122,10 +124,11 @@ test('PDF and comic remain streamed while audio never enters the Reader download
     globalThis.fetch = async (input) => {
       requests.push(String(input));
       return Response.json({ ok: true, data: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         userId: 'user-1',
         readerType: 'audio',
         sourceFormat: 'm4b',
+        resourceUrl: '/api/reader/v5/resources/audio-resource/publication',
         book: { id: 'book-1', title: 'Audio' },
         resource: { id: 'audio-resource', bookId: 'book-1', title: 'Audio', format: 'M4B', readerType: 'audio', sortOrder: 0 }
       } });
@@ -166,10 +169,11 @@ test('IMAGE_DIR bootstraps from PAGE assets and the comic manifest without a dir
         } });
       }
       return Response.json({ ok: true, data: {
-        schemaVersion: 4,
+        schemaVersion: 5,
         userId: 'user-1',
         readerType: 'comic',
         sourceFormat: 'image_dir',
+        resourceUrl: `/api/reader/v5/resources/${resourceId}/publication`,
         book: { id: 'book-1', title: 'Image directory' },
         resource: {
           id: resourceId,
@@ -195,8 +199,8 @@ test('IMAGE_DIR bootstraps from PAGE assets and the comic manifest without a dir
         units: [],
         publication: {
           kind: 'comic',
-          manifestUrl: `/api/reader/v4/resources/${resourceId}/comic/manifest`,
-          pageUrlTemplate: `/api/reader/v4/resources/${resourceId}/comic/pages/{pageIndex}`,
+          manifestUrl: `/api/reader/v5/resources/${resourceId}/comic/manifest`,
+          pageUrlTemplate: `/api/reader/v5/resources/${resourceId}/comic/pages/{pageIndex}`,
           imageVariants: ['original', 'data-saver']
         },
         capabilities: {},
@@ -208,7 +212,7 @@ test('IMAGE_DIR bootstraps from PAGE assets and the comic manifest without a dir
 
     assert.equal(bootstrap.source.kind, 'comic');
     assert.equal(bootstrap.source.sourceFormat, 'image_dir');
-    assert.equal(bootstrap.source.contentUrl, '');
+    assert.equal(bootstrap.source.contentUrl, `/api/reader/v5/resources/${resourceId}/publication`);
     assert.equal(bootstrap.comicRevision, revision);
     assert.deepEqual(bootstrap.pages.map((page) => page.mimeType), ['image/png', 'image/png']);
     assert.deepEqual(bootstrap.pages.map((page) => page.safetyError), [undefined, undefined]);
@@ -223,10 +227,11 @@ test('comic archive bootstrap still rejects an asset with the wrong MIME type', 
   const resourceId = 'invalid-cbz-resource';
   try {
     globalThis.fetch = async () => Response.json({ ok: true, data: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       userId: 'user-1',
       readerType: 'comic',
       sourceFormat: 'cbz',
+      resourceUrl: `/api/reader/v5/resources/${resourceId}/publication`,
       book: { id: 'book-1', title: 'Invalid archive' },
       resource: {
         id: resourceId,
@@ -252,8 +257,8 @@ test('comic archive bootstrap still rejects an asset with the wrong MIME type', 
       units: [],
       publication: {
         kind: 'comic',
-        manifestUrl: `/api/reader/v4/resources/${resourceId}/comic/manifest`,
-        pageUrlTemplate: `/api/reader/v4/resources/${resourceId}/comic/pages/{pageIndex}`,
+        manifestUrl: `/api/reader/v5/resources/${resourceId}/comic/manifest`,
+        pageUrlTemplate: `/api/reader/v5/resources/${resourceId}/comic/pages/{pageIndex}`,
         imageVariants: ['original', 'data-saver']
       },
       capabilities: {},
@@ -264,6 +269,46 @@ test('comic archive bootstrap still rejects an asset with the wrong MIME type', 
       fetchReaderBootstrap(resourceId, new AbortController().signal),
       (reason: unknown) => reason instanceof ReaderSafetyPolicyError
         && reason.ruleId === READER_SAFETY_RULE_IDS.COMMON_EXACT_FORMAT_MIME
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('requires the v5 publication resource URL from bootstrap', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({
+      ...bootstrapPayload('epub'),
+      data: {
+        ...bootstrapPayload('epub').data,
+        resourceUrl: '/api/resources/resource-1'
+      }
+    });
+    await assert.rejects(
+      fetchReaderBootstrap('resource-1', new AbortController().signal),
+      (reason: unknown) => reason instanceof ReaderBootstrapError
+        && reason.code === 'READER_PUBLICATION_PROTOCOL_INVALID'
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rejects a non-null legacy or malformed progress snapshot instead of treating it as empty', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({
+      ...bootstrapPayload('epub'),
+      data: {
+        ...bootstrapPayload('epub').data,
+        progressSnapshot: { schemaVersion: 4, locator: {} }
+      }
+    });
+    await assert.rejects(
+      fetchReaderBootstrap('resource-1', new AbortController().signal),
+      (reason: unknown) => reason instanceof ReaderBootstrapError
+        && reason.code === 'READER_PROGRESS_RESPONSE_INVALID'
     );
   } finally {
     globalThis.fetch = originalFetch;

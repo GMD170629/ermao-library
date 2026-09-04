@@ -180,6 +180,7 @@ enum AudioRecoverableErrorCode: String, Codable, Equatable, Sendable {
     case resourceUnavailable = "AUDIO_RESOURCE_UNAVAILABLE"
     case interrupted = "AUDIO_INTERRUPTED"
     case localArtifactUnavailable = "AUDIO_LOCAL_ARTIFACT_UNAVAILABLE"
+    case locationRestoreFailed = "LOCATION_RESTORE_FAILED"
     case unknown = "AUDIO_PLAYBACK_FAILED"
 }
 

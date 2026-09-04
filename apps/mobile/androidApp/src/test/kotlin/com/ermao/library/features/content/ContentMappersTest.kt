@@ -88,6 +88,7 @@ class ContentMappersTest {
                 Asset(
                     id = "asset-1",
                     title = "golden-dream.epub",
+                    path = "library/golden-dream.epub",
                     resourceId = "resource-completed",
                     sourceNodeId = "source-asset-1",
                     role = "publication",
@@ -104,7 +105,7 @@ class ContentMappersTest {
                     trackNumber = null,
                     sortOrder = 0,
                     url = null,
-                    downloadUrl = "library/golden-dream.epub",
+                    downloadUrl = "/api/assets/asset-1?download=true",
                 ),
             ),
         )

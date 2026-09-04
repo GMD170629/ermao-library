@@ -23,6 +23,10 @@ from app.modules.publications.application.navigation_ports import (
     PublicationNavigationLookupUnitOfWorkFactory,
     PublicationNavigationUnitOfWorkFactory,
 )
+from app.modules.publications.domain.model import (
+    PublicationNotFoundError,
+    PublicationResource,
+)
 from app.modules.publications.infrastructure.epub_adapter import (
     EpubPublicationAdapter,
 )
@@ -46,6 +50,9 @@ class PublicationNavigationRuntime:
 
     _ensure: EnsurePublicationNavigation
     _adapter: CompositePublicationAdapter
+    _source_repository_factory: Callable[
+        [Session], SqlAlchemyPublicationSourceRepository
+    ]
 
     def ensure(
         self,
@@ -65,6 +72,29 @@ class PublicationNavigationRuntime:
 
     def close(self) -> None:
         self._adapter.close()
+
+    def read_resource(
+        self,
+        *,
+        session: Session,
+        resource_id: str,
+        access_scope: PublicationAccessScope,
+        href: str,
+    ) -> PublicationResource:
+        """Read one validated Publication resource through the shared adapter.
+
+        Reader delivery uses the same source lookup and format adapter as the
+        publication navigation capability.  It does not duplicate parser or
+        filesystem safety rules in a route module.
+        """
+
+        source = self._source_repository_factory(session).find_source(
+            resource_id=resource_id,
+            access_scope=access_scope,
+        )
+        if source is None:
+            raise PublicationNotFoundError
+        return self._adapter.read_resource(source, href)
 
 
 def build_publication_navigation_runtime(
@@ -103,7 +133,11 @@ def build_publication_navigation_runtime(
         publication_adapter=adapter,
         unit_of_work_factory=unit_of_work_factory,
     )
-    return PublicationNavigationRuntime(ensure, adapter)
+    return PublicationNavigationRuntime(
+        ensure,
+        adapter,
+        SqlAlchemyPublicationSourceRepository,
+    )
 
 
 __all__ = [

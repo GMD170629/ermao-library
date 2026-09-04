@@ -9,7 +9,7 @@ import type {
   TextLayer
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { PdfReaderAdapter, resolvedPdfPageRotation } from './pdf-adapter';
-import { MemoryReaderStorage } from '../../../../lib/reader/memory-storage';
+import pdfFixture from '../../../../../../packages/reader-contracts/fixtures/reader-v5/pdf.json';
 
 type FakeListener = (event: Event) => void;
 
@@ -40,7 +40,6 @@ function pdfRangeFixture() {
         resourceId: 'resource-1',
         assetId: 'asset-1',
       },
-      cache: new MemoryReaderStorage()
     },
     fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers({
@@ -312,16 +311,21 @@ test('PDF adapter forces legacy continuous preferences into paged rendering', as
     assert.equal(container.children.length, 1);
     assert.equal(container.children[0]?.dataset.pageNumber, '4');
 
-    const restored = await adapter.execute({
-      type: 'go-to-location',
-      location: { kind: 'pdf', pageIndex: 4, pageProgression: 0.5 }
-    }, {
+    const standardPosition = {
+      ...pdfFixture.position,
+      locator: {
+        ...pdfFixture.position.locator,
+        locations: { ...pdfFixture.position.locator.locations, position: 5, progression: 0.5, totalProgression: 0.6 }
+      },
+      presentation: { ...pdfFixture.position.presentation, displayPercent: 66, totalProgression: 0.66, page: { number: 5, total: 7 } }
+    } as const;
+    const restoredV5 = await adapter.execute({ type: 'go-to-position', position: standardPosition }, {
       operation: { sessionId: 'pdf-continuous-session', kind: 'navigation', sequence: 3 },
       signal: new AbortController().signal
     });
-
-    assert.equal(restored.accepted, true);
-    assert.deepEqual(restored.location, { kind: 'pdf', pageIndex: 4, pageProgression: 0 });
+    assert.equal(restoredV5.accepted, true);
+    assert.equal(restoredV5.position?.locator && 'kind' in restoredV5.position.locator, false);
+    assert.equal(restoredV5.position?.presentation.page?.number, 5);
   } finally {
     await adapter.dispose();
     Object.assign(globalThis, {

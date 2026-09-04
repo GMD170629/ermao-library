@@ -48,10 +48,11 @@ function bootstrap(fixture: ReflowableFixture, sizeBytes: number) {
     lastReadAt: null
   };
   return { ok: true, data: {
-    schemaVersion: 4,
+    schemaVersion: 5,
     userId: 'local-formats-user',
     readerType: 'reflowable',
     sourceFormat: fixture.format,
+    resourceUrl: `/api/reader/v5/resources/${resourceId}/publication`,
     book: { id: 'local-formats-book', title: `Local ${format}`, author: 'Fixture', coverUrl: null },
     resource,
     resourceCompleted: false,
@@ -142,15 +143,23 @@ async function installFixtureRoutes(
     }
     if (pathname.endsWith('/progress')) {
       return request.method() === 'GET'
-        ? route.fulfill({ headers: { ETag: '"reader-progress-0"' }, json: { ok: true, data: { schemaVersion: 4, progressSnapshot: null } } })
-        : route.fulfill({ json: { ok: true, data: {
-          schemaVersion: 4,
-          clientId: 'web-e2e',
-          revision: 1,
-          locator: request.postDataJSON().locator,
-          displayPercent: 0,
-          receivedAtEpochMillis: Date.now()
-        } } });
+        ? route.fulfill({ headers: { ETag: '"reader-v5-progress-0"' }, json: { ok: true, data: { schemaVersion: 5, progressSnapshot: null } } })
+        : (() => {
+          const body = request.postDataJSON() as { clientId: string; mutationId: string; capturedAtEpochMillis: number; position: Record<string, unknown> };
+          return route.fulfill({ json: { ok: true, data: {
+            acceptedMutationId: body.mutationId,
+            acceptedRevision: 1,
+            currentSnapshot: {
+              schemaVersion: 5,
+              revision: 1,
+              clientId: body.clientId,
+              mutationId: body.mutationId,
+              capturedAtEpochMillis: body.capturedAtEpochMillis,
+              receivedAtEpochMillis: Date.now(),
+              position: body.position
+            }
+          } } });
+        })();
     }
     if (pathname === '/api/auth/me') return route.fulfill({ json: { ok: true, data: {
       user: { id: 'local-formats-user', email: 'formats@example.com', name: 'Formats', role: 'admin' },

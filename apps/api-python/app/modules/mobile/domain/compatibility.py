@@ -9,7 +9,7 @@ SERVER_IDENTITY_SETTING_KEY = "mobile.serverIdentity"
 MOBILE_SERVICE_NAME: Literal["ermao-books"] = "ermao-books"
 MOBILE_PROTOCOL_VERSION: Literal[3] = 3
 MINIMUM_SUPPORTED_MOBILE_CLIENT_VERSION: Literal[3] = 3
-MOBILE_READER_SCHEMA_VERSION: Literal[4] = 4
+MOBILE_READER_SCHEMA_VERSION: Literal[5] = 5
 MOBILE_LIBRARY_SCHEMA_VERSION: Literal[1] = 1
 
 
@@ -23,7 +23,7 @@ class MobileProtocolCompatibility:
 class MobileCapabilities:
     setup: Literal[True]
     cookie_session: Literal[True]
-    reader_v4: Literal[True]
+    reader_v5: Literal[True]
     media_range: Literal[True]
     managed_offline_downloads: Literal[True]
     book_resource_asset: Literal[True]
@@ -36,7 +36,7 @@ class MobileCompatibility:
     server_identity: str
     server_version: str
     protocol: MobileProtocolCompatibility
-    reader_schema_version: Literal[4]
+    reader_schema_version: Literal[5]
     library_schema_version: Literal[1]
     capabilities: MobileCapabilities
 
@@ -61,7 +61,7 @@ def mobile_compatibility(
         capabilities=MobileCapabilities(
             setup=True,
             cookie_session=True,
-            reader_v4=True,
+            reader_v5=True,
             media_range=True,
             managed_offline_downloads=True,
             book_resource_asset=True,

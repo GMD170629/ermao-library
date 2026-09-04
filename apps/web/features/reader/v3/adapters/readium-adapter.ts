@@ -1,28 +1,21 @@
 import { EpubNavigator, EpubPreferences, type EpubNavigatorListeners } from '@readium/navigator';
 import { Layout, Link, Locator, LocatorLocations } from '@readium/shared';
 import {
-  compareExactReadiumLocators,
-  hasExactReadiumAnchor,
-  parseReadiumLocatorEnvelope,
   readerAdjacentResourceProgression,
   type OperationToken,
-  type ReadiumLocatorEnvelope,
   type ReaderAdapter,
   type ReaderAdapterOpenContext,
   type ReaderAdapterOperationContext,
   type ReaderCapabilities,
   type ReaderCommand,
   type ReaderCommandAck,
+  type ReaderOpaqueLocator,
   type ReaderPreferences,
+  type ReaderPositionReport,
   type ReflowableLocation
 } from '@shuku/reader-core';
 import { ReaderAdapterBase } from './adapter-base';
 import { openReadiumPublication } from './readium-publication';
-import {
-  captureExactReadiumLocator,
-  captureVisibleReadiumTarget,
-  isReadiumTextAnchorUnique
-} from './readium-exact-locator-bridge';
 import type { ReaderAdapterInputHandler, ReaderInteractiveAdapter, ReaderInteractionPolicy } from './reader-interaction';
 import {
   closestReadiumPosition,
@@ -52,8 +45,10 @@ import {
 } from './readium-presentation';
 import { resolveEpubFont, type EpubFontResolution } from './epub-font';
 import { advanceScrollViewport, positionScrollResourceEdge } from './scroll-page-turn';
+import { LOCATION_RESTORE_FAILED as STANDARD_LOCATION_RESTORE_FAILED } from '../../../../lib/reader/v5-locator';
 
 const READIUM_VERSION = 'readium-ts:2.8.2';
+export const LOCATION_RESTORE_FAILED = STANDARD_LOCATION_RESTORE_FAILED;
 const READIUM_SUPPORTED_CONTROLS = [
   'Theme', 'SystemTheme', 'FontSize', 'FontFamily', 'FontWeight', 'LineHeight',
   'LetterSpacing', 'NegativeLetterSpacing', 'PageMargins', 'PageWidth', 'ReadingMode',
@@ -106,29 +101,21 @@ function commandForInput(intent: ReturnType<typeof readerKeyIntent> | ReturnType
 }
 
 
-function envelope(locator: Locator): ReadiumLocatorEnvelope | null {
-  const parsed = parseReadiumLocatorEnvelope({ engine: 'readium', platform: 'web', version: READIUM_VERSION, payload: locator.serialize() });
-  return parsed && hasExactReadiumAnchor(parsed.payload) ? parsed : null;
+export function deserializeReadiumLocator(value: ReaderOpaqueLocator): Locator {
+  try {
+    const locator = Locator.deserialize(value);
+    if (!locator) throw new Error('Readium returned no Locator');
+    return locator;
+  } catch (cause) {
+    throw new Error(LOCATION_RESTORE_FAILED, { cause });
+  }
 }
 
-function location(locator: ReadiumLocatorEnvelope, format: ReflowableLocation['format'], navigator: EpubNavigator | null): ReflowableLocation {
-  const fragments = Array.isArray(locator.payload.locations.fragments) ? locator.payload.locations.fragments : [];
+function location(locator: Locator, format: ReflowableLocation['format'], navigator: EpubNavigator | null): ReflowableLocation {
+  const fragments = Array.isArray(locator.locations.fragments) ? locator.locations.fragments : [];
   const cfi = fragments.find((value) => value.startsWith('epubcfi('));
-  const spineIndex = navigator?.publication.readingOrder.items.findIndex((item) => samePublicationResource(item.href, locator.payload.href)) ?? -1;
-  return { kind: 'reflowable', format, href: locator.payload.href, ...(cfi ? { cfi } : {}), ...(spineIndex >= 0 ? { spineIndex } : {}), ...(typeof locator.payload.locations.progression === 'number' ? { resourceProgression: locator.payload.locations.progression } : {}), ...(typeof locator.payload.locations.position === 'number' ? { position: locator.payload.locations.position } : {}), ...(locator.payload.text?.highlight ? { textQuote: { exact: locator.payload.text.highlight, ...(locator.payload.text.before ? { prefix: locator.payload.text.before } : {}), ...(locator.payload.text.after ? { suffix: locator.payload.text.after } : {}) } } : {}), exactLocator: locator };
-}
-
-function withTotalProgression(locator: ReadiumLocatorEnvelope, totalProgression: number): ReadiumLocatorEnvelope {
-  return {
-    ...locator,
-    payload: {
-      ...locator.payload,
-      locations: {
-        ...locator.payload.locations,
-        totalProgression
-      }
-    }
-  };
+  const spineIndex = navigator?.publication.readingOrder.items.findIndex((item) => samePublicationResource(item.href, locator.href)) ?? -1;
+  return { kind: 'reflowable', format, href: locator.href, ...(cfi ? { cfi } : {}), ...(spineIndex >= 0 ? { spineIndex } : {}), ...(typeof locator.locations.progression === 'number' ? { resourceProgression: locator.locations.progression } : {}), ...(typeof locator.locations.position === 'number' ? { position: locator.locations.position } : {}), ...(locator.text?.highlight ? { textQuote: { exact: locator.text.highlight, ...(locator.text.before ? { prefix: locator.text.before } : {}), ...(locator.text.after ? { suffix: locator.text.after } : {}) } } : {}) };
 }
 
 function locatorAtStartup(target: Readonly<{ position: Locator; fragment: string }> | null) {
@@ -148,11 +135,15 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   private preferences: ReaderPreferences | null = null;
   private source: Extract<ReaderAdapterOpenContext['source'], { kind: 'reflowable' }> | null = null;
   private format: ReflowableLocation['format'] = 'epub';
-  private latestExact: ReadiumLocatorEnvelope | null = null;
-  private restoreTarget: ReadiumLocatorEnvelope | null = null;
+  private latestLocator: Locator | null = null;
+  private latestPosition: ReaderPositionReport | null = null;
   private captureEnabled = false;
-  private restoreNavigationInFlight = false;
-  private pendingFrameCapture: { window: Window; requestId: number; completesPresentation: boolean } | null = null;
+  private pendingFrameCapture: {
+    window: Window;
+    requestId: number;
+    completesPresentation: boolean;
+    reportsLocation: boolean;
+  } | null = null;
   private positions: Locator[] = [];
   private startLocator: Locator | null = null;
   private locationOperation: OperationToken | null = null;
@@ -209,8 +200,16 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       contextMenu: () => undefined,
       peripheral: () => undefined
     };
-    const restoreTarget = context.initialLocation?.kind === 'reflowable' ? context.initialLocation.exactLocator ?? null : null;
-    const restoreLocator = restoreTarget ? Locator.deserialize(restoreTarget.payload) : null;
+    // Only the engine-owned opaque Locator is used for restoration. The
+    // presentation projection and legacy domain location never navigate.
+    let requestedRestoreLocator: Locator | null = null;
+    if (context.initialPosition) {
+      try {
+        requestedRestoreLocator = deserializeReadiumLocator(context.initialPosition.locator);
+      } catch {
+        requestedRestoreLocator = null;
+      }
+    }
     const requestedHref = context.initialLocation?.kind === 'reflowable'
       ? context.initialLocation.href
       : null;
@@ -221,16 +220,11 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       requestedHref
     );
     this.startLocator = locatorAtStartup(startupTargets.start);
-    let startupLocator = locatorAtStartup(startupTargets.initial);
-    const resourceProgression = context.initialLocation?.kind === 'reflowable'
-      ? context.initialLocation.resourceProgression
-      : undefined;
-    if (!restoreLocator && startupLocator && typeof resourceProgression === 'number') {
-      startupLocator = startupLocator.copyWithLocations({ progression: resourceProgression });
-    }
-    const initial = restoreLocator
-      ? opened.positions.find((position) => samePublicationResource(position.href, restoreLocator.href)) ?? opened.positions[0]
+    const startupLocator = locatorAtStartup(startupTargets.initial);
+    const restoreInitial = requestedRestoreLocator
+      ? opened.positions.find((position) => samePublicationResource(position.href, requestedRestoreLocator.href)) ?? null
       : startupLocator ?? opened.positions[0];
+    const initial = restoreInitial ?? undefined;
     this.navigator = new EpubNavigator(this.options.container, opened.publication, listeners, opened.positions, initial, {
       preferences: createReadiumEpubPreferences(context.preferences, this.viewportWidth(), this.resolvedFont ?? undefined),
       defaults: { optimalLineLength: 66 }
@@ -238,8 +232,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     await this.navigator.load(); this.assertActive(generation, context.signal);
     this.applyPresentationToLoadedFrames();
     this.observeViewport();
-    if (restoreTarget && restoreLocator) {
-      await this.navigateToExact(this.navigator, restoreTarget, restoreLocator);
+    if (requestedRestoreLocator) {
+      await this.navigateToPosition(this.navigator, requestedRestoreLocator).catch(() => false);
       this.assertActive(generation, context.signal);
     } else if (requestedHref && startupLocator) {
       // EpubNavigator can bootstrap its iframe at the publication start even
@@ -249,32 +243,63 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       await this.navigateToPosition(this.navigator, startupLocator);
       this.assertActive(generation, context.signal);
     }
-    // A rejected portable anchor falls back to the loaded resource without
-    // turning an otherwise readable publication into a fatal reader error.
     this.captureEnabled = true;
-    this.scheduleFrameCapture(this.options.container.ownerDocument.defaultView ?? window);
+    this.capturePosition(this.navigator.currentLocator);
+    // A restored opaque Locator must never be written back merely because the
+    // publication was opened. A genuinely new session at the publication
+    // start still reports Readium's first settled location so it can establish
+    // its first v5 position record.
+    this.scheduleFrameCapture(
+      this.options.container.ownerDocument.defaultView ?? window,
+      false,
+      requestedRestoreLocator === null
+    );
     const navigation = readiumNavigationEntries(opened.publication);
     if (navigation.length > 0) this.emit({ type: 'navigation-changed', items: navigation }, context.operation);
-    this.emit({ type: 'ready', capabilities: capabilities(this.navigator), location: this.latestExact ? location(this.latestExact, this.format, this.navigator) : null }, context.operation);
+    this.emit({
+      type: 'ready',
+      capabilities: capabilities(this.navigator),
+      location: this.latestLocator ? location(this.latestLocator, this.format, this.navigator) : null,
+      position: this.latestPosition
+    }, context.operation);
     this.emit({ type: 'phase-changed', phase: null }, context.operation);
   }
 
-  private scheduleFrameCapture(window: Window, completesPresentation = false) {
+  private scheduleFrameCapture(
+    window: Window,
+    completesPresentation = false,
+    reportsLocation = true
+  ) {
     const shouldCompletePresentation = completesPresentation
       || this.pendingFrameCapture?.completesPresentation === true;
+    const shouldReportLocation = reportsLocation
+      && this.pendingFrameCapture?.reportsLocation !== false;
     if (this.pendingFrameCapture) {
       this.pendingFrameCapture.window.cancelAnimationFrame(this.pendingFrameCapture.requestId);
     }
     const afterLayout = () => {
       this.pendingFrameCapture = null;
-      if (this.navigator) this.onPositionChanged(this.navigator.currentLocator);
+      if (this.navigator) {
+        if (shouldReportLocation) this.onPositionChanged(this.navigator.currentLocator);
+        else this.capturePosition(this.navigator.currentLocator);
+      }
       if (shouldCompletePresentation) this.presentationOperation = null;
     };
     const firstRequestId = window.requestAnimationFrame(() => {
       const secondRequestId = window.requestAnimationFrame(afterLayout);
-      this.pendingFrameCapture = { window, requestId: secondRequestId, completesPresentation: shouldCompletePresentation };
+      this.pendingFrameCapture = {
+        window,
+        requestId: secondRequestId,
+        completesPresentation: shouldCompletePresentation,
+        reportsLocation: shouldReportLocation
+      };
     });
-    this.pendingFrameCapture = { window, requestId: firstRequestId, completesPresentation: shouldCompletePresentation };
+    this.pendingFrameCapture = {
+      window,
+      requestId: firstRequestId,
+      completesPresentation: shouldCompletePresentation,
+      reportsLocation: shouldReportLocation
+    };
   }
 
   private onFrameLoaded(window: Window) {
@@ -465,89 +490,50 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     return true;
   }
 
-  private async navigateToExact(navigator: EpubNavigator, target: ReadiumLocatorEnvelope, locator: Locator) {
-    delete this.options.container.dataset.readerExactRestore;
-    this.restoreTarget = target;
-    this.restoreNavigationInFlight = true;
-    const accepted = await callbackNavigation((callback) => navigator.go(locator, false, callback));
-    this.restoreNavigationInFlight = false;
-    if (!accepted) {
-      this.restoreTarget = null;
-    }
-    return accepted;
-  }
-
-  private async verifyExactNavigation(navigator: EpubNavigator, target: ReadiumLocatorEnvelope) {
-    const ownerWindow = this.options.container.ownerDocument.defaultView ?? window;
-    for (let attempt = 0; attempt < 60; attempt += 1) {
-      await new Promise<void>((resolve) => ownerWindow.requestAnimationFrame(() => resolve()));
-      if (navigator !== this.navigator) return false;
-      // The public go() callback may run before Readium has recycled and laid
-      // out the destination iframe. An independent visible-DOM capture is the
-      // evidence used by Reader v4, never the echoed requested Locator.
-      this.onPositionChanged(navigator.currentLocator, true);
-      const recaptured = this.latestExact;
-      if (!recaptured) continue;
-      const comparison = compareExactReadiumLocators(target, recaptured);
-      const textAnchorIsUnique = comparison.reason !== 'same_text_anchor'
-        || isReadiumTextAnchorUnique(this.options.container, target.payload.text?.highlight ?? '');
-      if (comparison.precision === 'exact-block' && textAnchorIsUnique) {
-        this.options.container.dataset.readerExactRestore = 'verified';
-        return true;
+  private positionReport(value: Locator): ReaderPositionReport {
+    const totalProgression = readiumTotalProgression(value, this.positions);
+    const serialized = value.serialize();
+    const href = typeof serialized.href === 'string' ? serialized.href : null;
+    const navigation = this.navigator ? readiumNavigationEntries(this.navigator.publication) : [];
+    const chapter = href
+      ? navigation.find((item) => item.href && samePublicationResource(item.href, href))
+      : undefined;
+    return {
+      // This is the exact object returned by Readium's public serialize().
+      locator: serialized,
+      presentation: {
+        displayPercent: Math.max(0, Math.min(100, totalProgression * 100)),
+        totalProgression: Math.max(0, Math.min(1, totalProgression)),
+        currentHref: href,
+        chapter: chapter ? { href: chapter.href ?? null, title: chapter.label ?? null, index: chapter.index ?? null } : null,
+        page: null,
+        playback: null
       }
-    }
-    this.options.container.dataset.readerExactRestore = 'failed';
-    return false;
+    };
   }
 
-  private onPositionChanged(value: Locator, settledNavigation = false) {
+  private onPositionChanged(value: Locator, _settledNavigation = false) {
     if (
       !this.captureEnabled
-      || this.restoreNavigationInFlight
-      || (this.resizePresentationInFlight && !settledNavigation)
+      || (this.resizePresentationInFlight && !_settledNavigation)
     ) return;
-    // Error-marker resources remain navigable, but must never become progress
-    // or bookmark locations. The last successfully rendered exact Locator stays current.
-    if (this.hasUnreadablePage()) return;
-    // During restoration, the Navigator can echo the requested Locator before the
-    // target is actually the first visible block. Only an independent DOM recapture
-    // is valid post-navigation evidence.
-    const restoreTarget = this.restoreTarget;
-    const resourceHrefs = this.navigator?.publication.readingOrder.items.map((item) => item.href) ?? [];
-    let exact = restoreTarget
-      ? captureVisibleReadiumTarget(restoreTarget, value, this.options.container, resourceHrefs)
-      : captureExactReadiumLocator(value, this.options.container, resourceHrefs)
-        ?? envelope(value);
-    if (restoreTarget && !exact) {
-      exact = captureExactReadiumLocator(value, this.options.container, resourceHrefs)
-        ?? envelope(value);
-      this.restoreTarget = null;
-      this.options.container.dataset.readerExactRestore = 'failed';
-    }
-    if (!exact) return; // Public Navigator event did not provide a verifiable block anchor.
-    if (restoreTarget && this.restoreTarget) {
-      const comparison = compareExactReadiumLocators(restoreTarget, exact);
-      const textAnchorIsUnique = comparison.reason !== 'same_text_anchor'
-        || isReadiumTextAnchorUnique(this.options.container, restoreTarget.payload.text?.highlight ?? '');
-      if (comparison.precision !== 'exact-block' || !textAnchorIsUnique) {
-        exact = captureExactReadiumLocator(value, this.options.container, resourceHrefs)
-          ?? envelope(value);
-        this.restoreTarget = null;
-        this.options.container.dataset.readerExactRestore = 'failed';
-        if (!exact) return;
-      } else {
-        this.restoreTarget = null;
-        this.options.container.dataset.readerExactRestore = 'verified';
-      }
-    }
-    const totalProgression = readiumTotalProgression(value, this.positions);
-    exact = withTotalProgression(exact, totalProgression);
-    this.latestExact = exact;
-    const percent = totalProgression * 100;
+    const percent = this.capturePosition(value);
+    const position = this.latestPosition;
+    if (percent === null || !position) return;
     const operation = this.presentationOperation ?? this.locationOperation ?? this.currentOperation();
-    this.emit({ type: 'location-changed', location: location(exact, this.format, this.navigator), percent }, operation);
+    this.emit({ type: 'location-changed', location: location(value, this.format, this.navigator), percent, position }, operation);
     if (this.navigator) this.emit({ type: 'capabilities-changed', capabilities: capabilities(this.navigator) }, operation);
     if (this.presentationOperation === operation) this.presentationOperation = null;
+  }
+
+  private capturePosition(value: Locator): number | null {
+    // Error-marker resources remain navigable, but must never become progress
+    // or bookmark locations. The last successfully rendered Locator stays current.
+    if (this.hasUnreadablePage()) return null;
+    const totalProgression = readiumTotalProgression(value, this.positions);
+    this.latestLocator = value;
+    this.latestPosition = this.positionReport(value);
+    return totalProgression * 100;
   }
 
   async execute(command: ReaderCommand, context: ReaderAdapterOperationContext): Promise<ReaderCommandAck> {
@@ -582,38 +568,30 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       }
     } else if (command.type === 'first') accepted = await this.navigateToPosition(navigator, this.startLocator ?? this.positions[0] ?? null);
     else if (command.type === 'last') {
-      const last = this.positions.at(-1)?.copyWithLocations({ progression: 1, totalProgression: 1 }) ?? null;
+      const last = this.positions.at(-1) ?? null;
       accepted = await this.navigateToPosition(navigator, last);
     } else if (command.type === 'go-to-progress') {
       const target = command.progression <= 0
         ? this.startLocator ?? this.positions[0] ?? null
         : closestReadiumPosition(this.positions, command.progression);
-      const adjusted = command.progression >= 1 && target
-        ? target.copyWithLocations({ progression: 1, totalProgression: 1 })
-        : target;
-      accepted = await this.navigateToPosition(navigator, adjusted);
+      accepted = await this.navigateToPosition(navigator, target);
     } else if (command.type === 'go-to-index') {
       const link = Number.isInteger(command.index) && command.index >= 0
         ? navigator.publication.readingOrder.items[command.index]
         : undefined;
       accepted = link ? await this.navigateToPosition(navigator, link.locator) : false;
     }
-    else if (command.type === 'go-to-location' && command.location.kind === 'reflowable' && command.location.exactLocator) {
-      const target = parseReadiumLocatorEnvelope(command.location.exactLocator); const readium = target ? Locator.deserialize(target.payload) : null;
-      if (target && readium) {
-        accepted = await this.navigateToExact(navigator, target, readium);
-        if (accepted) {
-          this.captureEnabled = true;
-          accepted = await this.verifyExactNavigation(navigator, target);
-        }
-        else {
-          this.captureEnabled = true;
-        }
-      }
+    else if (command.type === 'go-to-position') {
+      const readium = deserializeReadiumLocator(command.position.locator);
+      accepted = await this.navigateToPosition(navigator, readium);
+      if (!accepted) throw new Error(LOCATION_RESTORE_FAILED);
     } else if (command.type === 'go-to-href') {
       accepted = await this.navigateToHref(navigator, command.href);
     }
-    return this.ack(context.operation, accepted, this.latestExact ? { location: location(this.latestExact, this.format, this.navigator) } : {});
+    return this.ack(context.operation, accepted, this.latestLocator ? {
+      location: location(this.latestLocator, this.format, this.navigator),
+      position: this.latestPosition ?? undefined
+    } : {});
   }
 
   private async navigateAdjacentScrollResource(navigator: EpubNavigator, direction: 'previous' | 'next') {
@@ -675,7 +653,7 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
   private async navigateToHref(navigator: EpubNavigator, href: string) {
     const candidate = href.trim();
     if (!candidate) return false;
-    const currentHref = this.latestExact?.payload.href ?? navigator.currentLocator.href;
+    const currentHref = this.latestLocator?.href ?? navigator.currentLocator.href;
     const resolved = resolveReadiumHref(candidate, currentHref);
     const publication = navigator.publication;
     const match = [candidate, resolved]
@@ -733,9 +711,9 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
       kind: 'reflowable',
       format: this.format,
       href: current.href,
-      resourceProgression: current.locations.progression,
-      ...(this.latestExact ? { exactLocator: this.latestExact } : {})
+      resourceProgression: current.locations.progression
     };
+    const initialPosition = this.latestPosition;
     this.presentationOperation = context.operation;
     await this.closeActiveNavigator();
     try {
@@ -746,7 +724,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
         signal: context.signal,
         source,
         preferences,
-        initialLocation
+        initialLocation,
+        initialPosition
       });
       return this.ack(context.operation, true);
     } catch (reason) {
@@ -759,7 +738,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
             signal: context.signal,
             source,
             preferences: previous,
-            initialLocation
+            initialLocation,
+            initialPosition
           });
           return this.failOperation(context, 'READER_PREFERENCES_ENGINE_FAILED');
         } catch {
@@ -878,6 +858,8 @@ export class ReadiumWebReaderAdapter extends ReaderAdapterBase implements Reader
     await this.closeActiveNavigator();
     this.positions = [];
     this.startLocator = null;
+    this.latestLocator = null;
+    this.latestPosition = null;
     this.locationOperation = null;
     this.presentationOperation = null;
     this.source = null;

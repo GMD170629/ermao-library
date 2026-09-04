@@ -4,37 +4,36 @@ import com.ermao.library.shared.modules.audio.application.AudioProgressSaveReaso
 import com.ermao.library.shared.modules.audio.application.AudioProgressSession
 import com.ermao.library.shared.modules.audio.application.AudioProgressWriter
 import com.ermao.library.shared.modules.audio.application.LocalAudioPublicationFactory
-import com.ermao.library.shared.modules.reader.AudioPublicationLocation
-import com.ermao.library.shared.modules.reader.AudioReaderLocation
-import com.ermao.library.shared.modules.reader.ReaderProgress
-import com.ermao.library.shared.modules.reader.ReaderProgressDurableState
-import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV4
-import com.ermao.library.shared.modules.reader.ReaderProgressSyncingStore
+import com.ermao.library.shared.modules.reader.ReaderPositionLocalState
+import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
+import com.ermao.library.shared.modules.reader.ReaderPositionDurableState
+import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
+import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 
 class AudioProgressWriterTest {
     @Test
-    fun writerPersistsEveryStateMachineCaptureWithItsExactPercentage() = runBlocking {
+    fun writerPersistsAudioLocatorAndIndependentPresentation() = runBlocking {
         val store = FakeStore()
         var now = 1_000L
         val writer = AudioProgressWriter(store, "resource-1", "device-1") { now }
 
-        writer.save("asset-1", null, 1_000, 10_000, AudioProgressSaveReason.Tick)
-        now += 14_999
         writer.save("asset-1", "chapter-1", 2_000, 10_000, AudioProgressSaveReason.Pause)
 
-        assertEquals(2, store.saved.size)
-        val location = assertIs<AudioReaderLocation>(store.saved.last().location)
-        assertEquals("chapter-1", location.chapterId)
-        assertEquals(20.0, store.saved.last().percent)
+        val state = store.saved.single()
+        assertEquals("asset-1", writer.toAudioLocation(state.position)?.assetId)
+        assertEquals(20.0, state.position.presentation.displayPercent)
+        assertEquals(2_000, state.position.presentation.playback?.positionMillis)
+        assertNotNull(state.position.locator.canonicalJson)
+        now += 1
     }
 
     @Test
-    fun sessionRestoresNewestValidExactLocationAndFallsBackFromInvalidRemote() = runBlocking {
+    fun sessionUsesRemoteLocatorOnlyWhenNoLocalPendingCapture() = runBlocking {
         val store = FakeStore()
         val writer = AudioProgressWriter(store, "resource-1", "device-1") { 3_000 }
         val session = AudioProgressSession(writer)
@@ -50,44 +49,78 @@ class AudioProgressWriterTest {
             sizeBytes = 1_000,
             durationMillis = 60_000,
         )
-        store.saved += ReaderProgress(
-            resourceId = "resource-1",
-            location = AudioReaderLocation("asset-1", null, 10_000),
-            updatedAtEpochMillis = 1_000,
-            deviceId = "device-1",
-            percent = 16.67,
-        )
-        val newerRemote = ReaderProgressSnapshotV4(
+        val remote = ReaderProgressSnapshotV5(
             resourceId = "resource-1",
             clientId = "remote-device",
             revision = 2,
-            locator = AudioPublicationLocation("asset-1", null, 20_000),
-            displayPercent = 33.33,
-            receivedAtEpochMillis = 2_000,
+            mutationId = "f4743f84-16dc-4202-ab50-729e4d036d16",
             capturedAtEpochMillis = 2_000,
+            receivedAtEpochMillis = 2_000,
+            position = writerReport("asset-1", 20_000, 60_000),
         )
 
-        assertEquals(20_000, session.restore(publication, newerRemote)?.positionMillis)
-
-        val invalidRemote = newerRemote.copy(
-            revision = 3,
-            locator = AudioPublicationLocation("missing-asset", null, 30_000),
-            receivedAtEpochMillis = 3_000,
-            capturedAtEpochMillis = 3_000,
-        )
-        assertEquals(10_000, session.restore(publication, invalidRemote)?.positionMillis)
+        assertEquals(20_000, session.restore(publication, remote)?.positionMillis)
     }
 
-    private class FakeStore : ReaderProgressSyncingStore {
-        val saved = mutableListOf<ReaderProgress>()
+    @Test
+    fun selectedRemoteAudioLocationIgnoresTheLocalRestoreCandidate() = runBlocking {
+        val store = FakeStore()
+        val writer = AudioProgressWriter(store, "resource-1", "device-1") { 3_000 }
+        val session = AudioProgressSession(writer)
+        val publication = LocalAudioPublicationFactory().create(
+            namespace = ReaderSyncNamespace("server-1", "user-1", 1),
+            bookId = "book-1",
+            bookTitle = "Book",
+            author = null,
+            resourceId = "resource-1",
+            resourceTitle = "Volume",
+            assetId = "asset-1",
+            mimeType = "audio/mp4",
+            sizeBytes = 1_000,
+            durationMillis = 60_000,
+        )
+        writer.save("asset-1", null, 5_000, 60_000, AudioProgressSaveReason.Pause)
+        val remote = ReaderProgressSnapshotV5(
+            resourceId = "resource-1",
+            clientId = "remote-device",
+            revision = 2,
+            mutationId = "f4743f84-16dc-4202-ab50-729e4d036d16",
+            capturedAtEpochMillis = 2_000,
+            receivedAtEpochMillis = 2_000,
+            position = writerReport("asset-1", 20_000, 60_000),
+        )
 
-        override suspend fun load(sourceId: String): ReaderProgress? = saved.lastOrNull()
-        override suspend fun save(progress: ReaderProgress) {
-            saved += progress
+        assertEquals(20_000, session.remoteLocation(publication, remote).positionMillis)
+    }
+
+    private fun writerReport(assetId: String, position: Long, duration: Long) =
+        com.ermao.library.shared.modules.reader.ReaderPositionReport(
+            com.ermao.library.shared.modules.reader.ReaderOpaqueLocator.parse(
+                "{\"href\":\"$assetId\",\"type\":\"audio/mp4\",\"locations\":{" +
+                    "\"position\":1,\"time\":${position.toDouble() / 1000}}}",
+            ),
+            com.ermao.library.shared.modules.reader.ReaderPositionPresentation(
+                displayPercent = position * 100.0 / duration,
+                totalProgression = position.toDouble() / duration,
+                currentHref = assetId,
+                chapter = null,
+                page = null,
+                playback = com.ermao.library.shared.modules.reader.ReaderPlaybackPresentation(position, duration),
+            ),
+        )
+
+    private class FakeStore : ReaderPositionSyncingStore {
+        val saved = mutableListOf<ReaderPositionLocalState>()
+        var pending = false
+
+        override suspend fun load(resourceId: String): ReaderPositionLocalState? = saved.lastOrNull()
+        override suspend fun save(position: ReaderPositionLocalState) {
+            saved += position
+            pending = true
         }
-        override suspend fun delete(sourceId: String) = Unit
+        override suspend fun delete(resourceId: String) = Unit
         override suspend fun awaitPendingUpload() = Unit
         override suspend fun retryPendingUpload() = Unit
-        override suspend fun syncState(): ReaderProgressDurableState = ReaderProgressDurableState()
+        override suspend fun syncState(): ReaderPositionDurableState = ReaderPositionDurableState()
     }
 }

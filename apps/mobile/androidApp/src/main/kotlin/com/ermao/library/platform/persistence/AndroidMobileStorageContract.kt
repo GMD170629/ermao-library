@@ -8,9 +8,10 @@ import java.io.File
  * Owns destructive local storage boundaries for native mobile contracts.
  *
  * The Book/Resource/Asset cutover has no trustworthy Work/Version/Volume
- * mapping. On first launch of this contract, old private artifacts are
- * removed and the new stores start empty. Completed downloads remain a
- * first-class feature: they are stored below the v3 root after this boundary.
+ * mapping. On first launch of this contract, only superseded download
+ * artifacts are removed and the new stores start empty. Reader v5 owns a
+ * separate namespace; legacy Reader databases, directories, caches, and
+ * preferences are intentionally ignored and preserved.
  */
 object AndroidMobileStorageContract {
     const val CURRENT_VERSION = 3
@@ -24,36 +25,23 @@ object AndroidMobileStorageContract {
         if (preferences.getInt(VERSION_KEY, 0) >= CURRENT_VERSION) return
 
         val filesDirectory = applicationContext.filesDir
-        val cacheDirectory = applicationContext.cacheDir
-        val oldFiles = listOf(
+        val legacyDownloadFiles = listOf(
             File(filesDirectory, "managed-downloads-v1"),
             File(filesDirectory, "managed-downloads-v2"),
-            File(filesDirectory, "reader-progress"),
-            File(filesDirectory, "reader-progress-v2"),
-            File(filesDirectory, "reader-publications"),
-            File(filesDirectory, "reader-publications-v1"),
-            File(filesDirectory, "reader-publications-v2"),
-        )
-        val oldCaches = listOf(
-            File(cacheDirectory, "reader/pdf-range-v1"),
-            File(cacheDirectory, "reader/pdf-range-v2"),
         )
 
         // Keep the marker at the old version if cleanup cannot finish. This
-        // makes the next process retry instead of silently retaining legacy
-        // identity-bound data.
+        // makes the next process retry the download cleanup. Reader legacy
+        // data is deliberately not part of this operation.
         runCatching {
-            (oldFiles + oldCaches).forEach(::deleteRecursivelyIfPresent)
-            applicationContext.deleteDatabase("reader-progress.db")
-            applicationContext.deleteSharedPreferences("reader_bookmarks_v1")
-            applicationContext.deleteSharedPreferences("reader-navigation-v1")
+            legacyDownloadFiles.forEach(::deleteRecursivelyIfPresent)
             preferences.edit { putInt(VERSION_KEY, CURRENT_VERSION) }
         }
     }
 
     private fun deleteRecursivelyIfPresent(file: File) {
         if (file.exists() && !file.deleteRecursively()) {
-            error("Unable to clear legacy mobile storage: ${file.name}")
+            error("Unable to clear legacy download storage: ${file.name}")
         }
     }
 }

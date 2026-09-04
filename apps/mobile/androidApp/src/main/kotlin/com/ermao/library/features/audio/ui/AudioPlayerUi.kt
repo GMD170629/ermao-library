@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MenuBook
@@ -56,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -95,7 +97,10 @@ import com.ermao.library.shared.modules.library.ContentRepository
 import com.ermao.library.shared.modules.library.ContentRequestContext
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import java.text.NumberFormat
+import java.text.DateFormat
+import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -244,6 +249,8 @@ fun AudioNowPlayingScreen(
     )
     val chaptersEnabled = runtime.currentTracks().isNotEmpty()
     val speedEnabled = controlsEnabled
+    val remoteNotice by runtime.remoteProgressNotice.collectAsState()
+    val remoteActionFailed by runtime.remoteProgressActionFailed.collectAsState()
 
     Scaffold(
         modifier = modifier.semantics { stateDescription = status },
@@ -569,6 +576,49 @@ fun AudioNowPlayingScreen(
                                 )
                             },
                         )
+                    }
+                }
+            }
+            remoteNotice?.let { notice ->
+                item(key = "audio-remote-progress-${notice.revision}") {
+                    val readAt = remember(notice.snapshot.capturedAtEpochMillis) {
+                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                            .format(Date(notice.snapshot.capturedAtEpochMillis))
+                    }
+                    val position = notice.presentation.chapter?.title?.takeIf(String::isNotBlank)
+                        ?: stringResource(
+                            R.string.reader_progress_percent,
+                            notice.presentation.displayPercent.roundToInt(),
+                        )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = theme.colors.surface,
+                        shape = RoundedCornerShape(theme.radii.task),
+                        tonalElevation = 4.dp,
+                    ) {
+                        Column(Modifier.padding(theme.spacing.one)) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text(
+                                    stringResource(R.string.reader_resume_prompt, readAt, position),
+                                    modifier = Modifier.weight(1f),
+                                    style = theme.typography.body,
+                                    color = theme.colors.textPrimary,
+                                )
+                                IconButton(onClick = runtime::dismissRemoteProgressNotice) {
+                                    Icon(Icons.Filled.Close, stringResource(R.string.reader_resume_dismiss))
+                                }
+                            }
+                            if (remoteActionFailed) {
+                                Text(
+                                    stringResource(R.string.reader_resume_return_failed),
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                                    style = theme.typography.caption,
+                                )
+                            }
+                            TextButton(onClick = runtime::goToRemoteProgress) {
+                                Text(stringResource(R.string.reader_resume_return))
+                            }
+                        }
                     }
                 }
             }

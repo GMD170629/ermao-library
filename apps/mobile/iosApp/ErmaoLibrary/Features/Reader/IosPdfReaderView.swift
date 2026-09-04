@@ -19,27 +19,13 @@ struct IosPdfReaderView: View {
                 if session.phase == .reading || session.phase == .background {
                     IosReaderControls(session: session, onClose: close)
                 }
-                if session.restoreWarning != nil {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Text("reader.restore.warning.message")
-                            Spacer()
-                            Button { session.dismissRestoreWarning() } label: { Image(systemName: "xmark") }
-                                .accessibilityLabel(Text("common.close"))
-                        }
-                        .padding().background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 14)).padding()
-                    }
-                }
-                if let snapshot = session.remoteProgressSnapshot,
-                   let location = snapshot.locator as? ErmaoShared.PdfPublicationLocation {
+                if let snapshot = session.remoteProgressSnapshot {
                     IosPageRemoteProgressNotice(
                         snapshot: snapshot,
-                        position: String(
-                            format: String(localized: "reader.page.number.format"),
-                            Int(location.pageIndex) + 1
-                        ),
+                        position: snapshot.position.presentation.page.map {
+                            String(format: String(localized: "reader.page.number.format"), Int($0.number))
+                        } ?? String(format: "%d%%", Int(snapshot.position.presentation.displayPercent.rounded())),
+                        actionFailed: session.remoteProgressActionFailed,
                         onOpen: { Task { await session.goToRemoteProgress() } },
                         onClose: session.dismissRemoteProgressNotice
                     )
@@ -52,7 +38,7 @@ struct IosPdfReaderView: View {
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .task {
             await session.open()
-            await session.verifyRestoredLocationAfterPresentation()
+            session.applySavedZoomAfterPresentation()
             UIApplication.shared.isIdleTimerDisabled = session.preferences.keepScreenAwake
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -113,8 +99,9 @@ struct IosPdfReaderView: View {
 }
 
 struct IosPageRemoteProgressNotice: View {
-    let snapshot: ErmaoShared.ReaderProgressSnapshotV4
+    let snapshot: ErmaoShared.ReaderProgressSnapshotV5
     let position: String
+    let actionFailed: Bool
     let onOpen: () -> Void
     let onClose: () -> Void
 
@@ -123,10 +110,16 @@ struct IosPageRemoteProgressNotice: View {
             Spacer()
             HStack(spacing: 12) {
                 Button(action: onOpen) {
-                    Text(message).multilineTextAlignment(.leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(message).multilineTextAlignment(.leading)
+                        if actionFailed {
+                            Text("reader.resume.returnFailed").font(.caption)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
                 Spacer(minLength: 4)
+                Button("reader.resume.return", action: onOpen)
                 Button(action: onClose) {
                     Image(systemName: "xmark").frame(width: 32, height: 32)
                 }
@@ -137,13 +130,10 @@ struct IosPageRemoteProgressNotice: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .padding()
         }
-        .accessibilityElement(children: .combine)
     }
 
     private var message: String {
-        let date = Date(
-            timeIntervalSince1970: TimeInterval(snapshot.effectiveCapturedAtEpochMillis) / 1_000
-        )
+        let date = Date(timeIntervalSince1970: TimeInterval(snapshot.capturedAtEpochMillis) / 1_000)
         return String(
             format: String(localized: "reader.remote.notice.format"),
             locale: .current,

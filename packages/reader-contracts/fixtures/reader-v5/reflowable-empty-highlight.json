@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 5,
+  "clientId": "ios-fixture",
+  "mutationId": "0b65b4fd-29d3-4a33-8c61-3a286a3154a2",
+  "capturedAtEpochMillis": 1786500000000,
+  "position": {
+    "locator": {
+      "href": "OEBPS/Text/backcover.xhtml",
+      "type": "application/xhtml+xml",
+      "locations": {
+        "cssSelector": ".cover",
+        "fragments": [],
+        "position": 190,
+        "progression": 1,
+        "totalProgression": 0.25,
+        "vendorExtension": {
+          "nullable": null,
+          "empty": ""
+        }
+      },
+      "text": {
+        "highlight": ""
+      },
+      "unknownExtension": {
+        "preserve": true
+      }
+    },
+    "presentation": {
+      "displayPercent": 99,
+      "totalProgression": 0.99,
+      "currentHref": "OEBPS/Text/backcover.xhtml",
+      "chapter": {
+        "href": "OEBPS/Text/backcover.xhtml",
+        "title": "封底",
+        "index": 19
+      },
+      "page": null,
+      "playback": null
+    }
+  }
+}

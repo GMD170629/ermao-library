@@ -450,60 +450,6 @@ class ReaderScreenContentsInstrumentedTest {
         compose.waitUntil { controller.preferences.value.epub.pageWidth == 900 }
     }
 
-    @Test
-    fun restoreWarningCanBeDismissed() {
-        compose.mainClock.autoAdvance = false
-        val controller = DeferredContentsController().apply { showRestoreWarning() }
-        val dismiss = instrumentation.targetContext.getString(R.string.reader_restore_warning_dismiss)
-        compose.setContent {
-            ReaderScreen(
-                title = "Restore warning fixture",
-                controller = controller,
-                opening = false,
-                openError = null,
-                controlsVisible = false,
-                onControlsVisibleChange = {},
-                onClose = {},
-                onNavigatorContainerReady = {},
-            )
-        }
-        showTestHostOverKeyguard()
-        compose.mainClock.advanceTimeByFrame()
-
-        compose.onNodeWithTag(READER_RESTORE_WARNING_TEST_TAG).assertIsDisplayed()
-        compose.onNodeWithContentDescription(dismiss).performClick()
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitForIdle()
-        compose.onNodeWithTag(READER_RESTORE_WARNING_TEST_TAG).assertDoesNotExist()
-        assertEquals(null, controller.restoreWarning.value)
-    }
-
-    @Test
-    fun restoreWarningAutomaticallyDisappears() {
-        compose.mainClock.autoAdvance = false
-        val controller = DeferredContentsController().apply { showRestoreWarning() }
-        compose.setContent {
-            ReaderScreen(
-                title = "Restore warning timeout fixture",
-                controller = controller,
-                opening = false,
-                openError = null,
-                controlsVisible = false,
-                onControlsVisibleChange = {},
-                onClose = {},
-                onNavigatorContainerReady = {},
-            )
-        }
-        showTestHostOverKeyguard()
-        compose.mainClock.advanceTimeByFrame()
-        compose.onNodeWithTag(READER_RESTORE_WARNING_TEST_TAG).assertIsDisplayed()
-
-        compose.mainClock.advanceTimeBy(RESTORE_WARNING_AUTO_DISMISS_MILLIS + 1)
-        compose.waitForIdle()
-        compose.onNodeWithTag(READER_RESTORE_WARNING_TEST_TAG).assertDoesNotExist()
-        assertEquals(null, controller.restoreWarning.value)
-    }
-
     private fun showTestHostOverKeyguard() {
         instrumentation.runOnMainSync {
             listOf(Stage.RESUMED, Stage.PAUSED, Stage.STOPPED).forEach { stage ->
@@ -555,8 +501,6 @@ class ReaderScreenContentsInstrumentedTest {
         override val currentLocation: StateFlow<ReaderLocation?> = locationState
         private val preferenceState = MutableStateFlow(initialPreferences)
         override val preferences: StateFlow<ReaderPreferences> = preferenceState
-        private val restoreWarningState = MutableStateFlow<ReaderError?>(null)
-        override val restoreWarning: StateFlow<ReaderError?> = restoreWarningState
         override val resumeNotice: StateFlow<ReaderResumeNotice?> = MutableStateFlow(null)
         override val resumeActionFailed: StateFlow<Boolean> = MutableStateFlow(false)
         override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())
@@ -589,12 +533,6 @@ class ReaderScreenContentsInstrumentedTest {
             seekCalls.incrementAndGet()
             lastSeek.set(totalProgression)
             return seekAccepted
-        }
-        fun showRestoreWarning() {
-            restoreWarningState.value = ReaderError(ReaderErrorCode.LocationRestoreFailed)
-        }
-        override fun dismissRestoreWarning() {
-            restoreWarningState.value = null
         }
         override fun dismissResumeNotice() = Unit
         override fun returnToResumeNotice() = false

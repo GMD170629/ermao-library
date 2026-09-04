@@ -17,7 +17,7 @@ import com.ermao.library.shared.modules.reader.domain.ReaderPreferences
 import com.ermao.library.shared.modules.reader.domain.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.domain.changedReaderControls
 import com.ermao.library.shared.modules.reader.domain.supportedControls
-import com.ermao.library.shared.modules.reader.domain.ComicPublicationLocation
+import com.ermao.library.shared.modules.reader.domain.ComicReaderLocation
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -56,7 +56,7 @@ class ComicReaderSemanticsTest {
         assertEquals(2, runtime.plan.anchorPageIndex)
 
         val restored = runtime.dispatch(
-            ComicNavigationCommand.RestoreLocation(ComicPublicationLocation("pages/3", 3)),
+            ComicNavigationCommand.RestoreLocation(ComicReaderLocation("pages/3", 3)),
         )
         assertEquals(ComicNavigationOutcome.NoOp, restored.outcome)
         assertEquals(3, restored.plan.currentPageIndex)
@@ -76,7 +76,7 @@ class ComicReaderSemanticsTest {
             ),
         )
         val invalid = runtime.dispatch(
-            ComicNavigationCommand.RestoreLocation(ComicPublicationLocation("pages/0", 1)),
+            ComicNavigationCommand.RestoreLocation(ComicReaderLocation("pages/0", 1)),
         )
         assertEquals(ComicNavigationOutcome.InvalidLocation, invalid.outcome)
         assertEquals(0, runtime.plan.currentPageIndex)

@@ -27,7 +27,7 @@ import kotlin.test.assertTrue
 
 class KtorReaderBookmarkSyncPortTest {
     @Test
-    fun loadMapsAllFourBookmarkLocationMorphologies() = runBlocking {
+    fun loadMapsOpaqueBookmarkPositions() = runBlocking {
         val port = port {
             respond(
                 BOOKMARKS_RESPONSE,
@@ -39,18 +39,16 @@ class KtorReaderBookmarkSyncPortTest {
         val result = port.load(target())
 
         assertTrue(result.succeeded)
-        assertEquals(listOf("reflow", "comic", "pdf", "audio"), result.bookmarks.map { it.location.kind })
-        assertEquals(3, result.bookmarks[1].location.pageIndex)
-        assertEquals(4, result.bookmarks[2].location.pageNumber)
-        assertEquals("asset-1", result.bookmarks[3].location.assetId)
-        assertEquals(42_000, result.bookmarks[3].location.positionMs)
+        assertEquals(listOf("chapter-1.xhtml", "comic/page-3", "pdf/page-4", "asset-1"), result.bookmarks.map { it.currentHref })
+        assertEquals(30.0, result.bookmarks[1].displayPercent)
+        assertEquals(42_000, result.bookmarks[3].position.presentation.playback?.positionMillis)
     }
 
     @Test
     fun malformedLocationIsRejectedAtTheTransportBoundary() = runBlocking {
         val port = port {
             respond(
-                BOOKMARKS_RESPONSE.replace("\"pageIndex\":3", "\"pageIndex\":0"),
+                BOOKMARKS_RESPONSE.replace("\"displayPercent\":30.0", "\"displayPercent\":101.0"),
                 HttpStatusCode.OK,
                 headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
             )
@@ -81,10 +79,10 @@ class KtorReaderBookmarkSyncPortTest {
     private companion object {
         const val BOOKMARKS_RESPONSE = """
             {"ok":true,"data":{"bookmarks":[
-              {"id":"reflow-1","location":{"kind":"reflow","resourceKey":"chapter-1.xhtml","progression":0.25},"label":"Chapter 1","percent":10.0,"createdAt":"2026-08-13T00:00:00Z"},
-              {"id":"comic-1","location":{"kind":"comic","pageIndex":3},"label":"Page 3","percent":30.0,"createdAt":"2026-08-13T01:00:00Z"},
-              {"id":"pdf-1","location":{"kind":"pdf","pageNumber":4},"label":"Page 4","percent":40.0,"createdAt":"2026-08-13T02:00:00Z"},
-              {"id":"audio-1","location":{"kind":"audio","assetId":"asset-1","chapterId":"chapter-2","positionMs":42000},"label":"Track 2","percent":50.0,"createdAt":"2026-08-13T03:00:00Z"}
+              {"id":"reflow-1","position":{"locator":{"href":"chapter-1.xhtml"},"presentation":{"displayPercent":10.0,"totalProgression":0.1,"currentHref":"chapter-1.xhtml","chapter":{"href":"chapter-1.xhtml","title":"Chapter 1","index":0},"page":null,"playback":null}},"label":"Chapter 1","createdAt":"2026-08-13T00:00:00Z"},
+              {"id":"comic-1","position":{"locator":{"href":"comic/page-3"},"presentation":{"displayPercent":30.0,"totalProgression":0.3,"currentHref":"comic/page-3","chapter":null,"page":{"number":3,"total":10},"playback":null}},"label":"Page 3","createdAt":"2026-08-13T01:00:00Z"},
+              {"id":"pdf-1","position":{"locator":{"href":"pdf/page-4"},"presentation":{"displayPercent":40.0,"totalProgression":0.4,"currentHref":"pdf/page-4","chapter":null,"page":{"number":4,"total":10},"playback":null}},"label":"Page 4","createdAt":"2026-08-13T02:00:00Z"},
+              {"id":"audio-1","position":{"locator":{"href":"asset-1"},"presentation":{"displayPercent":50.0,"totalProgression":0.5,"currentHref":"asset-1","chapter":{"href":"chapter-2","title":null,"index":null},"page":null,"playback":{"positionMillis":42000,"durationMillis":84000}}},"label":"Track 2","createdAt":"2026-08-13T03:00:00Z"}
             ]}}
         """
     }

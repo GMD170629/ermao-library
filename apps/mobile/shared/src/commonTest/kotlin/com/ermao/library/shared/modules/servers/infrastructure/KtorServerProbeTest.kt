@@ -77,6 +77,6 @@ class KtorServerProbeTest {
 
     private companion object {
         const val HEALTHY = """{"ok":true,"data":{"service":"ermao-books","status":"ok"}}"""
-        const val COMPATIBLE = """{"ok":true,"data":{"service":"ermao-books","serverIdentity":"server-fixture","serverVersion":"1.0.0","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":4,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV4":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}"""
+        const val COMPATIBLE = """{"ok":true,"data":{"service":"ermao-books","serverIdentity":"server-fixture","serverVersion":"1.0.0","protocol":{"version":3,"minimumSupportedClientVersion":3},"readerSchemaVersion":5,"librarySchemaVersion":1,"capabilities":{"setup":true,"cookieSession":true,"readerV5":true,"mediaRange":true,"managedOfflineDownloads":true,"bookResourceAsset":true,"bookDetailManagement":false}}}"""
     }
 }

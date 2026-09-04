@@ -112,7 +112,7 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     book_resource = book_response.json()["data"]["book"]["resources"][0]
     assert book_resource["format"] == "CBZ"
     assert book_resource["readerType"] == "comic"
-    bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+    bootstrap_response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
     assert bootstrap_response.status_code == 200, bootstrap_response.text
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "comic"
@@ -120,7 +120,7 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert bootstrap["publication"]["kind"] == "comic"
 
     manifest_response = client.get(
-        f"/api/reader/v4/resources/{resource.id}/comic/manifest"
+        f"/api/reader/v5/resources/{resource.id}/comic/manifest"
     )
     assert manifest_response.status_code == 200, manifest_response.text
     manifest = manifest_response.json()["data"]
@@ -131,13 +131,13 @@ def test_scan_import_comic_archive_is_readable_end_to_end(
     assert manifest["revision"].startswith("sha256:")
 
     stale_response = client.get(
-        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        f"/api/reader/v5/resources/{resource.id}/comic/pages/0",
         params={"revision": "sha256:" + "0" * 64},
     )
     assert stale_response.status_code == 412
     assert stale_response.json()["error"]["code"] == "COMIC_RESOURCE_CHANGED"
     page_response = client.get(
-        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        f"/api/reader/v5/resources/{resource.id}/comic/pages/0",
         params={"revision": manifest["revision"]},
     )
     assert page_response.status_code == 200, page_response.text
@@ -178,7 +178,7 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     assert len(page_assets) == 2
 
     _login(client, db_session)
-    bootstrap_response = client.get(f"/api/reader/v4/resources/{resource.id}/bootstrap")
+    bootstrap_response = client.get(f"/api/reader/v5/resources/{resource.id}/bootstrap")
     assert bootstrap_response.status_code == 200, bootstrap_response.text
     bootstrap = bootstrap_response.json()["data"]
     assert bootstrap["readerType"] == "comic"
@@ -192,7 +192,7 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     }
 
     manifest_response = client.get(
-        f"/api/reader/v4/resources/{resource.id}/comic/manifest"
+        f"/api/reader/v5/resources/{resource.id}/comic/manifest"
     )
     assert manifest_response.status_code == 200, manifest_response.text
     manifest = manifest_response.json()["data"]
@@ -204,7 +204,7 @@ def test_scan_import_image_directory_reuses_comic_manifest_without_download(
     ]
 
     page_response = client.get(
-        f"/api/reader/v4/resources/{resource.id}/comic/pages/0",
+        f"/api/reader/v5/resources/{resource.id}/comic/pages/0",
         params={"revision": manifest["revision"]},
     )
     assert page_response.status_code == 200, page_response.text

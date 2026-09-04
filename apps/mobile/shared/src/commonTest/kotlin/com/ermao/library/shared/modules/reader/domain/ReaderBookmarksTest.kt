@@ -4,18 +4,28 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class ReaderBookmarksTest {
+    private fun report(href: String, progression: Double): ReaderPositionReport = ReaderPositionReport(
+        locator = ReaderOpaqueLocator.parse("{\"href\":\"$href\"}"),
+        presentation = ReaderPositionPresentation(
+            displayPercent = progression * 100.0,
+            totalProgression = progression,
+            currentHref = href,
+            chapter = ReaderChapterPresentation(href, href, null),
+            page = null,
+            playback = null,
+        ),
+    )
+
     private val first = ReaderBookmark(
         id = "first",
-        location = ReaderBookmarkLocation("chapter-1.xhtml", 0.25),
+        position = report("chapter-1.xhtml", 0.25),
         label = "Chapter 1",
-        percent = 10.0,
         createdAt = "2026-08-13T00:00:00Z",
     )
     private val second = ReaderBookmark(
         id = "second",
-        location = ReaderBookmarkLocation("chapter-2.xhtml", 0.5),
+        position = report("chapter-2.xhtml", 0.5),
         label = "Chapter 2",
-        percent = 30.0,
         createdAt = "2026-08-13T01:00:00Z",
     )
 
@@ -34,17 +44,8 @@ class ReaderBookmarksTest {
     }
 
     @Test
-    fun allServerBookmarkLocationMorphologiesRetainTheirWireFields() {
-        val locations = listOf(
-            ReaderBookmarkLocation.reflow("chapter-1.xhtml", 0.25),
-            ReaderBookmarkLocation.comic(3),
-            ReaderBookmarkLocation.pdf(4),
-            ReaderBookmarkLocation.audio("asset-1", "chapter-2", 42_000),
-        )
-
-        assertEquals(listOf("reflow", "comic", "pdf", "audio"), locations.map { it.kind })
-        assertEquals(3, locations[1].pageIndex)
-        assertEquals(4, locations[2].pageNumber)
-        assertEquals(42_000, locations[3].positionMs)
+    fun bookmarksExposeTheSharedPresentationProjection() {
+        assertEquals("chapter-1.xhtml", first.currentHref)
+        assertEquals(25.0, first.displayPercent)
     }
 }

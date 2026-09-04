@@ -239,7 +239,7 @@ class ApiClientBoundedResponseTest {
     }
 
     private companion object {
-        const val PATH = "/api/reader/v4/resources/book/publication/chapter.xhtml"
+        const val PATH = "/api/reader/v5/resources/book/publication/chapter.xhtml"
         val MIMES = setOf("application/xhtml+xml")
     }
 }

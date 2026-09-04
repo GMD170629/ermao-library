@@ -34,6 +34,13 @@ data class AudioPlaybackEffect(
     val namespaceKey: String? = null,
     val resourceId: String? = null,
     val chapterId: String? = null,
+    /** The publication-wide position captured in the same state transition. */
+    val absolutePositionMillis: Long = 0,
+    val totalDurationMillis: Long = 0,
+    /** Zero-based engine asset index; v5 presentation serializes it as one-based. */
+    val currentAssetIndex: Int = -1,
+    val chapterIndex: Int? = null,
+    val chapterTitle: String? = null,
     val positionMillis: Long = 0,
     val durationMillis: Long? = null,
     val playbackRate: Double = 1.0,
@@ -43,7 +50,10 @@ data class AudioPlaybackEffect(
 ) {
     init {
         require(sourceId >= 0)
-        require(positionMillis >= 0)
+        require(positionMillis >= 0 && absolutePositionMillis >= 0 && totalDurationMillis >= 0)
+        require(currentAssetIndex >= -1)
+        require(chapterIndex == null || chapterIndex >= 0)
+        require(chapterTitle == null || chapterTitle.isNotBlank())
         require(durationMillis == null || durationMillis >= 0)
         require(playbackRate in AUDIO_PLAYBACK_RATES)
         require(operationId >= 0)
@@ -53,6 +63,7 @@ data class AudioPlaybackEffect(
         require(type != AudioPlaybackEffectType.SaveProgress || resourceId?.isNotBlank() == true)
         require(type != AudioPlaybackEffectType.SaveProgress || asset != null)
         require(type != AudioPlaybackEffectType.SaveProgress || progressReason != null)
+        require(type != AudioPlaybackEffectType.SaveProgress || currentAssetIndex >= 0)
     }
 }
 
@@ -417,6 +428,19 @@ class AudioPlaybackStateMachine(
             seekWithinActiveAsset(0, AudioProgressSaveReason.TrackChange)
         } else {
             switchAsset(index, 0, state.isPlaying, AudioProgressSaveReason.TrackChange)
+        }
+    }
+
+    /** Applies a decoded Reader v5 audio location as one engine navigation operation. */
+    fun goToReaderLocation(location: com.ermao.library.shared.modules.reader.AudioReaderLocation): AudioPlaybackTransition {
+        if (userCommandsLocked()) return transition()
+        val publication = state.publication ?: return transition()
+        val index = publication.assets.indexOfFirst { it.assetId == location.assetId }
+        if (index < 0) return transition()
+        return if (index == state.currentAssetIndex) {
+            seekWithinActiveAsset(location.positionMillis, AudioProgressSaveReason.Seek)
+        } else {
+            switchAsset(index, location.positionMillis, state.isPlaying, AudioProgressSaveReason.TrackChange)
         }
     }
 
@@ -995,6 +1019,9 @@ class AudioPlaybackStateMachine(
         val publication = state.publication ?: return null
         val sourceId = state.sourceId ?: return null
         val asset = publication.assets.getOrNull(state.currentAssetIndex) ?: return null
+        val chapter = state.currentChapterId?.let { chapterId ->
+            publication.chapters.firstOrNull { it.chapterId == chapterId && it.assetId == asset.assetId }
+        }
         if (reason != AudioProgressSaveReason.Tick) {
             lastTickRequestedAtEpochMillis = nowEpochMillis().takeIf { it >= 0 }
         }
@@ -1005,6 +1032,11 @@ class AudioPlaybackStateMachine(
             namespaceKey = state.namespaceKey,
             resourceId = publication.resource.resourceId,
             chapterId = state.currentChapterId,
+            absolutePositionMillis = state.absolutePositionMillis,
+            totalDurationMillis = state.totalDurationMillis,
+            currentAssetIndex = state.currentAssetIndex,
+            chapterIndex = chapter?.index,
+            chapterTitle = chapter?.title,
             positionMillis = state.positionMillis,
             durationMillis = state.durationMillis,
             progressReason = reason,

@@ -2,7 +2,6 @@ package com.ermao.library.shared.modules.reader
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -71,98 +70,25 @@ class ReaderChapterStateTest {
     }
 
     @Test
-    fun fullPublicationLocationUsesTheMatchingFragment() {
-        val location = reflowableLocation(
-            href = "Text/all.xhtml",
-            fragments = listOf("runtime-marker", "chapter-2"),
-            position = 4,
+    fun presentationChapterIndexSelectsUnitsIndexRatherThanSortOrder() {
+        val units = listOf(
+            ReaderChapterUnit("chapter-a.xhtml", 50),
+            ReaderChapterUnit("chapter-b.xhtml", 10),
+            ReaderChapterUnit("chapter-c.xhtml", 20),
+        )
+        val presentation = ReaderPositionPresentation(
+            displayPercent = 42.0,
+            totalProgression = 0.42,
+            currentHref = "chapter-c.xhtml",
+            chapter = ReaderChapterPresentation("chapter-c.xhtml", "C", 1),
+            page = null,
+            playback = null,
         )
 
         assertEquals(
             listOf(ReaderChapterState.Read, ReaderChapterState.Current, ReaderChapterState.Unread),
-            resolveReaderChapterStatesFromLocation(anchored, location, 42.0),
+            resolveReaderChapterStatesFromPresentation(units, presentation),
         )
-    }
-
-    @Test
-    fun uniqueResourceMatchIsSafeWhenRuntimeFragmentDiffers() {
-        val units = listOf(
-            ReaderChapterUnit("Text/one.xhtml#toc-anchor", 0, 1),
-            ReaderChapterUnit("Text/two.xhtml#toc-anchor", 1, 2),
-        )
-
-        assertEquals(
-            listOf(ReaderChapterState.Read, ReaderChapterState.Current),
-            resolveReaderChapterStatesFromLocation(
-                units,
-                reflowableLocation("text/two.xhtml", listOf("runtime-anchor"), 2),
-                50.0,
-            ),
-        )
-    }
-
-    @Test
-    fun readingOrderPositionResolvesSplitResourceRange() {
-        val units = listOf(
-            ReaderChapterUnit("text/part0003.html", 1, 3),
-            ReaderChapterUnit("text/part0008_split_000.html", 4, 10),
-            ReaderChapterUnit("text/part0009.html", 5, 13),
-        )
-
-        assertEquals(
-            listOf(ReaderChapterState.Read, ReaderChapterState.Current, ReaderChapterState.Unread),
-            resolveReaderChapterStatesFromLocation(
-                units,
-                reflowableLocation("text/part0008_split_001.html", listOf("visible"), 11),
-                15.2,
-            ),
-        )
-    }
-
-    @Test
-    fun duplicateAnchorAndDuplicatePositionNeverGuess() {
-        val duplicateAnchors = listOf(
-            ReaderChapterUnit("text/all.xhtml#same", 0, 4),
-            ReaderChapterUnit("text/all.xhtml#same", 1, 4),
-        )
-        val duplicatePositions = listOf(
-            ReaderChapterUnit("text/all.xhtml#one", 0, 4),
-            ReaderChapterUnit("text/all.xhtml#two", 1, 4),
-        )
-
-        assertEquals(
-            List(2) { ReaderChapterState.Unread },
-            resolveReaderChapterStatesFromLocation(
-                duplicateAnchors,
-                reflowableLocation("text/all.xhtml", listOf("same"), 4),
-                50.0,
-            ),
-        )
-        assertEquals(
-            List(2) { ReaderChapterState.Unread },
-            resolveReaderChapterStatesFromLocation(
-                duplicatePositions,
-                reflowableLocation("text/all.xhtml", listOf("unmatched"), 4),
-                50.0,
-            ),
-        )
-    }
-
-    @Test
-    fun nonReflowableLocationsNeverSelectAChapter() {
-        val units = listOf(ReaderChapterUnit("chapter.xhtml", 0, 1))
-        val locations = listOf<PublicationLocation>(
-            PdfPublicationLocation(pageIndex = 0, pageProgression = 0.25),
-            ComicPublicationLocation(resourceHref = "page-1.jpg", pageIndex = 0),
-            AudioPublicationLocation(assetId = "asset-1", positionMillis = 5_000),
-        )
-
-        locations.forEach { location ->
-            assertEquals(
-                listOf(ReaderChapterState.Unread),
-                resolveReaderChapterStatesFromLocation(units, location, 50.0),
-            )
-        }
     }
 
     @Test
@@ -218,55 +144,31 @@ class ReaderChapterStateTest {
     }
 
     @Test
-    fun presentationUpdateFactoryCarriesTheCompletePublicationLocation() {
-        val engineLocator = reflowableEngineLocator(
-            href = "Text/all.xhtml",
-            fragments = listOf("chapter-2", "epubcfi(/6/4)"),
-            position = 4,
-        )
-        val progress = ReaderProgress(
-            resourceId = "reader-resource",
-            location = ReflowReaderLocation(engineLocator = engineLocator),
-            updatedAtEpochMillis = 123_456,
-            deviceId = "device-1",
+    fun presentationUpdateCarriesOpaqueLocatorAndIndependentPresentation() {
+        val locatorJson = """{"href":"Text/all.xhtml","type":"application/xhtml+xml","locations":{"position":4}}"""
+        val position = ReaderPositionReport(
+            locator = ReaderOpaqueLocator.parse(locatorJson),
+            presentation = ReaderPositionPresentation(
+                displayPercent = 42.0,
+                totalProgression = 0.42,
+                currentHref = "Text/all.xhtml",
+                chapter = ReaderChapterPresentation("Text/all.xhtml#chapter-2", "第二章", 1),
+                page = null,
+                playback = null,
+            ),
         )
 
         val update = createReaderProgressPresentationUpdate(
             namespaceKey = "server:user",
             bookId = "book-1",
             resourceId = "resource-1",
-            percent = 42.0,
-            progress = progress,
-            chapterTitle = "第二章",
+            position = position,
+            capturedAtEpochMillis = 123_456,
         )
 
-        val location = assertIs<ReflowablePublicationLocation>(update.location)
         assertEquals(123_456, update.capturedAtEpochMillis)
-        assertEquals(engineLocator, location.engineLocator)
-        assertTrue(location.canonicalJson().contains("chapter-2"))
-        assertTrue(location.canonicalJson().contains("epubcfi(/6/4)"))
+        assertEquals(position, update.position)
+        assertEquals(42.0, update.presentation.displayPercent)
+        assertTrue(update.position.locator.canonicalJson.contains("Text/all.xhtml"))
     }
-
-    private fun reflowableLocation(
-        href: String,
-        fragments: List<String>,
-        position: Int,
-    ): ReflowablePublicationLocation = ReflowablePublicationLocation(
-        reflowableEngineLocator(href, fragments, position),
-    )
-
-    private fun reflowableEngineLocator(
-        href: String,
-        fragments: List<String>,
-        position: Int,
-    ): EngineLocator {
-        val fragmentsJson = fragments.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
-        return createEngineLocator(
-            ReaderEngine.Readium,
-            ReaderEnginePlatform.Android,
-            "readium-kotlin:test",
-            """{"href":"$href","type":"application/xhtml+xml","locations":{"cssSelector":"body","fragments":$fragmentsJson,"position":$position}}""",
-        )
-    }
-
 }

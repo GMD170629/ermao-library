@@ -1,89 +1,74 @@
-import CryptoKit
 import Foundation
 import SQLite3
 @preconcurrency import ErmaoShared
 
-/// Durable, device-local exact Reader positions.
+/// Durable, device-local Reader v5 position reports.
 ///
 /// The owner key deliberately excludes authorizationVersion so a successful
 /// reauthentication cannot hide the position stored on this installation.
-/// Exact progress and the latest pending mutation share one DB.
-final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @unchecked Sendable {
+/// The current report and latest pending mutation share one fresh v5 DB.
+final class IosReaderLocalDatabase: ErmaoShared.ReaderPositionSyncStateStore, @unchecked Sendable {
     private let worker: IosReaderLocalDatabaseWorker
 
     init(
         identity: ErmaoShared.ReaderLocalProgressIdentity,
         databaseURL: URL? = nil,
-        legacyProgressRoot: URL? = nil,
         fileManager: FileManager = .default
     ) throws {
         worker = try IosReaderLocalDatabaseWorker(
             identity: identity,
             databaseURL: databaseURL,
-            legacyProgressRoot: legacyProgressRoot,
             fileManager: SendableFileManager(fileManager)
         )
     }
 
-    func load(resourceId: String) async throws -> ErmaoShared.ReaderProgress? {
+    func loadPosition(resourceId: String) async throws -> ErmaoShared.ReaderPositionLocalState? {
         try await worker.load(resourceID: resourceId).value
     }
 
-    // ReaderProgressStore keeps the historical Swift/Kotlin label `sourceId`.
-    // The value is now the resource identity; retain this forwarding entry
-    // point until the generated shared API label is migrated as well.
-    func load(sourceId: String) async throws -> ErmaoShared.ReaderProgress? {
-        try await load(resourceId: sourceId)
+    func savePosition(position: ErmaoShared.ReaderPositionLocalState) async throws {
+        try await worker.save(SendableReaderPosition(position))
     }
 
-    func save(progress: ErmaoShared.ReaderProgress) async throws {
-        try await worker.save(SendableReaderProgress(progress))
-    }
-
-    func delete(resourceId: String) async throws {
+    func deletePosition(resourceId: String) async throws {
         try await worker.delete(resourceID: resourceId)
     }
 
-    func delete(sourceId: String) async throws {
-        try await delete(resourceId: sourceId)
-    }
-
-    func loadSyncState() async throws -> ErmaoShared.ReaderProgressDurableState {
+    func loadPositionSyncState() async throws -> ErmaoShared.ReaderPositionDurableState {
         try await worker.loadSyncState().value
     }
 
-    func commitProgressAndPending(
-        progress: ErmaoShared.ReaderProgress,
-        pending: ErmaoShared.ReaderProgressMutation
+    func commitPositionAndPending(
+        position: ErmaoShared.ReaderPositionLocalState,
+        pending: ErmaoShared.ReaderProgressMutationV5
     ) async throws {
-        try await worker.commitProgressAndPending(
-            SendableReaderProgress(progress),
-            pending: SendableProgressMutation(value: pending)
+        try await worker.commitPositionAndPending(
+            SendableReaderPosition(position),
+            pending: SendablePositionMutation(value: pending)
         )
     }
 
-    func acknowledge(mutationId: String, snapshot: ErmaoShared.ReaderProgressSnapshotV4) async throws {
-        try await worker.acknowledge(mutationID: mutationId, snapshot: SendableProgressSnapshot(value: snapshot))
-    }
-
-    func discardPendingAfterConflict(mutationId: String, serverRevision: Int64) async throws {
-        try await worker.discardPendingAfterConflict(
+    func acknowledgePosition(
+        mutationId: String,
+        response: ErmaoShared.ReaderPositionWriteResponse
+    ) async throws {
+        try await worker.acknowledge(
             mutationID: mutationId,
-            serverRevision: serverRevision
+            response: SendablePositionWriteResponse(value: response)
         )
     }
 
-    func acceptRemoteProgress(
-        progress: ErmaoShared.ReaderProgress,
-        snapshot: ErmaoShared.ReaderProgressSnapshotV4
+    func acceptRemotePosition(
+        position: ErmaoShared.ReaderPositionLocalState,
+        snapshot: ErmaoShared.ReaderProgressSnapshotV5
     ) async throws {
-        try await worker.acceptRemoteProgress(
-            SendableReaderProgress(progress),
-            snapshot: SendableProgressSnapshot(value: snapshot)
+        try await worker.acceptRemotePosition(
+            SendableReaderPosition(position),
+            snapshot: SendablePositionSnapshot(value: snapshot)
         )
     }
 
-    func recordTerminalFailure(mutationId: String, failureCode: String) async throws {
+    func recordPositionTerminalFailure(mutationId: String, failureCode: String) async throws {
         try await worker.recordTerminalFailure(mutationID: mutationId, code: failureCode)
     }
 
@@ -91,7 +76,7 @@ final class IosReaderLocalDatabase: ErmaoShared.ReaderProgressSyncStateStore, @u
         await worker.close()
     }
 
-    /// Purges all exact progress and pending-sync rows owned by one account.
+    /// Purges all v5 position and pending-sync rows owned by one account.
     /// The DB intentionally omits authorizationVersion from owner keys, so a
     /// reauthentication does not strand the account's local position.
     static func purgeNamespace(
@@ -130,7 +115,7 @@ private enum IosReaderLocalDatabaseNamespacePurger {
             )
             url = support
                 .appendingPathComponent("Reader", isDirectory: true)
-                .appendingPathComponent("Reader.sqlite3")
+                .appendingPathComponent("ReaderV5.sqlite3")
         }
         guard fileManager.fileExists(atPath: url.path) else { return }
 
@@ -152,7 +137,7 @@ private enum IosReaderLocalDatabaseNamespacePurger {
             // initialized the Reader tables yet; these no-op schemas make the
             // purge safe in that state.
             try exec(database, """
-                CREATE TABLE IF NOT EXISTS reader_local_exact (
+                CREATE TABLE IF NOT EXISTS reader_local_v5 (
                     owner_key TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     progress_document TEXT NOT NULL,
@@ -161,14 +146,14 @@ private enum IosReaderLocalDatabaseNamespacePurger {
                 )
                 """)
             try exec(database, """
-                CREATE TABLE IF NOT EXISTS reader_progress_sync_v4 (
+                CREATE TABLE IF NOT EXISTS reader_progress_sync_v5 (
                     owner_key TEXT PRIMARY KEY NOT NULL,
                     state_document TEXT NOT NULL
                 )
                 """)
             let prefix = lengthPrefixed(serverIdentity, userID)
-            try delete(database, table: "reader_local_exact", prefix: prefix)
-            try delete(database, table: "reader_progress_sync_v4", prefix: prefix)
+            try delete(database, table: "reader_local_v5", prefix: prefix)
+            try delete(database, table: "reader_progress_sync_v5", prefix: prefix)
             try exec(database, "COMMIT")
         } catch {
             try? exec(database, "ROLLBACK")
@@ -221,21 +206,30 @@ private struct SendableFileManager: @unchecked Sendable {
     }
 }
 
-private struct SendableReaderProgress: @unchecked Sendable {
-    let value: ErmaoShared.ReaderProgress
+private struct SendableReaderPosition: @unchecked Sendable {
+    let value: ErmaoShared.ReaderPositionLocalState
 
-    init(_ value: ErmaoShared.ReaderProgress) {
+    init(_ value: ErmaoShared.ReaderPositionLocalState) {
         self.value = value
     }
 }
 
-private struct SendableOptionalReaderProgress: @unchecked Sendable {
-    let value: ErmaoShared.ReaderProgress?
+private struct SendableOptionalReaderPosition: @unchecked Sendable {
+    let value: ErmaoShared.ReaderPositionLocalState?
 }
 
-private struct SendableSyncState: @unchecked Sendable { let value: ErmaoShared.ReaderProgressDurableState }
-private struct SendableProgressMutation: @unchecked Sendable { let value: ErmaoShared.ReaderProgressMutation }
-private struct SendableProgressSnapshot: @unchecked Sendable { let value: ErmaoShared.ReaderProgressSnapshotV4 }
+private struct SendablePositionSyncState: @unchecked Sendable {
+    let value: ErmaoShared.ReaderPositionDurableState
+}
+private struct SendablePositionMutation: @unchecked Sendable {
+    let value: ErmaoShared.ReaderProgressMutationV5
+}
+private struct SendablePositionSnapshot: @unchecked Sendable {
+    let value: ErmaoShared.ReaderProgressSnapshotV5
+}
+private struct SendablePositionWriteResponse: @unchecked Sendable {
+    let value: ErmaoShared.ReaderPositionWriteResponse
+}
 
 private actor IosReaderLocalDatabaseWorker {
     private static let maximumDocumentBytes = 1_048_576
@@ -244,18 +238,16 @@ private actor IosReaderLocalDatabaseWorker {
     private let ownerKey: String
     private let clientID: String
     private let resourceID: String
-    private let legacyProgressRoot: URL
     private let databaseURL: URL
     private let fileManager: FileManager
-    private let progressCodec = ErmaoShared.PublicKt.createReaderProgressJson()
-    private let syncCodec = ErmaoShared.PublicKt.createReaderProgressSyncStateJson()
+    private let positionCodec = ErmaoShared.PublicKt.createReaderPositionJson()
+    private let syncCodec = ErmaoShared.PublicKt.createReaderPositionSyncStateJson()
     private nonisolated(unsafe) var database: OpaquePointer?
     private var initialized = false
 
     init(
         identity: ErmaoShared.ReaderLocalProgressIdentity,
         databaseURL: URL?,
-        legacyProgressRoot: URL?,
         fileManager: SendableFileManager
     ) throws {
         guard !identity.stableKey.isEmpty else { throw IosReaderFailure(code: .persistenceFailed) }
@@ -266,11 +258,8 @@ private actor IosReaderLocalDatabaseWorker {
         self.fileManager = manager
 
         let url: URL
-        let defaultLegacyRoot: URL
         if let databaseURL {
             url = databaseURL
-            defaultLegacyRoot = databaseURL.deletingLastPathComponent()
-                .appendingPathComponent("Progress", isDirectory: true)
         } else {
             let support = try manager.url(
                 for: .applicationSupportDirectory,
@@ -284,10 +273,8 @@ private actor IosReaderLocalDatabaseWorker {
                 withIntermediateDirectories: true,
                 attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
             )
-            url = directory.appendingPathComponent("Reader.sqlite3")
-            defaultLegacyRoot = directory.appendingPathComponent("Progress", isDirectory: true)
+            url = directory.appendingPathComponent("ReaderV5.sqlite3")
         }
-        self.legacyProgressRoot = legacyProgressRoot ?? defaultLegacyRoot
         self.databaseURL = url
 
         guard sqlite3_open_v2(
@@ -312,51 +299,51 @@ private actor IosReaderLocalDatabaseWorker {
         initialized = false
     }
 
-    func load(resourceID: String) throws -> SendableOptionalReaderProgress {
+    func load(resourceID: String) throws -> SendableOptionalReaderPosition {
         try initializeIfNeeded()
         guard resourceID == self.resourceID else { throw IosReaderFailure(code: .persistenceFailed) }
         if let payload = try scalarText(
-            "SELECT progress_document FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
+            "SELECT progress_document FROM reader_local_v5 WHERE owner_key = ? AND source_id = ?",
             bindings: [.text(ownerKey), .text(resourceID)]
         ) {
-            let progress: ErmaoShared.ReaderProgress
+            let position: ErmaoShared.ReaderPositionLocalState
             do {
-                progress = try decodeProgress(payload, expectedSourceID: resourceID)
+                position = try decodePosition(payload, expectedResourceID: resourceID)
             } catch {
-                return SendableOptionalReaderProgress(value: nil)
+                return SendableOptionalReaderPosition(value: nil)
             }
-            try requireIdentity(progress)
-            return SendableOptionalReaderProgress(value: progress)
+            try requireIdentity(position)
+            return SendableOptionalReaderPosition(value: position)
         }
-        return SendableOptionalReaderProgress(value: try migrateLegacyProgressFile(resourceID: resourceID))
+        return SendableOptionalReaderPosition(value: nil)
     }
 
-    func save(_ progressTransfer: SendableReaderProgress) throws {
+    func save(_ positionTransfer: SendableReaderPosition) throws {
         try initializeIfNeeded()
-        let progress = progressTransfer.value
-        try requireIdentity(progress)
-        try withTransaction { try saveProgress(progress, ownerKey: ownerKey, preferNewer: false) }
+        let position = positionTransfer.value
+        try requireIdentity(position)
+        try withTransaction { try savePosition(position, ownerKey: ownerKey) }
     }
 
-    func loadSyncState() throws -> SendableSyncState {
+    func loadSyncState() throws -> SendablePositionSyncState {
         try initializeIfNeeded()
-        return SendableSyncState(value: try readSyncState())
+        return SendablePositionSyncState(value: try readSyncState())
     }
 
-    func commitProgressAndPending(
-        _ progressTransfer: SendableReaderProgress,
-        pending: SendableProgressMutation
+    func commitPositionAndPending(
+        _ positionTransfer: SendableReaderPosition,
+        pending: SendablePositionMutation
     ) throws {
         try initializeIfNeeded()
-        let progress = progressTransfer.value
-        try requireIdentity(progress)
+        let position = positionTransfer.value
+        try requireIdentity(position)
         guard pending.value.resourceId == resourceID, pending.value.clientId == clientID else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
         try withTransaction {
-            try saveProgress(progress, ownerKey: ownerKey, preferNewer: false)
+            try savePosition(position, ownerKey: ownerKey)
             let current = try readSyncState()
-            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
+            try writeSyncState(ErmaoShared.ReaderPositionDurableState(
                 confirmedRevision: current.confirmedRevision,
                 pending: pending.value,
                 terminalFailureCode: nil
@@ -364,66 +351,35 @@ private actor IosReaderLocalDatabaseWorker {
         }
     }
 
-    func acknowledge(mutationID: String, snapshot: SendableProgressSnapshot) throws {
+    func acknowledge(mutationID: String, response: SendablePositionWriteResponse) throws {
         try initializeIfNeeded()
         try withTransaction {
             let current = try readSyncState()
-            let pending: ErmaoShared.ReaderProgressMutation?
-            if let existing = current.pending, existing.mutationId != mutationID {
-                pending = ErmaoShared.ReaderProgressMutation(
-                    resourceId: existing.resourceId,
-                    clientId: existing.clientId,
-                    mutationId: existing.mutationId,
-                    baseRevision: snapshot.value.revision,
-                    capturedAtEpochMillis: existing.capturedAtEpochMillis,
-                    locator: existing.locator
-                )
-            } else {
-                pending = nil
-            }
-            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
-                confirmedRevision: max(current.confirmedRevision, snapshot.value.revision),
+            let acknowledgedCurrentPending = current.pending?.mutationId == mutationID
+            let pending = acknowledgedCurrentPending ? nil : current.pending
+            try writeSyncState(ErmaoShared.ReaderPositionDurableState(
+                confirmedRevision: max(
+                    current.confirmedRevision,
+                    max(response.value.acceptedRevision, response.value.currentSnapshot.revision)
+                ),
                 pending: pending,
-                terminalFailureCode: nil
+                terminalFailureCode: acknowledgedCurrentPending
+                    ? nil
+                    : current.terminalFailureCode
             ))
         }
     }
 
-    func discardPendingAfterConflict(mutationID: String, serverRevision: Int64) throws {
-        try initializeIfNeeded()
-        try withTransaction {
-            let current = try readSyncState()
-            let pending: ErmaoShared.ReaderProgressMutation?
-            if let existing = current.pending, existing.mutationId != mutationID {
-                pending = ErmaoShared.ReaderProgressMutation(
-                    resourceId: existing.resourceId,
-                    clientId: existing.clientId,
-                    mutationId: existing.mutationId,
-                    baseRevision: serverRevision,
-                    capturedAtEpochMillis: existing.capturedAtEpochMillis,
-                    locator: existing.locator
-                )
-            } else {
-                pending = nil
-            }
-            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
-                confirmedRevision: max(current.confirmedRevision, serverRevision),
-                pending: pending,
-                terminalFailureCode: nil
-            ))
-        }
-    }
-
-    func acceptRemoteProgress(
-        _ progressTransfer: SendableReaderProgress,
-        snapshot: SendableProgressSnapshot
+    func acceptRemotePosition(
+        _ positionTransfer: SendableReaderPosition,
+        snapshot: SendablePositionSnapshot
     ) throws {
         try initializeIfNeeded()
-        let progress = progressTransfer.value
-        try requireIdentity(progress)
+        let position = positionTransfer.value
+        try requireIdentity(position)
         try withTransaction {
-            try saveProgress(progress, ownerKey: ownerKey, preferNewer: false)
-            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
+            try savePosition(position, ownerKey: ownerKey)
+            try writeSyncState(ErmaoShared.ReaderPositionDurableState(
                 confirmedRevision: snapshot.value.revision,
                 pending: nil,
                 terminalFailureCode: nil
@@ -436,7 +392,7 @@ private actor IosReaderLocalDatabaseWorker {
         try withTransaction {
             let current = try readSyncState()
             guard current.pending?.mutationId == mutationID else { return }
-            try writeSyncState(ErmaoShared.ReaderProgressDurableState(
+            try writeSyncState(ErmaoShared.ReaderPositionDurableState(
                 confirmedRevision: current.confirmedRevision,
                 pending: current.pending,
                 terminalFailureCode: code
@@ -449,11 +405,11 @@ private actor IosReaderLocalDatabaseWorker {
         guard resourceID == self.resourceID else { throw IosReaderFailure(code: .persistenceFailed) }
         try withTransaction {
             try run(
-                "DELETE FROM reader_local_exact WHERE owner_key = ? AND source_id = ?",
+                "DELETE FROM reader_local_v5 WHERE owner_key = ? AND source_id = ?",
                 bindings: [.text(ownerKey), .text(resourceID)]
             )
             try run(
-                "DELETE FROM reader_progress_sync_v4 WHERE owner_key = ?",
+                "DELETE FROM reader_progress_sync_v5 WHERE owner_key = ?",
                 bindings: [.text(ownerKey)]
             )
         }
@@ -467,7 +423,7 @@ private actor IosReaderLocalDatabaseWorker {
             try execute("PRAGMA busy_timeout=5000")
             try execute(
                 """
-                CREATE TABLE IF NOT EXISTS reader_local_exact (
+                CREATE TABLE IF NOT EXISTS reader_local_v5 (
                     owner_key TEXT NOT NULL,
                     source_id TEXT NOT NULL,
                     progress_document TEXT NOT NULL,
@@ -478,7 +434,7 @@ private actor IosReaderLocalDatabaseWorker {
             )
             try execute(
                 """
-                CREATE TABLE IF NOT EXISTS reader_progress_sync_v4 (
+                CREATE TABLE IF NOT EXISTS reader_progress_sync_v5 (
                     owner_key TEXT PRIMARY KEY NOT NULL,
                     state_document TEXT NOT NULL
                 )
@@ -500,23 +456,21 @@ private actor IosReaderLocalDatabaseWorker {
     private func recordReaderContractVersionIfNeeded() throws {
         try execute(
             """
-            CREATE TABLE IF NOT EXISTS reader_contract_metadata (
+            CREATE TABLE IF NOT EXISTS reader_v5_contract_metadata (
                 singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton = 1),
                 contract_version INTEGER NOT NULL
             )
             """
         )
         let version = try scalarText(
-            "SELECT CAST(contract_version AS TEXT) FROM reader_contract_metadata WHERE singleton = 1",
+            "SELECT CAST(contract_version AS TEXT) FROM reader_v5_contract_metadata WHERE singleton = 1",
             bindings: []
         )
-        // Record the current codec without deleting user progress. Unknown older
-        // identity keys remain isolated and available for explicit recovery.
-        guard version != "7" else { return }
+        guard version != "5" else { return }
         try withTransaction {
             try run(
                 """
-                INSERT INTO reader_contract_metadata(singleton, contract_version) VALUES(1, 7)
+                INSERT INTO reader_v5_contract_metadata(singleton, contract_version) VALUES(1, 5)
                 ON CONFLICT(singleton) DO UPDATE SET contract_version = excluded.contract_version
                 """,
                 bindings: []
@@ -524,117 +478,77 @@ private actor IosReaderLocalDatabaseWorker {
         }
     }
 
-    private func saveProgress(
-        _ progress: ErmaoShared.ReaderProgress,
-        ownerKey: String,
-        preferNewer: Bool
+    private func savePosition(
+        _ position: ErmaoShared.ReaderPositionLocalState,
+        ownerKey: String
     ) throws {
-        try requireIdentity(progress)
-        let payload = try progressCodec.encode(progress: progress)
-        _ = try decodeProgress(payload, expectedSourceID: progress.resourceId)
+        try requireIdentity(position)
+        let payload = positionCodec.encode(position: position)
+        _ = try decodePosition(payload, expectedResourceID: position.resourceId)
         try run(
             """
-            INSERT INTO reader_local_exact(
+            INSERT INTO reader_local_v5(
                 owner_key, source_id, progress_document, updated_at_epoch_millis
             ) VALUES(?, ?, ?, ?)
             ON CONFLICT(owner_key, source_id) DO UPDATE SET
                 progress_document = excluded.progress_document,
                 updated_at_epoch_millis = excluded.updated_at_epoch_millis
-            \(preferNewer ? "WHERE excluded.updated_at_epoch_millis >= reader_local_exact.updated_at_epoch_millis" : "")
             """,
             bindings: [
                 .text(ownerKey),
-                .text(progress.resourceId),
+                .text(position.resourceId),
                 .text(payload),
-                .int64(progress.updatedAtEpochMillis),
+                .int64(position.capturedAtEpochMillis),
             ]
         )
     }
 
-    private func readSyncState() throws -> ErmaoShared.ReaderProgressDurableState {
+    private func readSyncState() throws -> ErmaoShared.ReaderPositionDurableState {
         guard let payload = try scalarText(
-            "SELECT state_document FROM reader_progress_sync_v4 WHERE owner_key = ?",
+            "SELECT state_document FROM reader_progress_sync_v5 WHERE owner_key = ?",
             bindings: [.text(ownerKey)]
         ) else {
-            return ErmaoShared.ReaderProgressDurableState(
+            return ErmaoShared.ReaderPositionDurableState(
                 confirmedRevision: 0,
                 pending: nil,
                 terminalFailureCode: nil
             )
         }
-        do {
-            try requireDocumentSize(payload)
-            return syncCodec.decode(payload: payload)
-        } catch {
-            return ErmaoShared.ReaderProgressDurableState(
-                confirmedRevision: 0,
-                pending: nil,
-                terminalFailureCode: nil
-            )
-        }
+        // A malformed v5 sync document is a persistence failure, not an
+        // empty outbox.  Propagating the codec error keeps a real pending
+        // mutation from being mistaken for a successful read with no upload.
+        try requireDocumentSize(payload)
+        return syncCodec.decode(payload: payload)
     }
 
-    private func writeSyncState(_ state: ErmaoShared.ReaderProgressDurableState) throws {
+    private func writeSyncState(_ state: ErmaoShared.ReaderPositionDurableState) throws {
         let payload = syncCodec.encode(state: state)
         try requireDocumentSize(payload)
         try run(
             """
-            INSERT INTO reader_progress_sync_v4(owner_key, state_document) VALUES(?, ?)
+            INSERT INTO reader_progress_sync_v5(owner_key, state_document) VALUES(?, ?)
             ON CONFLICT(owner_key) DO UPDATE SET state_document = excluded.state_document
             """,
             bindings: [.text(ownerKey), .text(payload)]
         )
     }
 
-    /// These old files have no trustworthy account identity. Preserve them, but
-    /// never attach their position to whichever account happens to open a resource.
-    private func migrateLegacyProgressFile(resourceID: String) throws -> ErmaoShared.ReaderProgress? {
-        let legacyURL = legacyProgressURL(resourceID)
-        guard fileManager.fileExists(atPath: legacyURL.path) else { return nil }
-        try requireLegacyContained(legacyURL)
-        let values = try legacyURL.resourceValues(
-            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        )
-        guard values.isRegularFile == true,
-              values.isSymbolicLink != true,
-              (values.fileSize ?? 0) <= Self.maximumDocumentBytes
-        else { throw IosReaderFailure(code: .persistenceFailed) }
-        return nil
-    }
-
-    private func decodeProgress(
+    private func decodePosition(
         _ payload: String,
-        expectedSourceID: String
-    ) throws -> ErmaoShared.ReaderProgress {
+        expectedResourceID: String
+    ) throws -> ErmaoShared.ReaderPositionLocalState {
         try requireDocumentSize(payload)
-        let projection = try IosReaderProgressContractDecoder.decode(payload)
-        guard projection.resourceID == expectedSourceID else {
+        let position = try positionCodec.decode(payload: payload)
+        guard position.resourceId == expectedResourceID else {
             throw IosReaderFailure(code: .persistenceFailed)
         }
-        return try progressCodec.decode(payload: payload)
+        return position
     }
 
-    private func requireIdentity(_ progress: ErmaoShared.ReaderProgress) throws {
-        guard progress.resourceId == resourceID,
-              matchesIdentity(progress)
+    private func requireIdentity(_ position: ErmaoShared.ReaderPositionLocalState) throws {
+        guard position.resourceId == resourceID,
+              position.clientId == clientID
         else { throw IosReaderFailure(code: .persistenceFailed) }
-    }
-
-    private func matchesIdentity(_ progress: ErmaoShared.ReaderProgress) -> Bool {
-        progress.deviceId == clientID
-    }
-
-    private func legacyProgressURL(_ resourceID: String) -> URL {
-        let key = SHA256.hash(data: Data(resourceID.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return legacyProgressRoot.appendingPathComponent(key).appendingPathExtension("json")
-    }
-
-    private func requireLegacyContained(_ url: URL) throws {
-        let rootPath = legacyProgressRoot.standardizedFileURL.resolvingSymlinksInPath().path + "/"
-        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
-        guard path.hasPrefix(rootPath) else { throw IosReaderFailure(code: .persistenceFailed) }
     }
 
     private func requireDocumentSize(_ value: String) throws {

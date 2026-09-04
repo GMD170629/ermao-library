@@ -7,7 +7,6 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.features.reader.infrastructure.AndroidPdfiumFeatureFlags
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressStore
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
@@ -33,7 +32,6 @@ class ReaderPdfInstrumentedTest {
     private val context: Context = instrumentation.targetContext
     private val sourceId = "pdf-reader-${UUID.randomUUID()}"
     private val publicationStore = AndroidReaderPublicationStore(context)
-    private val progressStore = AndroidReaderProgressStore(context)
     private lateinit var source: com.ermao.library.shared.modules.reader.LocalReaderSource
 
     @Before
@@ -50,7 +48,9 @@ class ReaderPdfInstrumentedTest {
 
     @After
     fun removeArtifacts() = runBlocking {
-        progressStore.delete(sourceId)
+        if (this@ReaderPdfInstrumentedTest::source.isInitialized) {
+            deleteLocalReaderV5Position(context, source)
+        }
         publicationStore.delete(sourceId)
     }
 
@@ -83,20 +83,19 @@ class ReaderPdfInstrumentedTest {
             }
 
             runBlocking { controller(scenario).flush() }
-            val persisted = runBlocking { progressStore.load(sourceId) }
-            val persistedLocation = persisted?.location as? PdfReaderLocation
-            assertNotNull(persistedLocation)
-            assertEquals(0, persistedLocation?.pageIndex)
-            assertEquals(0.0, persistedLocation?.pageProgression ?: -1.0, 0.0)
+            val persisted = runBlocking { loadLocalReaderV5Position(context, source) }
+            val persistedPage = persisted?.position?.presentation?.page
+            assertNotNull(persistedPage)
+            assertEquals(1, persistedPage?.number)
+            assertEquals(0.0, persisted?.position?.presentation?.totalProgression ?: -1.0, 0.0)
 
             scenario.moveToState(Lifecycle.State.CREATED)
             scenario.recreate()
             scenario.moveToState(Lifecycle.State.RESUMED)
             waitUntil(scenario, "recreated PDF exact location recapture") { activity ->
                 (activity.controllerForTesting?.currentLocation?.value as? PdfReaderLocation)?.let { recaptured ->
-                    recaptured.pageIndex == persistedLocation?.pageIndex &&
-                        recaptured.pageProgression == 0.0 &&
-                        activity.controllerForTesting?.restoreWarning?.value == null
+                    recaptured.pageIndex == (persistedPage?.number ?: 1) - 1 &&
+                        recaptured.pageProgression == 0.0
                 } == true
             }
         }

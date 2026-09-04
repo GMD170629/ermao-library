@@ -1,32 +1,37 @@
 # Shuku Reader wire contracts
 
-This package is the language-neutral source of truth for Reader v4 wire data.
+This package is the language-neutral source of truth for Reader v5 wire data.
 It deliberately contains schemas and fixtures rather than a shared runtime.
 Python, TypeScript, Kotlin, and Swift validate untrusted JSON at their own
 boundaries and map it into renderer-neutral domain values.
 
-`reader-v4.schema.json` defines a discriminated exact-location union. Reflowable
-content requires a Readium resource plus CSS selector, fragment/CFI, or bounded
-text anchor. PDF uses a zero-based page index plus normalized page-local
-progression. Comics use a zero-based page index plus canonical resource href.
-Audio uses asset/chapter identity and playback milliseconds; the owning resource
-is carried by the Reader resource contract. An engine locator is
-optional for fixed-layout and audio locations, but required for reflowable
-content. Boundary adapters additionally verify that every referenced resource
-belongs to the active Reader resource.
+`reader-v5.schema.json` defines `ReaderPositionReport`. Its `locator` is the
+opaque JSON object emitted by the active Reader engine. Empty strings, explicit
+nulls and unknown nested extensions are preserved. The server may bound,
+serialize, hash, store and return that object, but must never inspect its keys,
+infer progress from it, or prove that it is exact. The compact UTF-8 Locator is
+limited to 64 KiB.
 
-`displayPercent`, resource progression, logical position, and total progression
-are presentation or diagnostic values. They must never be used for automatic
-cross-device restoration.
+The sibling `presentation` object is produced by the Reader at the same capture
+event. It independently carries `displayPercent`, `totalProgression`, current
+href, chapter, page and playback facts. Library surfaces use these fields
+directly. Only `locator` is passed back to a Reader for restoration;
+presentation values are never navigation candidates.
 
-Reader v4 was unreleased when this morphology union replaced the former
-all-Readium envelope. Old v4 locations and pending/conflict state are invalid;
-there is no dual-read or migration fallback. The canonical fixtures are consumed
-by each platform's contract tests. Adding or changing a field requires updating
-the schema, all fixtures, and all four boundary validators in the same change.
+Reader v5 writes are arrival-ordered and idempotent. The server assigns a
+monotonic revision in transaction commit order. `capturedAtEpochMillis` is
+metadata, not an ordering input. Reusing a mutation id with identical content
+returns its accepted revision without another write; reusing it with different
+content is an error. There is no `baseRevision` or Locator conflict resolver.
 
-`locator-dom-projection-v3.schema.json` defines the current content identity used
-by reflowable exact progress. It projects the ordered reading resources and the
+Reader v4 is immutable historical documentation. v5 does not read, migrate,
+rewrite or delete v4 server rows, client progress, pending mutations or conflict
+state. The canonical v5 fixtures are consumed by every platform's contract
+tests. Adding or changing a field requires updating the schema, all fixtures and
+all four boundary validators in the same change.
+
+`locator-dom-projection-v3.schema.json` defines the current reflowable
+publication-normalization diagnostic. It projects the ordered reading resources and the
 policy-sanitized, pre-Navigator `body` element tree, preserving element paths,
 author IDs and normalized locator-block text. Platform CSP, `head` decoration
 and Readium runtime nodes are deliberately excluded. The projection records the
@@ -38,7 +43,8 @@ former head-only policy. They are superseded by `normalization-v3` and must not
 be rewritten to make current sanitization tests pass. The v3
 `projection.sha256` value is `sha256:` followed by the SHA-256 of canonical
 projection JSON (UTF-8, sorted keys and compact separators), so formatting the
-golden file cannot change its semantic identity.
+golden file cannot change its semantic identity. Reader v5 never compares this
+diagnostic with a Locator and never uses it to accept, reject, or select progress.
 
 `schemas/txt-decoding-v1.schema.json` and `fixtures/txt-decoding-v1.json`
 record the native TXT decoder output, including internal/trailing NUL and empty
@@ -141,6 +147,6 @@ Do not edit generated files or add platform-owned setting lists. Run the generat
 then `python3 packages/reader-contracts/generate-reader-settings.py --check`.
 The check also verifies that iOS maps every catalog field. Web pretest runs it.
 
-Preference storage uses version 6; Reader progress remains v4. Web, Android and
+Preference storage uses version 6; Reader progress uses v5. Web, Android and
 iOS do not migrate older preference schemas. The generator verifies that Web and
 KMP runtime versions match the catalog owner.

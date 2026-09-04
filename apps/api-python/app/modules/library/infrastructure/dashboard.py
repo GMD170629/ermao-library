@@ -23,13 +23,13 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
 )
 from app.modules.library.application.dashboard import (
     DashboardActivityQueryPort,
     DashboardContinueReading,
 )
 from app.modules.library.infrastructure.book_covers import SqlAlchemyBookCoverQueries
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
 def _visible_book_filter(context: AuthorizationContext):
@@ -40,7 +40,11 @@ def _visible_book_filter(context: AuthorizationContext):
 
 
 def dashboard_summary(
-    db: Session, context: AuthorizationContext, user_id: str
+    db: Session,
+    context: AuthorizationContext,
+    user_id: str,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any]:
     visible_book = _visible_book_filter(context)
     total_books = int(
@@ -48,12 +52,7 @@ def dashboard_summary(
         or 0
     )
 
-    latest_progress_at = db.scalar(
-        select(ReaderResourceProgress.updated_at)
-        .where(ReaderResourceProgress.user_id == user_id)
-        .order_by(ReaderResourceProgress.updated_at.desc())
-        .limit(1)
-    )
+    latest_progress_at = reader_queries.latest_progress_at(user_id=user_id)
     storage = int(
         db.scalar(
             select(func.coalesce(func.sum(LibrarySourceNode.observed_size_bytes), 0))
@@ -131,9 +130,21 @@ def recent_books(
 
 
 def recent_reading(
-    db: Session, context: AuthorizationContext, user_id: str, *, limit: int
+    db: Session,
+    context: AuthorizationContext,
+    user_id: str,
+    *,
+    limit: int,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> list[dict[str, Any]]:
-    latest_read_at = func.max(ReaderResourceProgress.updated_at).label("lastReadAt")
+    latest_read_at = cast(
+        ColumnElement[object],
+        reader_queries.latest_read_at_expression(
+            context=context,
+            user_id=user_id,
+            book_id_expression=LibraryBook.id,
+        ),
+    ).label("lastReadAt")
     rows = db.execute(
         select(
             LibraryBook.id,
@@ -143,24 +154,11 @@ def recent_reading(
             LibraryBookMetadata.cover_path,
             latest_read_at,
         )
-        .select_from(ReaderResourceProgress)
-        .join(
-            LibraryReadableResource,
-            LibraryReadableResource.id == ReaderResourceProgress.resource_id,
-        )
-        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+        .select_from(LibraryBook)
         .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
         .where(
-            ReaderResourceProgress.user_id == user_id,
             *_visible_book_filter(context),
-            resource_visibility_predicate(context),
-        )
-        .group_by(
-            LibraryBook.id,
-            LibraryBookMetadata.title,
-            LibraryBookMetadata.author,
-            LibraryBookMetadata.cover_status,
-            LibraryBookMetadata.cover_path,
+            latest_read_at.is_not(None),
         )
         .order_by(latest_read_at.desc(), LibraryBook.id.desc())
         .limit(limit)
@@ -184,58 +182,52 @@ def recent_reading(
 
 
 def continue_reading_progress(
-    db: Session, context: AuthorizationContext, user_id: str
+    db: Session,
+    context: AuthorizationContext,
+    user_id: str,
+    *,
+    reader_queries: ReaderV5LibraryPresentationQueryPort,
 ) -> dict[str, Any] | None:
-    def latest_progress(*, unfinished_only: bool):
-        statement = (
-            select(
-                LibraryReadableResource.id.label("resource_id"),
-                LibraryReadableResourceMetadata.title.label("resource_title"),
-                LibraryReadableResourceMetadata.narrator,
-                LibraryReadableResource.format.label("resource_format"),
-                LibraryBook.id.label("book_id"),
-                LibraryBookMetadata.title.label("book_title"),
-                LibraryBookMetadata.author,
-                LibraryBookMetadata.cover_path,
-                LibraryBookMetadata.cover_status,
-                LibraryBook.updated_at.label("book_updated_at"),
-                ReaderResourceProgress.percent,
-                ReaderResourceProgress.updated_at.label("progress_updated_at"),
-            )
-            .select_from(ReaderResourceProgress)
-            .join(
-                LibraryReadableResource,
-                LibraryReadableResource.id == ReaderResourceProgress.resource_id,
-            )
-            .join(
-                LibraryReadableResourceMetadata,
-                LibraryReadableResourceMetadata.resource_id
-                == LibraryReadableResource.id,
-            )
-            .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
-            .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
-            .where(
-                ReaderResourceProgress.user_id == user_id,
-                *_visible_book_filter(context),
-                resource_visibility_predicate(context),
-            )
-            .order_by(
-                ReaderResourceProgress.updated_at.desc(),
-                ReaderResourceProgress.id.desc(),
-            )
-            .limit(1)
+    rows = db.execute(
+        select(
+            LibraryReadableResource.id.label("resource_id"),
+            LibraryReadableResourceMetadata.title.label("resource_title"),
+            LibraryReadableResourceMetadata.narrator,
+            LibraryReadableResource.format.label("resource_format"),
+            LibraryBook.id.label("book_id"),
+            LibraryBookMetadata.title.label("book_title"),
+            LibraryBookMetadata.author,
+            LibraryBookMetadata.cover_path,
+            LibraryBookMetadata.cover_status,
+            LibraryBook.updated_at.label("book_updated_at"),
         )
-        if unfinished_only:
-            statement = statement.where(
-                func.coalesce(ReaderResourceProgress.percent, 0) < 100
-            )
-        return db.execute(statement).first()
-
-    selected = latest_progress(unfinished_only=True) or latest_progress(
-        unfinished_only=False
+        .select_from(LibraryReadableResource)
+        .join(
+            LibraryReadableResourceMetadata,
+            LibraryReadableResourceMetadata.resource_id == LibraryReadableResource.id,
+        )
+        .join(LibraryBook, LibraryBook.id == LibraryReadableResource.book_id)
+        .join(LibraryBookMetadata, LibraryBookMetadata.book_id == LibraryBook.id)
+        .where(*_visible_book_filter(context), resource_visibility_predicate(context))
+    ).all()
+    presentations = reader_queries.list_presentations(
+        user_id=user_id,
+        resource_ids=[str(row.resource_id) for row in rows],
     )
-    if selected is None:
+    candidates = [
+        (row, presentations[str(row.resource_id)])
+        for row in rows
+        if str(row.resource_id) in presentations
+    ]
+    if not candidates:
         return None
+    unfinished = [
+        candidate for candidate in candidates if candidate[1].display_percent < 100
+    ]
+    selected, selected_progress = max(
+        unfinished or candidates,
+        key=lambda candidate: (candidate[1].updated_at, str(candidate[0].resource_id)),
+    )
     cover_path = (
         SqlAlchemyBookCoverQueries(db)
         .preferred_paths((str(selected.book_id),))
@@ -254,8 +246,8 @@ def continue_reading_progress(
         "resourceId": selected.resource_id,
         "resourceTitle": selected.resource_title,
         "narrator": selected.narrator,
-        "percent": float(selected.percent or 0),
-        "updatedAt": selected.progress_updated_at,
+        "percent": float(selected_progress.display_percent),
+        "updatedAt": selected_progress.updated_at,
     }
 
 
@@ -291,8 +283,14 @@ def list_management_books(db: Session, *, limit: int = 300) -> list[dict[str, An
 
 
 class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
-    def __init__(self, db: Session) -> None:
+    def __init__(
+        self,
+        db: Session,
+        *,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
+    ) -> None:
         self._db = db
+        self._reader_queries = reader_queries
 
     def recent_book_ids(
         self,
@@ -313,7 +311,13 @@ class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
     ) -> tuple[str, ...]:
         return tuple(
             str(row["id"])
-            for row in recent_reading(self._db, context, user_id, limit=limit)
+            for row in recent_reading(
+                self._db,
+                context,
+                user_id,
+                limit=limit,
+                reader_queries=self._reader_queries,
+            )
         )
 
     def continue_reading(
@@ -322,7 +326,12 @@ class SqlAlchemyDashboardActivityQueries(DashboardActivityQueryPort):
         context: AuthorizationContext,
         user_id: str,
     ) -> DashboardContinueReading | None:
-        row = continue_reading_progress(self._db, context, user_id)
+        row = continue_reading_progress(
+            self._db,
+            context,
+            user_id,
+            reader_queries=self._reader_queries,
+        )
         if row is None:
             return None
         return DashboardContinueReading(

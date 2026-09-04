@@ -1,33 +1,17 @@
-import type { ExactProgressRecord } from '../../lib/reader/model';
+import type { ReaderV5ProgressRecord } from '../../lib/reader';
 
-export type LocalProgressScope = {
-  userId: string;
-  bookId: string;
-  resourceId: string;
-};
-
-export function latestScopedProgress(
-  mutations: readonly ExactProgressRecord[],
-  scope: LocalProgressScope
-) {
-  return mutations
-    .filter((mutation) => (
-      mutation.userId === scope.userId
-      && mutation.bookId === scope.bookId
-      && mutation.resourceId === scope.resourceId
-    ))
-    .sort((left, right) => right.capturedAtEpochMillis - left.capturedAtEpochMillis)[0] ?? null;
+/** v5 detail overlays consume presentation only; Locator remains engine-owned. */
+export function localV5ProgressPresentation(progress: ReaderV5ProgressRecord | null) {
+  return progress?.position.presentation ?? null;
 }
 
-export function localProgressProjection(mutation: ExactProgressRecord | null) {
-  if (!mutation) return null;
-  const location = mutation.locator;
-  if (location.kind === 'reflowable') {
-    return {
-      percent: mutation.displayPercent,
-      currentHref: location.engineLocator.payload.href,
-      position: location.engineLocator.payload.locations.position ?? null
-    };
-  }
-  return { percent: mutation.displayPercent };
+export function localV5ProgressPercent(serverProgress: number, progress: ReaderV5ProgressRecord | null) {
+  return progress?.position.presentation.displayPercent ?? serverProgress;
+}
+
+export function latestLocalV5Progress(progresses: readonly ReaderV5ProgressRecord[]) {
+  return [...progresses].sort((left, right) => (
+    right.capturedAtEpochMillis - left.capturedAtEpochMillis
+    || right.mutationId.localeCompare(left.mutationId)
+  ))[0] ?? null;
 }

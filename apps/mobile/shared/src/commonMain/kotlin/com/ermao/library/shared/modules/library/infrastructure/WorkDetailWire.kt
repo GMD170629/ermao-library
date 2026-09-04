@@ -87,6 +87,7 @@ data class ResourceWire(
 data class AssetWire(
     val id: String,
     val title: String,
+    val path: String? = null,
     val resourceId: String? = null,
     val sourceNodeId: String? = null,
     val role: String? = null,
@@ -182,6 +183,7 @@ fun AssetWire.toDomain(): Asset {
     return Asset(
         id = id,
         title = title,
+        path = path,
         resourceId = resourceId,
         sourceNodeId = sourceNodeId,
         role = role,

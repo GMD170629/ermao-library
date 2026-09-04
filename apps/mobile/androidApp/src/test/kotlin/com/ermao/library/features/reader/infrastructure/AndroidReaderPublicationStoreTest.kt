@@ -45,19 +45,4 @@ class AndroidReaderPublicationStoreTest {
         )
     }
 
-    @Test
-    fun legacyHashSidecarRemovesItselfAndItsArtifactWithoutReadingEitherFile() {
-        val root = Files.createTempDirectory("reader-publication-legacy-hash").toFile()
-        try {
-            val artifact = root.resolve("legacy.epub").apply { writeBytes(byteArrayOf(1, 2, 3)) }
-            val sidecar = root.resolve("legacy.epub.sha256").apply { writeText("legacy") }
-
-            removeLegacyHashedPublicationArtifacts(root)
-
-            assertFalse(artifact.exists())
-            assertFalse(sidecar.exists())
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 }

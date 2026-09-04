@@ -37,7 +37,10 @@ import com.ermao.library.shared.modules.library.domain.Resource
 import com.ermao.library.shared.modules.reader.ReaderChapterState
 import com.ermao.library.shared.modules.reader.ReaderChapterUnit
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
-import com.ermao.library.shared.modules.reader.resolveReaderChapterStatesFromLocation
+import com.ermao.library.shared.modules.reader.ReaderPositionPresentationSnapshot
+import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
+import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
+import com.ermao.library.features.reader.infrastructure.AndroidReaderV5PresentationQuery
 import com.ermao.library.shared.modules.shelf.application.ShelfRepository
 import com.ermao.library.shared.modules.shelf.domain.ShelfErrorKind
 import com.ermao.library.shared.modules.shelf.domain.ShelfMembership
@@ -216,6 +219,8 @@ class WorkDetailViewModel(
     private val onSessionUnauthorized: () -> Unit,
     private val target: BookContentTarget = BookContentTarget.Root,
     private val savedState: SavedStateHandle,
+    private val durablePresentationQuery: AndroidReaderV5PresentationQuery =
+        AndroidReaderV5PresentationQuery(appContext.applicationContext),
 ) : ViewModel() {
     private var multiDownloadGeneration = 0L
     private val mutableUiState = MutableStateFlow(WorkDetailUiState())
@@ -223,6 +228,7 @@ class WorkDetailViewModel(
     private var loadGeneration = 0
     private var surfaceGeneration = 0
     private val latestProgressUpdatesByResourceId = mutableMapOf<String, ReaderProgressPresentationUpdate>()
+    private val durablePresentationsByResourceId = mutableMapOf<String, ReaderPositionPresentationSnapshot>()
 
     init {
         viewModelScope.launch {
@@ -441,9 +447,8 @@ class WorkDetailViewModel(
                     val snapshot = result.value
                     val resourceId = (snapshot.target as? BookContentTarget.ResourceDetail)?.resourceId
                     val base = snapshot.book.toUiContent()
-                    val content = latestProgressUpdatesByResourceId.values.sortedBy { it.capturedAtEpochMillis }.fold(base) { current, update ->
-                        current.applying(update, resourceId)
-                    }
+                    loadDurablePresentations()
+                    val content = applyLocalPresentations(base, resourceId)
                     mutableUiState.update { state ->
                         state.copy(
                             isLoading = false,
@@ -478,6 +483,46 @@ class WorkDetailViewModel(
                 }
             }
         }
+    }
+
+    private suspend fun loadDurablePresentations() {
+        val snapshots = runCatching {
+            durablePresentationQuery.load(
+                namespace = ReaderSyncNamespace(
+                    context.namespace.serverIdentity,
+                    context.namespace.userId,
+                    context.namespace.authorizationVersion,
+                ),
+                clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
+                bookIds = setOf(bookId),
+            )
+        }.getOrDefault(emptyList())
+        snapshots.forEach { snapshot ->
+            val previous = durablePresentationsByResourceId[snapshot.resourceId]
+            if (previous == null || previous.capturedAtEpochMillis <= snapshot.capturedAtEpochMillis) {
+                durablePresentationsByResourceId[snapshot.resourceId] = snapshot
+            }
+        }
+    }
+
+    private fun applyLocalPresentations(
+        content: BookDetailContent,
+        selectedResourceId: String?,
+    ): BookDetailContent {
+        val inMemory = latestProgressUpdatesByResourceId.values.map { update ->
+            ReaderPositionPresentationSnapshot(
+                bookId = update.bookId,
+                resourceId = update.resourceId,
+                capturedAtEpochMillis = update.capturedAtEpochMillis,
+                presentation = update.presentation,
+            )
+        }
+        return (durablePresentationsByResourceId.values + inMemory)
+            .groupBy(ReaderPositionPresentationSnapshot::resourceId)
+            .values
+            .mapNotNull { values -> values.maxByOrNull(ReaderPositionPresentationSnapshot::capturedAtEpochMillis) }
+            .sortedBy(ReaderPositionPresentationSnapshot::capturedAtEpochMillis)
+            .fold(content) { current, snapshot -> current.applying(snapshot, selectedResourceId) }
     }
 
     private fun loadMultiDownloadResources(generation: Long) {
@@ -677,21 +722,41 @@ private fun ContentRequestContext.presentationKey(): String =
     "${namespace.serverIdentity}|${namespace.userId}|${namespace.authorizationVersion}"
 
 internal fun BookDetailContent.applying(update: ReaderProgressPresentationUpdate, selectedResourceId: String?): BookDetailContent {
-    if (book.id != update.bookId) return this
-    if (selectedResourceId != update.resourceId) return copy(
-        continueResourceId = update.resourceId,
+    return applying(
+        ReaderPositionPresentationSnapshot(
+            bookId = update.bookId,
+            resourceId = update.resourceId,
+            capturedAtEpochMillis = update.capturedAtEpochMillis,
+            presentation = update.presentation,
+        ),
+        selectedResourceId,
+    )
+}
+
+internal fun BookDetailContent.applying(
+    snapshot: ReaderPositionPresentationSnapshot,
+    selectedResourceId: String?,
+): BookDetailContent {
+    if (book.id != snapshot.bookId) return this
+    if (selectedResourceId != snapshot.resourceId) return copy(
+        continueResourceId = snapshot.resourceId,
         resources = resources.map { resource ->
-            if (resource.id == update.resourceId) resource.copy(progressPercent = update.percent.toInt().coerceIn(0, 100)) else resource
+            if (resource.id == snapshot.resourceId) {
+                resource.copy(progressPercent = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100))
+            } else resource
         },
     )
     val units = readingUnits.map { ReaderChapterUnit(href = it.href, sortOrder = it.sortOrder, readingOrderPosition = it.readingOrderPosition) }
-    val states = resolveReaderChapterStatesFromLocation(units, update.location, update.percent)
-    val progress = update.percent.toInt().coerceIn(0, 100)
+    val states = com.ermao.library.shared.modules.reader.resolveReaderChapterStatesFromPresentation(
+        units,
+        snapshot.presentation,
+    )
+    val progress = snapshot.presentation.displayPercent.toInt().coerceIn(0, 100)
     return copy(
         book = book.copy(progressPercent = progress),
-        continueResourceId = update.resourceId,
-        completed = update.percent >= 100.0,
-        resources = resources.map { resource -> if (resource.id == update.resourceId) resource.copy(progressPercent = progress) else resource },
+        continueResourceId = snapshot.resourceId,
+        completed = snapshot.presentation.displayPercent >= 100.0,
+        resources = resources.map { resource -> if (resource.id == snapshot.resourceId) resource.copy(progressPercent = progress) else resource },
         readingUnits = readingUnits.mapIndexed { index, unit ->
             unit.copy(
                 progressPercent = progress.takeIf { states.getOrNull(index) == ReaderChapterState.Current },

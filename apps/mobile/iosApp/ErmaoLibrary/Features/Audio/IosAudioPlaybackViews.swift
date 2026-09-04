@@ -230,6 +230,18 @@ struct AudioNowPlayingView: View {
                     AudioSleepTimerSheet(runtime: runtime)
                 }
             }
+            .overlay {
+                if let remote = runtime.remoteProgressSnapshot {
+                    IosPageRemoteProgressNotice(
+                        snapshot: remote,
+                        position: remote.position.presentation.chapter?.title
+                            ?? remote.position.presentation.displayPercent.formatted(.percent.scale(0.01)),
+                        actionFailed: runtime.remoteProgressActionFailed,
+                        onOpen: runtime.goToRemoteProgress,
+                        onClose: runtime.dismissRemoteProgress
+                    )
+                }
+            }
             .tint(theme.textPrimary)
         }
         .background(theme.surfaceRaised.ignoresSafeArea())
@@ -478,6 +490,7 @@ struct AudioNowPlayingView: View {
         case .resourceUnavailable, .localArtifactUnavailable: "audio.error.unavailable"
         case .invalidBootstrap: "audio.error.bootstrap"
         case .interrupted: "audio.error.interrupted"
+        case .locationRestoreFailed: "reader.restore.warning.message"
         case .unknown, .none: "audio.error.generic"
         }
     }

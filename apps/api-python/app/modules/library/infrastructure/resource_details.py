@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast
@@ -29,7 +28,6 @@ from app.models import (
     LibraryResourceAssetMetadata,
     LibrarySourceNode,
     ReadableResourceNavigationUnit,
-    ReaderResourceProgress,
 )
 from app.modules.library.application.resource_details import (
     ResourceAssetDetail,
@@ -42,56 +40,7 @@ from app.modules.library.domain.asset_titles import (
     AssetTitleCandidate,
     resolve_asset_display_titles,
 )
-
-
-def _progress_position(
-    location_json: str | None,
-    *,
-    fallback_href: str | None,
-    fallback_page: int | None,
-) -> tuple[str | None, int | None, int | None]:
-    if not location_json:
-        return fallback_href, fallback_page, None
-    try:
-        value = json.loads(location_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return fallback_href, fallback_page, None
-    if not isinstance(value, dict):
-        return fallback_href, fallback_page, None
-    kind = value.get("kind")
-    if kind == "reflowable":
-        engine = value.get("engineLocator")
-        payload = engine.get("payload") if isinstance(engine, dict) else None
-        href = payload.get("href") if isinstance(payload, dict) else None
-        locations = payload.get("locations") if isinstance(payload, dict) else None
-        locations = locations if isinstance(locations, dict) else {}
-        fragments = locations.get("fragments")
-        if (
-            isinstance(href, str)
-            and "#" not in href
-            and isinstance(fragments, list)
-            and len(fragments) == 1
-            and isinstance(fragments[0], str)
-            and fragments[0]
-        ):
-            href = f"{href}#{fragments[0].lstrip('#')}"
-        position = locations.get("position")
-        return (
-            (href.strip() if isinstance(href, str) and href.strip() else fallback_href),
-            None,
-            (
-                position
-                if isinstance(position, int)
-                and not isinstance(position, bool)
-                and position >= 1
-                else None
-            ),
-        )
-    if kind in {"comic", "pdf"}:
-        page_index = value.get("pageIndex")
-        if isinstance(page_index, int) and page_index >= 0:
-            return None, page_index + 1, None
-    return fallback_href, fallback_page, None
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 
 class _PdfDocument(Protocol):
@@ -105,9 +54,16 @@ class _PdfiumModule(Protocol):
 
 
 class SqlAlchemyResourceDetailQueries:
-    def __init__(self, db: Session, user_id: str) -> None:
+    def __init__(
+        self,
+        db: Session,
+        user_id: str,
+        *,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
+    ) -> None:
         self._db = db
         self._user_id = user_id
+        self._reader_queries = reader_queries
 
     def get_resource(
         self,
@@ -120,17 +76,11 @@ class SqlAlchemyResourceDetailQueries:
             select(
                 LibraryReadableResource,
                 LibraryReadableResourceMetadata,
-                ReaderResourceProgress,
             )
             .outerjoin(
                 LibraryReadableResourceMetadata,
                 LibraryReadableResourceMetadata.resource_id
                 == LibraryReadableResource.id,
-            )
-            .outerjoin(
-                ReaderResourceProgress,
-                (ReaderResourceProgress.resource_id == LibraryReadableResource.id)
-                & (ReaderResourceProgress.user_id == self._user_id),
             )
             .where(
                 LibraryReadableResource.id == resource_id,
@@ -148,25 +98,29 @@ class SqlAlchemyResourceDetailQueries:
         ).one_or_none()
         if row is None:
             return None
-        resource, metadata, progress = row
+        resource, metadata = row
+        progress = self._reader_queries.get_presentation(
+            user_id=self._user_id,
+            resource_id=resource.id,
+        )
         current_href = None
         current_page_number = None
         current_position = None
-        if progress is not None:
-            current_href, current_page_number, current_position = _progress_position(
-                progress.location_json,
-                fallback_href=str(progress.position or "").strip() or None,
-                fallback_page=progress.page,
-            )
+        current_href = progress.current_href if progress is not None else None
+        current_page_number = progress.page_number if progress is not None else None
+        current_chapter_index = progress.chapter_index if progress is not None else None
+        current_chapter_title = progress.chapter_title if progress is not None else None
         return ResourceDetailResource(
             id=resource.id,
             book_id=resource.book_id,
             format=resource.format,
             page_count=metadata.page_count if metadata is not None else None,
-            progress=float(progress.percent if progress is not None else 0),
+            progress=float(progress.display_percent if progress is not None else 0),
             current_href=current_href,
             current_page_number=current_page_number,
             current_position=current_position,
+            current_chapter_index=current_chapter_index,
+            current_chapter_title=current_chapter_title,
         )
 
     def list_navigation_units(

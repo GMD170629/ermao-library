@@ -107,8 +107,10 @@ struct ErmaoLibraryApp: App {
                 .onReceive(
                     NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)
                 ) { _ in
-                    audioRuntime.shutdown()
-                    sessionStore.close()
+                    Task { @MainActor in
+                        await audioRuntime.shutdown()
+                        sessionStore.close()
+                    }
                 }
         }
     }

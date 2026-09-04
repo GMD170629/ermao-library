@@ -22,7 +22,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibrarySourceNode,
     LibrarySourceNodeMetadata,
-    ReaderResourceProgress,
+    ReaderResourceReadingStatusV5,
 )
 from app.models.auth import User, UserLibraryAccess
 from app.models.shelf import Shelf, ShelfBook
@@ -342,11 +342,16 @@ def test_personal_bulk_shelf_and_reading_status_are_not_manager_only(
     assert reading_response.status_code == 200, reading_response.text
     assert reading_response.json()["data"]["updated"] == 2
     assert reading_response.json()["data"]["operation"]["undoAvailable"] is False
-    progress = db_session.scalars(
-        select(ReaderResourceProgress).where(ReaderResourceProgress.user_id == user.id)
+    statuses = db_session.scalars(
+        select(ReaderResourceReadingStatusV5).where(
+            ReaderResourceReadingStatusV5.user_id == user.id
+        )
     ).all()
-    assert len(progress) == 2
-    assert {row.percent for row in progress} == {100.0}
+    assert {row.resource_id for row in statuses} == {
+        "bulk-resource-1",
+        "bulk-resource-2",
+    }
+    assert {row.status for row in statuses} == {"FINISHED"}
 
     repeated = client.post(
         "/api/library/operations/books/reading-status",
@@ -365,13 +370,12 @@ def test_personal_bulk_shelf_and_reading_status_are_not_manager_only(
     assert {book["id"] for book in recent_books.json()["data"]["books"]} == set(
         book_ids
     )
-    assert {book["id"] for book in recent_reading.json()["data"]["books"]} == set(
-        book_ids
-    )
+    # A status-only mutation is intentionally independent from Reader
+    # presentation/progress.  Dashboard reading activity is presentation
+    # backed, so it must not invent a 100% snapshot for these resources.
+    assert recent_reading.json()["data"]["books"] == []
     continue_item = continuing.json()["data"]["item"]
-    assert continue_item["bookId"] in book_ids
-    assert continue_item["resumeResourceId"].startswith("bulk-resource-")
-    assert continue_item["progress"] == 100
+    assert continue_item is None
 
 
 def test_bulk_metadata_noop_is_finalized_and_reports_no_changes(

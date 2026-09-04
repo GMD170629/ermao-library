@@ -12,7 +12,8 @@ import {
   type ReaderCapabilities,
   type ReaderCommand,
   type ReaderCommandAck,
-  type ReaderPreferences
+  type ReaderPreferences,
+  type ReaderPositionReport
 } from '@shuku/reader-core';
 import { effectiveReaderPageWidth } from '../page-width';
 import type {
@@ -46,6 +47,13 @@ import {
   readerSafetyFailure,
   rejectReaderSafety
 } from '../security/reader-safety-policy';
+import {
+  createStandardReaderLocator,
+  LOCATION_RESTORE_FAILED,
+  parseStandardReaderLocator,
+  standardLocatorPosition,
+  standardLocatorProgression
+} from '../../../../lib/reader/v5-locator';
 
 type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
 
@@ -235,9 +243,11 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     const generation = this.beginSession(context.sessionId, context.operation);
     this.openContext = context;
     this.preferences = pagedPdfPreferences(context.preferences);
-    this.pageNumber = context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageIndex + 1) : 1;
-    // Reader v4 phase 1 persists the canonical top-of-page anchor on every platform.
-    this.pageProgression = 0;
+    const restoredPage = this.pageFromPosition(context.initialPosition);
+    this.pageNumber = restoredPage
+      ?? (context.initialLocation?.kind === 'pdf' ? Math.max(1, context.initialLocation.pageIndex + 1) : 1);
+    this.pageProgression = this.progressionFromPosition(context.initialPosition)
+      ?? (context.initialLocation?.kind === 'pdf' ? context.initialLocation.pageProgression : 0);
     this.status = 'loading';
     this.error = undefined;
     this.container.dataset.readerEngine = 'pdf-v3';
@@ -303,6 +313,9 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
         rejectReaderSafety(READER_SAFETY_RULE_IDS.PDF_PAGE_GEOMETRY);
       }
       this.pageCount = document.numPages;
+      if (context.initialPosition && (this.pageNumber < 1 || this.pageNumber > this.pageCount)) {
+        throw new Error(LOCATION_RESTORE_FAILED);
+      }
       this.pageNumber = clampPage(this.pageNumber, this.pageCount);
       this.emit({ type: 'metadata-changed', totalPages: this.pageCount }, context.operation);
       this.installResizeObserver(generation);
@@ -313,7 +326,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
-      this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.location() }, context.operation);
+      this.emit({ type: 'ready', capabilities: this.getCapabilities(), location: this.location(), position: this.positionReport() }, context.operation);
     } catch (reason) {
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError) return;
       const effectiveReason = this.rangeFailure ?? reason;
@@ -369,6 +382,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
           operation: context.operation,
           signal: context.signal,
           initialLocation: this.location(),
+          initialPosition: this.positionReport(),
           preferences
         });
         return context.signal.aborted
@@ -401,15 +415,21 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
       else if (command.type === 'last') target = this.pageCount;
       else if (command.type === 'go-to-progress') target = Math.round(Math.max(0, Math.min(1, command.progression)) * (this.pageCount - 1)) + 1;
       else if (command.type === 'go-to-index') target = command.index;
-      else if (command.type === 'go-to-location') {
-        if (command.location.kind !== 'pdf') return this.failOperation(context, 'location-kind-mismatch');
-        target = command.location.pageIndex + 1;
-        targetProgression = 0;
+      else if (command.type === 'go-to-position') {
+        const position = this.pageFromPosition(command.position);
+        const progression = this.progressionFromPosition(command.position);
+        if (position === null) throw new Error(LOCATION_RESTORE_FAILED);
+        if (position > this.pageCount) throw new Error(LOCATION_RESTORE_FAILED);
+        target = position;
+        targetProgression = progression ?? 0;
       } else if (command.type === 'retry') {
         this.continuousFailures.delete(this.pageNumber);
         this.releasePage(this.pageNumber);
       }
       const clamped = clampPage(target, this.pageCount);
+      if (command.type === 'go-to-position' && clamped === this.pageNumber && targetProgression === this.pageProgression) {
+        return this.ack(context.operation, true, { location: this.location(), position: this.positionReport() });
+      }
       if (clamped === this.pageNumber && targetProgression === this.pageProgression && command.type !== 'retry') {
         if (command.type === 'next') this.emitLocation(context.operation);
         return this.failOperation(context, command.type === 'next' ? 'end-of-document' : command.type === 'previous' ? 'start-of-document' : 'no-op');
@@ -426,13 +446,13 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
     try {
       await this.queueRender(this.currentGeneration(), context.signal, forceRender);
       if (pageChanged && this.preferences.pdf.flow === 'paged') this.container.scrollTop = 0;
-      if ((pageChanged || command.type === 'go-to-location') && this.preferences.pdf.flow === 'continuous') {
+      if ((pageChanged || command.type === 'go-to-position') && this.preferences.pdf.flow === 'continuous') {
         this.scrollToContinuousPage(this.pageNumber, this.pageProgression);
       }
       this.status = 'ready';
       this.emitLocation(context.operation);
       this.emitView();
-      return this.ack(context.operation, true, { location: this.location() });
+      return this.ack(context.operation, true, { location: this.location(), position: this.positionReport() });
     } catch (reason) {
       if (isAbortError(reason) || reason instanceof StaleReaderOperationError || this.isRenderingCancelled(reason)) {
         return this.failOperation(context, 'operation-cancelled');
@@ -884,12 +904,43 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
 
   private emitLocation(operation = this.currentOperation()) {
     const percent = this.pageCount > 1 ? ((this.pageNumber - 1) / (this.pageCount - 1)) * 100 : 100;
-    this.emit({ type: 'location-changed', location: this.location(), percent }, operation);
+    this.emit({ type: 'location-changed', location: this.location(), percent, position: this.positionReport() }, operation);
     this.emit({ type: 'capabilities-changed', capabilities: this.getCapabilities() }, operation);
   }
 
   private location(): PdfLocation {
     return { kind: 'pdf', pageIndex: this.pageNumber - 1, pageProgression: this.pageProgression };
+  }
+
+  private positionReport(): ReaderPositionReport {
+    const percent = this.pageCount > 1 ? ((this.pageNumber - 1) / (this.pageCount - 1)) * 100 : 100;
+    return {
+      locator: createStandardReaderLocator({
+        href: 'document.pdf',
+        type: 'application/pdf',
+        position: this.pageNumber,
+        progression: this.pageProgression,
+        totalProgression: Math.max(0, Math.min(1, percent / 100))
+      }),
+      presentation: {
+        displayPercent: Math.max(0, Math.min(100, percent)),
+        totalProgression: Math.max(0, Math.min(1, percent / 100)),
+        currentHref: 'document.pdf',
+        chapter: null,
+        page: { number: this.pageNumber, total: this.pageCount || null },
+        playback: null
+      }
+    };
+  }
+
+  private pageFromPosition(position: ReaderPositionReport | null | undefined): number | null {
+    const locator = parseStandardReaderLocator(position?.locator);
+    return locator ? standardLocatorPosition(locator) : null;
+  }
+
+  private progressionFromPosition(position: ReaderPositionReport | null | undefined): number | null {
+    const locator = parseStandardReaderLocator(position?.locator);
+    return locator ? standardLocatorProgression(locator) : null;
   }
 
   private neighborPage() {
@@ -944,6 +995,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
   }
 
   private pdfErrorCode(reason: unknown) {
+    if (reason instanceof Error && reason.message === LOCATION_RESTORE_FAILED) return LOCATION_RESTORE_FAILED;
     if (reason instanceof ReaderSafetyPolicyError) return reason.code;
     if (reason instanceof PdfRangeError || reason instanceof ReaderResourceError) return reason.code;
     if (reason instanceof PdfAdapterFailure) return reason.code;
@@ -958,6 +1010,7 @@ export class PdfReaderAdapter extends ReaderAdapterBase implements ReaderAdapter
 
   private pdfErrorMessage(reason: unknown) {
     const code = this.pdfErrorCode(reason);
+    if (code === LOCATION_RESTORE_FAILED) return '保存的位置无法在当前文档中恢复';
     if (code === 'PDF_INVALID') return 'PDF 文件已损坏或格式无效';
     if (code === PDF_PAGE_POLICY_ERROR_CODE) return 'PDF 页数或页面尺寸超过安全策略限制';
     if (code === PDF_DRM_POLICY_ERROR_CODE) return '加密或密码保护的 PDF 暂不支持阅读';

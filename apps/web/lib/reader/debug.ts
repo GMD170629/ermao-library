@@ -1,7 +1,7 @@
-import type { ReaderSyncDiagnostic } from './model';
+import type { ReaderV5SyncDiagnostic } from './v5-storage';
 
 export function emitReaderDebug(
-  level: ReaderSyncDiagnostic['level'],
+  level: ReaderV5SyncDiagnostic['level'],
   message: string,
   data?: Record<string, unknown>
 ) {

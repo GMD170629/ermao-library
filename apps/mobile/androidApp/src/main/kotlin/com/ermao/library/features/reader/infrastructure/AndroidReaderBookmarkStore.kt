@@ -9,13 +9,8 @@ import org.json.JSONObject
 
 internal data class AndroidReaderBookmarkRecord(
     val id: String,
-    val resourceKey: String,
-    val progression: Double?,
-    val totalProgression: Double?,
-    val position: Int?,
-    val exactEnvelope: String?,
+    val positionJson: String,
     val label: String,
-    val percent: Double,
     val createdAt: String,
 )
 
@@ -30,7 +25,7 @@ internal class AndroidReaderBookmarkStore(
     resourceId: String,
 ) {
     private val preferences = context.getSharedPreferences(
-        "reader_bookmarks_v3_${sha256(readerAccountStorageKey(namespace))}",
+        "reader_bookmarks_v5_${sha256(readerAccountStorageKey(namespace))}",
         Context.MODE_PRIVATE,
     )
     private val key = listOf(namespace.stableKey, resourceId)
@@ -63,16 +58,11 @@ internal class AndroidReaderBookmarkStore(
     }.getOrDefault(AndroidReaderBookmarkState())
 
     private fun records(values: List<AndroidReaderBookmarkRecord>) = JSONArray().apply {
-        values.forEach { value ->
+            values.forEach { value ->
             put(JSONObject()
                 .put("id", value.id)
-                .put("resourceKey", value.resourceKey)
-                .put("progression", value.progression)
-                .put("totalProgression", value.totalProgression)
-                .put("position", value.position)
-                .put("exactEnvelope", value.exactEnvelope)
+                .put("position", JSONObject(value.positionJson))
                 .put("label", value.label)
-                .put("percent", value.percent)
                 .put("createdAt", value.createdAt))
         }
     }
@@ -82,16 +72,11 @@ internal class AndroidReaderBookmarkStore(
         repeat(array.length()) { index ->
             val item = array.optJSONObject(index) ?: return@repeat
             val id = item.optString("id").takeIf(String::isNotBlank) ?: return@repeat
-            val resourceKey = item.optString("resourceKey").takeIf(String::isNotBlank) ?: return@repeat
+            val position = item.optJSONObject("position")?.toString() ?: return@repeat
             add(AndroidReaderBookmarkRecord(
                 id = id,
-                resourceKey = resourceKey,
-                progression = item.optionalDouble("progression"),
-                totalProgression = item.optionalDouble("totalProgression"),
-                position = if (item.isNull("position")) null else item.optInt("position"),
-                exactEnvelope = item.optString("exactEnvelope").takeIf(String::isNotBlank),
+                positionJson = position,
                 label = item.optString("label"),
-                percent = item.optDouble("percent").takeIf(Double::isFinite) ?: 0.0,
                 createdAt = item.optString("createdAt"),
             ))
         }
@@ -99,13 +84,10 @@ internal class AndroidReaderBookmarkStore(
 
     companion object {
         internal fun clearNamespace(context: Context, namespace: ReaderSyncNamespace) {
-            context.deleteSharedPreferences("reader_bookmarks_v3_${sha256(readerAccountStorageKey(namespace))}")
+            context.deleteSharedPreferences("reader_bookmarks_v5_${sha256(readerAccountStorageKey(namespace))}")
         }
     }
 }
-
-private fun JSONObject.optionalDouble(name: String): Double? =
-    if (isNull(name)) null else optDouble(name).takeIf(Double::isFinite)
 
 private fun String.sha256(): String = MessageDigest.getInstance("SHA-256")
     .digest(toByteArray())

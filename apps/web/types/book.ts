@@ -15,6 +15,7 @@ export type ResourceImportSummary = Readonly<{
 export type ResourceAssetView = Readonly<{
   id: string;
   title: string;
+  path?: string;
   resourceId: string;
   sourceNodeId: string;
   role: string;

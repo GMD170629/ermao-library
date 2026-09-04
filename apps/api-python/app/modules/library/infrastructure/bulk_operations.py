@@ -15,7 +15,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from app.contracts.media_capabilities import require_reader_type_for_format
 from app.core.authorization import AuthorizationContext, book_visibility_predicate
 from app.models import (
     LibraryBook,
@@ -25,9 +24,7 @@ from app.models import (
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
     LibrarySourceNodeMetadata,
-    ReaderResourceProgress,
 )
-from app.models.common import cuid
 from app.models.shelf import Shelf, ShelfBook
 from app.modules.library.application.bulk_operations import (
     BulkBookOperationPort,
@@ -69,6 +66,7 @@ from app.modules.library.infrastructure.source_node_commands import (
 from app.modules.library.infrastructure.source_node_cover import (
     FilesystemSourceNodeCoverPublication,
 )
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 
 _TEMPLATE_VARIABLES = {
     "value",
@@ -202,8 +200,10 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
         db: Session,
         *,
         storage_root: Path | None = None,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
     ) -> None:
         self._db = db
+        self._reader_queries = reader_queries
         self._storage_root = (
             storage_root.resolve() if storage_root is not None else None
         )
@@ -706,7 +706,6 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             select(
                 LibraryReadableResource.id,
                 LibraryReadableResource.book_id,
-                LibraryReadableResource.format,
             )
             .where(
                 LibraryReadableResource.book_id.in_(command.book_ids),
@@ -716,71 +715,27 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             .order_by(LibraryReadableResource.book_id, LibraryReadableResource.id)
         ).all()
         resource_ids = tuple(str(row.id) for row in resources)
-        progress_rows = (
-            self._db.scalars(
-                select(ReaderResourceProgress).where(
-                    ReaderResourceProgress.user_id == command.context.user_id,
-                    ReaderResourceProgress.resource_id.in_(resource_ids),
-                )
-            ).all()
-            if resource_ids
-            else []
-        )
-        progress_by_resource = {str(row.resource_id): row for row in progress_rows}
-        if command.status == "UNREAD":
-            changed_resource_ids = tuple(progress_by_resource)
-        else:
-            changed_resource_ids = tuple(
-                str(row.id)
-                for row in resources
-                if (progress := progress_by_resource.get(str(row.id))) is None
-                or float(progress.percent) < 100.0
+        status_by_resource = dict(
+            self._reader_queries.list_statuses(
+                user_id=command.context.user_id,
+                resource_ids=resource_ids,
             )
+        )
+        changed_resource_ids = tuple(
+            str(row.id)
+            for row in resources
+            if (
+                status_by_resource.get(str(row.id)) is None
+                or status_by_resource[str(row.id)].status != command.status
+            )
+        )
         now = _now()
-        if command.status == "UNREAD":
-            if changed_resource_ids:
-                self._db.execute(
-                    delete(ReaderResourceProgress).where(
-                        ReaderResourceProgress.user_id == command.context.user_id,
-                        ReaderResourceProgress.resource_id.in_(changed_resource_ids),
-                    )
-                )
-        elif changed_resource_ids:
-            values = [
-                {
-                    "id": cuid(),
-                    "user_id": command.context.user_id,
-                    "resource_id": str(row.id),
-                    "reader_type": require_reader_type_for_format(
-                        str(row.format)
-                    ).value,
-                    "position": "0",
-                    "percent": 100.0,
-                    "extra": "{}",
-                    "schema_version": 3,
-                    "progressed_at": now,
-                    "source_protocol": "SHUKU_WEB",
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for row in resources
-                if str(row.id) in changed_resource_ids
-            ]
-            self._db.execute(
-                sqlite_insert(ReaderResourceProgress)
-                .values(values)
-                .on_conflict_do_update(
-                    index_elements=[
-                        ReaderResourceProgress.user_id,
-                        ReaderResourceProgress.resource_id,
-                    ],
-                    set_={
-                        ReaderResourceProgress.percent: 100.0,
-                        ReaderResourceProgress.position: "0",
-                        ReaderResourceProgress.updated_at: now,
-                        ReaderResourceProgress.progressed_at: now,
-                    },
-                )
+        if changed_resource_ids:
+            self._reader_queries.upsert_statuses(
+                user_id=command.context.user_id,
+                resource_ids=changed_resource_ids,
+                status=command.status,
+                updated_at=now,
             )
         affected_books = {
             str(row.book_id) for row in resources if str(row.id) in changed_resource_ids
@@ -793,7 +748,19 @@ class SqlAlchemyBulkBookOperations(BulkBookOperationPort):
             target_id=None,
             summary=f"批量设置 {len(affected_books)} 本图书为{('未读' if command.status == 'UNREAD' else '已读')}",
             payload={"bookIds": list(command.book_ids), "status": command.status},
-            inverse={"progress": [entity_record(row) for row in progress_rows]},
+            inverse={
+                "status": [
+                    {
+                        "resourceId": resource_id,
+                        "status": (
+                            status_by_resource[resource_id].status
+                            if resource_id in status_by_resource
+                            else "UNREAD"
+                        ),
+                    }
+                    for resource_id in changed_resource_ids
+                ]
+            },
             now=now,
             undoable=False,
         )

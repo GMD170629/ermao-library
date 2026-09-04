@@ -1,7 +1,10 @@
 import Foundation
 import XCTest
+@preconcurrency import class ErmaoShared.KotlinInt
 @preconcurrency import class ErmaoShared.PublicKt
-@preconcurrency import class ErmaoShared.ReaderProgress
+@preconcurrency import class ErmaoShared.ReaderChapterPresentation
+@preconcurrency import class ErmaoShared.ReaderPositionPresentation
+@preconcurrency import class ErmaoShared.ReaderPositionReport
 @testable import ErmaoLibrary
 
 @MainActor
@@ -329,6 +332,33 @@ final class ContentStoreTests: XCTestCase {
         }
     }
 
+    func testLibraryReentryKeepsLoadedResultsWithoutStartingAnotherRequest() async throws {
+        let client = RacingContentClient()
+        let store = LibraryStore(
+            context: contentContext,
+            client: client,
+            onUnauthorized: {}
+        )
+
+        store.reloadIfNeeded()
+        try await waitUntil {
+            guard case .ready = store.current.results else { return false }
+            return await client.booksRequestCount == 1
+        }
+        store.rememberAnchor("work:unfiltered")
+
+        store.reloadIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let requestCount = await client.booksRequestCount
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(store.current.scrollAnchor, "work:unfiltered")
+        guard case .ready(let items, _) = store.current.results else {
+            return XCTFail("Returning from detail must keep the loaded library visible")
+        }
+        XCTAssertEqual(items.compactMap(\.bookValue).map(\.id), ["unfiltered"])
+    }
+
     func testApplyingFiltersDoesNotCancelInFlightContentRequestAndRejectsItsStaleResult() async throws {
         let client = RacingContentClient()
         let store = LibraryStore(
@@ -531,9 +561,9 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertNil(store.selectedResourceID)
 
         ReaderProgressPresentationCenter.shared.publish(
-            namespaceKey: contentContext.namespaceKey, bookID: "browser-work", resourceID: "resource-2", percent: 75,
-            progress: try exactReflowableProgress(sourceID: "resource-2", href: "chapter.xhtml", fragment: "one", updatedAtEpochMillis: 2_000),
-            chapterTitle: "Chapter"
+            namespaceKey: contentContext.namespaceKey, bookID: "browser-work", resourceID: "resource-2",
+            position: try positionReport(href: "chapter.xhtml", fragment: "one", percent: 75, chapterIndex: 0),
+            capturedAtEpochMillis: 2_000
         )
         store.refreshIfLoaded()
         try await waitUntil { await client.contentsRequestCount == 2 && !store.isLoadingContentBrowser }
@@ -636,13 +666,13 @@ final class ContentStoreTests: XCTestCase {
             namespaceKey: contentContext.namespaceKey,
             bookID: "reader-work",
             resourceID: "resource-1",
-            percent: 42,
-            progress: try exactReflowableProgress(
+            position: try positionReport(
                 href: "Text/all.xhtml",
                 fragment: "two",
-                updatedAtEpochMillis: 1_000
+                percent: 42,
+                chapterIndex: 1
             ),
-            chapterTitle: "Chapter 2"
+            capturedAtEpochMillis: 1_000
         )
 
         guard case .ready(let content) = store.state else {
@@ -656,14 +686,13 @@ final class ContentStoreTests: XCTestCase {
             namespaceKey: contentContext.namespaceKey,
             bookID: "reader-work",
             resourceID: "resource-2",
-            percent: 75,
-            progress: try exactReflowableProgress(
-                sourceID: "resource-2",
+            position: try positionReport(
                 href: "Text/all.xhtml",
                 fragment: "one",
-                updatedAtEpochMillis: 2_000
+                percent: 75,
+                chapterIndex: 0
             ),
-            chapterTitle: "Chapter 1"
+            capturedAtEpochMillis: 2_000
         )
 
         guard case .ready(let unchanged) = store.state else {
@@ -678,13 +707,13 @@ final class ContentStoreTests: XCTestCase {
             namespaceKey: contentContext.namespaceKey,
             bookID: "reader-work",
             resourceID: "resource-1",
-            percent: 55,
-            progress: try exactReflowableProgress(
+            position: try positionReport(
                 href: "Text/all.xhtml",
                 fragment: "one",
-                updatedAtEpochMillis: 1_500
+                percent: 55,
+                chapterIndex: 0
             ),
-            chapterTitle: "Chapter 1"
+            capturedAtEpochMillis: 1_500
         )
 
         guard case .ready(let reordered) = store.state else {
@@ -764,14 +793,13 @@ final class ContentStoreTests: XCTestCase {
             namespaceKey: contentContext.namespaceKey,
             bookID: "position-work",
             resourceID: "resource-position",
-            percent: 15.2,
-            progress: try exactPositionProgress(
-                sourceID: "resource-position",
+            position: try positionReport(
                 href: "Text/part0008_split_001.xhtml",
                 position: 11,
-                updatedAtEpochMillis: 3_000
+                percent: 15.2,
+                chapterIndex: 1
             ),
-            chapterTitle: "Chapter 2"
+            capturedAtEpochMillis: 3_000
         )
 
         guard case .ready(let content) = store.state else {
@@ -781,28 +809,40 @@ final class ContentStoreTests: XCTestCase {
         XCTAssertEqual(content.chapters.map(\.state), [.read, .current, .unread])
     }
 
-    private func exactReflowableProgress(
-        sourceID: String = "resource-1",
+    private func positionReport(
         href: String,
-        fragment: String,
-        updatedAtEpochMillis: Int64
-    ) throws -> ReaderProgress {
-        let payload = """
-        {"schema":"ermao.reader-progress","version":7,"resourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)#\(fragment)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"fragments":["\(fragment)"]}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":42.0}
-        """
-        return try PublicKt.createReaderProgressJson().decode(payload: payload)
-    }
-
-    private func exactPositionProgress(
-        sourceID: String,
-        href: String,
-        position: Int,
-        updatedAtEpochMillis: Int64
-    ) throws -> ReaderProgress {
-        let payload = """
-        {"schema":"ermao.reader-progress","version":7,"resourceId":"\(sourceID)","location":{"kind":"reflow","resourceKey":"\(href)","engineLocator":{"engine":"readium","platform":"ios","version":"readium-swift:3.8.0","payload":{"href":"\(href)","type":"application/xhtml+xml","locations":{"cssSelector":"#visible","position":\(position)}}}},"updatedAtEpochMillis":\(updatedAtEpochMillis),"deviceId":"ios-test","percent":15.2}
-        """
-        return try PublicKt.createReaderProgressJson().decode(payload: payload)
+        fragment: String? = nil,
+        position: Int? = nil,
+        percent: Double,
+        chapterIndex: Int
+    ) throws -> ReaderPositionReport {
+        let currentHref = fragment.map { "\(href)#\($0)" } ?? href
+        var locations: [String: Any] = ["cssSelector": "#visible"]
+        if let fragment { locations["fragments"] = [fragment] }
+        if let position { locations["position"] = position }
+        let locator: [String: Any] = [
+            "href": href,
+            "type": "application/xhtml+xml",
+            "locations": locations,
+            "text": ["highlight": ""],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: locator, options: [.sortedKeys])
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        return ReaderPositionReport(
+            locator: try PublicKt.createReaderOpaqueLocator(payloadJson: json),
+            presentation: ReaderPositionPresentation(
+                displayPercent: percent,
+                totalProgression: percent / 100,
+                currentHref: currentHref,
+                chapter: ReaderChapterPresentation(
+                    href: currentHref,
+                    title: "Chapter \(chapterIndex + 1)",
+                    index: KotlinInt(int: Int32(chapterIndex))
+                ),
+                page: nil,
+                playback: nil
+            )
+        )
     }
 
     private var contentContext: ContentRequestContext {

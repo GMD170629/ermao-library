@@ -94,60 +94,6 @@ internal sealed interface ReadiumOpeningDiagnostic {
 }
 
 private val bookmarkPositionJson = ReaderPositionReportJson()
-private const val RESTORE_PROGRESSION_EPSILON = 0.02
-
-/**
- * Checks the navigation identity of a persisted Readium locator against the
- * first locator observed from the newly-created navigator.
- *
- * The complete locator remains opaque for persistence and transport.  This
- * small adapter-side check only answers whether the engine opened the
- * selected resource/anchor; it deliberately does not require a non-empty
- * text highlight (Readium is allowed to return an empty one).
- */
-internal fun readiumLocatorMatchesRestoreCandidate(
-    expected: Locator,
-    actual: Locator,
-): Boolean = readiumNavigationMatchesRestoreCandidate(
-    expectedHref = expected.href.toString(),
-    actualHref = actual.href.toString(),
-    expectedFragments = expected.locations.fragments,
-    actualFragments = actual.locations.fragments,
-    expectedPosition = expected.locations.position,
-    actualPosition = actual.locations.position,
-    expectedProgression = expected.locations.progression,
-    actualProgression = actual.locations.progression,
-)
-
-/**
- * Verifies only the navigation identity exposed by a Readium location event.
- * Text/highlight and all other locator fields stay outside this check.
- */
-internal fun readiumNavigationMatchesRestoreCandidate(
-    expectedHref: String,
-    actualHref: String,
-    expectedFragments: List<String>,
-    actualFragments: List<String>,
-    expectedPosition: Int?,
-    actualPosition: Int?,
-    expectedProgression: Double?,
-    actualProgression: Double?,
-): Boolean {
-    if (expectedHref.substringBefore('#') != actualHref.substringBefore('#')) {
-        return false
-    }
-    if (expectedFragments.isNotEmpty() && expectedFragments != actualFragments) {
-        return false
-    }
-    expectedPosition?.let { position ->
-        if (actualPosition != position) return false
-    }
-    expectedProgression?.let { progression ->
-        val observedProgression = actualProgression ?: return false
-        if (abs(observedProgression - progression) > RESTORE_PROGRESSION_EPSILON) return false
-    }
-    return true
-}
 
 private fun AndroidReaderBookmarkRecord.shared(): ReaderBookmark? = runCatching {
     ReaderBookmark(
@@ -205,8 +151,6 @@ internal class ReadiumEpubSession(
     private val _preferences = MutableStateFlow(initialPreferences)
     override val preferences: StateFlow<ReaderPreferences> = _preferences.asStateFlow()
 
-    private val _restoreWarning = MutableStateFlow<ReaderError?>(null)
-    override val restoreWarning: StateFlow<ReaderError?> = _restoreWarning.asStateFlow()
 
     private val _resumeNotice = MutableStateFlow<ReaderResumeNotice?>(null)
     override val resumeNotice: StateFlow<ReaderResumeNotice?> = _resumeNotice.asStateFlow()
@@ -237,11 +181,7 @@ internal class ReadiumEpubSession(
     private var removedBookmark: AndroidReaderBookmarkRecord? = null
     private var lastPersistedReport: ReaderPositionReport? = null
     private var lastObservedLocator: Locator? = null
-    private var expectedRestoreLocator: Locator? = null
-    private var failedRestoreLocator: Locator? = null
-    private var restoreFailed = false
-    private var awaitingInitialObservation = true
-    private var hasLocalReadingActivity = false
+    private var remoteTarget: ReaderProgressSnapshotV5? = null
     private var suppressNextPreferenceLocation = false
     private var currentPageUnreadable = false
     private var prepared = false
@@ -395,15 +335,12 @@ internal class ReadiumEpubSession(
         val initialLocator = when {
             explicitLocator != null -> explicitLocator
             localPosition != null -> positionLocator(localPosition.position)
-                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
             startupPositionSource == ReaderStartupPositionSource.ServerSnapshot && remoteSnapshot != null ->
                 positionLocator(remoteSnapshot.position)
-                ?: throw ReaderOpenFailure(ReaderError(ReaderErrorCode.LocationRestoreFailed))
             else -> null
         }
-        expectedRestoreLocator = initialLocator
-        if (localPosition != null) {
-            val restoredLocalLocator = checkNotNull(initialLocator)
+        if (localPosition != null && initialLocator != null) {
+            val restoredLocalLocator = initialLocator
             _currentLocation.value = locatorMapper.toDomain(restoredLocalLocator)
             _presentationProgress.value = positionReport(restoredLocalLocator).presentation.totalProgression
             lastPersistedReport = localPosition.position
@@ -453,6 +390,15 @@ internal class ReadiumEpubSession(
         checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
         bookmarkScope = scope
+        progressCoordinator?.let { coordinator ->
+            scope.launch {
+                coordinator.remotePositionNotices.collectLatest { notice ->
+                    remoteTarget = notice?.snapshot
+                    _resumeActionFailed.value = false
+                    _resumeNotice.value = notice?.snapshot?.let(::resumeNotice)
+                }
+            }
+        }
         locationJob = scope.launch {
             checkNotNull(navigator).currentLocator.collectLatest { locator ->
                 lastObservedLocator = locator
@@ -460,28 +406,10 @@ internal class ReadiumEpubSession(
                 val eventReport = positionReport(locator)
                 _currentLocation.value = mapped
                 _presentationProgress.value = eventReport.presentation.totalProgression
-                if (awaitingInitialObservation) {
-                    awaitingInitialObservation = false
-                    val expected = expectedRestoreLocator
-                    expectedRestoreLocator = null
-                    if (expected != null && !readiumLocatorMatchesRestoreCandidate(expected, locator)) {
-                        restoreFailed = true
-                        failedRestoreLocator = locator
-                        publishReaderRestoreWarning(_restoreWarning, "epub", "initial_locator_verification")
-                    }
-                    return@collectLatest
-                }
-                if (restoreFailed) {
-                    // Keep fencing repeated observations of the failed candidate. A later
-                    // different observation is a gesture/navigation event and may be saved.
-                    if (failedRestoreLocator == locator) return@collectLatest
-                    restoreFailed = false
-                    failedRestoreLocator = null
-                }
                 if (suppressNextPreferenceLocation) {
+                    suppressNextPreferenceLocation = false
                     return@collectLatest
                 }
-                hasLocalReadingActivity = true
                 if (_resumeNotice.value != null) {
                     hideResumeNotice()
                 }
@@ -503,9 +431,6 @@ internal class ReadiumEpubSession(
     override fun goPrevious(): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        restoreFailed = false
-        failedRestoreLocator = null
-        expectedRestoreLocator = null
         if (isContinuousScroll(_preferences.value)) {
             return advanceContinuousScroll(direction = ReaderPageTurnDirection.Previous)
         }
@@ -515,9 +440,6 @@ internal class ReadiumEpubSession(
     override fun goNext(): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        restoreFailed = false
-        failedRestoreLocator = null
-        expectedRestoreLocator = null
         if (isContinuousScroll(_preferences.value)) {
             return advanceContinuousScroll(direction = ReaderPageTurnDirection.Next)
         }
@@ -646,9 +568,6 @@ internal class ReadiumEpubSession(
     override fun goTo(location: ReaderLocation): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        restoreFailed = false
-        failedRestoreLocator = null
-        expectedRestoreLocator = null
         val openedPublication = publication ?: return false
         val target = locatorMapper.resourceLocator(location, openedPublication)
             ?: return false
@@ -659,9 +578,6 @@ internal class ReadiumEpubSession(
     override fun goToTotalProgression(totalProgression: Double): Boolean {
         suppressNextPreferenceLocation = false
         dismissResumeNotice()
-        restoreFailed = false
-        failedRestoreLocator = null
-        expectedRestoreLocator = null
         require(totalProgression in 0.0..1.0) { "Total progression is outside 0..1" }
         val target = publicationPositionIndex.nearestLocator(totalProgression) ?: return false
         requestedNavigationTarget = com.ermao.library.shared.modules.reader.ReaderNavigationTargetReflowable(target.href.toString())
@@ -680,20 +596,46 @@ internal class ReadiumEpubSession(
     }
 
     override fun dismissResumeNotice() {
+        progressCoordinator?.dismissRemotePositionNotice()
         hideResumeNotice()
     }
 
-    override fun dismissRestoreWarning() {
-        _restoreWarning.value = null
-    }
-
     private fun hideResumeNotice() {
+        remoteTarget = null
         _resumeNotice.value = null
         _resumeActionFailed.value = false
     }
 
-    /** Remote v5 snapshots are applied only while opening the next session. */
-    override fun returnToResumeNotice(): Boolean = false
+    override fun returnToResumeNotice(): Boolean {
+        val snapshot = remoteTarget ?: return false
+        val locator = positionLocator(snapshot.position) ?: run {
+            _resumeActionFailed.value = true
+            return false
+        }
+        val moved = runCatching {
+            navigator?.go(locator, animated = navigationAnimationsEnabled()) == true
+        }.getOrDefault(false)
+        if (!moved) {
+            _resumeActionFailed.value = true
+            return false
+        }
+        bookmarkScope?.launch {
+            runCatching {
+                progressCoordinator?.acceptRemotePosition(
+                    ReaderPositionLocalState(
+                        resourceId = source.resourceId,
+                        clientId = deviceIdentity.stableDeviceId(),
+                        capturedAtEpochMillis = snapshot.capturedAtEpochMillis,
+                        position = snapshot.position,
+                    ),
+                    snapshot,
+                )
+            }
+        }
+        lastPersistedReport = snapshot.position
+        hideResumeNotice()
+        return true
+    }
 
     override fun updatePreferences(updated: ReaderPreferences) {
         val active = checkNotNull(navigator) { "READER_NOT_READY" }
@@ -780,15 +722,12 @@ internal class ReadiumEpubSession(
                 bookmarkPositionJson.decode(record.positionJson).locator.canonicalJson,
             ))
         }.getOrNull() ?: return false
-        restoreFailed = false
-        failedRestoreLocator = null
-        expectedRestoreLocator = null
         requestedNavigationTarget = ReaderNavigationTargetReflowable(locator.href.toString())
         return navigator?.go(locator, animated = navigationAnimationsEnabled()) ?: false
     }
 
     override suspend fun flush() {
-        if (suppressNextPreferenceLocation || restoreFailed || !hasLocalReadingActivity) return
+        if (suppressNextPreferenceLocation) return
         val locator = lastObservedLocator ?: return
         val location = locatorMapper.toDomain(locator)
         _currentLocation.value = location
@@ -815,9 +754,7 @@ internal class ReadiumEpubSession(
         mobiPublication?.close()
         mobiPublication = null
         publicationPositionIndex = ReadiumPublicationPositionIndex.Empty
-        expectedRestoreLocator = null
-        failedRestoreLocator = null
-        restoreFailed = false
+        remoteTarget = null
     }
 
     private fun commitBookmarkMutation(next: List<AndroidReaderBookmarkRecord>) {
@@ -887,7 +824,6 @@ internal class ReadiumEpubSession(
         report: ReaderPositionReport = positionReport(locator),
     ) {
         saveMutex.withLock {
-            if (restoreFailed) return@withLock
             if (report == lastPersistedReport) return@withLock
             val capturedAt = nowEpochMillis()
             val state = ReaderPositionLocalState(
@@ -909,7 +845,6 @@ internal class ReadiumEpubSession(
                 return@withLock
             }
             lastPersistedReport = report
-            _restoreWarning.value = null
             val namespace = presentationNamespaceKey ?: return@withLock
             val bookId = source.bookId ?: return@withLock
             publishProgressUpdate(
@@ -940,10 +875,16 @@ internal class ReadiumEpubSession(
         progressStore.load(source.resourceId)
     } catch (cancelled: CancellationException) {
         throw cancelled
-    } catch (error: Exception) {
-        publishReaderRestoreWarning(_restoreWarning, "epub", "position_load", error)
+    } catch (_: Exception) {
         null
     }
+
+    private fun resumeNotice(snapshot: ReaderProgressSnapshotV5): ReaderResumeNotice = ReaderResumeNotice(
+        capturedAtEpochMillis = snapshot.capturedAtEpochMillis,
+        percent = snapshot.position.presentation.displayPercent,
+        chapterLabel = snapshot.position.presentation.chapter?.title,
+        pageNumber = snapshot.position.presentation.page?.number,
+    )
 
     private fun positionLocator(position: ReaderPositionReport): Locator? = runCatching {
         Locator.fromJSON(org.json.JSONObject(position.locator.canonicalJson))

@@ -4,20 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from sqlalchemy import delete, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
-from sqlalchemy.sql.base import Executable
 
 from app.core.authorization import resource_visibility_predicate
-from app.core.sql_batches import sqlite_parameter_chunks
 from app.models import (
     LibraryBookMetadata,
     LibraryReadableResource,
     LibraryReadableResourceMetadata,
-    ReaderResourceProgress,
 )
-from app.models.common import cuid
 from app.models.organize import OrganizeJob
 from app.modules.library.application.request_mutations import (
     BookRecordMutation,
@@ -35,6 +30,7 @@ from app.modules.library.infrastructure.facet_sync import (
     PreparedBookFacetWrite,
     execute_book_facet_write,
 )
+from app.modules.reader.public import ReaderV5LibraryPresentationQueryPort
 from app.modules.shelf.public import ShelfBookMembershipPort
 
 EventWriter = Callable[[Session, list[object]], None]
@@ -69,11 +65,13 @@ class SqlAlchemyLibraryRequestMutations:
         shelf_memberships: ShelfBookMembershipPort,
         write_events: EventWriter,
         write_metadata: MetadataWriter,
+        reader_queries: ReaderV5LibraryPresentationQueryPort,
     ) -> None:
         self._db = db
         self._shelf_memberships = shelf_memberships
         self._write_events = write_events
         self._write_metadata = write_metadata
+        self._reader_queries = reader_queries
 
     def save_detail_preference(self, command: DetailPreferenceMutation) -> None:
         projections.save_detail_preference(
@@ -112,7 +110,6 @@ class SqlAlchemyLibraryRequestMutations:
         rows = self._db.execute(
             select(
                 LibraryReadableResource.id,
-                LibraryReadableResource.format,
                 LibraryReadableResource.book_id,
             )
             .join(
@@ -131,63 +128,13 @@ class SqlAlchemyLibraryRequestMutations:
                 LibraryReadableResource.id.asc(),
             )
         ).all()
-        resource_ids = tuple(str(row.id) for row in rows)
         updated = len({str(row.book_id) for row in rows})
-        statements: list[Executable] = []
-        if command.status == "UNREAD":
-            statements.extend(
-                delete(ReaderResourceProgress).where(
-                    ReaderResourceProgress.user_id == command.context.user_id,
-                    ReaderResourceProgress.resource_id.in_(chunk),
-                )
-                for chunk in sqlite_parameter_chunks(resource_ids, parameters_per_row=1)
-            )
-        else:
-            target_percent = 100.0 if command.status == "FINISHED" else 0.01
-            progress_rows = tuple(
-                {
-                    "id": cuid(),
-                    "user_id": command.context.user_id,
-                    "resource_id": str(row.id),
-                    "reader_type": (
-                        "audio"
-                        if str(row.format).upper() in {"M4B", "M4A", "MP3"}
-                        else "comic"
-                        if str(row.format).upper() in {"CBR", "CBZ", "RAR", "ZIP"}
-                        else "pdf"
-                        if str(row.format).upper() == "PDF"
-                        else "epub"
-                    ),
-                    "position": "0",
-                    "percent": target_percent,
-                    "extra": "{}",
-                    "schema_version": 3,
-                    "progressed_at": command.now,
-                    "source_protocol": "SHUKU_WEB",
-                    "created_at": command.now,
-                    "updated_at": command.now,
-                }
-                for row in rows
-            )
-            statements.extend(
-                sqlite_insert(ReaderResourceProgress)
-                .values(list(chunk))
-                .on_conflict_do_update(
-                    index_elements=[
-                        ReaderResourceProgress.user_id,
-                        ReaderResourceProgress.resource_id,
-                    ],
-                    set_={
-                        ReaderResourceProgress.percent: target_percent,
-                        ReaderResourceProgress.updated_at: command.now,
-                    },
-                )
-                for chunk in sqlite_parameter_chunks(
-                    progress_rows, parameters_per_row=12
-                )
-            )
-        for statement in statements:
-            self._db.execute(statement)
+        self._reader_queries.upsert_statuses(
+            user_id=command.context.user_id,
+            resource_ids=[str(row.id) for row in rows],
+            status=command.status,
+            updated_at=command.now,
+        )
         if updated and command.events:
             self._write_events(self._db, list(command.events))
         return updated

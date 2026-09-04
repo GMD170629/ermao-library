@@ -74,7 +74,7 @@ struct LibraryView: View {
         .onChange(of: managementRevision, initial: true) { _, _ in guard managementRevision > 0 else { return }; store.refreshAfterManagement() }
         .task {
             store.loadLibraryOptionsIfNeeded()
-            store.reload()
+            store.reloadIfNeeded()
         }
     }
 

@@ -23,7 +23,7 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
+    ReaderResourceProgressV5,
 )
 from app.models.auth import User
 
@@ -137,18 +137,23 @@ def test_mobile_library_routes_emit_current_wire_shapes(
     resource = _seed_ready_resource(db_session, book)
     now = datetime(2026, 8, 12, tzinfo=UTC)
     db_session.add(
-        ReaderResourceProgress(
+        ReaderResourceProgressV5(
             id="mobile-contract-progress",
             user_id=user.id,
             resource_id=resource.id,
-            reader_type="pdf",
-            position="page-3",
-            percent=42,
-            extra="{}",
-            progressed_at=now,
-            source_protocol="SHUKU_WEB",
-            created_at=now,
+            client_id="mobile-contract-client",
+            mutation_id="00000000-0000-4000-8000-000000000001",
+            locator_json='{"page":3}',
+            presentation_json=(
+                '{"displayPercent":42,"totalProgression":0.42,'
+                '"currentHref":null,"chapter":null,"page":null,"playback":null}'
+            ),
+            display_percent=42,
+            total_progression=0.42,
+            captured_at=now,
+            received_at=now,
             updated_at=now,
+            revision=1,
         )
     )
     facet = LibraryFacet(
@@ -232,6 +237,7 @@ def test_mobile_library_routes_emit_current_wire_shapes(
     assert "mediaKind" not in detail_resource
     assert "classification" not in detail_resource
     assert detail_resource["assets"][0]["title"] == "mobile-contract-resource.pdf"
+    assert "path" not in detail_resource["assets"][0]
 
     resources = client.get(f"/api/books/{book.id}/resources")
     assert resources.status_code == 200, resources.text
@@ -241,3 +247,4 @@ def test_mobile_library_routes_emit_current_wire_shapes(
     assert resource_payload["resources"][0]["assets"][0]["title"] == (
         "mobile-contract-resource.pdf"
     )
+    assert "path" not in resource_payload["resources"][0]["assets"][0]

@@ -13,12 +13,15 @@ from app.models import (
     LibraryReadableResourceMetadata,
     LibraryResourceAsset,
     LibrarySourceNode,
-    ReaderResourceProgress,
+    ReaderResourceReadingStatusV5,
 )
 from app.models.auth import User
 from app.modules.library.application.request_mutations import BulkReadingStatusMutation
 from app.modules.library.infrastructure.request_mutations import (
     SqlAlchemyLibraryRequestMutations,
+)
+from app.modules.reader.infrastructure.v5_library_queries import (
+    SqlAlchemyReaderV5LibraryPresentationQueries,
 )
 from app.modules.shelf.infrastructure.memberships import (
     SqlAlchemyShelfBookMembership,
@@ -115,6 +118,7 @@ def test_bulk_reading_status_targets_resources_by_book_identity(db_session) -> N
         shelf_memberships=SqlAlchemyShelfBookMembership(db_session),
         write_events=lambda _db, _events: None,
         write_metadata=lambda _db, _intents: (),
+        reader_queries=SqlAlchemyReaderV5LibraryPresentationQueries(db_session),
     )
     context = AuthorizationContext(
         user_id="reader-user",
@@ -136,12 +140,14 @@ def test_bulk_reading_status_targets_resources_by_book_identity(db_session) -> N
     )
 
     assert updated == 2
-    progress = db_session.scalars(
-        select(ReaderResourceProgress).order_by(ReaderResourceProgress.resource_id)
+    statuses = db_session.scalars(
+        select(ReaderResourceReadingStatusV5).order_by(
+            ReaderResourceReadingStatusV5.resource_id
+        )
     ).all()
-    assert [(row.resource_id, row.percent) for row in progress] == [
-        ("reading-audio", 100.0),
-        ("reading-epub", 100.0),
+    assert [(row.resource_id, row.status) for row in statuses] == [
+        ("reading-audio", "FINISHED"),
+        ("reading-epub", "FINISHED"),
     ]
 
     cleared = gateway.update_reading_status(
@@ -153,4 +159,13 @@ def test_bulk_reading_status_targets_resources_by_book_identity(db_session) -> N
         )
     )
     assert cleared == 2
-    assert db_session.scalars(select(ReaderResourceProgress.id)).all() == []
+    db_session.expire_all()
+    statuses = db_session.scalars(
+        select(ReaderResourceReadingStatusV5).order_by(
+            ReaderResourceReadingStatusV5.resource_id
+        )
+    ).all()
+    assert [(row.resource_id, row.status) for row in statuses] == [
+        ("reading-audio", "UNREAD"),
+        ("reading-epub", "UNREAD"),
+    ]

@@ -65,6 +65,12 @@ from app.modules.library.infrastructure.readable_resource_schema import (
     LibrarySourceNodeInterpretation,
     LibrarySourceNodeMetadata,
 )
+from app.modules.reader.infrastructure.persistence.models import (
+    ReaderBookmarkV5,
+    ReaderProgressMutationV5,
+    ReaderResourceProgressV5,
+    ReaderResourceReadingStatusV5,
+)
 from app.modules.shelf.infrastructure.models import ShelfCollectionMembership
 
 __all__ = [
@@ -103,10 +109,14 @@ __all__ = [
     "ReadableResourceNavigationUnit",
     "ReaderBookPreference",
     "ReaderBookmark",
+    "ReaderBookmarkV5",
     "ReaderPreference",
     "ReaderProgressCursor",
     "ReaderProgressMutation",
+    "ReaderProgressMutationV5",
     "ReaderResourceProgress",
+    "ReaderResourceProgressV5",
+    "ReaderResourceReadingStatusV5",
     "Session",
     "Shelf",
     "ShelfBook",

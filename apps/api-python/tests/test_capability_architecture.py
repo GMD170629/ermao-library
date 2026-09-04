@@ -493,6 +493,7 @@ def test_readable_resource_migrations_are_linear_and_baseline_is_self_contained(
         "0006_import_task_missing_entry_policy.py",
         "0007_source_node_lookup_indexes.py",
         "0008_foreign_key_lookup_indexes.py",
+        "0009_reader_v5_opaque_progress.py",
     ]
     path = versions_dir / "0001_library_topology_baseline.py"
     source = path.read_text(encoding="utf-8")
@@ -799,10 +800,6 @@ def test_adr0019_cross_capability_adapters_use_public_surfaces() -> None:
         ),
         APP_ROOT / "modules" / "reader" / "infrastructure" / "resource_repository.py": (
             "app.modules.library.infrastructure",
-        ),
-        APP_ROOT / "modules" / "reader" / "presentation" / "v4.py": (
-            "app.modules.publications.application",
-            "app.modules.publications.domain",
         ),
     }
     for path, tokens in forbidden_imports.items():
