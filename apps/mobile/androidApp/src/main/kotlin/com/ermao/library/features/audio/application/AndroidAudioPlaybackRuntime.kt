@@ -36,13 +36,16 @@ import com.ermao.library.shared.modules.reader.ReaderFormat
 import com.ermao.library.shared.modules.reader.ReaderBootstrapGateway
 import com.ermao.library.shared.modules.reader.ReaderBootstrapRequest
 import com.ermao.library.shared.modules.reader.ReaderLocalProgressIdentity
+import com.ermao.library.shared.modules.reader.ReaderLocationRestoreException
+import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
-import com.ermao.library.shared.modules.reader.ReaderProgressSyncRuntime
+import com.ermao.library.shared.modules.reader.ReaderPositionSyncRuntime
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
-import com.ermao.library.shared.createAndroidReaderProgressSyncPort
+import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
+import com.ermao.library.shared.createAndroidReaderPositionSyncPort
 import com.ermao.library.shared.modules.servers.domain.ServerProfile
 import com.ermao.library.features.reader.infrastructure.AndroidReaderDeviceIdentity
-import com.ermao.library.features.reader.infrastructure.AndroidReaderProgressDatabase
+import com.ermao.library.features.reader.infrastructure.AndroidReaderV5Database
 import java.io.Closeable
 import java.io.File
 import java.util.concurrent.Executor
@@ -73,11 +76,13 @@ class AndroidAudioPlaybackRuntime private constructor(
     private val scope: CoroutineScope,
     initialController: AndroidAudioMediaController?,
     private val mediaItemsForLaunch: (AndroidAudioLaunchIntent) -> List<MediaItem>,
+    private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit,
 ) : Closeable {
     constructor(
         context: Context,
         transportRegistry: AndroidAudioTransportRegistry? = null,
         progressSink: AndroidAudioProgressSink = AndroidAudioProgressSink.NoOp,
+        publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
     ) : this(
         appContext = context.applicationContext,
         transportRegistry = transportRegistry,
@@ -85,6 +90,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
         initialController = null,
         mediaItemsForLaunch = ::buildAudioMediaItems,
+        publishProgressUpdate = publishProgressUpdate,
     )
 
     /** Test-only construction path: use the same runtime transaction with a fake engine port. */
@@ -92,6 +98,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         controller: AndroidAudioMediaController,
         scope: CoroutineScope,
         progressSink: AndroidAudioProgressSink = AndroidAudioProgressSink.NoOp,
+        publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
     ) : this(
         appContext = null,
         transportRegistry = null,
@@ -101,6 +108,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         mediaItemsForLaunch = { intent ->
             intent.tracks.map { track -> MediaItem.Builder().setMediaId(track.assetId).build() }
         },
+        publishProgressUpdate = publishProgressUpdate,
     )
 
     private val mainExecutor: Executor? = appContext?.let(ContextCompat::getMainExecutor)
@@ -118,7 +126,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     private var remoteLaunch: RemoteLaunch? = null
     private var activePublication: com.ermao.library.shared.modules.audio.AudioPublication? = null
     private var sharedSessionId: Long? = null
-    private var activeProgressRuntime: ReaderProgressSyncRuntime? = null
+    private var activeProgressRuntime: ReaderPositionSyncRuntime? = null
     private var activeProgressWriter: AudioProgressWriter? = null
     private var seekRequestId = 0L
     private var activeSeek: ActiveSeek? = null
@@ -246,11 +254,13 @@ class AndroidAudioPlaybackRuntime private constructor(
             )
         }
         scope.launch {
-            val result = runCatching {
+            val result = try {
                 LoadAudioPublication(bootstrapGateway).execute(
                     ReaderBootstrapRequest(profile, namespace, resourceId),
                 )
-            }.getOrElse {
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
                 AudioBootstrapFailure("AUDIO_NETWORK_UNAVAILABLE", recoverable = true)
             }
             if (generation.get() != token || remoteLaunch !== request) return@launch
@@ -261,14 +271,74 @@ class AndroidAudioPlaybackRuntime private constructor(
                         profile.baseUrl.resolveApiPath(asset.apiPath) to asset
                     }
                     transportRegistry?.register(namespace.stableKey, mediaTransport, sourceUris)
+                    val restored = try {
+                        configureProgress(publication, profile)
+                        // Explicit chapter/position launches are user navigation and must
+                        // outrank both the durable pending report and the server snapshot.
+                        // With no explicit target, the shared audio restore use case selects
+                        // pending local v5 state first, then the server snapshot, then start.
+                        if (request.chapterId != null || request.positionMillis != null) {
+                            null
+                        } else {
+                            activeProgressRuntime?.let { runtime ->
+                                com.ermao.library.shared.modules.audio.AudioProgressSession(
+                                    writer = requireNotNull(activeProgressWriter),
+                                    syncRuntime = runtime,
+                                    syncTarget = ReaderProgressSyncTarget(
+                                        namespace = publication.namespace,
+                                        bookId = publication.bookId,
+                                        resourceId = publication.resource.resourceId,
+                                        sourceFormat = ReaderFormat.Audio,
+                                    ),
+                                ).restore(publication, result.bootstrap.remoteSnapshot)
+                            }
+                        }
+                    } catch (_: ReaderLocationRestoreException) {
+                        failRemoteLaunch(
+                            namespace = request.namespace,
+                            resourceId = request.resourceId,
+                            title = request.titleHint,
+                            artworkUri = request.artworkUri,
+                        )
+                        return@launch
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // Storage, JSON and runtime failures during restore are all
+                        // terminal for this launch. Do not leave the loading phase
+                        // or a stale progress writer behind.
+                        failRemoteLaunch(
+                            namespace = request.namespace,
+                            resourceId = request.resourceId,
+                            title = request.titleHint,
+                            artworkUri = request.artworkUri,
+                        )
+                        return@launch
+                    }
+                    // The restore candidate is selected before starting a pending
+                    // upload, so an acknowledgement cannot change this launch's
+                    // position. The next launch will use the resulting server
+                    // snapshot when no newer pending report exists.
+                    try {
+                        activeProgressRuntime?.store?.retryPendingUpload()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        failRemoteLaunch(
+                            namespace = request.namespace,
+                            resourceId = request.resourceId,
+                            title = request.titleHint,
+                            artworkUri = request.artworkUri,
+                        )
+                        return@launch
+                    }
                     val intent = AudioLaunchIntent(
                         resourceId = resourceId,
-                        assetId = requestAssetId(publication, request.chapterId),
+                        assetId = requestAssetId(publication, request.chapterId) ?: restored?.assetId,
                         chapterId = request.chapterId,
-                        positionMillis = request.positionMillis,
+                        positionMillis = request.positionMillis ?: restored?.positionMillis,
                         autoplay = autoplay,
                     )
-                    configureProgress(publication, profile)
                     val mapped = AndroidAudioLaunchIntent.fromPublication(
                         publication = publication,
                         intent = intent,
@@ -316,6 +386,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         cancelSeekTimeout()
         transportExpectation = null
         captureProgress(immediate = true, reason = AudioProgressSaveReason.Stop)
+        clearProgressRuntime()
         pendingLaunch = null
         activeIntent = null
         remoteLaunch = null
@@ -524,9 +595,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         controllerFuture = null
         controller?.release()
         controller = null
-        activeProgressRuntime?.close()
-        activeProgressRuntime = null
-        activeProgressWriter = null
+        clearProgressRuntime()
         scope.coroutineContext.cancel()
     }
 
@@ -617,24 +686,24 @@ class AndroidAudioPlaybackRuntime private constructor(
         profile: ServerProfile,
     ) {
         val appContext = requireNotNull(appContext) { "AUDIO_ANDROID_CONTEXT_REQUIRED" }
-        activeProgressRuntime?.close()
+        clearProgressRuntime()
         val identity = ReaderLocalProgressIdentity(
             namespace = publication.namespace,
             clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
             bookId = publication.bookId,
             resourceId = publication.resource.resourceId,
         )
-        val database = AndroidReaderProgressDatabase(appContext, identity)
+        val database = AndroidReaderV5Database(appContext, identity)
         val target = ReaderProgressSyncTarget(
             namespace = publication.namespace,
             bookId = publication.bookId,
             resourceId = publication.resource.resourceId,
             sourceFormat = ReaderFormat.Audio,
         )
-        val syncRuntime = ReaderProgressSyncRuntime(
+        val syncRuntime = ReaderPositionSyncRuntime(
             stateStore = database,
             target = target,
-            server = createAndroidReaderProgressSyncPort(appContext, profile),
+            server = createAndroidReaderPositionSyncPort(appContext, profile),
         )
         activeProgressRuntime = syncRuntime
         activeProgressWriter = AudioProgressWriter(
@@ -661,17 +730,86 @@ class AndroidAudioPlaybackRuntime private constructor(
             return
         }
         val assetId = current.assetId ?: return
+        val intent = activeIntent
+        val trackIndex = intent?.tracks?.indexOfFirst { it.assetId == assetId }?.takeIf { it >= 0 } ?: 0
+        val track = intent?.tracks?.getOrNull(trackIndex)
+        val durations = intent?.tracks?.map { it.durationMillis }
+        val totalDuration = activePublication?.resource?.durationMillis
+            ?.takeIf { it > 0 }
+            ?: durations?.takeIf { values -> values.all { it != null } }
+                ?.sumOf { it ?: 0L }
+        val absolutePosition = durations
+            ?.take(trackIndex)
+            ?.fold(0L) { total, duration -> total + (duration ?: 0L) }
+            ?.plus(current.positionMillis)
+        val chapter = current.chapterId?.let { chapterId ->
+            activePublication?.chapters?.firstOrNull { it.chapterId == chapterId }
+        }
         val previous = progressOperationJob
         progressOperationJob = scope.launch {
             previous?.join()
-            writer.save(
+            val saved = writer.save(
                 assetId = assetId,
                 chapterId = current.chapterId,
                 positionMillis = current.positionMillis,
                 durationMillis = current.durationMillis.takeIf { it > 0 },
                 reason = reason,
+                mimeType = track?.mimeType
+                    ?: "audio/mp4",
+                logicalPosition = (trackIndex + 1).coerceAtLeast(1),
+                locatorHref = track?.apiPath ?: assetId,
+                absolutePositionMillis = absolutePosition,
+                totalDurationMillis = totalDuration,
+                currentAssetIndex = trackIndex,
+                chapterIndex = chapter?.index,
+                chapterTitle = chapter?.title ?: current.chapterTitle,
+            )
+            publishProgressUpdate(
+                createReaderProgressPresentationUpdate(
+                    namespaceKey = current.namespace?.key ?: return@launch,
+                    bookId = current.bookId ?: return@launch,
+                    resourceId = current.resourceId ?: return@launch,
+                    position = saved.position,
+                    capturedAtEpochMillis = saved.capturedAtEpochMillis,
+                ),
             )
         }
+    }
+
+    private fun failRemoteLaunch(
+        namespace: ReaderSyncNamespace,
+        resourceId: String,
+        title: String?,
+        artworkUri: String?,
+    ) {
+        clearProgressRuntime()
+        val mapped = AndroidAudioError(
+            code = "LOCATION_RESTORE_FAILED",
+            recoverable = false,
+        )
+        _snapshot.value = if (_snapshot.value.hasSession) {
+            _snapshot.value.copy(phase = AndroidAudioPhase.Error, error = mapped)
+        } else {
+            AndroidAudioPlaybackSnapshot(
+                phase = AndroidAudioPhase.Error,
+                namespace = AndroidAudioNamespace(
+                    namespace.serverIdentity,
+                    namespace.userId,
+                    namespace.authorizationVersion,
+                ),
+                resourceId = resourceId,
+                title = title,
+                artworkApiPath = artworkUri,
+                error = mapped,
+            )
+        }
+        lastError = mapped
+    }
+
+    private fun clearProgressRuntime() {
+        activeProgressRuntime?.close()
+        activeProgressRuntime = null
+        activeProgressWriter = null
     }
 
     private fun beginEngineSeek(request: ActiveSeek) {
