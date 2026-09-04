@@ -28,7 +28,10 @@ import com.ermao.library.shared.modules.audio.AudioLaunchIntent
 import com.ermao.library.shared.modules.audio.AudioMediaTransport
 import com.ermao.library.shared.modules.audio.AudioBootstrapContent
 import com.ermao.library.shared.modules.audio.AudioBootstrapFailure
+import com.ermao.library.shared.modules.audio.AudioPublication
+import com.ermao.library.shared.modules.audio.LocalAudioPublicationFactory
 import com.ermao.library.shared.modules.audio.AudioProgressSaveReason
+import com.ermao.library.shared.modules.audio.AudioProgressSession
 import com.ermao.library.shared.modules.audio.AudioProgressWriter
 import com.ermao.library.shared.modules.audio.AudioPlaybackStateMachine
 import com.ermao.library.shared.modules.audio.LoadAudioPublication
@@ -40,6 +43,7 @@ import com.ermao.library.shared.modules.reader.ReaderLocationRestoreException
 import com.ermao.library.shared.modules.reader.ReaderProgressPresentationUpdate
 import com.ermao.library.shared.modules.reader.ReaderProgressSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderPositionSyncRuntime
+import com.ermao.library.shared.modules.reader.ReaderProgressSnapshotV5
 import com.ermao.library.shared.modules.reader.ReaderSyncNamespace
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
 import com.ermao.library.shared.createAndroidReaderPositionSyncPort
@@ -124,6 +128,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     private var progressJob: Job? = null
     private var lastError: AndroidAudioError? = null
     private var remoteLaunch: RemoteLaunch? = null
+    private var localLaunchToken: Long? = null
     private var activePublication: com.ermao.library.shared.modules.audio.AudioPublication? = null
     private var sharedSessionId: Long? = null
     private var activeProgressRuntime: ReaderPositionSyncRuntime? = null
@@ -150,6 +155,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     fun launch(intent: AndroidAudioLaunchIntent) {
         val launchGeneration = generation.incrementAndGet()
         remoteLaunch = null
+        localLaunchToken = null
         if (activePublication == null || sharedSessionId == null) {
             sharedStateMachine.retireSession()
             sharedSessionId = null
@@ -168,7 +174,11 @@ class AndroidAudioPlaybackRuntime private constructor(
         }
     }
 
-    /** Starts a verified completed local artifact without creating an online fallback request. */
+    /**
+     * Starts a verified completed local artifact and restores a pending v5 report when no
+     * explicit position was supplied. The source API path is retained as the Locator href so a
+     * downloaded asset can restore a report captured while the same resource was streamed.
+     */
     fun launchLocal(
         namespace: AndroidAudioNamespace,
         bookId: String,
@@ -178,33 +188,129 @@ class AndroidAudioPlaybackRuntime private constructor(
         assetId: String,
         localFile: File,
         mimeType: String,
+        sourceApiPath: String,
+        profile: ServerProfile,
         artworkApiPath: String? = null,
-        positionMillis: Long = 0,
+        positionMillis: Long? = null,
     ) {
         requireNotNull(appContext) { "AUDIO_ANDROID_CONTEXT_REQUIRED" }
         require(localFile.isFile && localFile.length() > 0) { "AUDIO_LOCAL_ARTIFACT_UNAVAILABLE" }
-        launch(
-            AndroidAudioLaunchIntent(
-                namespace = namespace,
-                bookId = bookId,
-                resourceId = resourceId,
-                title = title,
-                author = author,
-                artworkUri = artworkApiPath,
-                tracks = listOf(
-                    AndroidAudioTrack(
-                        assetId = assetId,
-                        title = title,
-                        sourceUri = localFile.toURI().toString(),
-                        mimeType = mimeType,
-                        durationMillis = null,
-                    ),
-                ),
-                assetId = assetId,
-                positionMillis = positionMillis,
-                autoplay = true,
-            ),
+        require(profile.serverIdentity == namespace.serverIdentity) {
+            "AUDIO_PROFILE_NAMESPACE_MISMATCH"
+        }
+        require(sourceApiPath.startsWith("/api/") && '#' !in sourceApiPath && '?' !in sourceApiPath) {
+            "AUDIO_SOURCE_API_PATH_INVALID"
+        }
+        val publication = localAudioPublication(
+            namespace = namespace,
+            bookId = bookId,
+            resourceId = resourceId,
+            title = title,
+            author = author,
+            assetId = assetId,
+            mimeType = mimeType,
+            sourceApiPath = sourceApiPath,
+            sizeBytes = localFile.length(),
         )
+        val intent = AndroidAudioLaunchIntent(
+            namespace = namespace,
+            bookId = bookId,
+            resourceId = resourceId,
+            title = title,
+            author = author,
+            artworkUri = artworkApiPath,
+            tracks = listOf(
+                AndroidAudioTrack(
+                    assetId = assetId,
+                    title = title,
+                    sourceUri = localFile.toURI().toString(),
+                    apiPath = sourceApiPath,
+                    mimeType = mimeType,
+                    durationMillis = null,
+                ),
+            ),
+            assetId = assetId,
+            positionMillis = positionMillis ?: 0,
+            autoplay = true,
+        )
+        val token = generation.incrementAndGet()
+        localLaunchToken = token
+        remoteLaunch = null
+        sharedStateMachine.retireSession()
+        sharedSessionId = null
+        lastError = null
+        cancelSeekTimeout()
+        activeSeek = null
+        transportExpectation = null
+        stopPlaybackTickers()
+        if (!snapshot.value.hasSession) _snapshot.value = intent.toSnapshot(AndroidAudioPhase.Loading)
+        scope.launch {
+            var configuredRuntime: ReaderPositionSyncRuntime? = null
+            try {
+                configuredRuntime = configureProgress(publication, profile)
+                val configuredWriter = requireNotNull(activeProgressWriter)
+                val restored = if (positionMillis == null) {
+                    restoreProgress(
+                        publication,
+                        remoteSnapshot = null,
+                        runtime = requireNotNull(configuredRuntime),
+                        writer = configuredWriter,
+                    )
+                } else {
+                    null
+                }
+                // Freeze the restore candidate before draining the exact pending mutation. The
+                // acknowledgement may clear the outbox, but must never change this launch's
+                // already-selected position.
+                if (generation.get() != token || localLaunchToken != token) {
+                    if (activeProgressRuntime === configuredRuntime) {
+                        clearProgressRuntime(cancelPendingProgressOperation = true)
+                    }
+                    return@launch
+                }
+                requireNotNull(configuredRuntime).store.retryPendingUpload()
+                if (generation.get() != token || localLaunchToken != token) {
+                    if (activeProgressRuntime === configuredRuntime) {
+                        clearProgressRuntime(cancelPendingProgressOperation = true)
+                    }
+                    return@launch
+                }
+                activePublication = publication
+                localLaunchToken = null
+                launch(
+                    intent.copy(
+                        assetId = restored?.assetId ?: intent.assetId,
+                        positionMillis = selectLocalAudioPosition(positionMillis, restored?.positionMillis),
+                    ),
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: ReaderLocationRestoreException) {
+                if (generation.get() == token && localLaunchToken == token) {
+                    localLaunchToken = null
+                    failRemoteLaunch(
+                        namespace = namespace.toReaderSyncNamespace(),
+                        resourceId = resourceId,
+                        title = title,
+                        artworkUri = artworkApiPath,
+                    )
+                } else if (configuredRuntime != null && activeProgressRuntime === configuredRuntime) {
+                    clearProgressRuntime(cancelPendingProgressOperation = true)
+                }
+            } catch (_: Exception) {
+                if (generation.get() == token && localLaunchToken == token) {
+                    localLaunchToken = null
+                    failRemoteLaunch(
+                        namespace = namespace.toReaderSyncNamespace(),
+                        resourceId = resourceId,
+                        title = title,
+                        artworkUri = artworkApiPath,
+                    )
+                } else if (configuredRuntime != null && activeProgressRuntime === configuredRuntime) {
+                    clearProgressRuntime(cancelPendingProgressOperation = true)
+                }
+            }
+        }
     }
 
     /**
@@ -226,6 +332,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     ) {
         require(profile.serverIdentity == namespace.serverIdentity)
         val token = generation.incrementAndGet()
+        localLaunchToken = null
         val request = RemoteLaunch(
             token = token,
             profile = profile,
@@ -272,27 +379,38 @@ class AndroidAudioPlaybackRuntime private constructor(
                     }
                     transportRegistry?.register(namespace.stableKey, mediaTransport, sourceUris)
                     val restored = try {
-                        configureProgress(publication, profile)
+                        val configuredRuntime = configureProgress(publication, profile)
+                        val configuredWriter = requireNotNull(activeProgressWriter)
                         // Explicit chapter/position launches are user navigation and must
                         // outrank both the durable pending report and the server snapshot.
                         // With no explicit target, the shared audio restore use case selects
                         // pending local v5 state first, then the server snapshot, then start.
-                        if (request.chapterId != null || request.positionMillis != null) {
+                        val candidate = if (request.chapterId != null || request.positionMillis != null) {
                             null
                         } else {
-                            activeProgressRuntime?.let { runtime ->
-                                com.ermao.library.shared.modules.audio.AudioProgressSession(
-                                    writer = requireNotNull(activeProgressWriter),
-                                    syncRuntime = runtime,
-                                    syncTarget = ReaderProgressSyncTarget(
-                                        namespace = publication.namespace,
-                                        bookId = publication.bookId,
-                                        resourceId = publication.resource.resourceId,
-                                        sourceFormat = ReaderFormat.Audio,
-                                    ),
-                                ).restore(publication, result.bootstrap.remoteSnapshot)
-                            }
+                            restoreProgress(
+                                publication,
+                                result.bootstrap.remoteSnapshot,
+                                runtime = configuredRuntime,
+                                writer = configuredWriter,
+                            )
                         }
+                        if (generation.get() != token || remoteLaunch !== request) {
+                            if (activeProgressRuntime === configuredRuntime) {
+                                clearProgressRuntime(cancelPendingProgressOperation = true)
+                            }
+                            return@launch
+                        }
+                        // The restore candidate is frozen before draining the exact pending
+                        // mutation; an acknowledgement cannot change this launch's position.
+                        configuredRuntime.store.retryPendingUpload()
+                        if (generation.get() != token || remoteLaunch !== request) {
+                            if (activeProgressRuntime === configuredRuntime) {
+                                clearProgressRuntime(cancelPendingProgressOperation = true)
+                            }
+                            return@launch
+                        }
+                        candidate
                     } catch (_: ReaderLocationRestoreException) {
                         failRemoteLaunch(
                             namespace = request.namespace,
@@ -307,23 +425,6 @@ class AndroidAudioPlaybackRuntime private constructor(
                         // Storage, JSON and runtime failures during restore are all
                         // terminal for this launch. Do not leave the loading phase
                         // or a stale progress writer behind.
-                        failRemoteLaunch(
-                            namespace = request.namespace,
-                            resourceId = request.resourceId,
-                            title = request.titleHint,
-                            artworkUri = request.artworkUri,
-                        )
-                        return@launch
-                    }
-                    // The restore candidate is selected before starting a pending
-                    // upload, so an acknowledgement cannot change this launch's
-                    // position. The next launch will use the resulting server
-                    // snapshot when no newer pending report exists.
-                    try {
-                        activeProgressRuntime?.store?.retryPendingUpload()
-                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
                         failRemoteLaunch(
                             namespace = request.namespace,
                             resourceId = request.resourceId,
@@ -682,11 +783,11 @@ class AndroidAudioPlaybackRuntime private constructor(
     }
 
     private fun configureProgress(
-        publication: com.ermao.library.shared.modules.audio.AudioPublication,
+        publication: AudioPublication,
         profile: ServerProfile,
-    ) {
+    ): ReaderPositionSyncRuntime {
         val appContext = requireNotNull(appContext) { "AUDIO_ANDROID_CONTEXT_REQUIRED" }
-        clearProgressRuntime()
+        clearProgressRuntime(cancelPendingProgressOperation = true)
         val identity = ReaderLocalProgressIdentity(
             namespace = publication.namespace,
             clientId = AndroidReaderDeviceIdentity(appContext).stableDeviceId(),
@@ -711,6 +812,56 @@ class AndroidAudioPlaybackRuntime private constructor(
             resourceId = publication.resource.resourceId,
             deviceId = identity.clientId,
             nowEpochMillis = System::currentTimeMillis,
+        )
+        return syncRuntime
+    }
+
+    private suspend fun restoreProgress(
+        publication: AudioPublication,
+        remoteSnapshot: ReaderProgressSnapshotV5?,
+        runtime: ReaderPositionSyncRuntime,
+        writer: AudioProgressWriter,
+    ): com.ermao.library.shared.modules.reader.AudioReaderLocation? {
+        return AudioProgressSession(
+            writer = writer,
+            syncRuntime = runtime,
+            syncTarget = ReaderProgressSyncTarget(
+                namespace = publication.namespace,
+                bookId = publication.bookId,
+                resourceId = publication.resource.resourceId,
+                sourceFormat = ReaderFormat.Audio,
+            ),
+        ).restore(publication, remoteSnapshot)
+    }
+
+    private fun localAudioPublication(
+        namespace: AndroidAudioNamespace,
+        bookId: String,
+        resourceId: String,
+        title: String,
+        author: String?,
+        assetId: String,
+        mimeType: String,
+        sourceApiPath: String,
+        sizeBytes: Long,
+    ): AudioPublication {
+        val publication = LocalAudioPublicationFactory().create(
+            namespace = namespace.toReaderSyncNamespace(),
+            bookId = bookId,
+            bookTitle = title,
+            author = author,
+            resourceId = resourceId,
+            resourceTitle = title,
+            assetId = assetId,
+            mimeType = mimeType,
+            sizeBytes = sizeBytes,
+            durationMillis = 0,
+        )
+        // The shared local factory supplies a valid placeholder href. Replace only that
+        // transport identity with the catalog's stable source path so remote and downloaded
+        // captures resolve to the same asset without changing Locator semantics.
+        return publication.copy(
+            assets = publication.assets.map { asset -> asset.copy(apiPath = sourceApiPath) },
         )
     }
 
@@ -782,7 +933,7 @@ class AndroidAudioPlaybackRuntime private constructor(
         title: String?,
         artworkUri: String?,
     ) {
-        clearProgressRuntime()
+        clearProgressRuntime(cancelPendingProgressOperation = true)
         val mapped = AndroidAudioError(
             code = "LOCATION_RESTORE_FAILED",
             recoverable = false,
@@ -806,7 +957,11 @@ class AndroidAudioPlaybackRuntime private constructor(
         lastError = mapped
     }
 
-    private fun clearProgressRuntime() {
+    private fun clearProgressRuntime(cancelPendingProgressOperation: Boolean = false) {
+        if (cancelPendingProgressOperation) {
+            progressOperationJob?.cancel()
+            progressOperationJob = null
+        }
         activeProgressRuntime?.close()
         activeProgressRuntime = null
         activeProgressWriter = null
@@ -1114,6 +1269,12 @@ class AndroidAudioPlaybackRuntime private constructor(
     }
 }
 
+private fun AndroidAudioNamespace.toReaderSyncNamespace() = ReaderSyncNamespace(
+    serverIdentity = serverIdentity,
+    userId = userId,
+    authorizationVersion = authorizationVersion,
+)
+
 @AndroidXOptIn(markerClass = [UnstableApi::class])
 private fun buildAudioMediaItems(intent: AndroidAudioLaunchIntent): List<MediaItem> =
     intent.tracks.map { track ->
@@ -1160,6 +1321,12 @@ internal fun stableErrorCode(error: PlaybackException): String {
     }
     return error.errorCodeName.takeUnless { it.isNullOrBlank() } ?: "AUDIO_ENGINE_ERROR"
 }
+
+/** Explicit local navigation, including position zero, always outranks a pending report. */
+internal fun selectLocalAudioPosition(
+    explicitPositionMillis: Long?,
+    restoredPositionMillis: Long?,
+): Long = explicitPositionMillis ?: restoredPositionMillis ?: 0L
 
 private fun requestAssetId(
     publication: com.ermao.library.shared.modules.audio.AudioPublication,

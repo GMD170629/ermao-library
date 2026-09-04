@@ -310,6 +310,8 @@ fun MainShell(
                     assetId = record.assetId,
                     localFile = localFile,
                     mimeType = record.sourceMimeType,
+                    sourceApiPath = record.sourceApiPath,
+                    profile = session.profile,
                     artworkApiPath = record.coverUrl.takeIf(String::isNotBlank),
                     positionMillis = audioSnapshot.positionMillis,
                 )
@@ -721,6 +723,8 @@ fun MainShell(
                                         assetId = record.assetId,
                                         localFile = localFile,
                                         mimeType = record.sourceMimeType,
+                                        sourceApiPath = record.sourceApiPath,
+                                        profile = session.profile,
                                         artworkApiPath = record.coverUrl.takeIf(String::isNotBlank),
                                     )
                                     dispatchAudioChrome(

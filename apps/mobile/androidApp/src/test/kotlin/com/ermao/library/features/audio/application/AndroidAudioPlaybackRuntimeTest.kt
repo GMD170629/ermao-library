@@ -81,6 +81,26 @@ class AndroidAudioPlaybackRuntimeTest {
         }
     }
 
+    @Test
+    fun localExplicitZeroPositionSkipsPendingRestore() {
+        assertEquals(
+            0L,
+            selectLocalAudioPosition(explicitPositionMillis = 0L, restoredPositionMillis = 42_000L),
+        )
+    }
+
+    @Test
+    fun localUnspecifiedPositionUsesPendingRestore() {
+        assertEquals(
+            42_000L,
+            selectLocalAudioPosition(explicitPositionMillis = null, restoredPositionMillis = 42_000L),
+        )
+        assertEquals(
+            0L,
+            selectLocalAudioPosition(explicitPositionMillis = null, restoredPositionMillis = null),
+        )
+    }
+
     private fun TestScope.newRuntime(
         controller: FakeMediaController,
         progress: RecordingProgressSink = RecordingProgressSink(),
