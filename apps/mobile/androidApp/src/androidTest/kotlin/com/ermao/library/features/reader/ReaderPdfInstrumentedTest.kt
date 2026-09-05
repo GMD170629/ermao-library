@@ -10,7 +10,6 @@ import com.ermao.library.features.reader.infrastructure.AndroidPdfiumFeatureFlag
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPublicationStore
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
-import com.ermao.library.shared.modules.reader.ReaderPdfFit
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -22,7 +21,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.readium.adapter.pdfium.navigator.PdfiumNavigatorFragment
-import org.readium.r2.navigator.preferences.Fit
 import org.readium.r2.shared.ExperimentalReadiumApi
 
 @OptIn(ExperimentalReadiumApi::class)
@@ -71,15 +69,9 @@ class ReaderPdfInstrumentedTest {
             }
 
             scenario.onActivity { activity ->
-                val controller = checkNotNull(activity.controllerForTesting)
-                controller.updatePreferences(
-                    controller.preferences.value.copy(
-                        pdf = controller.preferences.value.pdf.copy(fit = ReaderPdfFit.Width),
-                    ),
-                )
-            }
-            waitUntil(scenario, "PDF width fit preference") { activity ->
-                activity.pdfNavigatorOrNull()?.settings?.value?.fit == Fit.WIDTH
+                // The repository-owned PDFium navigator does not expose a fit
+                // command yet, so the shared catalog must render it disabled.
+                assertEquals(false, checkNotNull(activity.controllerForTesting).capabilities.supportsPdfFit)
             }
 
             runBlocking { controller(scenario).flush() }
@@ -87,7 +79,7 @@ class ReaderPdfInstrumentedTest {
             val persistedPage = persisted?.position?.presentation?.page
             assertNotNull(persistedPage)
             assertEquals(1, persistedPage?.number)
-            assertEquals(0.0, persisted?.position?.presentation?.totalProgression ?: -1.0, 0.0)
+            assertEquals(1.0, persisted?.position?.presentation?.totalProgression ?: -1.0, 0.0)
 
             scenario.moveToState(Lifecycle.State.CREATED)
             scenario.recreate()

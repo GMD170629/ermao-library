@@ -1,14 +1,12 @@
 package com.ermao.library.features.me.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
-import androidx.compose.foundation.clickable
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,34 +15,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.AccountCircle
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,13 +32,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
 import com.ermao.library.features.me.model.AboutViewState
@@ -75,13 +49,30 @@ import com.ermao.library.features.me.platform.AvatarSanitizationFailure
 import com.ermao.library.features.me.platform.AvatarSanitizationResult
 import com.ermao.library.features.me.platform.decodeBoundedAvatarPreview
 import com.ermao.library.shared.modules.personalsettings.PersonalSettingsLocale
+import com.ermao.library.shared.modules.settingscenter.SettingsCenterCatalog
+import com.ermao.library.shared.modules.settingscenter.SettingsGroupId
+import com.ermao.library.shared.modules.settingscenter.SettingsItemId
+import com.ermao.library.shared.modules.settingscenter.visibleSettingsItems
 import com.ermao.library.ui.components.SettingsSaveAction
 import com.ermao.library.ui.components.SettingsTabRow
 import com.ermao.library.ui.components.SettingsTextField
+import com.ermao.library.ui.components.WarmPageChoice
+import com.ermao.library.ui.components.WarmPageSegmentedControl
+import com.ermao.library.ui.components.WarmSettingsDangerAction
+import com.ermao.library.ui.components.WarmSettingsContentState
+import com.ermao.library.ui.components.WarmSettingsContentStateKind
+import com.ermao.library.ui.components.WarmSettingsDivider
+import com.ermao.library.ui.components.WarmSettingsIcons
+import com.ermao.library.ui.components.WarmSettingsIdentityHeader
+import com.ermao.library.ui.components.WarmSettingsInlineMessage
+import com.ermao.library.ui.components.WarmSettingsNavigationRow
+import com.ermao.library.ui.components.WarmSettingsScaffold
+import com.ermao.library.ui.components.WarmSettingsScaffoldRole
+import com.ermao.library.ui.components.WarmSettingsSection
+import com.ermao.library.ui.components.WarmSettingsValueRow
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MeRootScreen(
     state: MeRootViewState,
@@ -92,71 +83,202 @@ fun MeRootScreen(
     onOpenDownloads: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
-    canOpenAdministration: Boolean = false,
+    downloadStatus: String? = null,
+    appVersion: String? = null,
+    emailAndKindleConfigured: Boolean = false,
+    failedKindleTaskCount: Int = 0,
+    isAdmin: Boolean = false,
+    canManageSystem: Boolean = false,
     onOpenEmailAndKindle: () -> Unit = {},
     onOpenKindleQueue: () -> Unit = {},
-    onOpenAdministration: () -> Unit = {},
+    onOpenUsers: () -> Unit = {},
+    onOpenOpds: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
 ) {
     val theme = WarmPageThemeValues
-    Scaffold(
-        modifier = modifier,
-        containerColor = theme.colors.canvas,
-        topBar = {
-            LargeTopAppBar(
-                title = { Text(stringResource(R.string.me_title), style = theme.typography.display) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = theme.colors.canvas),
-            )
-        },
+    val visibleItems = visibleSettingsItems(isAdmin = isAdmin, canManageSystem = canManageSystem).toSet()
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Root,
+        title = stringResource(R.string.me_title),
+        modifier = modifier.testTag("me-root"),
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .testTag("settings-page-scroll"),
         ) {
             state.failure?.let { InlineFailure(onRetry) }
-            SettingsSection(R.string.me_section_account)
-            SettingsRow(R.string.me_profile_title, R.string.me_profile_summary, Icons.Outlined.AccountCircle, onOpenProfile)
-            SettingsDivider()
-            SettingsRow(R.string.me_security_title, R.string.me_security_summary, Icons.Outlined.Lock, onOpenSecurity)
-            SettingsSection(R.string.me_section_offline_storage)
-            SettingsRow(R.string.me_downloads_title, R.string.me_downloads_summary, Icons.Outlined.Storage, onOpenDownloads)
-            SettingsSection(R.string.me_section_connected_services)
-            SettingsRow(
-                R.string.me_email_kindle_title,
-                R.string.me_email_kindle_summary,
-                Icons.Outlined.Email,
-                onOpenEmailAndKindle,
-            )
-            SettingsDivider()
-            SettingsRow(
-                R.string.me_kindle_queue_title,
-                R.string.me_kindle_queue_summary,
-                Icons.AutoMirrored.Outlined.Send,
-                onOpenKindleQueue,
-            )
-            if (canOpenAdministration) {
-                SettingsSection(R.string.me_section_administration)
-                SettingsRow(
-                    R.string.me_administration_title,
-                    R.string.me_administration_summary,
-                    Icons.Outlined.Settings,
-                    onOpenAdministration,
-                )
+            SettingsCenterCatalog.groups.forEach { group ->
+                if (group.id == SettingsGroupId.PREFERENCES) {
+                    WarmSettingsSection(stringResource(R.string.me_section_server)) {
+                        WarmSettingsValueRow(
+                            label = state.serverName,
+                            supporting = state.serverBaseUrl,
+                            value = stringResource(R.string.me_current_server),
+                            icon = WarmSettingsIcons.Server,
+                            modifier = Modifier.testTag("settings-row-value-server"),
+                        )
+                    }
+                }
+                val items = group.itemIds.filter(visibleItems::contains)
+                if (items.isNotEmpty()) {
+                    WarmSettingsSection(
+                        title = meSettingsGroupTitle(group.id),
+                        modifier = if (group.id == SettingsGroupId.PRODUCT) {
+                            Modifier.padding(bottom = theme.components.page.contentBottomInset)
+                        } else {
+                            Modifier
+                        },
+                    ) {
+                        items.forEachIndexed { index, item ->
+                            MeSettingsNavigationRow(
+                                item = item,
+                                state = state,
+                                downloadStatus = downloadStatus,
+                                appVersion = appVersion,
+                                emailAndKindleConfigured = emailAndKindleConfigured,
+                                failedKindleTaskCount = failedKindleTaskCount,
+                                onOpenProfile = onOpenProfile,
+                                onOpenSecurity = onOpenSecurity,
+                                onOpenDownloads = onOpenDownloads,
+                                onOpenEmailAndKindle = onOpenEmailAndKindle,
+                                onOpenKindleQueue = onOpenKindleQueue,
+                                onOpenUsers = onOpenUsers,
+                                onOpenOpds = onOpenOpds,
+                                onOpenLogs = onOpenLogs,
+                                onOpenLanguage = onOpenLanguage,
+                                onOpenAbout = onOpenAbout,
+                            )
+                            if (index < items.lastIndex) WarmSettingsDivider(afterIcon = true)
+                        }
+                    }
+                }
             }
-            SettingsSection(R.string.me_section_server)
-            ReadOnlyServerRow(state.serverName, state.serverBaseUrl)
-            SettingsSection(R.string.me_section_preferences)
-            SettingsRow(
-                R.string.me_language_title,
-                if (state.locale == PersonalSettingsLocale.ZhCn) R.string.me_language_zh_cn else R.string.me_language_en_us,
-                Icons.Outlined.Language,
-                onOpenLanguage,
-            )
-            SettingsSection(R.string.me_section_product)
-            SettingsRow(R.string.me_about_title, null, Icons.Outlined.Info, onOpenAbout)
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun meSettingsGroupTitle(group: SettingsGroupId): String = stringResource(
+    when (group) {
+        SettingsGroupId.ACCOUNT -> R.string.me_section_account
+        SettingsGroupId.READING_AND_STORAGE -> R.string.me_section_offline_storage
+        SettingsGroupId.CONNECTED_SERVICES -> R.string.me_section_connected_services
+        SettingsGroupId.SYSTEM_MANAGEMENT -> R.string.me_section_administration
+        SettingsGroupId.PREFERENCES -> R.string.me_section_preferences
+        SettingsGroupId.PRODUCT -> R.string.me_section_product
+    },
+)
+
+@Composable
+private fun MeSettingsNavigationRow(
+    item: SettingsItemId,
+    state: MeRootViewState,
+    downloadStatus: String?,
+    appVersion: String?,
+    emailAndKindleConfigured: Boolean,
+    failedKindleTaskCount: Int,
+    onOpenProfile: () -> Unit,
+    onOpenSecurity: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onOpenEmailAndKindle: () -> Unit,
+    onOpenKindleQueue: () -> Unit,
+    onOpenUsers: () -> Unit,
+    onOpenOpds: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onOpenLanguage: () -> Unit,
+    onOpenAbout: () -> Unit,
+) {
+    val title: String
+    val status: String?
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+    val tag: String
+    val onClick: () -> Unit
+    when (item) {
+        SettingsItemId.PROFILE -> {
+            title = stringResource(R.string.me_profile_title)
+            status = state.account?.displayName
+            icon = WarmSettingsIcons.Account
+            tag = "settings-row-profile"
+            onClick = onOpenProfile
+        }
+        SettingsItemId.SECURITY -> {
+            title = stringResource(R.string.me_security_title)
+            status = null
+            icon = WarmSettingsIcons.Security
+            tag = "settings-row-security"
+            onClick = onOpenSecurity
+        }
+        SettingsItemId.DOWNLOADS -> {
+            title = stringResource(R.string.me_downloads_title)
+            status = downloadStatus
+            icon = WarmSettingsIcons.Downloads
+            tag = "settings-row-downloads"
+            onClick = onOpenDownloads
+        }
+        SettingsItemId.EMAIL_KINDLE -> {
+            title = stringResource(R.string.me_email_kindle_title)
+            status = stringResource(R.string.me_status_configured).takeIf { emailAndKindleConfigured }
+            icon = WarmSettingsIcons.EmailAndKindle
+            tag = "settings-row-email-kindle"
+            onClick = onOpenEmailAndKindle
+        }
+        SettingsItemId.KINDLE_QUEUE -> {
+            title = stringResource(R.string.me_kindle_queue_title)
+            status = failedKindleTaskCount.takeIf { it > 0 }?.toString()
+            icon = WarmSettingsIcons.KindleQueue
+            tag = "settings-row-kindle-queue"
+            onClick = onOpenKindleQueue
+        }
+        SettingsItemId.USERS -> {
+            title = stringResource(R.string.me_users_title)
+            status = null
+            icon = WarmSettingsIcons.Users
+            tag = "settings-row-users"
+            onClick = onOpenUsers
+        }
+        SettingsItemId.OPDS -> {
+            title = stringResource(R.string.me_opds_title)
+            status = null
+            icon = WarmSettingsIcons.Opds
+            tag = "settings-row-opds"
+            onClick = onOpenOpds
+        }
+        SettingsItemId.LOGS -> {
+            title = stringResource(R.string.me_system_logs_title)
+            status = null
+            icon = WarmSettingsIcons.Logs
+            tag = "settings-row-logs"
+            onClick = onOpenLogs
+        }
+        SettingsItemId.LANGUAGE -> {
+            title = stringResource(R.string.me_language_title)
+            status = stringResource(
+                if (state.locale == PersonalSettingsLocale.ZhCn) R.string.me_language_zh_cn else R.string.me_language_en_us,
+            )
+            icon = WarmSettingsIcons.Language
+            tag = "settings-row-language"
+            onClick = onOpenLanguage
+        }
+        SettingsItemId.ABOUT -> {
+            title = stringResource(R.string.me_about_title)
+            status = appVersion?.takeIf(String::isNotBlank)?.let { "v$it" }
+            icon = WarmSettingsIcons.About
+            tag = "settings-row-about"
+            onClick = onOpenAbout
+        }
+    }
+    WarmSettingsNavigationRow(
+        title = title,
+        status = status,
+        icon = icon,
+        modifier = Modifier.testTag(tag),
+        onClick = onClick,
+    )
+}
+
 @Composable
 fun ProfileScreen(
     state: ProfileEditorState,
@@ -171,6 +293,7 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val theme = WarmPageThemeValues
     val sanitizer = remember(context) { AndroidAvatarSanitizer(context.contentResolver) }
     val scope = rememberCoroutineScope()
     var avatarError by remember { mutableStateOf<AvatarSanitizationFailure?>(null) }
@@ -186,53 +309,74 @@ fun ProfileScreen(
             }
         }
     }
-    SettingsPageScaffold(
-        title = R.string.me_profile_title,
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = stringResource(R.string.me_profile_title),
         onBack = onBack,
-        modifier = modifier,
-        topBarActions = {
+        navigationContentDescription = stringResource(R.string.navigate_back),
+        modifier = modifier.testTag("me-profile"),
+        actions = {
             SettingsSaveAction(
                 contentDescription = stringResource(R.string.me_save_display_name),
+                label = stringResource(R.string.me_save),
                 enabled = !state.isSaving && state.displayName.isNotBlank() &&
                     state.displayName.trim() != state.savedDisplayName.trim(),
                 working = state.isSaving,
                 onClick = onSaveName,
+                modifier = Modifier.testTag("settings-save"),
             )
         },
-    ) {
+    ) { padding ->
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = theme.components.page.compactGutter)
+                .testTag("settings-page-scroll"),
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
         ) {
-            Avatar(account.displayName, state.pendingAvatar?.bytes ?: avatarBytes)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text(stringResource(R.string.me_avatar_choose)) }
-                if (account.avatarUrl != null) {
-                    TextButton(onClick = { confirmDelete = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Icon(Icons.Outlined.Delete, contentDescription = null)
-                        Text(stringResource(R.string.me_avatar_delete))
+            WarmSettingsIdentityHeader(
+                title = account.displayName,
+                subtitle = account.email,
+                modifier = Modifier.testTag("settings-identity"),
+                avatar = { Avatar(account.displayName, state.pendingAvatar?.bytes ?: avatarBytes) },
+                actions = {
+                    TextButton(
+                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        enabled = !state.isSaving,
+                        modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
+                    ) { Text(stringResource(R.string.me_avatar_choose), style = theme.typography.button) }
+                    if (account.avatarUrl != null) {
+                        TextButton(
+                            onClick = { confirmDelete = true },
+                            enabled = !state.isSaving,
+                            modifier = Modifier.heightIn(min = theme.components.controls.minimumTouchTarget),
+                        ) { Text(stringResource(R.string.me_avatar_delete), style = theme.typography.button) }
                     }
-                }
-            }
+                },
+            )
             if (state.pendingAvatar != null) {
-                Text(stringResource(R.string.me_avatar_ready), color = WarmPageThemeValues.colors.textSecondary)
-                Button(onClick = onUploadAvatar, enabled = !state.isSaving, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                    Text(stringResource(R.string.me_avatar_upload))
-                }
+                WarmSettingsInlineMessage(stringResource(R.string.me_avatar_ready))
+                Button(
+                    onClick = onUploadAvatar,
+                    enabled = !state.isSaving,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = theme.components.controls.minimumTouchTarget),
+                ) { Text(stringResource(R.string.me_avatar_upload)) }
             }
-            avatarError?.let { Text(avatarFailureText(it), color = androidx.compose.material3.MaterialTheme.colorScheme.error) }
-            HorizontalDivider(color = WarmPageThemeValues.colors.divider)
+            avatarError?.let {
+                WarmSettingsInlineMessage(
+                    message = avatarFailureText(it),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                )
+            }
+            HorizontalDivider(color = theme.colors.divider)
             SettingsTextField(
                 value = state.displayName,
                 onValueChange = onDisplayNameChanged,
                 label = stringResource(R.string.me_display_name_label),
-                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.isSaving,
+                modifier = Modifier.testTag("settings-field-display-name"),
             )
             state.failure?.let { InlineFailure() }
         }
@@ -265,6 +409,7 @@ fun SecurityScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val theme = WarmPageThemeValues
     var confirmEmail by rememberSaveable { mutableStateOf(false) }
     var confirmPassword by rememberSaveable { mutableStateOf(false) }
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
@@ -275,50 +420,63 @@ fun SecurityScreen(
         state.email.trim() != state.savedEmail.trim()
     val canSavePassword = !state.isSaving && state.currentPassword.isNotBlank() && state.newPassword.isNotBlank() &&
         state.confirmPassword.isNotBlank() && state.newPassword == state.confirmPassword
-    SettingsPageScaffold(
-        title = R.string.me_security_title,
+    val tabLabels = listOf(stringResource(R.string.me_email_section), stringResource(R.string.me_password_section))
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = stringResource(R.string.me_security_title),
         onBack = onBack,
-        modifier = modifier,
-        topBarActions = {
+        navigationContentDescription = stringResource(R.string.navigate_back),
+        modifier = modifier.testTag("me-security"),
+        actions = {
             SettingsSaveAction(
                 contentDescription = stringResource(if (isEmailTab) R.string.me_email_change else R.string.me_password_change),
+                label = stringResource(R.string.me_save),
                 enabled = if (isEmailTab) canSaveEmail else canSavePassword,
                 working = state.isSaving,
                 onClick = { if (isEmailTab) confirmEmail = true else confirmPassword = true },
+                modifier = Modifier.testTag("settings-save"),
             )
         },
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+        tabs = {
             SettingsTabRow(
                 selectedIndex = if (isEmailTab) 0 else 1,
-                tabs = listOf(stringResource(R.string.me_email_section), stringResource(R.string.me_password_section)),
+                tabs = tabLabels,
                 enabled = !state.isSaving,
                 onSelect = { selectedTabName = SecurityTab.entries[it].name },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.testTag("settings-tabs"),
             )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(theme.components.page.compactGutter)
+                .testTag("settings-page-scroll"),
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
+        ) {
             if (isEmailTab) {
-                SectionHeading(R.string.me_email_section)
                 SettingsTextField(
                     value = state.email,
                     onValueChange = onEmailChanged,
                     label = stringResource(R.string.me_email_label),
-                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isSaving,
+                    modifier = Modifier.testTag("settings-field-email"),
                 )
-                PasswordField(state.emailCurrentPassword, onEmailCurrentPasswordChanged, R.string.me_current_password_label)
+                PasswordField(state.emailCurrentPassword, onEmailCurrentPasswordChanged, R.string.me_current_password_label, "settings-field-email-current-password", !state.isSaving)
             } else {
-                SectionHeading(R.string.me_password_section)
-                PasswordField(state.currentPassword, onCurrentPasswordChanged, R.string.me_current_password_label)
-                PasswordField(state.newPassword, onNewPasswordChanged, R.string.me_new_password_label)
-                PasswordField(state.confirmPassword, onPasswordConfirmationChanged, R.string.me_confirm_password_label)
+                PasswordField(state.currentPassword, onCurrentPasswordChanged, R.string.me_current_password_label, "settings-field-current-password", !state.isSaving)
+                PasswordField(state.newPassword, onNewPasswordChanged, R.string.me_new_password_label, "settings-field-new-password", !state.isSaving)
+                PasswordField(state.confirmPassword, onPasswordConfirmationChanged, R.string.me_confirm_password_label, "settings-field-confirm-password", !state.isSaving)
             }
             state.failure?.let { InlineFailure() }
-            HorizontalDivider()
-            TextButton(onClick = { confirmLogout = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.logout_action), color = androidx.compose.material3.MaterialTheme.colorScheme.error)
-            }
+            WarmSettingsDangerAction(
+                label = stringResource(R.string.logout_action),
+                onClick = { confirmLogout = true },
+                enabled = !state.isSaving,
+                modifier = Modifier.padding(top = theme.spacing.two).testTag("settings-danger-logout"),
+            )
         }
     }
     if (confirmEmail) ConfirmationDialog(
@@ -355,10 +513,29 @@ fun LanguageScreen(
     onSelect: (PersonalSettingsLocale) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    SettingsPageScaffold(R.string.me_language_title, onBack, modifier) {
-        LanguageRow(R.string.me_language_zh_cn, PersonalSettingsLocale.ZhCn, selected, onSelect)
-        SettingsDivider()
-        LanguageRow(R.string.me_language_en_us, PersonalSettingsLocale.EnUs, selected, onSelect)
+    val theme = WarmPageThemeValues
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = stringResource(R.string.me_language_title),
+        onBack = onBack,
+        navigationContentDescription = stringResource(R.string.navigate_back),
+        modifier = modifier.testTag("me-language"),
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(theme.components.page.compactGutter).testTag("settings-page-scroll"),
+        ) {
+            WarmSettingsSection(stringResource(R.string.me_language_title)) {
+                WarmPageSegmentedControl(
+                    options = listOf(
+                        WarmPageChoice(PersonalSettingsLocale.ZhCn, stringResource(R.string.me_language_zh_cn)),
+                        WarmPageChoice(PersonalSettingsLocale.EnUs, stringResource(R.string.me_language_en_us)),
+                    ),
+                    selected = selected,
+                    onSelect = onSelect,
+                    modifier = Modifier.testTag("settings-language-segmented"),
+                )
+            }
+        }
     }
 }
 
@@ -370,162 +547,88 @@ fun AboutScreen(
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(Unit) { onRetry() }
-    SettingsPageScaffold(R.string.me_about_title, onBack, modifier) {
-        SettingsSection(R.string.me_about_versions)
-        ReadOnlyValueRow(R.string.me_app_version, state.appVersion)
-        SettingsDivider()
-        ReadOnlyValueRow(
-            R.string.me_server_version,
-            state.serverVersion ?: stringResource(if (state.isLoading) R.string.me_loading else R.string.me_not_available),
-        )
-        state.failure?.let { InlineFailure(onRetry) }
-    }
-}
-
-@Composable
-private fun Avatar(name: String, bytes: ByteArray?) {
-    val image = remember(bytes) {
-        bytes?.let { decodeBoundedAvatarPreview(it) }?.asImageBitmap()
-    }
-    androidx.compose.material3.Surface(
-        modifier = Modifier.size(64.dp).clip(CircleShape),
-        color = WarmPageThemeValues.colors.accentSoft,
-        shape = CircleShape,
-    ) {
-        if (image != null) {
-            androidx.compose.foundation.Image(
-                bitmap = image,
-                contentDescription = stringResource(R.string.me_avatar_content_description),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Text(name.trim().take(1).ifEmpty { "?" }, style = WarmPageThemeValues.typography.title)
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = stringResource(R.string.me_about_title),
+        onBack = onBack,
+        navigationContentDescription = stringResource(R.string.navigate_back),
+        modifier = modifier.testTag("me-about"),
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).testTag("settings-page-scroll"),
+        ) {
+            WarmSettingsSection(stringResource(R.string.me_about_versions)) {
+                WarmSettingsValueRow(
+                    label = stringResource(R.string.me_app_version),
+                    value = state.appVersion,
+                    modifier = Modifier.testTag("settings-row-value-app-version"),
+                )
+                WarmSettingsDivider()
+                WarmSettingsValueRow(
+                    label = stringResource(R.string.me_server_version),
+                    value = state.serverVersion ?: stringResource(if (state.isLoading) R.string.me_loading else R.string.me_not_available),
+                    modifier = Modifier.testTag("settings-row-value-server-version"),
+                )
+            }
+            state.failure?.let {
+                WarmSettingsContentState(
+                    kind = WarmSettingsContentStateKind.Error,
+                    title = stringResource(R.string.me_operation_failed),
+                    actionLabel = stringResource(R.string.retry_action),
+                    onAction = onRetry,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SettingsSection(title: Int) {
-    Text(
-        stringResource(title),
-        style = WarmPageThemeValues.typography.label,
-        color = WarmPageThemeValues.colors.textSecondary,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp).semantics { heading() },
-    )
+private fun Avatar(name: String, bytes: ByteArray?) {
+    val image = remember(bytes) { bytes?.let { decodeBoundedAvatarPreview(it) }?.asImageBitmap() }
+    Surface(
+        modifier = Modifier.size(52.dp).clip(CircleShape),
+        color = WarmPageThemeValues.colors.accentSoft,
+        shape = CircleShape,
+    ) {
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = stringResource(R.string.me_avatar_content_description),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Text(name.trim().take(1).ifEmpty { "?" }, style = WarmPageThemeValues.typography.sectionTitle)
+            }
+        }
+    }
 }
 
 @Composable
-private fun SectionHeading(title: Int) {
-    Text(stringResource(title), style = WarmPageThemeValues.typography.sectionTitle, modifier = Modifier.semantics { heading() })
-}
-
-@Composable
-private fun SettingsRow(
-    title: Int,
-    summaryResource: Int?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    summary: String? = null,
-    trailingIcon: androidx.compose.ui.graphics.vector.ImageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-) {
-    val supportingText = summary ?: summaryResource?.let { stringResource(it) }
-    ListItem(
-        headlineContent = { Text(stringResource(title)) },
-        supportingContent = supportingText?.let { value -> ({ Text(value) }) },
-        leadingContent = { Icon(icon, contentDescription = null) },
-        trailingContent = { Icon(trailingIcon, contentDescription = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick),
-    )
-}
-
-@Composable
-private fun ReadOnlyServerRow(name: String, address: String) {
-    ListItem(
-        headlineContent = { Text(name) },
-        supportingContent = { Text(address) },
-        leadingContent = { Icon(Icons.Outlined.Storage, contentDescription = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
-    )
-}
-
-@Composable
-private fun ReadOnlyValueRow(label: Int, value: String) {
-    ListItem(
-        headlineContent = { Text(stringResource(label)) },
-        trailingContent = { Text(value, color = WarmPageThemeValues.colors.textSecondary) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-    )
-}
-
-@Composable
-private fun SettingsDivider() {
-    HorizontalDivider(Modifier.padding(start = 56.dp), color = WarmPageThemeValues.colors.divider)
-}
-
-@Composable
-private fun LanguageRow(
+private fun PasswordField(
+    value: String,
+    onValueChanged: (String) -> Unit,
     label: Int,
-    locale: PersonalSettingsLocale,
-    selected: PersonalSettingsLocale,
-    onSelect: (PersonalSettingsLocale) -> Unit,
+    tag: String,
+    enabled: Boolean,
 ) {
-    ListItem(
-        headlineContent = { Text(stringResource(label)) },
-        trailingContent = { RadioButton(selected = selected == locale, onClick = null) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.RadioButton) { onSelect(locale) },
-    )
-}
-
-@Composable
-private fun PasswordField(value: String, onValueChanged: (String) -> Unit, label: Int) {
     SettingsTextField(
         value = value,
         onValueChange = onValueChanged,
         label = stringResource(label),
         password = true,
-        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        showPasswordContentDescription = stringResource(R.string.login_show_password),
+        hidePasswordContentDescription = stringResource(R.string.login_hide_password),
+        modifier = Modifier.testTag(tag),
     )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SettingsPageScaffold(
-    title: Int,
-    onBack: () -> Unit,
-    modifier: Modifier,
-    topBarActions: @Composable RowScope.() -> Unit = {},
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Scaffold(
-        modifier = modifier,
-        containerColor = WarmPageThemeValues.colors.canvas,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.navigate_back))
-                    }
-                },
-                actions = topBarActions,
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WarmPageThemeValues.colors.canvas),
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()), content = content)
-    }
 }
 
 @Composable
 private fun InlineFailure(onRetry: (() -> Unit)? = null) {
     Row(
-        Modifier.fillMaxWidth().padding(16.dp),
+        Modifier.fillMaxWidth().padding(WarmPageThemeValues.spacing.two).testTag("settings-error"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {

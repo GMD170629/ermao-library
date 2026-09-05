@@ -1,6 +1,5 @@
 package com.ermao.library.features.downloads.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,24 +9,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,16 +25,23 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ermao.library.R
-import com.ermao.library.features.content.ui.ContentAreaMessage
 import com.ermao.library.features.downloads.application.DownloadCenterUiState
 import com.ermao.library.features.downloads.application.DownloadedBookUiState
 import com.ermao.library.features.downloads.model.AndroidDownloadRecord
 import com.ermao.library.features.downloads.model.DownloadedBookGroup
 import com.ermao.library.features.downloads.model.DownloadedResourceGroup
 import com.ermao.library.ui.components.rememberForwardProgress
+import com.ermao.library.ui.components.WarmPageSearchField
+import com.ermao.library.ui.components.WarmSettingsEmptyState
+import com.ermao.library.ui.components.WarmSettingsContentState
+import com.ermao.library.ui.components.WarmSettingsContentStateKind
+import com.ermao.library.ui.components.WarmSettingsDivider
+import com.ermao.library.ui.components.WarmSettingsNavigationRow
+import com.ermao.library.ui.components.WarmSettingsScaffold
+import com.ermao.library.ui.components.WarmSettingsScaffoldRole
+import com.ermao.library.ui.components.WarmSettingsSection
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadCenterScreen(
     state: DownloadCenterUiState,
@@ -67,63 +59,73 @@ fun DownloadCenterScreen(
 ) {
     val theme = WarmPageThemeValues
     var pendingRemoval by remember { mutableStateOf<AndroidDownloadRecord?>(null) }
-    Scaffold(
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = stringResource(R.string.downloads_title),
+        onBack = onBack.takeIf { showBackNavigation },
+        navigationContentDescription = stringResource(R.string.navigate_back),
         modifier = modifier.testTag("downloads-center"),
-        containerColor = theme.colors.canvas,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.downloads_title)) },
-                navigationIcon = {
-                    if (showBackNavigation) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.navigate_back))
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = theme.colors.canvas),
-            )
-        },
     ) { padding ->
         if (state.isLoading) {
-            ContentAreaMessage(stringResource(R.string.content_loading_title), stringResource(R.string.downloads_loading), modifier = Modifier.padding(padding), loading = true)
+            WarmSettingsContentState(
+                kind = WarmSettingsContentStateKind.Loading,
+                title = stringResource(R.string.content_loading_title),
+                message = stringResource(R.string.downloads_loading),
+                modifier = Modifier.padding(padding),
+            )
         } else if (state.errorCode != null) {
-            ContentAreaMessage(stringResource(R.string.content_error_title), stringResource(R.string.downloads_error), modifier = Modifier.padding(padding), actionLabel = stringResource(R.string.retry_action), onAction = onRetry)
+            WarmSettingsContentState(
+                kind = WarmSettingsContentStateKind.Error,
+                title = stringResource(R.string.content_error_title),
+                message = stringResource(R.string.downloads_error),
+                actionLabel = stringResource(R.string.retry_action),
+                onAction = onRetry,
+                modifier = Modifier.padding(padding),
+            )
         } else {
             LazyColumn(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier.fillMaxSize().padding(padding).testTag("settings-page-scroll"),
                 verticalArrangement = Arrangement.spacedBy(theme.spacing.two),
             ) {
                 item {
-                    Column(Modifier.padding(horizontal = theme.spacing.three)) {
-                        Text(stringResource(R.string.downloads_storage), style = theme.typography.sectionTitle)
-                        Text(stringResource(R.string.downloads_used_space, formatBytes(state.totalCompletedBytes)), color = theme.colors.textSecondary)
+                    WarmSettingsSection(stringResource(R.string.downloads_storage)) {
+                        Text(
+                            stringResource(R.string.downloads_used_space, formatBytes(state.totalCompletedBytes)),
+                            style = theme.typography.callout,
+                            color = theme.colors.textSecondary,
+                            modifier = Modifier.padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
+                        )
                     }
                 }
                 if (state.active.isNotEmpty()) {
-                    item { SectionTitle(R.string.downloads_active) }
+                    item { WarmSettingsSection(stringResource(R.string.downloads_active)) {} }
                     items(state.active, key = AndroidDownloadRecord::taskId) {
                         ActiveRow(it, onCancelDownload.takeIf { allowManagementActions })
                     }
                 }
                 item {
-                    OutlinedTextField(
+                    WarmPageSearchField(
                         value = state.query,
                         onValueChange = onQueryChanged,
-                        label = { Text(stringResource(R.string.downloads_search)) },
-                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
-                        trailingIcon = if (state.query.isNotEmpty()) ({ TextButton(onClick = onClearQuery) { Text(stringResource(R.string.clear_action)) } }) else null,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three).testTag("downloads-search"),
+                        placeholder = stringResource(R.string.downloads_search),
+                        onClear = onClearQuery,
+                        clearLabel = stringResource(R.string.clear_action),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = theme.spacing.two).testTag("downloads-search"),
                     )
                 }
-                item { SectionTitle(R.string.downloads_completed) }
+                item { WarmSettingsSection(stringResource(R.string.downloads_completed)) {} }
                 if (state.completedBooks.isEmpty()) {
-                    item { Text(stringResource(if (state.query.isBlank()) R.string.downloads_empty else R.string.downloads_search_empty), modifier = Modifier.padding(horizontal = theme.spacing.three), color = theme.colors.textSecondary) }
+                    item {
+                        WarmSettingsEmptyState(
+                            title = stringResource(if (state.query.isBlank()) R.string.downloads_empty else R.string.downloads_search_empty),
+                            modifier = Modifier.testTag("settings-empty"),
+                        )
+                    }
                 } else {
                     items(state.completedBooks, key = DownloadedBookGroup::bookId) { DownloadedBookRow(it, onOpenBook) }
                 }
                 if (state.failed.isNotEmpty()) {
-                    item { SectionTitle(R.string.downloads_failed) }
+                    item { WarmSettingsSection(stringResource(R.string.downloads_failed)) {} }
                     items(state.failed, key = AndroidDownloadRecord::taskId) {
                         FailedRow(
                             it,
@@ -153,7 +155,6 @@ fun DownloadCenterScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadedBookScreen(
     state: DownloadedBookUiState,
@@ -162,32 +163,48 @@ fun DownloadedBookScreen(
     modifier: Modifier = Modifier,
 ) {
     val theme = WarmPageThemeValues
-    Scaffold(
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = state.book?.title ?: stringResource(R.string.downloads_title),
+        onBack = onBack,
+        navigationContentDescription = stringResource(R.string.navigate_back),
         modifier = modifier.testTag("downloads-book"),
-        containerColor = theme.colors.canvas,
-        topBar = { TopAppBar(title = { Text(state.book?.title ?: stringResource(R.string.downloads_title)) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.navigate_back)) } }) },
     ) { padding ->
         val book = state.book
-        if (state.isLoading) ContentAreaMessage(stringResource(R.string.content_loading_title), stringResource(R.string.downloads_loading), modifier = Modifier.padding(padding), loading = true)
-        else if (book == null) ContentAreaMessage(stringResource(R.string.downloads_unavailable_title), stringResource(R.string.downloads_unavailable_message), modifier = Modifier.padding(padding))
-        else LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            item { Text(book.author, color = theme.colors.textSecondary, modifier = Modifier.padding(theme.spacing.three)) }
+        if (state.isLoading) {
+            WarmSettingsContentState(
+                kind = WarmSettingsContentStateKind.Loading,
+                title = stringResource(R.string.content_loading_title),
+                message = stringResource(R.string.downloads_loading),
+                modifier = Modifier.padding(padding),
+            )
+        } else if (book == null) {
+            WarmSettingsEmptyState(
+                title = stringResource(R.string.downloads_unavailable_title),
+                message = stringResource(R.string.downloads_unavailable_message),
+                modifier = Modifier.padding(padding).testTag("settings-empty"),
+            )
+        } else LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("settings-page-scroll")) {
+            item {
+                Text(
+                    book.author,
+                    style = theme.typography.callout,
+                    color = theme.colors.textSecondary,
+                    modifier = Modifier.padding(theme.components.settings.horizontalInset),
+                )
+            }
             book.resources.forEach { resource ->
                 item(key = "resource-${resource.resourceId}") {
                     ResourceHeader(resource)
                 }
                 items(resource.artifacts, key = AndroidDownloadRecord::assetId) { record ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onOpenResource(record) }.padding(horizontal = theme.spacing.four, vertical = theme.spacing.two),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(resource.title, style = theme.typography.headline)
-                            Text("${record.format} · ${formatBytes(record.expectedBytes)}", color = theme.colors.textSecondary)
-                        }
-                        Icon(Icons.Outlined.CheckCircle, stringResource(R.string.downloads_offline_available), tint = theme.colors.brandAccent)
-                    }
-                    HorizontalDivider(color = theme.colors.divider)
+                    WarmSettingsNavigationRow(
+                        title = resource.title,
+                        summary = "${record.format} · ${formatBytes(record.expectedBytes)}",
+                        modifier = Modifier.testTag("settings-row-resource-${record.assetId}"),
+                        onClick = { onOpenResource(record) },
+                    )
+                    WarmSettingsDivider()
                 }
             }
         }
@@ -197,7 +214,12 @@ fun DownloadedBookScreen(
 @Composable
 private fun ResourceHeader(resource: DownloadedResourceGroup) {
     val theme = WarmPageThemeValues
-    Column(Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.one)) {
+    Column(
+        Modifier.fillMaxWidth().padding(
+            horizontal = theme.components.settings.horizontalInset,
+            vertical = theme.components.settings.verticalInset,
+        ),
+    ) {
         Text(resource.title, style = theme.typography.sectionTitle)
         Text(
             pluralStringResource(
@@ -212,15 +234,19 @@ private fun ResourceHeader(resource: DownloadedResourceGroup) {
     }
 }
 
-@Composable private fun SectionTitle(resource: Int) = Text(stringResource(resource), style = WarmPageThemeValues.typography.sectionTitle, modifier = Modifier.padding(horizontal = WarmPageThemeValues.spacing.three))
-
 @Composable
 private fun ActiveRow(record: AndroidDownloadRecord, onCancel: ((String) -> Unit)?) {
     val theme = WarmPageThemeValues
     val progress = if (record.expectedBytes == 0L) 0f else record.transferredBytes.toFloat() / record.expectedBytes
     val animatedProgress = rememberForwardProgress(progress, progressIdentity = record.assetId)
-    Column(Modifier.padding(horizontal = theme.spacing.three), verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.CloudDownload, null); Text(record.bookTitle, Modifier.padding(start = theme.spacing.one).weight(1f)); Text("${(progress * 100).toInt()}%") }
+    Column(
+        Modifier.padding(horizontal = theme.components.settings.horizontalInset),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(record.bookTitle, Modifier.weight(1f), style = theme.typography.body)
+            Text("${(progress * 100).toInt()}%", style = theme.typography.label, color = theme.colors.textSecondary)
+        }
         Text(
             stringResource(R.string.downloads_task_context, record.resourceTitle, record.format),
             color = theme.colors.textSecondary,
@@ -235,22 +261,18 @@ private fun ActiveRow(record: AndroidDownloadRecord, onCancel: ((String) -> Unit
 @Composable
 private fun DownloadedBookRow(book: DownloadedBookGroup, onOpenBook: (String) -> Unit) {
     val theme = WarmPageThemeValues
-    Row(Modifier.fillMaxWidth().clickable { onOpenBook(book.bookId) }.padding(horizontal = theme.spacing.three, vertical = theme.spacing.two), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(book.title, style = theme.typography.headline)
-            Text(
-                pluralStringResource(
-                    R.plurals.downloads_book_summary,
-                    book.resources.size,
-                    book.resources.size,
-                    formatBytes(book.totalBytes),
-                ),
-                color = theme.colors.textSecondary,
-            )
-        }
-        Icon(Icons.Outlined.CheckCircle, stringResource(R.string.downloads_offline_available), tint = theme.colors.brandAccent)
-    }
-    HorizontalDivider(color = theme.colors.divider)
+    WarmSettingsNavigationRow(
+        title = book.title,
+        summary = pluralStringResource(
+            R.plurals.downloads_book_summary,
+            book.resources.size,
+            book.resources.size,
+            formatBytes(book.totalBytes),
+        ),
+        modifier = Modifier.testTag("settings-row-book-${book.bookId}"),
+        onClick = { onOpenBook(book.bookId) },
+    )
+    WarmSettingsDivider()
 }
 
 @Composable
@@ -260,9 +282,14 @@ private fun FailedRow(
     onRemove: (() -> Unit)?,
 ) {
     val theme = WarmPageThemeValues
-    Row(Modifier.fillMaxWidth().padding(horizontal = theme.spacing.three, vertical = theme.spacing.two), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Outlined.ErrorOutline, null, tint = androidx.compose.material3.MaterialTheme.colorScheme.error)
-        Column(Modifier.padding(start = theme.spacing.two).weight(1f)) {
+    Row(
+        Modifier.fillMaxWidth().padding(
+            horizontal = theme.components.settings.horizontalInset,
+            vertical = theme.components.settings.verticalInset,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
             Text(record.bookTitle)
             Text(
                 stringResource(R.string.downloads_task_context, record.resourceTitle, record.format),

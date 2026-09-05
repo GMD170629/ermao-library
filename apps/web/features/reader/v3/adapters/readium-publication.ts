@@ -11,6 +11,7 @@ import {
 import { openMobiPublication } from '../original-publication/mobi-publication';
 import {
   createLocalPublication,
+  type LocalPublicationTocEntry,
   type ReadiumPublication
 } from '../original-publication/local-publication';
 import { openTextPublication } from '../original-publication/text-publication';
@@ -30,6 +31,184 @@ import {
 const MAX_XML_BYTES = READER_SAFETY_BUDGETS.xmlControlDocumentMaxBytes;
 function bareHref(href: string): string {
   return href.split('#', 1)[0]?.split('?', 1)[0] ?? href;
+}
+
+const EPUB_TYPE_NAMESPACE = 'http://www.idpf.org/2007/ops';
+const NCX_MEDIA_TYPE = 'application/x-dtbncx+xml';
+
+type EpubManifestItem = Readonly<{
+  path: string;
+  type: string;
+  properties: string;
+}>;
+
+function localName(element: Element): string {
+  return (element.localName || element.tagName).toLowerCase();
+}
+
+function childElements(element: Element, name?: string): Element[] {
+  const children = Array.from(element.children);
+  if (!name) return children;
+  const expected = name.toLowerCase();
+  return children.filter((child) => localName(child) === expected);
+}
+
+function firstDescendant(element: Element, name: string): Element | null {
+  const expected = name.toLowerCase();
+  for (const child of childElements(element)) {
+    if (localName(child) === expected) return child;
+    const nested = firstDescendant(child, expected);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function epubType(element: Element): string {
+  return element.getAttribute('epub:type')
+    ?? element.getAttributeNS(EPUB_TYPE_NAMESPACE, 'type')
+    ?? '';
+}
+
+function fragmentOf(href: string): string {
+  const hash = href.indexOf('#');
+  return hash >= 0 ? href.slice(hash) : '';
+}
+
+function navigationHref(
+  rawHref: string,
+  sourcePath: string,
+  knownManifestPaths: ReadonlySet<string>
+): string | null {
+  const path = resolveArchivePath(sourcePath, rawHref);
+  if (!path || !knownManifestPaths.has(path)) return null;
+  return `${path}${fragmentOf(rawHref)}`;
+}
+
+function directNavigationAnchor(listItem: Element): Element | null {
+  for (const child of childElements(listItem)) {
+    const childName = localName(child);
+    if (childName === 'ol' || childName === 'ul') break;
+    if (childName === 'a' && child.hasAttribute('href')) return child;
+    const nested = child.querySelector('a[href]');
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function parseNavigationList(
+  list: Element,
+  sourcePath: string,
+  knownManifestPaths: ReadonlySet<string>
+): LocalPublicationTocEntry[] {
+  const entries: LocalPublicationTocEntry[] = [];
+  for (const listItem of childElements(list, 'li')) {
+    const anchor = directNavigationAnchor(listItem);
+    const nestedList = childElements(listItem).find((child) => {
+      const name = localName(child);
+      return name === 'ol' || name === 'ul';
+    });
+    const children = nestedList
+      ? parseNavigationList(nestedList, sourcePath, knownManifestPaths)
+      : [];
+    const label = anchor?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    const href = anchor?.getAttribute('href') ?? '';
+    const resolvedHref = navigationHref(href, sourcePath, knownManifestPaths);
+    if (!resolvedHref || !label) {
+      entries.push(...children);
+      continue;
+    }
+    entries.push({
+      href: resolvedHref,
+      title: label,
+      ...(children.length > 0 ? { children } : {})
+    });
+  }
+  return entries;
+}
+
+/** Parses the EPUB3 Navigation Document's `toc` nav while preserving nesting. */
+export function parseEpub3Navigation(
+  document: XMLDocument,
+  sourcePath: string,
+  knownManifestPaths: ReadonlySet<string>
+): LocalPublicationTocEntry[] {
+  const navs = Array.from(document.querySelectorAll('nav'));
+  const tocNav = navs.find((nav) => epubType(nav).split(/\s+/).includes('toc'));
+  if (!tocNav) return [];
+  const list = childElements(tocNav).find((child) => {
+    const name = localName(child);
+    return name === 'ol' || name === 'ul';
+  }) ?? firstDescendant(tocNav, 'ol') ?? firstDescendant(tocNav, 'ul');
+  return list ? parseNavigationList(list, sourcePath, knownManifestPaths) : [];
+}
+
+function parseNcxNavPoint(
+  navPoint: Element,
+  sourcePath: string,
+  knownManifestPaths: ReadonlySet<string>
+): LocalPublicationTocEntry[] {
+  const content = childElements(navPoint, 'content')[0];
+  const rawHref = content?.getAttribute('src') ?? '';
+  const href = navigationHref(rawHref, sourcePath, knownManifestPaths);
+  const labelElement = childElements(navPoint, 'navlabel')[0];
+  const label = firstDescendant(labelElement ?? navPoint, 'text')?.textContent
+    ?.replace(/\s+/g, ' ').trim() ?? '';
+  const children = childElements(navPoint, 'navpoint').flatMap((child) => (
+    parseNcxNavPoint(child, sourcePath, knownManifestPaths)
+  ));
+  if (!href || !label) return children;
+  return [{
+    href,
+    title: label,
+    ...(children.length > 0 ? { children } : {})
+  }];
+}
+
+/** Parses the EPUB2 NCX navigation map while preserving nested navPoints. */
+export function parseEpub2NcxNavigation(
+  document: XMLDocument,
+  sourcePath: string,
+  knownManifestPaths: ReadonlySet<string>
+): LocalPublicationTocEntry[] {
+  const navMap = firstDescendant(document.documentElement, 'navmap');
+  if (!navMap) return [];
+  return childElements(navMap, 'navpoint').flatMap((navPoint) => (
+    parseNcxNavPoint(navPoint, sourcePath, knownManifestPaths)
+  ));
+}
+
+function titleByTocPath(entries: readonly LocalPublicationTocEntry[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  const visit = (items: readonly LocalPublicationTocEntry[]) => {
+    for (const item of items) {
+      titles.set(bareHref(item.href), item.title);
+      if (item.children) visit(item.children);
+    }
+  };
+  visit(entries);
+  return titles;
+}
+
+/** Applies the adapter's deterministic EPUB navigation precedence. */
+export function resolveEpubNavigation(
+  epub3: readonly LocalPublicationTocEntry[],
+  ncx: readonly LocalPublicationTocEntry[],
+  readingOrder: readonly Readonly<{ href: string; title: string }>[]
+): LocalPublicationTocEntry[] {
+  if (epub3.length > 0) return [...epub3];
+  if (ncx.length > 0) return [...ncx];
+  return readingOrder.map((item) => ({ href: item.href, title: item.title }));
+}
+
+/** Resolves the NCX through the OPF spine's declared ID, with a safe typed fallback. */
+export function resolveEpub2NcxManifestItem(
+  manifestItems: ReadonlyMap<string, EpubManifestItem>,
+  spineTocId: string | null | undefined
+): EpubManifestItem | null {
+  const declaredId = spineTocId?.trim();
+  const declaredItem = declaredId ? manifestItems.get(declaredId) : null;
+  if (declaredItem?.type.toLowerCase() === NCX_MEDIA_TYPE) return declaredItem;
+  return [...manifestItems.values()].find((item) => item.type.toLowerCase() === NCX_MEDIA_TYPE) ?? null;
 }
 
 function utf8(value: string): Uint8Array {
@@ -161,7 +340,7 @@ async function openEpub(
         }
       }
     }
-    const manifestItems = new Map<string, Readonly<{ path: string; type: string; properties: string }>>();
+    const manifestItems = new Map<string, EpubManifestItem>();
     for (const item of opf.querySelectorAll('manifest > item')) {
       const id = item.getAttribute('id');
       const href = item.getAttribute('href');
@@ -175,25 +354,32 @@ async function openEpub(
         properties: item.getAttribute('properties') ?? ''
       });
     }
-    const toc: Array<{ href: string; title: string }> = [];
     const knownManifestPaths = new Set([...manifestItems.values()].map((item) => item.path));
     const navItem = [...manifestItems.values()].find((item) => item.properties.split(/\s+/).includes('nav'));
+    let epub3Toc: LocalPublicationTocEntry[] = [];
     if (navItem) {
       const navEntry = required(navItem.path);
       if (navEntry.uncompressedSize > MAX_XML_BYTES) {
         rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
       }
       const nav = parseXml(new TextDecoder().decode(await readZipEntry(navEntry, signal)), 'PUBLICATION_STRUCTURE_INVALID');
-      for (const anchor of nav.querySelectorAll('nav a[href]')) {
-        const rawHref = anchor.getAttribute('href') ?? '';
-        const path = resolveArchivePath(navItem.path, rawHref);
-        const label = anchor.textContent?.replace(/\s+/g, ' ').trim();
-        if (!path || !label || !knownManifestPaths.has(path)) continue;
-        const fragment = rawHref.includes('#') ? `#${rawHref.split('#').slice(1).join('#')}` : '';
-        toc.push({ href: `${path}${fragment}`, title: label });
+      epub3Toc = parseEpub3Navigation(nav, navItem.path, knownManifestPaths);
+    }
+    let ncxToc: LocalPublicationTocEntry[] = [];
+    if (epub3Toc.length === 0) {
+      const spineTocId = opf.querySelector('spine')?.getAttribute('toc');
+      const ncxItem = resolveEpub2NcxManifestItem(manifestItems, spineTocId);
+      if (ncxItem) {
+        const ncxEntry = required(ncxItem.path);
+        if (ncxEntry.uncompressedSize > MAX_XML_BYTES) {
+          rejectReaderSafety(READER_SAFETY_RULE_IDS.REFLOWABLE_XML_CONTROL_DOCUMENT_MAX_BYTES);
+        }
+        const ncx = parseXml(new TextDecoder().decode(await readZipEntry(ncxEntry, signal)), 'PUBLICATION_STRUCTURE_INVALID');
+        ncxToc = parseEpub2NcxNavigation(ncx, ncxItem.path, knownManifestPaths);
       }
     }
-    const titleByPath = new Map(toc.map((entry) => [bareHref(entry.href), entry.title]));
+    const authoredToc = resolveEpubNavigation(epub3Toc, ncxToc, []);
+    const titleByPath = titleByTocPath(authoredToc);
     const itemByPath = new Map([...manifestItems.values()].map((item) => [item.path, item]));
     const rawReads = new Map<string, Promise<Uint8Array>>();
     const resourceReads = new Map<string, Promise<Uint8Array>>();
@@ -281,6 +467,7 @@ async function openEpub(
       });
     }
     if (readingOrder.length === 0) throw new Error('PUBLICATION_STRUCTURE_INVALID');
+    const toc = resolveEpubNavigation(epub3Toc, ncxToc, readingOrder);
     const extraResources = [...manifestItems.values()]
       .filter((item) => !readingOrderPaths.has(item.path))
       .map((item) => ({

@@ -17,6 +17,7 @@ import { ReaderShell, type ReaderControls, type ReaderNavigationItem, type Reade
 import { fetchReaderBookmarks, saveReaderBookmarks, type ReaderBootstrap } from './api';
 import { hasReaderBookmark, mergeReaderBookmarks, readReaderBookmarks, readerBookmarkId, readerBookmarkStorageKey, removeReaderBookmark, toggleReaderBookmark, type ReaderBookmark } from './bookmarks';
 import { resolveActiveEpubNavigationIndex } from './epub-navigation';
+import { flattenReadiumNavigationEntries } from './adapters/readium-navigation';
 import { locationExtra, locationProgress, preferencesToReaderSettings, readerSettingsToPreferences } from './presentation';
 import { useReaderSession } from './use-reader-session';
 import { isReaderInteractiveAdapter, type ReaderAdapterInputIntent } from './adapters/reader-interaction';
@@ -383,11 +384,12 @@ export function ReaderEngineRuntime({
   };
   const items = useMemo(() => {
     if (bootstrap.readerType === 'reflowable' && session.state.navigationItems.length > 0) {
-      return session.state.navigationItems.map((item, index) => ({
-        index: item.index ?? index,
+      return flattenReadiumNavigationEntries(session.state.navigationItems).map((item) => ({
+        index: item.index ?? 0,
         title: item.label,
         href: item.href,
-        navigationKey: item.navigationKey ?? item.id
+        navigationKey: item.navigationKey ?? item.id,
+        level: item.level ?? 0
       }));
     }
     return bootstrapNavigationItems(bootstrap);

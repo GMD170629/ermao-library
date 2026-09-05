@@ -1,0 +1,101 @@
+{
+  "runId": "20260904-cross-platform-visual-contract",
+  "status": "IN_PROGRESS",
+  "targetContract": "target-contract.md",
+  "visualContract": {
+    "file": "../../../../../packages/design-contracts/visual-tokens.json",
+    "schemaVersion": 3,
+    "contractVersion": "1.0.0",
+    "sha256": "be6a155168550d64ff71018186475dce7590a81eb728546ba64ddfefbc0fc6cc"
+  },
+  "source": {
+    "commit": "9ff93969bf46c24d24e97c0103cae50244fd64aa",
+    "dirtyWorkspace": true,
+    "note": "Task patch plus pre-existing unrelated user changes; unrelated changes were preserved."
+  },
+  "android": {
+    "status": "PASS",
+    "device": {
+      "serial": "9e896bbc",
+      "model": "M2102K1AC",
+      "androidVersion": "12",
+      "resolution": "1440x3200",
+      "densityDpi": 560,
+      "fontScale": 1.0,
+      "physicalDevice": true,
+      "locale": "zh-CN",
+      "orientation": "portrait",
+      "restoredSystemAppearance": "light"
+    },
+    "apk": {
+      "file": "../../../androidApp/build/outputs/apk/debug/androidApp-debug.apk",
+      "sha256": "93bffe01d04f479ad32ff71ad81574943a37afa03a558df0530ee73f26bf89a5",
+      "screenshotBuildSha256": "0e25a161badbbeb8c00c287137805612be75416df9948387d16f8d01bc280455",
+      "screenshotBuildNote": "The final APK adds case-insensitive/class-based Reader link selectors after capture. The accepted screenshots contain no links; all photographed theme surfaces and generated colors are unchanged. The selector change is covered by the focused unit test.",
+      "install": "adb install -r passed",
+      "coldLaunch": "passed on the final APK; MainActivity resumed in 1412 ms with no matching crash-buffer entries"
+    },
+    "screenshots": [
+      {
+        "file": "final/android/app-shell/zh-CN-system-dark/01-app-shell.png",
+        "sha256": "1a0b51b23fb02bda8168fd7b6b7f3a16e8597889ef4219424fda89ebfd839682"
+      },
+      {
+        "file": "final/android/app-shell/zh-CN-system-light/01-app-shell.png",
+        "sha256": "3b27b4d4da1409ca71bf6224ad96b4547f5f5c4da908380add2aa23420925e3f"
+      },
+      {
+        "file": "final/android/reader-system/zh-CN-system-dark/01-reader-system-night.png",
+        "sha256": "4e6749b9400c8348e3f13730b05879e9f75da222ca0d55809eecc1cbe4b40d0b"
+      },
+      {
+        "file": "final/android/reader-system/zh-CN-system-light/01-reader-system-day.png",
+        "sha256": "9f03a91d03658e702390bdb805353854bb37c2cdca3dca942f640ea08faadd4b"
+      },
+      {
+        "file": "final/android/reader/zh-CN/black/01-reader-black.png",
+        "sha256": "06294dd0b48cdb52226f505dfaea53bfe6dd9c12c29d563efd3873dd2744772b"
+      },
+      {
+        "file": "final/android/reader/zh-CN/day/01-reader-day.png",
+        "sha256": "1ec15fbcdc45847031bc21268d1f8211636b664a3dd1899d44c63b6c97ad08df"
+      },
+      {
+        "file": "final/android/reader/zh-CN/green/01-reader-green.png",
+        "sha256": "d0404ffcb0b5b41374d3db7e56b51514cdc8c9f044504a06ad54766f78fc6177"
+      },
+      {
+        "file": "final/android/reader/zh-CN/night/01-reader-night.png",
+        "sha256": "cbb7a142e8b45d553dda50ceb717a154614de3858aeef7d97689f0f2e3b60d9a"
+      },
+      {
+        "file": "final/android/reader/zh-CN/warm/01-reader-warm.png",
+        "sha256": "a25f3437d5a13c0c317302613972e62fa508ccb48af138f660b0a94caafcbe0b"
+      }
+    ],
+    "privacy": "Captured from the existing authenticated device state; evidence is local and must not be published externally."
+  },
+  "ios": {
+    "status": "IN_PROGRESS",
+    "completed": [
+      "Generated token integration",
+      "App shell fixed-light mapping",
+      "Independent System Reader appearance signal",
+      "Five Reader palettes and publication theme adapter",
+      "Static mapping and unit-test updates"
+    ],
+    "pending": [
+      "macOS simulator build and tests",
+      "physical iPhone app-shell light/dark screenshots",
+      "physical iPhone five Reader themes and System Day/Night screenshots"
+    ]
+  },
+  "verification": {
+    "contract": "passed",
+    "web": "passed except one pre-existing Windows python3 multiline-launch failure in the full suite; all changed Reader tests, lint, typecheck, and production build passed",
+    "android": "unit tests, AndroidTest compilation, assembleDebug, and the filtered System Day/Night test on the physical device passed",
+    "androidLint": "38 pre-existing errors remain in audio infrastructure, AndroidManifest.xml, and unused string resources; no errors reference the visual-contract files",
+    "ios": "not runnable on this Windows host",
+    "independentReview": "passed for Android: no P0/P1/P2 blocker; all nine 1440x3200 screenshots confirm the light-only app shell, five Reader themes, and System Day/Night mapping. iOS remains unverified."
+  }
+}

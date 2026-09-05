@@ -150,7 +150,11 @@ internal class AndroidLocalPdfiumDataSource(file: File) : AndroidPdfiumDataSourc
     }
 
     override suspend fun prepare() = Unit
-    override suspend fun acquireRequested(): Boolean = false
+    // Every byte is already available locally. PDFium's availability API can
+    // still yield NEED_DATA once after publishing a segment hint, especially
+    // for files smaller than its preferred read block. Let the bounded open
+    // loop retry instead of translating that transient state to a range error.
+    override suspend fun acquireRequested(): Boolean = true
 
     override fun isRangeCached(offset: Long, size: Long): Boolean =
         size > 0 && offset >= 0 && offset <= length - size

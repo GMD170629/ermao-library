@@ -1,31 +1,8 @@
 package com.ermao.library.features.administrativesettings
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ListAlt
-import androidx.compose.material.icons.automirrored.outlined.MergeType
-import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.HealthAndSafety
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.ManageAccounts
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Reorder
-import androidx.compose.material.icons.outlined.SettingsSuggest
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -35,11 +12,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.components.SettingsTabRow
 import com.ermao.library.ui.components.SettingsTextField
+import com.ermao.library.ui.components.WarmPageChoice
+import com.ermao.library.ui.components.WarmPageSegmentedControl
+import com.ermao.library.ui.components.WarmSettingsIcons
 
 @Composable
 fun ManagementIndexScreen(
@@ -156,27 +137,16 @@ private fun AdministrativeSettingsRoute.title(): AdministrativeCopy = when (this
 }
 
 private fun AdministrativeSettingsRoute.icon(): ImageVector = when (this) {
-    AdministrativeSettingsRoute.LibrarySources, is AdministrativeSettingsRoute.LibrarySourceEdit, is AdministrativeSettingsRoute.ServerDirectory -> Icons.Outlined.Folder
-    AdministrativeSettingsRoute.ImportTasks, is AdministrativeSettingsRoute.ImportTaskDetail,
-    AdministrativeSettingsRoute.ImportScanJobs, is AdministrativeSettingsRoute.ImportScanJob,
-    -> Icons.Outlined.Download
-    AdministrativeSettingsRoute.ImportPreferences -> Icons.Outlined.Tune
-    AdministrativeSettingsRoute.OrganizeQueue, AdministrativeSettingsRoute.OrganizeCandidates,
-    AdministrativeSettingsRoute.OrganizeRuns,
-    -> Icons.Outlined.SettingsSuggest
-    AdministrativeSettingsRoute.RecognitionPolicy -> Icons.Outlined.Tune
-    AdministrativeSettingsRoute.LibraryOperations, is AdministrativeSettingsRoute.CategoryGovernance,
-    -> Icons.AutoMirrored.Outlined.MergeType
-    AdministrativeSettingsRoute.MetadataProviders, is AdministrativeSettingsRoute.MetadataProviderEdit -> Icons.Outlined.Storage
-    AdministrativeSettingsRoute.Users, is AdministrativeSettingsRoute.UserEdit, is AdministrativeSettingsRoute.UserAccess -> Icons.Outlined.ManageAccounts
-    is AdministrativeSettingsRoute.EmailKindle -> Icons.Outlined.Email
-    AdministrativeSettingsRoute.KindleQueue -> Icons.AutoMirrored.Outlined.Send
-    AdministrativeSettingsRoute.Opds -> Icons.Outlined.Dns
-    AdministrativeSettingsRoute.Backups -> Icons.Outlined.Backup
-    AdministrativeSettingsRoute.DetailOrder -> Icons.Outlined.Reorder
-    is AdministrativeSettingsRoute.Health -> Icons.Outlined.HealthAndSafety
-    AdministrativeSettingsRoute.Logs -> Icons.AutoMirrored.Outlined.ListAlt
-    AdministrativeSettingsRoute.Root -> Icons.Outlined.SettingsSuggest
+    AdministrativeSettingsRoute.Users,
+    is AdministrativeSettingsRoute.UserEdit,
+    is AdministrativeSettingsRoute.UserAccess,
+    -> WarmSettingsIcons.Users
+    is AdministrativeSettingsRoute.EmailKindle -> WarmSettingsIcons.EmailAndKindle
+    AdministrativeSettingsRoute.KindleQueue -> WarmSettingsIcons.KindleQueue
+    AdministrativeSettingsRoute.Opds -> WarmSettingsIcons.Opds
+    AdministrativeSettingsRoute.Logs -> WarmSettingsIcons.Logs
+    AdministrativeSettingsRoute.Root -> WarmSettingsIcons.Administration
+    else -> WarmSettingsIcons.Server
 }
 
 @Composable
@@ -213,6 +183,22 @@ fun EmailKindleSettingsScreen(
         locale = locale,
         onBack = onBack,
         modifier = modifier,
+        tabs = {
+            SettingsTabRow(
+                selectedIndex = if (activeTab == EmailKindleTab.Kindle) 0 else 1,
+                tabs = buildList {
+                    add(AdministrativeCopy.Kindle.text(locale))
+                    if (snapshot?.canManageSmtp == true || activeTab == EmailKindleTab.Smtp) {
+                        add(AdministrativeCopy.Smtp.text(locale))
+                    }
+                },
+                enabled = !state.mutationInFlight,
+                onSelect = { index ->
+                    selectedTabName = if (index == 0) EmailKindleTab.Kindle.name else EmailKindleTab.Smtp.name
+                },
+                modifier = Modifier.fillMaxWidth().testTag("administrative-email-tabs"),
+            )
+        },
         toolbarActions = {
             AdministrativeSaveAction(
                 label = if (activeTab == EmailKindleTab.Kindle) AdministrativeCopy.SaveKindle else AdministrativeCopy.SaveSmtp,
@@ -232,20 +218,6 @@ fun EmailKindleSettingsScreen(
             )
         },
     ) {
-        SettingsTabRow(
-            selectedIndex = if (activeTab == EmailKindleTab.Kindle) 0 else 1,
-            tabs = buildList {
-                add(AdministrativeCopy.Kindle.text(locale))
-                if (snapshot?.canManageSmtp == true || activeTab == EmailKindleTab.Smtp) {
-                    add(AdministrativeCopy.Smtp.text(locale))
-                }
-            },
-            enabled = !state.mutationInFlight,
-            onSelect = { index ->
-                selectedTabName = if (index == 0) EmailKindleTab.Kindle.name else EmailKindleTab.Smtp.name
-            },
-            modifier = Modifier.fillMaxWidth(),
-        )
         PageStateContent(state, locale, onRetry) { current ->
             if (activeTab == EmailKindleTab.Kindle) {
                 KindleSettingsForm(
@@ -338,25 +310,48 @@ private fun ColumnScope.SmtpSettingsForm(
     onCommand: (AdministrativeCommand) -> Unit,
 ) {
     AdministrativeTextField(form.host, { onFormChanged(form.copy(host = it)) }, AdministrativeCopy.SmtpHost, locale)
-    AdministrativeTextField(form.port, { onFormChanged(form.copy(port = it.filter(Char::isDigit))) }, AdministrativeCopy.Port, locale)
-    EnumChoiceRow(AdministrativeCopy.Encryption, SmtpEncryption.entries, form.encryption, { onFormChanged(form.copy(encryption = it)) }, locale) { it.name }
+    AdministrativeTextField(
+        form.port,
+        { onFormChanged(form.copy(port = it.filter(Char::isDigit))) },
+        AdministrativeCopy.Port,
+        locale,
+        textAlign = TextAlign.End,
+    )
+    EnumChoiceRow(
+        AdministrativeCopy.Encryption,
+        SmtpEncryption.entries,
+        form.encryption,
+        { onFormChanged(form.copy(encryption = it)) },
+        locale,
+    ) {
+        when (it) {
+            SmtpEncryption.None -> if (locale == AdministrativeLocale.ZhCn) "无" else "None"
+            SmtpEncryption.StartTls -> "STARTTLS"
+            SmtpEncryption.Tls -> "TLS"
+        }
+    }
     AdministrativeTextField(form.senderEmail, { onFormChanged(form.copy(senderEmail = it)) }, AdministrativeCopy.SenderEmail, locale)
     AdministrativeTextField(form.username, { onFormChanged(form.copy(username = it)) }, AdministrativeCopy.Username, locale)
     AdministrativeTextField(form.senderName, { onFormChanged(form.copy(senderName = it)) }, AdministrativeCopy.DisplayName, locale)
-    AdministrativeTextField(form.maximumAttachment, { onFormChanged(form.copy(maximumAttachment = it)) }, AdministrativeCopy.FileFormat, locale)
-    SettingsTextField(
+    AdministrativeTextField(
+        form.maximumAttachment,
+        { onFormChanged(form.copy(maximumAttachment = it.filter { character -> character.isDigit() || character == '.' })) },
+        AdministrativeCopy.MaximumAttachment,
+        locale,
+        textAlign = TextAlign.End,
+    )
+    AdministrativeTextField(
         value = form.password,
         onValueChange = { onFormChanged(form.copy(password = it)) },
-        label = AdministrativeCopy.Password.text(locale),
+        label = AdministrativeCopy.Password,
+        locale = locale,
         placeholder = if (initial.passwordConfigured) AdministrativeCopy.PasswordUnchanged.text(locale) else null,
         password = true,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     )
     initial.lastTest?.let {
-        ListItem(
-            headlineContent = { Text(if (it.successful) AdministrativeCopy.SmtpTestSucceeded.text(locale) else AdministrativeCopy.OperationFailed.text(locale)) },
-            supportingContent = it.latencyMilliseconds?.let { latency -> ({ Text("$latency ms") }) },
-            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+        AdministrativeValueRow(
+            label = if (it.successful) AdministrativeCopy.SmtpTestSucceeded.text(locale) else AdministrativeCopy.OperationFailed.text(locale),
+            value = it.latencyMilliseconds?.let { latency -> "$latency ms" } ?: it.code.orEmpty(),
         )
     }
     val valid = form.host.isNotBlank() && form.senderEmail.isNotBlank() && (form.port.toIntOrNull() ?: 0) in 1..65535
@@ -373,7 +368,8 @@ internal fun AdministrativeTextField(
     locale: AdministrativeLocale,
     password: Boolean = false,
     supporting: String? = null,
-    textAlign: TextAlign = TextAlign.End,
+    placeholder: String? = null,
+    textAlign: TextAlign = TextAlign.Start,
 ) {
     SettingsTextField(
         value = value,
@@ -381,7 +377,10 @@ internal fun AdministrativeTextField(
         label = label.text(locale),
         supportingText = supporting,
         password = password,
+        placeholder = placeholder,
         textAlign = textAlign,
+        showPasswordContentDescription = if (locale == AdministrativeLocale.ZhCn) "显示密码" else "Show password",
+        hidePasswordContentDescription = if (locale == AdministrativeLocale.ZhCn) "隐藏密码" else "Hide password",
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     )
 }
@@ -395,12 +394,19 @@ internal fun <T> EnumChoiceRow(
     locale: AdministrativeLocale,
     valueText: (T) -> String,
 ) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(label.text(locale), style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            values.forEach { value ->
-                FilterChip(selected == value, { onSelect(value) }, { Text(valueText(value)) })
-            }
-        }
+    androidx.compose.foundation.layout.Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = label.text(locale),
+            style = com.ermao.library.ui.theme.WarmPageThemeValues.typography.label,
+            color = com.ermao.library.ui.theme.WarmPageThemeValues.colors.textSecondary,
+        )
+        WarmPageSegmentedControl(
+            options = values.map { value -> WarmPageChoice(value, valueText(value)) },
+            selected = selected,
+            onSelect = onSelect,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

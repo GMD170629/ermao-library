@@ -25,15 +25,11 @@ final class NavigationThemeTests: XCTestCase {
         XCTAssertEqual(paths.path(for: .me).count, 1)
     }
 
-    func testThemeUsesGeneratedLightDarkAndTypographyTokens() {
-        let light = AppTheme.app(for: .light)
-        let dark = AppTheme.app(for: .dark)
+    func testThemeUsesGeneratedLightOnlyAndTypographyTokens() {
+        let theme = AppTheme.app
 
-        XCTAssertNotEqual(light, dark)
-        XCTAssertEqual(light.canvas, Color(hex: GeneratedDesignTokens.AppLight.canvas))
-        XCTAssertEqual(dark.canvas, Color(hex: GeneratedDesignTokens.AppDark.canvas))
-        XCTAssertEqual(light.actionAccent, Color(hex: GeneratedDesignTokens.AppLight.actionAccent))
-        XCTAssertEqual(dark.actionAccent, Color(hex: GeneratedDesignTokens.AppDark.actionAccent))
+        XCTAssertEqual(theme.canvas, Color(hex: GeneratedDesignTokens.App.canvas))
+        XCTAssertEqual(theme.actionAccent, Color(hex: GeneratedDesignTokens.App.actionAccent))
         XCTAssertEqual(AppTextRole.display.metrics.size, CGFloat(GeneratedDesignTokens.Display.size))
         XCTAssertEqual(
             AppTextRole.display.metrics.lineHeight,
@@ -42,7 +38,40 @@ final class NavigationThemeTests: XCTestCase {
         XCTAssertEqual(AppTextRole.button.metrics.weight, GeneratedDesignTokens.Button.weight)
         XCTAssertEqual(
             CGFloat.iosMinimumTouchTarget,
-            CGFloat(GeneratedDesignTokens.Progress.iosMinimumTouchTarget)
+            CGFloat(GeneratedDesignTokens.Accessibility.MinimumTouchTarget.ios)
         )
+    }
+
+    func testReaderSystemThemeUsesTheIndependentSystemAppearanceSignal() {
+        var preferences = IosReaderPreferences()
+        preferences.theme = .green
+        preferences.themeMode = .system
+
+        XCTAssertEqual(preferences.resolvedTheme(for: .light), .day)
+        XCTAssertEqual(preferences.resolvedTheme(for: .dark), .night)
+        XCTAssertEqual(preferences.theme, .green)
+        XCTAssertEqual(IosReaderTheme.day.colors.canvas, GeneratedDesignTokens.Reader.Day.canvas)
+        XCTAssertEqual(IosReaderTheme.warm.colors.canvas, GeneratedDesignTokens.Reader.Warm.canvas)
+        XCTAssertEqual(IosReaderTheme.green.colors.canvas, GeneratedDesignTokens.Reader.Green.canvas)
+        XCTAssertEqual(IosReaderTheme.night.colors.canvas, GeneratedDesignTokens.Reader.Night.canvas)
+        XCTAssertEqual(IosReaderTheme.black.colors.canvas, GeneratedDesignTokens.Reader.Black.canvas)
+    }
+
+    func testPublicationThemeAdapterClearsAuthoredBackgroundsAndMapsGeneratedLinks() throws {
+        let decorated = String(
+            decoding: try IosPublicationSecurityPolicy.decorate(
+                data: Data("<html><head></head><body><p>Text</p></body></html>".utf8)
+            ),
+            as: UTF8.self
+        )
+
+        XCTAssertTrue(decorated.contains("data-shuku-reader-theme-adapter=\"v1\""))
+        XCTAssertTrue(decorated.contains("background-image: none !important"))
+        XCTAssertTrue(decorated.contains(":root.readium-sepia-on"))
+        XCTAssertTrue(decorated.contains(":root.readium-night-on"))
+        XCTAssertTrue(decorated.contains(GeneratedDesignTokens.Reader.Day.link))
+        XCTAssertTrue(decorated.contains(GeneratedDesignTokens.Reader.Warm.link))
+        XCTAssertTrue(decorated.contains(GeneratedDesignTokens.Reader.Green.link))
+        XCTAssertTrue(decorated.contains(GeneratedDesignTokens.Reader.Night.link))
     }
 }

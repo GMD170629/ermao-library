@@ -169,6 +169,11 @@ class ReaderActivity : AppCompatActivity() {
                 comicPages = intent.comicPagesOrEmpty(),
                 pdfPages = intent.pdfPagesOrEmpty(),
                 pageCount = intent.getIntExtra(EXTRA_PAGE_COUNT, -1).takeIf { it > 0 },
+                bookmarkStore = AndroidReaderBookmarkStore(
+                    applicationContext,
+                    ReaderSyncNamespace(LOCAL_READER_SERVER, LOCAL_READER_USER, 0),
+                    source.resourceId,
+                ),
             )
         } else if (managedRequest != null) {
             openJob = lifecycleScope.launch {
@@ -1118,6 +1123,11 @@ class ReaderActivity : AppCompatActivity() {
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
                 persistPreferences = { preferences -> preferencesStore?.save(preferences) },
+                bookmarkStore = requireNotNull(bookmarkStore) {
+                    "Reader bookmark store is missing for comic session"
+                },
+                bookmarkSyncPort = bookmarkSyncPort,
+                bookmarkSyncTarget = bookmarkSyncTarget,
                 presentationNamespaceKey = namespaceKey,
                 publishProgressUpdate = (application as ErmaoLibraryApplication)
                     .readerProgressPresentationCenter::publish,
@@ -1139,6 +1149,11 @@ class ReaderActivity : AppCompatActivity() {
                 initialPreferences = runCatching { preferencesStore?.load() }.getOrNull()
                     ?: com.ermao.library.shared.modules.reader.ReaderPreferences(),
                 persistPreferences = { preferences -> preferencesStore?.save(preferences) },
+                bookmarkStore = requireNotNull(bookmarkStore) {
+                    "Reader bookmark store is missing for PDF session"
+                },
+                bookmarkSyncPort = bookmarkSyncPort,
+                bookmarkSyncTarget = bookmarkSyncTarget,
                 presentationNamespaceKey = namespaceKey,
                 publishProgressUpdate = (application as ErmaoLibraryApplication)
                     .readerProgressPresentationCenter::publish,

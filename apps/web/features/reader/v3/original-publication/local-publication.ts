@@ -18,6 +18,19 @@ export type ReadiumPublication = Readonly<{
   close: () => void;
 }>;
 
+/**
+ * A local publication's authored table of contents.
+ *
+ * This is deliberately kept separate from Readium's `Link` objects. The
+ * archive adapters build this value before a `Manifest` exists, while the
+ * navigator consumes the nested hierarchy through the generated manifest.
+ */
+export type LocalPublicationTocEntry = Readonly<{
+  href: string;
+  title: string;
+  children?: readonly LocalPublicationTocEntry[];
+}>;
+
 class ByteResource extends Resource {
   constructor(
     private readonly publicationLink: Link,
@@ -89,6 +102,24 @@ function positionsFor(
   ));
 }
 
+type LocalTocLink = {
+  href: string;
+  title: string;
+  type: string;
+  children?: LocalTocLink[];
+};
+
+function localTocLinks(items: readonly LocalPublicationTocEntry[]): LocalTocLink[] {
+  return items.map((item) => ({
+    href: item.href,
+    title: item.title,
+    type: 'application/xhtml+xml',
+    ...(item.children && item.children.length > 0
+      ? { children: localTocLinks(item.children) }
+      : {})
+  }));
+}
+
 export function createLocalPublication(input: Readonly<{
   title: string;
   language?: string | null;
@@ -103,7 +134,7 @@ export function createLocalPublication(input: Readonly<{
     positionLength: number;
     read: () => Promise<Uint8Array>;
   }>[];
-  toc?: readonly Readonly<{ href: string; title: string }>[];
+  toc?: readonly LocalPublicationTocEntry[];
   extraResources?: readonly Readonly<{
     href: string;
     type: string;
@@ -117,6 +148,7 @@ export function createLocalPublication(input: Readonly<{
     type: item.type,
     title: item.title
   }));
+  const toc = input.toc && input.toc.length > 0 ? input.toc : readingOrder;
   const reflowable = input.layout !== 'fixed';
   const manifest = Manifest.deserialize({
     metadata: {
@@ -130,11 +162,7 @@ export function createLocalPublication(input: Readonly<{
     },
     readingOrder,
     resources: (input.extraResources ?? []).map((item) => ({ href: item.href, type: item.type })),
-    toc: (input.toc ?? readingOrder).map((item) => ({
-      href: item.href,
-      title: item.title,
-      type: 'application/xhtml+xml'
-    }))
+    toc: localTocLinks(toc)
   });
   if (!manifest || readingOrder.length === 0) throw new Error('PUBLICATION_STRUCTURE_INVALID');
 

@@ -6,24 +6,19 @@ import org.junit.Test
 
 class WarmPageTokensTest {
     @Test
-    fun appPalettesUseTheFrozenWarmPageValues() {
+    fun appPaletteUsesTheFrozenLightOnlyValues() {
         assertEquals(Color(0xFFFBFAF8), AppLightColors.canvas)
         assertEquals(Color(0xFF17191D), AppLightColors.textPrimary)
         assertEquals(Color(0xFFFF4F2A), AppLightColors.brandAccent)
         assertEquals(Color(0xFFC83B23), AppLightColors.actionAccent)
-
-        assertEquals(Color(0xFF151311), AppDarkColors.canvas)
-        assertEquals(Color(0xFFF3ECE4), AppDarkColors.textPrimary)
-        assertEquals(Color(0xFFFF6B48), AppDarkColors.brandAccent)
-        assertEquals(Color(0xFFFF7A58), AppDarkColors.actionAccent)
     }
 
     @Test
     fun readerPalettesRemainIndependentFromAppAppearance() {
         assertEquals(Color(0xFFFDF6EA), ReaderPaperColors.canvas)
         assertEquals(Color(0xFF2B2118), ReaderPaperColors.textPrimary)
-        assertEquals(Color(0xFF151311), ReaderNightColors.canvas)
-        assertEquals(Color(0xFFEFE7DD), ReaderNightColors.textPrimary)
+        assertEquals(Color(0xFF0F172A), ReaderNightColors.canvas)
+        assertEquals(Color(0xFFE2E8F0), ReaderNightColors.textPrimary)
     }
 
     @Test
@@ -36,17 +31,7 @@ class WarmPageTokensTest {
         assertEquals(AppLightColors.surface, AppLightColorScheme.surfaceContainer)
         assertEquals(AppLightColors.surfaceRaised, AppLightColorScheme.surfaceContainerHighest)
         assertEquals(AppLightColors.divider, AppLightColorScheme.outlineVariant)
-        assertEquals(AppDarkColors.actionAccent, AppLightColorScheme.inversePrimary)
-
-        assertEquals(AppDarkColors.actionAccent, AppDarkColorScheme.primary)
-        assertEquals(AppDarkColors.brandAccent, AppDarkColorScheme.secondary)
-        assertEquals(AppDarkColors.brandAccent, AppDarkColorScheme.tertiary)
-        assertEquals(AppDarkColors.canvas, AppDarkColorScheme.background)
-        assertEquals(AppDarkColors.surface, AppDarkColorScheme.surface)
-        assertEquals(AppDarkColors.surface, AppDarkColorScheme.surfaceContainer)
-        assertEquals(AppDarkColors.surfaceRaised, AppDarkColorScheme.surfaceContainerHighest)
-        assertEquals(AppDarkColors.divider, AppDarkColorScheme.outlineVariant)
-        assertEquals(AppLightColors.actionAccent, AppDarkColorScheme.inversePrimary)
+        assertEquals(AppLightColors.brandAccent, AppLightColorScheme.inversePrimary)
     }
 
     @Test

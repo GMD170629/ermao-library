@@ -5,6 +5,7 @@ import UIKit
 @main
 @MainActor
 struct ErmaoLibraryApp: App {
+    @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sessionStore: SessionStore
     @StateObject private var downloadCenter: DownloadCenterStore
@@ -95,6 +96,8 @@ struct ErmaoLibraryApp: App {
                 settingsClientOverride: settingsClientOverride,
                 readerComposition: readerComposition
             )
+                .environment(\.systemColorScheme, systemColorScheme)
+                .preferredColorScheme(.light)
                 .task {
                     sessionStore.start()
                 }

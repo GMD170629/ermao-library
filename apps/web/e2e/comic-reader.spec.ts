@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import sharp from 'sharp';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const PAGE_COLORS = [
   { r: 48, g: 96, b: 224, alpha: 1 },
@@ -120,6 +122,34 @@ async function installRoutes(page: Page) {
   });
   return { writes, requests, releaseSecondPage };
 }
+
+test('captures the 411x914 Web mobile comic Reader parity states', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 411, height: 914 });
+  await installRoutes(page);
+  await page.goto('/reader/comic-resource', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('[data-comic-view="true"] [data-comic-page-index="0"]')).toBeVisible();
+  await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' });
+  await page.mouse.click(205, 320);
+  await expect(page.locator('[data-reader-console-surface="true"]')).toBeVisible();
+
+  const outputDirectory = process.env.READER_VISUAL_OUTPUT_DIR
+    ? resolve(process.env.READER_VISUAL_OUTPUT_DIR)
+    : testInfo.outputPath('reader-web-mobile-comic-parity-v1');
+  mkdirSync(outputDirectory, { recursive: true });
+  await page.screenshot({ path: resolve(outputDirectory, '00-controls.png') });
+
+  const capturePanel = async (buttonName: string, outputName: string) => {
+    await page.getByRole('button', { name: buttonName, exact: true }).click();
+    await expect(page.locator('[data-reader-panel-surface="true"]')).toBeVisible();
+    await page.screenshot({ path: resolve(outputDirectory, outputName) });
+    await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+  };
+
+  await capturePanel('目录', '01-toc.png');
+  await capturePanel('笔记', '02-notes.png');
+  await capturePanel('外观', '03-appearance.png');
+  await capturePanel('阅读设置', '04-settings.png');
+});
 
 test('IMAGE_DIR comic paging streams PAGE images, avoids assets, and returns from page two to page zero', async ({ page }) => {
   const { writes, requests, releaseSecondPage } = await installRoutes(page);

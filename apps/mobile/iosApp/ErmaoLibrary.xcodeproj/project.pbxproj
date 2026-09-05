@@ -970,7 +970,8 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/../design/tokens.json",
+				"$(SRCROOT)/../../../packages/design-contracts/visual-tokens.json",
+				"$(SRCROOT)/../../../packages/design-contracts/schemas/visual-tokens.schema.json",
 			);
 			name = "Build KMP Framework and Design Tokens";
 			outputFileListPaths = (

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_READER_PREFERENCES } from '@shuku/reader-core';
+import { visualTokens } from '../../../../generated/visual-tokens';
 import { createEpubThemeSnapshot, epubPageWidth, resolveEpubViewportLayout } from './epub-theme';
 
 test('EPUB page width uses one bounded measure in paginated and scrolled layouts', () => {
@@ -93,7 +94,7 @@ test('EPUB theme exposes the selected reader background on the current page', ()
     appearance: { ...DEFAULT_READER_PREFERENCES.appearance, theme: 'black' }
   });
 
-  assert.match(snapshot, /--shuku-reader-background: #000000/);
+  assert.match(snapshot, new RegExp(`--shuku-reader-background: ${visualTokens.reader.themes.black.canvas}`));
 });
 
 test('EPUB theme keeps the selected line height on the body while descendants inherit it', () => {

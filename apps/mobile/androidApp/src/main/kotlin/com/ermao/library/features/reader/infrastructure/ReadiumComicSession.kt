@@ -11,6 +11,8 @@ import com.ermao.library.shared.modules.reader.RemoteComicReaderSource
 import com.ermao.library.shared.modules.reader.ReaderSource
 import com.ermao.library.shared.modules.reader.ComicPageServerPort
 import com.ermao.library.shared.modules.reader.ReaderBookmark
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderComicPage
 import com.ermao.library.shared.modules.reader.ReaderError
@@ -62,6 +64,9 @@ internal class ReadiumComicSession(
     private val progressCoordinator: ReaderPositionSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
+    private val bookmarkStore: AndroidReaderBookmarkStore,
+    private val bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
+    private val bookmarkSyncTarget: ReaderBookmarkSyncTarget? = null,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
@@ -71,7 +76,7 @@ internal class ReadiumComicSession(
         canGoPrevious = true,
         canGoNext = true,
         hasTableOfContents = true,
-        supportsBookmarks = false,
+        supportsBookmarks = true,
         supportsAnnotations = false,
         supportsTheme = true,
         supportsSystemTheme = true,
@@ -121,8 +126,6 @@ internal class ReadiumComicSession(
     override val resumeNotice: StateFlow<ReaderResumeNotice?> = _resumeNotice.asStateFlow()
     private val _resumeActionFailed = MutableStateFlow(false)
     override val resumeActionFailed: StateFlow<Boolean> = _resumeActionFailed.asStateFlow()
-    override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())
-    override val bookmarkSyncPending: StateFlow<Boolean> = MutableStateFlow(false)
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
         private set
 
@@ -137,6 +140,20 @@ internal class ReadiumComicSession(
     private var remoteTarget: ReaderProgressSnapshotV5? = null
     private var prepared = false
     private val saveMutex = Mutex()
+
+    private val bookmarkCoordinator = AndroidReaderBookmarkCoordinator(
+        bookmarkStore = bookmarkStore,
+        bookmarkSyncPort = bookmarkSyncPort,
+        bookmarkSyncTarget = bookmarkSyncTarget,
+        currentPosition = ::currentBookmarkPosition,
+        bookmarkLabel = ::currentBookmarkLabel,
+        bookmarkId = ::bookmarkId,
+        navigateToPosition = ::navigateToBookmarkPosition,
+        nowEpochMillis = nowEpochMillis,
+    )
+
+    override val bookmarks: StateFlow<List<ReaderBookmark>> = bookmarkCoordinator.bookmarks
+    override val bookmarkSyncPending: StateFlow<Boolean> = bookmarkCoordinator.bookmarkSyncPending
 
 
     override suspend fun prepare(@Suppress("UNUSED_PARAMETER") classLoader: ClassLoader): androidx.fragment.app.Fragment {
@@ -197,6 +214,7 @@ internal class ReadiumComicSession(
             throw ReaderOpenFailure(ReaderError(code), cause = error)
         }
         publication = opened
+        bookmarkCoordinator.load()
         val explicitPage = initialTarget?.let { target ->
             val comic = target as? com.ermao.library.shared.modules.reader.ReaderNavigationTargetComic
             canonicalPages.firstOrNull { it.pageIndex == comic?.pageIndex && it.resourceHref == comic.resourceHref }
@@ -251,6 +269,7 @@ internal class ReadiumComicSession(
         check(locationJob == null) { "Reader navigator is already bound" }
         check(presentationJob == null) { "Reader presentation is already bound" }
         sessionScope = scope
+        bookmarkCoordinator.bind(scope)
         presentationJob = scope.launch {
             currentNavigator.presentation.collectLatest { current ->
                 _presentationProgress.value = current?.plan?.progress
@@ -401,11 +420,18 @@ internal class ReadiumComicSession(
         }
     }
 
-    override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? =
+        bookmarkCoordinator.toggleCurrentBookmark()
 
-    override fun removeBookmark(id: String) = Unit
+    override fun undoBookmarkChange(change: ReaderBookmarkChange): Boolean =
+        bookmarkCoordinator.undoBookmarkChange(change)
 
-    override fun goToBookmark(id: String): Boolean = false
+    override fun removeBookmark(id: String) = bookmarkCoordinator.removeBookmark(id)
+
+    override fun undoBookmarkRemoval(id: String): Boolean =
+        bookmarkCoordinator.undoBookmarkRemoval(id)
+
+    override fun goToBookmark(id: String): Boolean = bookmarkCoordinator.goToBookmark(id)
 
     override suspend fun flush() {
         (_currentLocation.value as? ComicReaderLocation)?.let { location ->
@@ -427,6 +453,7 @@ internal class ReadiumComicSession(
         locationJob = null
         presentationJob?.cancel()
         presentationJob = null
+        bookmarkCoordinator.release()
         sessionScope = null
         navigator?.release()
         navigator = null
@@ -464,6 +491,50 @@ internal class ReadiumComicSession(
         val href = locator.href.toString().substringBefore('#')
         return canonicalPages.firstOrNull { it.resourceHref == href }
             ?: locator.locations.position?.minus(1)?.let { canonicalPages.getOrNull(it) }
+    }
+
+    private fun currentBookmarkPosition(): ReaderPositionReport? {
+        val location = _currentLocation.value as? ComicReaderLocation ?: return null
+        val locator = lastObservedLocator ?: locatorForPage(location.pageIndex) ?: return null
+        return positionReport(locator, location, _presentationProgress.value)
+    }
+
+    private fun currentBookmarkLabel(): String {
+        val location = _currentLocation.value as? ComicReaderLocation
+        return tableOfContents.firstOrNull { entry ->
+            (entry.location as? ComicReaderLocation)?.pageIndex == location?.pageIndex
+        }?.title ?: source.displayTitle
+    }
+
+    private fun bookmarkId(position: ReaderPositionReport): String {
+        val location = _currentLocation.value as? ComicReaderLocation
+        val pageIndex = position.presentation.page?.number?.minus(1) ?: location?.pageIndex
+        val href = position.presentation.currentHref ?: location?.resourceHref
+        return if (pageIndex == null || href.isNullOrBlank()) {
+            ""
+        } else {
+            "comic:position:${href.substringBefore('#')}:$pageIndex"
+        }
+    }
+
+    private fun navigateToBookmarkPosition(position: ReaderPositionReport): Boolean {
+        val locator = runCatching {
+            Locator.fromJSON(org.json.JSONObject(position.locator.canonicalJson))
+        }.getOrNull() ?: return false
+        val locatorHref = locator.href.toString().substringBefore('#')
+        val presentedHref = position.presentation.currentHref?.substringBefore('#')
+        val presentationPage = position.presentation.page?.number?.minus(1)
+            ?.takeIf { it >= 0 }
+        val locatorPage = locator.locations.position?.minus(1)?.takeIf { it >= 0 }
+        if (presentationPage != null && locator.locations.position != null && locatorPage != presentationPage) {
+            return false
+        }
+        val pageIndex = presentationPage ?: locatorPage ?: return false
+        val page = canonicalPages.getOrNull(pageIndex) ?: return false
+        if (page.resourceHref != locatorHref || (presentedHref != null && page.resourceHref != presentedHref)) {
+            return false
+        }
+        return goTo(page.toLocation())
     }
 
     private fun positionReport(

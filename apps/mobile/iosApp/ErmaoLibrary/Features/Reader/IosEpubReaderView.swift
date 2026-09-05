@@ -25,7 +25,7 @@ func localizedReaderOption(_ key: String, bundle: Bundle = .main, locale: Locale
 }
 
 struct IosReflowableReaderView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.systemColorScheme) private var systemColorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosReflowableReaderSession
@@ -49,19 +49,21 @@ struct IosReflowableReaderView: View {
                 }
             }
         }
+        .environment(\.colorScheme, effectiveTheme.preferredColorScheme)
+        .preferredColorScheme(effectiveTheme.preferredColorScheme)
         .animation(.easeInOut(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.18), value: session.controlsVisible)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader.reflow.screen")
         .accessibilityAction(named: Text("reader.controls.show")) { session.showControls() }
         .statusBarHidden(!session.controlsVisible)
         .task {
-            session.refreshSystemAppearance(colorScheme == .dark ? .dark : .light)
+            session.refreshSystemAppearance(systemColorScheme == .dark ? .dark : .light)
             await session.open()
             updateIdleTimer()
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
-        .onChange(of: colorScheme) { _, _ in
-            session.refreshSystemAppearance(colorScheme == .dark ? .dark : .light)
+        .onChange(of: systemColorScheme) { _, _ in
+            session.refreshSystemAppearance(systemColorScheme == .dark ? .dark : .light)
         }
         .onChange(of: scenePhase) { _, phase in
             Task {
@@ -166,7 +168,11 @@ struct IosReflowableReaderView: View {
     }
 
     private var palette: ReaderPalette {
-        ReaderPalette(theme: session.preferences.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
+        ReaderPalette(theme: effectiveTheme)
+    }
+
+    private var effectiveTheme: IosReaderTheme {
+        session.preferences.resolvedTheme(for: systemColorScheme == .dark ? .dark : .light)
     }
 
     private func updateIdleTimer() {
@@ -198,10 +204,10 @@ struct ReaderPalette {
     init(theme: IosReaderTheme) {
         let colors = theme.colors
         background = SwiftUI.Color(hex: colors.background)
-        surface = background
+        surface = SwiftUI.Color(hex: colors.surface)
         foreground = SwiftUI.Color(hex: colors.foreground)
-        secondary = foreground.opacity(0.72)
-        divider = foreground.opacity(0.16)
+        secondary = SwiftUI.Color(hex: colors.secondary)
+        divider = SwiftUI.Color(hex: colors.divider)
         accent = SwiftUI.Color(hex: colors.accent)
     }
 }

@@ -79,6 +79,11 @@ class ReaderScreenContentsInstrumentedTest {
         compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
         compose.onNodeWithTag(READER_SHEET_TEST_TAG).assertIsDisplayed()
         compose.onNodeWithTag(READER_CONTENTS_LOADING_TEST_TAG).assertIsDisplayed()
+        compose.onNodeWithTag(READER_PROGRESS_TEST_TAG).assertDoesNotExist()
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).assertIsDisplayed()
+        compose.onNodeWithTag("reader-notes").assertIsDisplayed()
+        compose.onNodeWithTag("reader-appearance").assertIsDisplayed()
+        compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).assertIsDisplayed()
         assertEquals(1, controller.loadCalls.get())
 
         controller.releaseContents()
@@ -96,6 +101,8 @@ class ReaderScreenContentsInstrumentedTest {
         compose.onNodeWithText("Chapter 1").assertIsDisplayed()
         compose.onNodeWithTag(READER_CONTENTS_LOADING_TEST_TAG).assertDoesNotExist()
         assertEquals(1, controller.loadCalls.get())
+        compose.onNodeWithTag(READER_CONTENTS_TEST_TAG).performClick()
+        compose.onNodeWithTag(READER_SHEET_TEST_TAG).assertDoesNotExist()
     }
 
     @Test
@@ -269,7 +276,7 @@ class ReaderScreenContentsInstrumentedTest {
     }
 
     @Test
-    fun fixedReaderControlsUseReadOnlyStatusInsteadOfDisabledSwitch() {
+    fun fixedReaderControlsUseDisabledCatalogReason() {
         val controller = DeferredContentsController()
         compose.setContent {
             ReaderScreen(
@@ -286,25 +293,23 @@ class ReaderScreenContentsInstrumentedTest {
         showTestHostOverKeyguard()
 
         compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
-        val alwaysOn = instrumentation.targetContext.getString(R.string.reader_setting_always_on)
-        val explanation = instrumentation.targetContext.getString(R.string.reader_setting_swipe_always_on_explanation)
-        val readOnly = compose.onNodeWithTag("reader-setting-readonly-swipePageTurn")
+        val notImplemented = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
+            .availabilityReasons.getValue("notImplemented")
+            .let { localized(it.chinese, it.english) }
+        compose.onNodeWithTag("reader-setting-control-swipePageTurn")
             .performScrollTo()
             .assertIsDisplayed()
-            .fetchSemanticsNode()
+            .assertIsNotEnabled()
 
-        assertTrue(!readOnly.config.contains(SemanticsActions.OnClick))
-        compose.onNodeWithText(alwaysOn).assertIsDisplayed()
-        compose.onNodeWithText(explanation).assertIsDisplayed()
-        compose.onNodeWithText("由当前阅读器确定").assertDoesNotExist()
-        compose.onNodeWithText("Fixed for this reader").assertDoesNotExist()
+        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
-    fun unsupportedAndTemporaryReaderControlsHaveDistinctReadOnlyCopy() {
+    fun unsupportedAndTemporaryReaderControlsUseCanonicalReasons() {
         val controller = DeferredContentsController(unavailable = setOf(ReaderControl.TapZones))
-        val notAdjustable = instrumentation.targetContext.getString(R.string.reader_setting_not_adjustable)
-        val temporarilyUnavailable = instrumentation.targetContext.getString(R.string.reader_setting_temporarily_unavailable)
+        val notImplemented = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
+            .availabilityReasons.getValue("notImplemented")
+            .let { localized(it.chinese, it.english) }
         val publicationConstraint = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
             .availabilityReasons.getValue("publicationConstraint")
         val constraintCopy = if (
@@ -329,18 +334,15 @@ class ReaderScreenContentsInstrumentedTest {
         showTestHostOverKeyguard()
 
         compose.onNodeWithTag(READER_SETTINGS_TEST_TAG).performClick()
-        val unsupported = compose.onNodeWithTag("reader-setting-readonly-optimization")
+        compose.onNodeWithTag("reader-setting-control-optimization")
             .performScrollTo()
             .assertIsDisplayed()
-            .fetchSemanticsNode()
-        assertTrue(unsupported.config[SemanticsProperties.Text].any { it.text == notAdjustable })
-        val temporary = compose.onNodeWithTag("reader-setting-readonly-tapZones")
+            .assertIsNotEnabled()
+        assertTrue(compose.onAllNodesWithText(notImplemented).fetchSemanticsNodes().isNotEmpty())
+        compose.onNodeWithTag("reader-setting-control-tapZones")
             .performScrollTo()
             .assertIsDisplayed()
-            .fetchSemanticsNode()
-        val temporaryText = temporary.config[SemanticsProperties.Text]
-        assertTrue(temporaryText.any { it.text == temporarilyUnavailable })
-        assertTrue(temporaryText.any { it.text == constraintCopy })
+        assertTrue(compose.onAllNodesWithText(constraintCopy).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test
@@ -412,9 +414,12 @@ class ReaderScreenContentsInstrumentedTest {
             controller.preferences.value.interaction.tapZones.wireValue == "reversed"
         }
 
-        compose.onNodeWithTag("reader-setting-control-progressStyle").performScrollTo().performClick()
-        compose.onNodeWithTag("settings-choice-sheet").assertIsDisplayed()
-        compose.onNodeWithTag("settings-choice-percent").performClick()
+        val percent = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings
+            .first { it.id == "progressStyle" }
+            .options.first { it.value == "percent" }
+            .let { option -> localized(option.chinese, option.english) }
+        compose.onNodeWithTag("reader-setting-control-progressStyle").performScrollTo()
+        compose.onNodeWithText(percent).performClick()
         compose.waitUntil {
             controller.preferences.value.display.progressStyle.wireValue == "percent"
         }
@@ -424,7 +429,7 @@ class ReaderScreenContentsInstrumentedTest {
     }
 
     @Test
-    fun readerPageWidthRetainsItsNumberControlInteraction() {
+    fun readerPageWidthUsesCanonicalNarrowViewportState() {
         val controller = DeferredContentsController()
         val pageWidth = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.settings
             .first { it.id == "textPageWidth" }
@@ -445,9 +450,36 @@ class ReaderScreenContentsInstrumentedTest {
 
         compose.onNodeWithTag("reader-appearance").performClick()
         compose.onNodeWithTag("reader-setting-textPageWidth").performScrollTo()
-        compose.onNodeWithContentDescription(pageWidth)
-            .performSemanticsAction(SemanticsActions.SetProgress) { setProgress -> setProgress(900f) }
-        compose.waitUntil { controller.preferences.value.epub.pageWidth == 900 }
+        compose.onNodeWithContentDescription(pageWidth).assertIsNotEnabled()
+        val narrowViewport = com.ermao.library.shared.modules.reader.ReaderSettingsCatalog
+            .availabilityReasons.getValue("narrowViewport")
+            .let { localized(it.chinese, it.english) }
+        compose.onNodeWithText(narrowViewport).assertIsDisplayed()
+        assertEquals(ReaderPreferences().epub.pageWidth, controller.preferences.value.epub.pageWidth)
+    }
+
+    @Test
+    fun notesTabsSwitchWhenAnnotationsAreSupported() {
+        val controller = DeferredContentsController(supportsAnnotations = true)
+        compose.setContent {
+            ReaderScreen(
+                title = "Notes fixture",
+                controller = controller,
+                opening = false,
+                openError = null,
+                controlsVisible = true,
+                onControlsVisibleChange = {},
+                onClose = {},
+                onNavigatorContainerReady = {},
+            )
+        }
+        showTestHostOverKeyguard()
+
+        compose.onNodeWithTag("reader-notes").performClick()
+        val annotations = instrumentation.targetContext.getString(R.string.reader_annotations)
+        compose.onNodeWithText(annotations).performClick()
+        compose.onNodeWithText(instrumentation.targetContext.getString(R.string.reader_annotations_empty))
+            .assertIsDisplayed()
     }
 
     private fun showTestHostOverKeyguard() {
@@ -469,6 +501,7 @@ class ReaderScreenContentsInstrumentedTest {
     private class DeferredContentsController(
         private val unavailable: Set<ReaderControl> = emptySet(),
         initialPreferences: ReaderPreferences = ReaderPreferences(),
+        supportsAnnotations: Boolean = false,
     ) : ReaderScreenController {
         private val loadGate = CompletableDeferred<Unit>()
         private val contentsMutex = Mutex()
@@ -497,6 +530,7 @@ class ReaderScreenContentsInstrumentedTest {
 
         override val morphology = ReaderMorphology.Reflowable
         override val capabilities = ReaderCapabilities.epub(supportsVolumeKeys = true, supportsCustomFonts = true)
+            .copy(supportsAnnotations = supportsAnnotations)
         private val locationState = MutableStateFlow<ReaderLocation?>(entries.first().location)
         override val currentLocation: StateFlow<ReaderLocation?> = locationState
         private val preferenceState = MutableStateFlow(initialPreferences)

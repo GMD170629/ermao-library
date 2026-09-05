@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { TextReader, Uint8ArrayWriter, ZipWriter } from '@zip.js/zip.js';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 test.beforeEach(async ({ context }) => {
   await context.addCookies([{ name: 'shuku_session', value: 'readium-e2e-session', domain: '127.0.0.1', path: '/' }]);
@@ -135,6 +137,48 @@ async function visibleReadiumFrame(page: Page) {
   const shell = page.locator('[data-reader-shell="v3"]'); await expect(shell).toBeVisible();
   const frame = shell.locator('iframe:visible').first(); await expect(frame).toBeVisible(); return frame;
 }
+
+test('captures the 411x914 Web mobile Reader parity states with a populated EPUB directory', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 411, height: 914 });
+  await installReaderRoutes(page);
+  await page.goto('/reader/epub-resource');
+  const frame = await visibleReadiumFrame(page);
+  await expect(frame.contentFrame().getByText('第一章 Readium 验收')).toBeVisible();
+  await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' });
+
+  await page.locator('[data-reader-shell="v3"] > div.relative').dispatchEvent('click', {
+    clientX: 205,
+    clientY: 320
+  });
+  await expect(page.locator('[data-reader-console-surface="true"]')).toBeVisible();
+
+  const outputDirectory = process.env.READER_VISUAL_OUTPUT_DIR
+    ? resolve(process.env.READER_VISUAL_OUTPUT_DIR)
+    : testInfo.outputPath('reader-web-mobile-parity-v1');
+  mkdirSync(outputDirectory, { recursive: true });
+
+  await page.screenshot({ path: resolve(outputDirectory, '00-controls.png') });
+
+  const capturePanel = async (buttonName: string, outputName: string) => {
+    await page.getByRole('button', { name: buttonName, exact: true }).click();
+    await expect(page.locator('[data-reader-panel-surface="true"]')).toBeVisible();
+    await page.screenshot({ path: resolve(outputDirectory, outputName) });
+    await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+    await expect(page.locator('[data-reader-panel-surface="true"]')).toHaveCount(0);
+  };
+
+  await page.getByRole('button', { name: '目录', exact: true }).click();
+  const contentsPanel = page.locator('[data-reader-panel-surface="true"]');
+  await expect(contentsPanel).toBeVisible();
+  await expect(contentsPanel.getByText('第一章', { exact: true })).toBeVisible();
+  await expect(contentsPanel.getByText('第二章', { exact: true })).toBeVisible();
+  await page.screenshot({ path: resolve(outputDirectory, '01-toc.png') });
+  await page.getByRole('button', { name: '关闭面板', exact: true }).click();
+
+  await capturePanel('笔记', '02-notes.png');
+  await capturePanel('外观', '03-appearance.png');
+  await capturePanel('阅读设置', '04-settings.png');
+});
 
 test('Readium opens a cached original EPUB without manifest, positions or chapter requests', async ({ page }) => {
   const requests: string[] = [];

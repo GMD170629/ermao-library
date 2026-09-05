@@ -6,7 +6,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ermao.library.design.GeneratedDesignTokens
 
-/** Android-only component geometry. Shared visual tokens remain generated from design/tokens.json. */
+/** Android-only component geometry. Shared visual tokens come from packages/design-contracts/visual-tokens.json. */
 @Immutable
 data class WarmPageComponentMetrics(
     val page: WarmPagePageMetrics,

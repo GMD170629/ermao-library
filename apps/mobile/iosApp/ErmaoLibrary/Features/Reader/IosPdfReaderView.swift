@@ -2,7 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 struct IosPdfReaderView: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.systemColorScheme) private var systemColorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: IosPdfReaderSession
@@ -32,6 +32,8 @@ struct IosPdfReaderView: View {
                 }
             }
         }
+        .environment(\.colorScheme, effectiveTheme.preferredColorScheme)
+        .preferredColorScheme(effectiveTheme.preferredColorScheme)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reader.pdf.screen")
         .statusBarHidden(!session.controlsVisible)
@@ -87,7 +89,11 @@ struct IosPdfReaderView: View {
     }
 
     private var palette: ReaderPalette {
-        ReaderPalette(theme: session.preferences.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
+        ReaderPalette(theme: effectiveTheme)
+    }
+
+    private var effectiveTheme: IosReaderTheme {
+        session.preferences.resolvedTheme(for: systemColorScheme == .dark ? .dark : .light)
     }
 
     private func close() {

@@ -30,6 +30,7 @@ import com.ermao.library.features.reader.presentation.READER_SHEET_TEST_TAG
 import com.ermao.library.features.reader.presentation.ReaderActivity
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderTheme
+import com.ermao.library.shared.modules.reader.ComicReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderSourceFormat
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -114,24 +115,31 @@ class ReaderControlsVisualInstrumentedTest {
     fun comicAndPdfControlsCaptureFromOriginalLocalPublications() {
         val outputDirectory = checkNotNull(context.getExternalFilesDir("reader-controls"))
         val comicRequests = listOf(
+            CaptureRequest("comic-controls-warm.png", ReaderPanelCapture.Controls, ReaderTheme.Warm),
             CaptureRequest("comic-controls-day.png", ReaderPanelCapture.Controls, ReaderTheme.Day),
             CaptureRequest("comic-controls-night.png", ReaderPanelCapture.Controls, ReaderTheme.Night),
             CaptureRequest("comic-controls-black.png", ReaderPanelCapture.Controls, ReaderTheme.Black),
-            CaptureRequest("comic-appearance.png", ReaderPanelCapture.Appearance, ReaderTheme.Day),
-            CaptureRequest("comic-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Day),
-            CaptureRequest("comic-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Day),
-            CaptureRequest("comic-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Day),
+            CaptureRequest("comic-appearance.png", ReaderPanelCapture.Appearance, ReaderTheme.Warm),
+            CaptureRequest("comic-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Warm),
+            CaptureRequest("comic-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Warm),
+            CaptureRequest("comic-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Warm),
+            CaptureRequest("comic-notes.png", ReaderPanelCapture.Notes, ReaderTheme.Warm),
         )
         val pdfRequests = listOf(
-            CaptureRequest("pdf-controls.png", ReaderPanelCapture.Controls, ReaderTheme.Day),
-            CaptureRequest("pdf-appearance.png", ReaderPanelCapture.Appearance, ReaderTheme.Day),
-            CaptureRequest("pdf-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Day),
-            CaptureRequest("pdf-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Day),
-            CaptureRequest("pdf-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Day),
+            CaptureRequest("pdf-controls.png", ReaderPanelCapture.Controls, ReaderTheme.Warm),
+            CaptureRequest("pdf-appearance.png", ReaderPanelCapture.Appearance, ReaderTheme.Warm),
+            CaptureRequest("pdf-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Warm),
+            CaptureRequest("pdf-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Warm),
+            CaptureRequest("pdf-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Warm),
+            CaptureRequest("pdf-notes.png", ReaderPanelCapture.Notes, ReaderTheme.Warm),
         )
         val epubRequests = listOf(
-            CaptureRequest("epub-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Day),
-            CaptureRequest("epub-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Day),
+            CaptureRequest("epub-controls.png", ReaderPanelCapture.Controls, ReaderTheme.Warm),
+            CaptureRequest("epub-contents.png", ReaderPanelCapture.Contents, ReaderTheme.Warm),
+            CaptureRequest("epub-notes.png", ReaderPanelCapture.Notes, ReaderTheme.Warm),
+            CaptureRequest("epub-appearance.png", ReaderPanelCapture.Appearance, ReaderTheme.Warm),
+            CaptureRequest("epub-settings.png", ReaderPanelCapture.Settings, ReaderTheme.Warm),
+            CaptureRequest("epub-settings-advanced.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Warm),
             CaptureRequest("epub-settings-night.png", ReaderPanelCapture.Settings, ReaderTheme.Night),
             CaptureRequest("epub-settings-advanced-night.png", ReaderPanelCapture.AdvancedSettings, ReaderTheme.Night),
             CaptureRequest("epub-page-width.png", ReaderPanelCapture.AppearancePageWidth, ReaderTheme.Day),
@@ -159,6 +167,17 @@ class ReaderControlsVisualInstrumentedTest {
                 context.getSystemService(KeyguardManager::class.java).isKeyguardLocked,
             )
             requests.map { request ->
+                if (source == comicSource && request.panel == ReaderPanelCapture.Contents) {
+                    scenario.onActivity { activity -> activity.controllerForTesting?.goNext() }
+                    composeRule.waitUntil(READER_READY_TIMEOUT_MILLIS) {
+                        var onSecondPage = false
+                        scenario.onActivity { activity ->
+                            onSecondPage = (activity.controllerForTesting?.currentLocation?.value as? ComicReaderLocation)
+                                ?.pageIndex == 1
+                        }
+                        onSecondPage
+                    }
+                }
                 scenario.onActivity { activity ->
                     val controller = checkNotNull(activity.controllerForTesting)
                     controller.updatePreferences(
@@ -180,6 +199,7 @@ class ReaderControlsVisualInstrumentedTest {
                     ReaderPanelCapture.PassiveStatus -> Unit
                     ReaderPanelCapture.Controls -> Unit
                     ReaderPanelCapture.Appearance -> openPanel("reader-appearance")
+                    ReaderPanelCapture.Notes -> openPanel("reader-notes")
                     ReaderPanelCapture.AppearancePageWidth -> {
                         openPanel("reader-appearance")
                         composeRule.onNodeWithTag("reader-setting-textPageWidth")
@@ -340,6 +360,7 @@ private enum class ReaderPanelCapture {
     PassiveStatus,
     Controls,
     Appearance,
+    Notes,
     AppearancePageWidth,
     Settings,
     AdvancedSettings,
@@ -349,12 +370,9 @@ private enum class ReaderPanelCapture {
 private val COMIC_PAGE_COLORS = listOf(
     Color.rgb(218, 137, 93),
     Color.rgb(76, 135, 144),
-    Color.rgb(117, 102, 161),
 )
 private val PDF_PAGE_COLORS = listOf(
     Color.rgb(237, 226, 207),
-    Color.rgb(221, 232, 225),
-    Color.rgb(226, 224, 237),
 )
 private const val PAGE_WIDTH = 1080
 private const val PAGE_HEIGHT = 1600

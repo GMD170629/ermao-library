@@ -24,7 +24,7 @@ val WarmPageMetricTokens = WarmPageMetrics(
     coverProgressHorizontalInset = GeneratedDesignTokens.Progress.CoverHorizontalInset.dp,
     readingProgressHeight = GeneratedDesignTokens.Progress.ReadingHeight.dp,
     downloadProgressHeight = GeneratedDesignTokens.Progress.DownloadHeight.dp,
-    androidMinimumTouchTarget = GeneratedDesignTokens.Progress.AndroidMinimumTouchTarget.dp,
+    androidMinimumTouchTarget = GeneratedDesignTokens.Accessibility.MinimumTouchTarget.Android.dp,
 )
 
 internal val LocalWarmPageMetrics = staticCompositionLocalOf { WarmPageMetricTokens }

@@ -147,6 +147,7 @@ export type ReaderNavigationItem = {
   href?: string;
   navigationKey?: string;
   sectionIndex?: number;
+  level?: number;
 };
 
 export type ReaderResourceNavigation = {
@@ -889,7 +890,7 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           aria-modal={panel ? 'true' : undefined}
           aria-labelledby={panel ? 'reader-panel-title' : undefined}
           tabIndex={panel ? -1 : undefined}
-          className={cn('shuku-reader-console-surface shuku-reader-control-border pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[1.65rem] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth)}
+          className={cn('shuku-reader-console-surface shuku-reader-control-border pointer-events-auto relative mx-auto flex h-full flex-col overflow-hidden rounded-[var(--visual-component-reader-controls-outer-radius)] border shadow-[0_8px_28px_rgba(75,54,31,0.10)] md:rounded-[1.35rem]', readerBottomControlsMaxWidth)}
           style={{ '--shuku-reader-surface': themeSurface.background, backgroundColor: themeSurface.background } as CSSProperties}
           data-reader-console-surface="true"
           data-reader-panel={panel ?? undefined}
@@ -899,11 +900,11 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
           {panel ? (
             <div
               key={panel}
-              className="shuku-reader-control-workspace shuku-reader-panel-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-contain p-4 md:p-5"
+              className="shuku-reader-control-workspace shuku-reader-panel-surface flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden overscroll-contain p-[var(--visual-component-reader-controls-content-inset)] md:p-5"
               data-reader-panel-surface="true"
               style={{
-                paddingLeft: 'calc(1rem + var(--shuku-safe-area-left))',
-                paddingRight: 'calc(1rem + var(--shuku-safe-area-right))'
+                paddingLeft: 'calc(var(--visual-component-reader-controls-content-inset) + var(--shuku-safe-area-left))',
+                paddingRight: 'calc(var(--visual-component-reader-controls-content-inset) + var(--shuku-safe-area-right))'
               }}
               onClick={stopControlEvent}
             >
@@ -956,6 +957,8 @@ export function ReaderShell({ readerType, progress, progressExtra = {}, controls
                         aria-current={currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'location' : undefined}
                         onClick={() => { void jumpToItem(item); }}
                         className={cn('flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition active:scale-[0.99]', currentNavigationItem && navigationItemKey(item) === navigationItemKey(currentNavigationItem) ? 'shuku-reader-accent-solid' : dark ? 'shuku-reader-control-border bg-white/[0.04] hover:bg-white/10' : 'shuku-reader-control-border bg-white/55 hover:bg-white/80')}
+                        style={{ paddingInlineStart: `${0.75 + Math.min(6, item.level ?? 0) * 0.75}rem` }}
+                        data-reader-navigation-level={item.level ?? 0}
                       >
                         <span className="w-9 shrink-0 tabular-nums opacity-60">{itemIndex + 1}</span>
                         <span className="line-clamp-2">{item.title}</span>
@@ -1211,7 +1214,7 @@ function ThemeSwatches({ value, onChange, dark }: { value: ReaderTheme; onChange
             className={cn('flex h-11 w-11 items-center justify-center rounded-full border-2 border-transparent p-1 transition active:scale-[0.96]', selected ? '' : 'hover:border-[var(--shuku-reader-control-border)]')}
             style={selected ? { borderColor: surface.accent } : undefined}
           >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: surface.background, color: surface.color }}>
+            <span className="flex h-[var(--visual-component-reader-controls-theme-swatch-size)] w-[var(--visual-component-reader-controls-theme-swatch-size)] items-center justify-center rounded-full border border-black/10 shadow-sm" style={{ backgroundColor: surface.background, color: surface.color }}>
               {selected ? <Check size={14} strokeWidth={2.5} /> : null}
             </span>
           </button>
@@ -1419,6 +1422,8 @@ function ResourceNavigationPanel({ navigation, readerType, activeItemKey, dark, 
                 isComic ? 'min-h-11 rounded-xl px-2 text-sm tabular-nums transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60' : 'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition active:scale-[0.99] disabled:cursor-wait disabled:opacity-60',
                 activeItemKey && navigationItemKey(item) === activeItemKey ? 'shuku-reader-accent-solid' : dark ? 'shuku-reader-control-border border bg-white/[0.05] hover:bg-white/10' : 'shuku-reader-control-border border bg-white/55 hover:bg-white/80'
               )}
+              style={isComic ? undefined : { paddingInlineStart: `${0.75 + Math.min(6, item.level ?? 0) * 0.75}rem` }}
+              data-reader-navigation-level={item.level ?? 0}
             >
               {isComic ? item.index : (
                 <>

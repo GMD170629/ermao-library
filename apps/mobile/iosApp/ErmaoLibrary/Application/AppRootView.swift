@@ -13,7 +13,6 @@ struct AppRootView: View {
     let workManagementRepository: (any ErmaoShared.WorkManagementRepository)?
     let settingsClientOverride: (any SettingsClient)?
     let readerComposition: IosReaderComposition?
-    @Environment(\.colorScheme) private var colorScheme
 
     init(
         store: SessionStore,
@@ -45,9 +44,9 @@ struct AppRootView: View {
         AudioApplicationHost(runtime: audioRuntime) {
             rootContent
         }
-            .environment(\.appTheme, AppTheme.app(for: colorScheme))
+            .environment(\.appTheme, AppTheme.app)
             .environment(\.locale, activeLocale)
-            .tint(AppTheme.app(for: colorScheme).actionAccent)
+            .tint(AppTheme.app.actionAccent)
             .appCanvas()
             .alert(
                 infrastructureErrorTitle,

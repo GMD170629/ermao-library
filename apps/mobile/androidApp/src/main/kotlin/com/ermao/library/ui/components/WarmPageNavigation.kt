@@ -50,6 +50,7 @@ fun <T> WarmPageNavigationSuite(
     selected: T,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    showNavigationChrome: Boolean = true,
     bottomAccessory: @Composable () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
@@ -88,65 +89,75 @@ fun <T> WarmPageNavigationSuite(
         navigationDrawerContainerColor = theme.colors.surface,
         navigationDrawerContentColor = theme.colors.textPrimary,
     )
-    BoxWithConstraints(modifier = modifier) {
-        if (maxWidth < theme.components.page.expandedBreakpoint) {
-            WarmPageCompactNavigation(
-                items = items,
-                selected = selected,
-                onSelect = onSelect,
-                bottomAccessory = bottomAccessory,
-                content = content,
-            )
-        } else {
-            NavigationSuiteScaffold(
-                modifier = Modifier.fillMaxSize(),
-                navigationSuiteColors = suiteColors,
-                containerColor = theme.colors.canvas,
-                contentColor = theme.colors.textPrimary,
-                navigationSuiteItems = {
-                    items.forEach { item ->
-                        val isSelected = selected == item.id
-                        item(
-                            modifier = Modifier.testTag(item.testTag),
-                            selected = isSelected,
-                            onClick = { onSelect(item.id) },
-                            icon = {
-                                androidx.compose.material3.Icon(
-                                    imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                                    contentDescription = null,
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = stringResource(item.labelResource),
-                                    style = theme.typography.label,
-                                )
-                            },
-                            colors = itemColors,
-                        )
-                    }
-                },
-                content = {
-                    Column(Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                        ) {
-                            content()
+    if (!showNavigationChrome) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .testTag("navigation-content-without-chrome"),
+        ) {
+            content()
+        }
+    } else {
+        BoxWithConstraints(modifier = modifier) {
+            if (maxWidth < theme.components.page.expandedBreakpoint) {
+                WarmPageCompactNavigation(
+                    items = items,
+                    selected = selected,
+                    onSelect = onSelect,
+                    bottomAccessory = bottomAccessory,
+                    content = content,
+                )
+            } else {
+                NavigationSuiteScaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    navigationSuiteColors = suiteColors,
+                    containerColor = theme.colors.canvas,
+                    contentColor = theme.colors.textPrimary,
+                    navigationSuiteItems = {
+                        items.forEach { item ->
+                            val isSelected = selected == item.id
+                            item(
+                                modifier = Modifier.testTag(item.testTag),
+                                selected = isSelected,
+                                onClick = { onSelect(item.id) },
+                                icon = {
+                                    androidx.compose.material3.Icon(
+                                        imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                                        contentDescription = null,
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = stringResource(item.labelResource),
+                                        style = theme.typography.label,
+                                    )
+                                },
+                                colors = itemColors,
+                            )
                         }
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = theme.colors.surface,
-                            contentColor = theme.colors.textPrimary,
-                            shape = RectangleShape,
-                            tonalElevation = 0.dp,
-                        ) {
-                            bottomAccessory()
+                    },
+                    content = {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                            ) {
+                                content()
+                            }
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = theme.colors.surface,
+                                contentColor = theme.colors.textPrimary,
+                                shape = RectangleShape,
+                                tonalElevation = 0.dp,
+                            ) {
+                                bottomAccessory()
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
     }
 }

@@ -13,7 +13,6 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
@@ -31,6 +30,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
+import com.ermao.library.ui.components.WarmSettingsEmptyState
+import com.ermao.library.ui.components.WarmSettingsFilterBar
+import com.ermao.library.ui.components.WarmSettingsFilterOption
+import com.ermao.library.ui.components.WarmSettingsInlineMessage
 import com.ermao.library.ui.components.SettingsTextField
 
 @Composable
@@ -71,11 +75,12 @@ fun OpdsScreen(
             )
             AdministrativeTextField(publicAddress, { publicAddress = it }, AdministrativeCopy.PublicAddress, locale)
             AdministrativeValueRow(AdministrativeCopy.CatalogAddress.text(locale), initial.catalogUrl, onClick = { onCopy(initial.catalogUrl) })
-            Text(
-                "1. OPDS 1.2\n2. ${AdministrativeCopy.CatalogAddress.text(locale)}\n3. ${AdministrativeCopy.Enabled.text(locale)}",
-                Modifier.padding(16.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val instructions = when {
+                initial.catalogUrl.isBlank() -> AdministrativeCopy.OpdsSetupHint
+                enabled -> AdministrativeCopy.OpdsInstructions
+                else -> AdministrativeCopy.OpdsEnableHint
+            }
+            WarmSettingsInlineMessage(instructions.text(locale))
             if (pendingDisable) AdministrativeConfirmDialog(
                 AdministrativeCopy.DisableOpdsTitle, AdministrativeCopy.DisableOpdsBody, AdministrativeCopy.DisableService, locale,
                 onConfirm = { pendingDisable = false; enabled = false }, onDismiss = { pendingDisable = false },
@@ -271,14 +276,27 @@ fun LogsScreen(
             var search by remember(snapshot.query) { mutableStateOf(snapshot.query.search) }
             var level by remember(snapshot.query) { mutableStateOf(snapshot.query.level) }
             AdministrativeTextField(search, { search = it }, AdministrativeCopy.SearchLogs, locale, textAlign = TextAlign.Start)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(level == null, { level = null }, { Text(AdministrativeCopy.All.text(locale)) })
-                LogLevel.entries.forEach { item -> FilterChip(level == item, { level = item }, { Text(item.copy().text(locale)) }) }
-            }
+            WarmSettingsFilterBar(
+                options = listOf(
+                    WarmSettingsFilterOption<LogLevel?>(null, AdministrativeCopy.All.text(locale)),
+                ) + LogLevel.entries.map { item ->
+                    WarmSettingsFilterOption<LogLevel?>(item, item.copy().text(locale))
+                },
+                selected = level,
+                onSelect = { level = it },
+                modifier = Modifier.testTag("administrative-log-filters"),
+            )
             Text("${snapshot.usedMegabytes} MB / ${snapshot.capacityMegabytes} MB", Modifier.padding(16.dp))
-            snapshot.records.filter { record ->
+            val filteredRecords = snapshot.records.filter { record ->
                 (search.isBlank() || record.summary.contains(search, true) || record.target.orEmpty().contains(search, true)) && (level == null || record.level == level)
-            }.forEach { record ->
+            }
+            if (filteredRecords.isEmpty()) {
+                WarmSettingsEmptyState(
+                    title = AdministrativeCopy.Empty.text(locale),
+                    message = AdministrativeCopy.SearchLogs.text(locale),
+                )
+            }
+            filteredRecords.forEach { record ->
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(record.timestampLabel, style = MaterialTheme.typography.bodySmall)
@@ -301,7 +319,7 @@ fun LogsScreen(
 }
 
 private fun LogLevel.copy(): AdministrativeCopy = when (this) {
-    LogLevel.Information -> AdministrativeCopy.Checking
+    LogLevel.Information -> AdministrativeCopy.Information
     LogLevel.Warning -> AdministrativeCopy.Warning
     LogLevel.Error -> AdministrativeCopy.Failed
 }
@@ -327,7 +345,7 @@ private fun ManageLogsDialog(
         title = { Text(AdministrativeCopy.ManageLogCapacity.text(locale)) },
         text = {
             Column {
-                StepperRow(AdministrativeCopy.CapacityMegabytes.text(locale), capacity, 10..500) { capacity = it }
+                StepperRow(AdministrativeCopy.CapacityMegabytes.text(locale), locale, capacity, 10..500) { capacity = it }
                 TextButton({ clearConfirm = true }) { Text(AdministrativeCopy.ClearInformationAndWarnings.text(locale), color = MaterialTheme.colorScheme.error) }
             }
         },

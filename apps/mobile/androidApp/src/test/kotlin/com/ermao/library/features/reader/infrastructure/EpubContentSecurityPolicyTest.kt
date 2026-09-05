@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader.infrastructure
 
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.shared.modules.reader.domain.ReaderSafetyPolicy
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -16,6 +17,22 @@ class EpubContentSecurityPolicyTest {
         assertTrue(!decorated.contains("https://readium_assets/fonts/reader/"))
         assertTrue(!decorated.contains("font-src *"))
         assertTrue(!decorated.contains("font-src https:"))
+    }
+
+    @Test
+    fun generatedReaderThemeAdapterClearsAuthoredBackgroundsAndMapsSemanticLinks() {
+        val decorated = EpubContentSecurityPolicy.decorateHtml(
+            "<html><head></head><body><p>Text</p></body></html>".encodeToByteArray(),
+        ).decodeToString()
+
+        assertTrue(decorated.contains("data-shuku-reader-theme-adapter=\"v1\""))
+        assertTrue(decorated.contains("background-image: none !important"))
+        assertTrue(decorated.contains(":root.readium-sepia-on"))
+        assertTrue(decorated.contains(":root.readium-night-on"))
+        assertTrue(decorated.contains(GeneratedDesignTokens.Reader.Day.Link))
+        assertTrue(decorated.contains(GeneratedDesignTokens.Reader.Warm.Link))
+        assertTrue(decorated.contains(GeneratedDesignTokens.Reader.Green.Link))
+        assertTrue(decorated.contains(GeneratedDesignTokens.Reader.Night.Link))
     }
 
     @Test

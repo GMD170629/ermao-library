@@ -8,11 +8,10 @@ import com.ermao.library.shared.modules.reader.ReaderMorphology
 import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
-import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
 import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
+import com.ermao.library.shared.modules.reader.ReaderBookmark
 import com.ermao.library.shared.modules.reader.createReaderProgressPresentationUpdate
-import com.ermao.library.shared.modules.reader.domain.mergeReaderBookmarks
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
 import com.ermao.library.shared.modules.reader.ReaderSafetyException
 import com.ermao.library.shared.modules.reader.ReaderSafetyImplementationException
@@ -36,12 +35,10 @@ import com.ermao.library.shared.modules.reader.ReaderPositionPresentation
 import com.ermao.library.shared.modules.reader.ReaderChapterPresentation
 import com.ermao.library.shared.modules.reader.ReaderPositionLocalState
 import com.ermao.library.shared.modules.reader.ReaderPositionSyncingStore
-import com.ermao.library.shared.modules.reader.ReaderPositionReportJson
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
 import java.io.FileNotFoundException
 import java.math.BigDecimal
-import java.time.Instant
 import java.util.logging.Level
 import java.util.logging.Logger
 import kotlin.math.abs
@@ -93,24 +90,6 @@ internal sealed interface ReadiumOpeningDiagnostic {
     data class PublicationOpening(val error: PublicationOpener.OpenError) : ReadiumOpeningDiagnostic
 }
 
-private val bookmarkPositionJson = ReaderPositionReportJson()
-
-private fun AndroidReaderBookmarkRecord.shared(): ReaderBookmark? = runCatching {
-    ReaderBookmark(
-        id = id,
-        position = bookmarkPositionJson.decode(positionJson),
-        label = label,
-        createdAt = createdAt,
-    )
-}.getOrNull()
-
-private fun ReaderBookmark.record(): AndroidReaderBookmarkRecord = AndroidReaderBookmarkRecord(
-    id = id,
-    positionJson = bookmarkPositionJson.encode(position),
-    label = label,
-    createdAt = createdAt,
-)
-
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumEpubSession(
     private val source: LocalReaderSource,
@@ -158,27 +137,18 @@ internal class ReadiumEpubSession(
     private val _resumeActionFailed = MutableStateFlow(false)
     override val resumeActionFailed: StateFlow<Boolean> = _resumeActionFailed.asStateFlow()
 
-    private val _bookmarks = MutableStateFlow<List<ReaderBookmark>>(emptyList())
-    override val bookmarks: StateFlow<List<ReaderBookmark>> = _bookmarks.asStateFlow()
-
-    private val _bookmarkSyncPending = MutableStateFlow(false)
-    override val bookmarkSyncPending: StateFlow<Boolean> = _bookmarkSyncPending.asStateFlow()
-
     private val _contentError = MutableStateFlow<ReaderError?>(null)
     override val contentError: StateFlow<ReaderError?> = _contentError.asStateFlow()
 
     private val saveMutex = Mutex()
     private val viewportNavigationMutex = Mutex()
-    private val bookmarkSyncMutex = Mutex()
     private val contentsMutex = Mutex()
-    private var bookmarkRecords: List<AndroidReaderBookmarkRecord> = emptyList()
     private var publication: Publication? = null
     private var mobiPublication: MobiReadiumPublication? = null
     private var navigator: EpubNavigatorFragment? = null
     private var publicationPositionIndex = ReadiumPublicationPositionIndex.Empty
     private var locationJob: Job? = null
     private var bookmarkScope: CoroutineScope? = null
-    private var removedBookmark: AndroidReaderBookmarkRecord? = null
     private var lastPersistedReport: ReaderPositionReport? = null
     private var lastObservedLocator: Locator? = null
     private var remoteTarget: ReaderProgressSnapshotV5? = null
@@ -188,6 +158,41 @@ internal class ReadiumEpubSession(
     private var contentsLoaded = false
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
         private set
+
+    private val bookmarkCoordinator = AndroidReaderBookmarkCoordinator(
+        bookmarkStore = bookmarkStore,
+        bookmarkSyncPort = bookmarkSyncPort,
+        bookmarkSyncTarget = bookmarkSyncTarget,
+        currentPosition = {
+            if (currentPageUnreadable) {
+                null
+            } else {
+                lastObservedLocator?.let(::positionReport)
+            }
+        },
+        bookmarkLabel = {
+            val location = _currentLocation.value as? ReflowReaderLocation
+            tableOfContents.firstOrNull { entry ->
+                (entry.location as? ReflowReaderLocation)?.resourceKey == location?.resourceKey
+            }?.title ?: source.displayTitle
+        },
+        bookmarkId = { position ->
+            val location = _currentLocation.value as? ReflowReaderLocation
+            val resourceKey = location?.resourceKey ?: position.presentation.currentHref
+            resourceKey?.let {
+                bookmarkId(
+                    it,
+                    location?.totalProgression ?: location?.progression
+                        ?: position.presentation.totalProgression,
+                )
+            }.orEmpty()
+        },
+        navigateToPosition = ::navigateToBookmarkPosition,
+        nowEpochMillis = nowEpochMillis,
+    )
+
+    override val bookmarks: StateFlow<List<ReaderBookmark>> = bookmarkCoordinator.bookmarks
+    override val bookmarkSyncPending: StateFlow<Boolean> = bookmarkCoordinator.bookmarkSyncPending
 
     private suspend fun openLocalPublication(): Publication {
         val file = try {
@@ -309,11 +314,7 @@ internal class ReadiumEpubSession(
                 )
             }.distinct(),
         )
-        runCatching { bookmarkStore?.load() }.getOrNull()?.let { state ->
-            bookmarkRecords = state.bookmarks
-            _bookmarks.value = state.bookmarks.mapNotNull(AndroidReaderBookmarkRecord::shared)
-            _bookmarkSyncPending.value = state.pending != null
-        }
+        bookmarkCoordinator.load()
 
         val explicitLocator = initialTarget?.let { target ->
             val href = (target as? ReaderNavigationTargetReflowable)?.href
@@ -390,6 +391,7 @@ internal class ReadiumEpubSession(
         checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
         bookmarkScope = scope
+        bookmarkCoordinator.bind(scope)
         progressCoordinator?.let { coordinator ->
             scope.launch {
                 coordinator.remotePositionNotices.collectLatest { notice ->
@@ -421,10 +423,6 @@ internal class ReadiumEpubSession(
                 currentPageUnreadable = isUnreadablePage(observedLocation)
                 if (!currentPageUnreadable) persist(locator, observedReport)
             }
-        }
-        if (bookmarkStore != null && bookmarkSyncPort != null && bookmarkSyncTarget != null) {
-            scope.launch { refreshBookmarksFromServer() }
-            scope.launch { flushBookmarkOutbox() }
         }
     }
 
@@ -664,66 +662,39 @@ internal class ReadiumEpubSession(
     private fun navigationAnimationsEnabled(): Boolean =
         shouldAnimateAndroidReaderNavigation(_preferences.value, morphology)
 
-    override fun toggleCurrentBookmark(): ReaderBookmarkChange? {
-        if (currentPageUnreadable) return null
-        val location = _currentLocation.value as? ReflowReaderLocation ?: return null
-        val resourceKey = location.resourceKey ?: return null
-        val locator = lastObservedLocator ?: return null
-        val report = positionReport(locator)
-        val id = bookmarkId(resourceKey, location.totalProgression ?: location.progression ?: 0.0)
-        val existing = bookmarkRecords.firstOrNull { it.id == id }
-        val added = existing == null
-        val next = if (existing != null) {
-            removedBookmark = existing
-            bookmarkRecords.filterNot { it.id == id }
-        } else {
-            bookmarkRecords + AndroidReaderBookmarkRecord(
-                id = id,
-                positionJson = bookmarkPositionJson.encode(report),
-                label = tableOfContents.firstOrNull {
-                    (it.location as? ReflowReaderLocation)?.resourceKey == location.resourceKey
-                }?.title ?: source.displayTitle,
-                createdAt = Instant.ofEpochMilli(nowEpochMillis()).toString(),
-            )
-        }
-        commitBookmarkMutation(next)
-        return ReaderBookmarkChange(id, added)
-    }
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? =
+        bookmarkCoordinator.toggleCurrentBookmark()
 
     override fun undoBookmarkChange(change: ReaderBookmarkChange): Boolean =
-        if (change.added) {
-            if (bookmarkRecords.none { it.id == change.bookmarkId }) {
-                false
-            } else {
-                commitBookmarkMutation(bookmarkRecords.filterNot { it.id == change.bookmarkId })
-                true
-            }
-        } else {
-            undoBookmarkRemoval(change.bookmarkId)
-        }
+        bookmarkCoordinator.undoBookmarkChange(change)
 
-    override fun removeBookmark(id: String) {
-        removedBookmark = bookmarkRecords.firstOrNull { it.id == id } ?: return
-        commitBookmarkMutation(bookmarkRecords.filterNot { it.id == id })
-    }
+    override fun removeBookmark(id: String) = bookmarkCoordinator.removeBookmark(id)
 
-    override fun undoBookmarkRemoval(id: String): Boolean {
-        val bookmark = removedBookmark?.takeIf { it.id == id } ?: return false
-        if (bookmarkRecords.any { it.id == id }) return false
-        removedBookmark = null
-        commitBookmarkMutation(bookmarkRecords + bookmark)
-        return true
-    }
+    override fun undoBookmarkRemoval(id: String): Boolean =
+        bookmarkCoordinator.undoBookmarkRemoval(id)
 
-    override fun goToBookmark(id: String): Boolean {
-        val record = bookmarkRecords.firstOrNull { it.id == id } ?: return false
+    override fun goToBookmark(id: String): Boolean = bookmarkCoordinator.goToBookmark(id)
+
+    private fun navigateToBookmarkPosition(position: ReaderPositionReport): Boolean {
         val locator = runCatching {
-            Locator.fromJSON(org.json.JSONObject(
-                bookmarkPositionJson.decode(record.positionJson).locator.canonicalJson,
-            ))
+            Locator.fromJSON(org.json.JSONObject(position.locator.canonicalJson))
         }.getOrNull() ?: return false
+        val opened = publication ?: return false
+        val locatorIndex = epubReadingOrderIndex(opened, locator.href.toString()) ?: return false
+        val presentedHref = position.presentation.currentHref
+        if (presentedHref != null && epubReadingOrderIndex(opened, presentedHref) != locatorIndex) {
+            return false
+        }
         requestedNavigationTarget = ReaderNavigationTargetReflowable(locator.href.toString())
         return navigator?.go(locator, animated = navigationAnimationsEnabled()) ?: false
+    }
+
+    private fun epubReadingOrderIndex(publication: Publication, href: String): Int? {
+        val normalized = href.substringBefore('#')
+        return publication.readingOrder.indexOfFirst { link ->
+            link.href.toString().substringBefore('#') == normalized ||
+                publication.url(link).toString().substringBefore('#') == normalized
+        }.takeIf { it >= 0 }
     }
 
     override suspend fun flush() {
@@ -746,6 +717,7 @@ internal class ReadiumEpubSession(
     override fun release() {
         locationJob?.cancel()
         locationJob = null
+        bookmarkCoordinator.release()
         bookmarkScope = null
         navigator = null
         publication?.close()
@@ -755,62 +727,6 @@ internal class ReadiumEpubSession(
         mobiPublication = null
         publicationPositionIndex = ReadiumPublicationPositionIndex.Empty
         remoteTarget = null
-    }
-
-    private fun commitBookmarkMutation(next: List<AndroidReaderBookmarkRecord>) {
-        val store = bookmarkStore ?: return
-        val ordered = next.sortedWith(compareBy<AndroidReaderBookmarkRecord>({
-            runCatching { bookmarkPositionJson.decode(it.positionJson).presentation.displayPercent }
-                .getOrDefault(0.0)
-        }, { it.createdAt }, { it.id }))
-        store.save(AndroidReaderBookmarkState(bookmarks = ordered, pending = ordered))
-        bookmarkRecords = ordered
-        _bookmarks.value = ordered.mapNotNull(AndroidReaderBookmarkRecord::shared)
-        _bookmarkSyncPending.value = true
-        bookmarkScope?.launch { flushBookmarkOutbox() }
-    }
-
-    private suspend fun refreshBookmarksFromServer() {
-        val store = bookmarkStore ?: return
-        val port = bookmarkSyncPort ?: return
-        val target = bookmarkSyncTarget ?: return
-        val response = port.load(target)
-        if (!response.succeeded) return
-        val state = store.load()
-        val merged = mergeReaderBookmarks(
-            local = state.bookmarks.mapNotNull(AndroidReaderBookmarkRecord::shared),
-            remote = response.bookmarks,
-            hasPendingLocalSnapshot = state.pending != null,
-        )
-        if (state.pending != null) return
-        val localById = state.bookmarks.associateBy(AndroidReaderBookmarkRecord::id)
-        val records = merged.map { bookmark ->
-            localById[bookmark.id] ?: bookmark.record()
-        }
-        store.save(AndroidReaderBookmarkState(records, null))
-        bookmarkRecords = records
-        _bookmarks.value = merged
-    }
-
-    private suspend fun flushBookmarkOutbox() = bookmarkSyncMutex.withLock {
-        val store = bookmarkStore ?: return@withLock
-        val port = bookmarkSyncPort ?: return@withLock
-        val target = bookmarkSyncTarget ?: return@withLock
-        while (true) {
-            val before = store.load()
-            val pending = before.pending ?: break
-            val response = port.replace(target, pending.mapNotNull(AndroidReaderBookmarkRecord::shared))
-            if (!response.succeeded) break
-            val latest = store.load()
-            if (latest.pending != pending) continue
-            val localById = latest.bookmarks.associateBy(AndroidReaderBookmarkRecord::id)
-            val acknowledged = response.bookmarks.map { localById[it.id] ?: it.record() }
-            store.save(AndroidReaderBookmarkState(acknowledged, null))
-            bookmarkRecords = acknowledged
-            _bookmarks.value = response.bookmarks
-            _bookmarkSyncPending.value = false
-            break
-        }
     }
 
     private fun bookmarkId(resourceKey: String, progression: Double): String {

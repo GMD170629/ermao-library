@@ -2,7 +2,7 @@ import SwiftUI
 @preconcurrency import ErmaoShared
 
 struct IosReaderControls<Session: IosReaderControlSession>: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.systemColorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var session: Session
     @StateObject private var editor: IosReaderPreferenceEditor
@@ -23,7 +23,7 @@ struct IosReaderControls<Session: IosReaderControlSession>: View {
     }
 
     private var palette: ReaderPalette {
-        ReaderPalette(theme: editor.draft.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
+        ReaderPalette(theme: editor.draft.resolvedTheme(for: systemColorScheme == .dark ? .dark : .light))
     }
 
     private func physicalTurn(
@@ -180,11 +180,11 @@ struct IosReaderContentStatusLayout<Session: IosReaderControlSession, Content: V
 }
 
 private struct IosReaderPassiveStatus<Session: IosReaderControlSession>: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.systemColorScheme) private var systemColorScheme
     @ObservedObject var session: Session
 
     private var palette: ReaderPalette {
-        ReaderPalette(theme: session.preferences.resolvedTheme(for: colorScheme == .dark ? .dark : .light))
+        ReaderPalette(theme: session.preferences.resolvedTheme(for: systemColorScheme == .dark ? .dark : .light))
     }
 
     var body: some View {

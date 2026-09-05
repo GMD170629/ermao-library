@@ -42,102 +42,118 @@ data class WarmPageRadii(
     val task: Dp,
     val coverCompact: Dp,
     val coverHero: Dp,
+    val panel: Dp,
+    val dialog: Dp,
+    val pill: Dp,
 )
 
 internal val AppLightColors = WarmPageColors(
-    canvas = colorOf(GeneratedDesignTokens.AppLight.Canvas),
-    surface = colorOf(GeneratedDesignTokens.AppLight.Surface),
-    surfaceRaised = colorOf(GeneratedDesignTokens.AppLight.SurfaceRaised),
-    textPrimary = colorOf(GeneratedDesignTokens.AppLight.TextPrimary),
-    textSecondary = colorOf(GeneratedDesignTokens.AppLight.TextSecondary),
-    textTertiary = colorOf(GeneratedDesignTokens.AppLight.TextTertiary),
-    divider = colorOf(GeneratedDesignTokens.AppLight.Divider),
-    brandAccent = colorOf(GeneratedDesignTokens.AppLight.BrandAccent),
-    actionAccent = colorOf(GeneratedDesignTokens.AppLight.ActionAccent),
-    accentSoft = colorOf(GeneratedDesignTokens.AppLight.AccentSoft),
-    onAction = colorOf(GeneratedDesignTokens.AppLight.OnAction),
-)
-
-internal val AppDarkColors = WarmPageColors(
-    canvas = colorOf(GeneratedDesignTokens.AppDark.Canvas),
-    surface = colorOf(GeneratedDesignTokens.AppDark.Surface),
-    surfaceRaised = colorOf(GeneratedDesignTokens.AppDark.SurfaceRaised),
-    textPrimary = colorOf(GeneratedDesignTokens.AppDark.TextPrimary),
-    textSecondary = colorOf(GeneratedDesignTokens.AppDark.TextSecondary),
-    textTertiary = colorOf(GeneratedDesignTokens.AppDark.TextTertiary),
-    divider = colorOf(GeneratedDesignTokens.AppDark.Divider),
-    brandAccent = colorOf(GeneratedDesignTokens.AppDark.BrandAccent),
-    actionAccent = colorOf(GeneratedDesignTokens.AppDark.ActionAccent),
-    accentSoft = colorOf(GeneratedDesignTokens.AppDark.AccentSoft),
-    onAction = colorOf(GeneratedDesignTokens.AppDark.OnAction),
+    canvas = colorOf(GeneratedDesignTokens.App.Canvas),
+    surface = colorOf(GeneratedDesignTokens.App.Surface),
+    surfaceRaised = colorOf(GeneratedDesignTokens.App.SurfaceRaised),
+    textPrimary = colorOf(GeneratedDesignTokens.App.TextPrimary),
+    textSecondary = colorOf(GeneratedDesignTokens.App.TextSecondary),
+    textTertiary = colorOf(GeneratedDesignTokens.App.TextTertiary),
+    divider = colorOf(GeneratedDesignTokens.App.Divider),
+    brandAccent = colorOf(GeneratedDesignTokens.App.BrandAccent),
+    actionAccent = colorOf(GeneratedDesignTokens.App.ActionAccent),
+    accentSoft = colorOf(GeneratedDesignTokens.App.AccentSoft),
+    onAction = colorOf(GeneratedDesignTokens.App.OnAction),
 )
 
 val ReaderPaperColors = WarmPageColors(
-    canvas = colorOf(GeneratedDesignTokens.ReaderPaper.Canvas),
-    surface = colorOf(GeneratedDesignTokens.ReaderPaper.Surface),
-    surfaceRaised = colorOf(GeneratedDesignTokens.ReaderPaper.SurfaceRaised),
-    textPrimary = colorOf(GeneratedDesignTokens.ReaderPaper.TextPrimary),
-    textSecondary = colorOf(GeneratedDesignTokens.ReaderPaper.TextSecondary),
-    textTertiary = colorOf(GeneratedDesignTokens.ReaderPaper.TextTertiary),
-    divider = colorOf(GeneratedDesignTokens.ReaderPaper.Divider),
-    brandAccent = colorOf(GeneratedDesignTokens.ReaderPaper.BrandAccent),
-    actionAccent = colorOf(GeneratedDesignTokens.ReaderPaper.ActionAccent),
-    accentSoft = colorOf(GeneratedDesignTokens.ReaderPaper.AccentSoft),
-    onAction = colorOf(GeneratedDesignTokens.ReaderPaper.OnAction),
+    canvas = colorOf(GeneratedDesignTokens.Reader.Warm.Canvas),
+    surface = colorOf(GeneratedDesignTokens.Reader.Warm.Surface),
+    surfaceRaised = colorOf(GeneratedDesignTokens.Reader.Warm.SurfaceRaised),
+    textPrimary = colorOf(GeneratedDesignTokens.Reader.Warm.TextPrimary),
+    textSecondary = colorOf(GeneratedDesignTokens.Reader.Warm.TextSecondary),
+    textTertiary = colorOf(GeneratedDesignTokens.Reader.Warm.TextTertiary),
+    divider = colorOf(GeneratedDesignTokens.Reader.Warm.Divider),
+    brandAccent = colorOf(GeneratedDesignTokens.Reader.Warm.Accent),
+    actionAccent = colorOf(GeneratedDesignTokens.Reader.Warm.Accent),
+    accentSoft = colorOf(GeneratedDesignTokens.Reader.Warm.AccentSoft),
+    onAction = colorOf(GeneratedDesignTokens.Reader.Warm.OnAccent),
 )
 
 val ReaderNightColors = WarmPageColors(
-    canvas = colorOf(GeneratedDesignTokens.ReaderNight.Canvas),
-    surface = colorOf(GeneratedDesignTokens.ReaderNight.Surface),
-    surfaceRaised = colorOf(GeneratedDesignTokens.ReaderNight.SurfaceRaised),
-    textPrimary = colorOf(GeneratedDesignTokens.ReaderNight.TextPrimary),
-    textSecondary = colorOf(GeneratedDesignTokens.ReaderNight.TextSecondary),
-    textTertiary = colorOf(GeneratedDesignTokens.ReaderNight.TextTertiary),
-    divider = colorOf(GeneratedDesignTokens.ReaderNight.Divider),
-    brandAccent = colorOf(GeneratedDesignTokens.ReaderNight.BrandAccent),
-    actionAccent = colorOf(GeneratedDesignTokens.ReaderNight.ActionAccent),
-    accentSoft = colorOf(GeneratedDesignTokens.ReaderNight.AccentSoft),
-    onAction = colorOf(GeneratedDesignTokens.ReaderNight.OnAction),
+    canvas = colorOf(GeneratedDesignTokens.Reader.Night.Canvas),
+    surface = colorOf(GeneratedDesignTokens.Reader.Night.Surface),
+    surfaceRaised = colorOf(GeneratedDesignTokens.Reader.Night.SurfaceRaised),
+    textPrimary = colorOf(GeneratedDesignTokens.Reader.Night.TextPrimary),
+    textSecondary = colorOf(GeneratedDesignTokens.Reader.Night.TextSecondary),
+    textTertiary = colorOf(GeneratedDesignTokens.Reader.Night.TextTertiary),
+    divider = colorOf(GeneratedDesignTokens.Reader.Night.Divider),
+    brandAccent = colorOf(GeneratedDesignTokens.Reader.Night.Accent),
+    actionAccent = colorOf(GeneratedDesignTokens.Reader.Night.Accent),
+    accentSoft = colorOf(GeneratedDesignTokens.Reader.Night.AccentSoft),
+    onAction = colorOf(GeneratedDesignTokens.Reader.Night.OnAccent),
 )
 
 fun readerColors(theme: com.ermao.library.shared.modules.reader.ReaderTheme): WarmPageColors = when (theme) {
     com.ermao.library.shared.modules.reader.ReaderTheme.Warm -> ReaderPaperColors
     com.ermao.library.shared.modules.reader.ReaderTheme.Night -> ReaderNightColors
     com.ermao.library.shared.modules.reader.ReaderTheme.Day -> readerPalette(
-        background = "#F7F7F4",
-        foreground = "#1E293B",
-        accent = "#B45309",
+        canvas = GeneratedDesignTokens.Reader.Day.Canvas,
+        surface = GeneratedDesignTokens.Reader.Day.Surface,
+        surfaceRaised = GeneratedDesignTokens.Reader.Day.SurfaceRaised,
+        textPrimary = GeneratedDesignTokens.Reader.Day.TextPrimary,
+        textSecondary = GeneratedDesignTokens.Reader.Day.TextSecondary,
+        textTertiary = GeneratedDesignTokens.Reader.Day.TextTertiary,
+        divider = GeneratedDesignTokens.Reader.Day.Divider,
+        accent = GeneratedDesignTokens.Reader.Day.Accent,
+        accentSoft = GeneratedDesignTokens.Reader.Day.AccentSoft,
+        onAccent = GeneratedDesignTokens.Reader.Day.OnAccent,
     )
     com.ermao.library.shared.modules.reader.ReaderTheme.Green -> readerPalette(
-        background = "#E8F0E3",
-        foreground = "#203126",
-        accent = "#3F6F4E",
+        canvas = GeneratedDesignTokens.Reader.Green.Canvas,
+        surface = GeneratedDesignTokens.Reader.Green.Surface,
+        surfaceRaised = GeneratedDesignTokens.Reader.Green.SurfaceRaised,
+        textPrimary = GeneratedDesignTokens.Reader.Green.TextPrimary,
+        textSecondary = GeneratedDesignTokens.Reader.Green.TextSecondary,
+        textTertiary = GeneratedDesignTokens.Reader.Green.TextTertiary,
+        divider = GeneratedDesignTokens.Reader.Green.Divider,
+        accent = GeneratedDesignTokens.Reader.Green.Accent,
+        accentSoft = GeneratedDesignTokens.Reader.Green.AccentSoft,
+        onAccent = GeneratedDesignTokens.Reader.Green.OnAccent,
     )
     com.ermao.library.shared.modules.reader.ReaderTheme.Black -> readerPalette(
-        background = "#000000",
-        foreground = "#F8FAFC",
-        accent = "#F59E0B",
+        canvas = GeneratedDesignTokens.Reader.Black.Canvas,
+        surface = GeneratedDesignTokens.Reader.Black.Surface,
+        surfaceRaised = GeneratedDesignTokens.Reader.Black.SurfaceRaised,
+        textPrimary = GeneratedDesignTokens.Reader.Black.TextPrimary,
+        textSecondary = GeneratedDesignTokens.Reader.Black.TextSecondary,
+        textTertiary = GeneratedDesignTokens.Reader.Black.TextTertiary,
+        divider = GeneratedDesignTokens.Reader.Black.Divider,
+        accent = GeneratedDesignTokens.Reader.Black.Accent,
+        accentSoft = GeneratedDesignTokens.Reader.Black.AccentSoft,
+        onAccent = GeneratedDesignTokens.Reader.Black.OnAccent,
     )
 }
 
-private fun readerPalette(background: String, foreground: String, accent: String): WarmPageColors {
-    val canvas = colorOf(background)
-    val text = colorOf(foreground)
-    val action = colorOf(accent)
-    return WarmPageColors(
-        canvas = canvas,
-        surface = canvas,
-        surfaceRaised = canvas,
-        textPrimary = text,
-        textSecondary = text.copy(alpha = 0.72f),
-        textTertiary = text.copy(alpha = 0.52f),
-        divider = text.copy(alpha = 0.16f),
-        brandAccent = action,
-        actionAccent = action,
-        accentSoft = action.copy(alpha = 0.16f),
-        onAction = if (background == "#000000") text else Color.White,
-    )
-}
+private fun readerPalette(
+    canvas: String,
+    surface: String,
+    surfaceRaised: String,
+    textPrimary: String,
+    textSecondary: String,
+    textTertiary: String,
+    divider: String,
+    accent: String,
+    accentSoft: String,
+    onAccent: String,
+) = WarmPageColors(
+    canvas = colorOf(canvas),
+    surface = colorOf(surface),
+    surfaceRaised = colorOf(surfaceRaised),
+    textPrimary = colorOf(textPrimary),
+    textSecondary = colorOf(textSecondary),
+    textTertiary = colorOf(textTertiary),
+    divider = colorOf(divider),
+    brandAccent = colorOf(accent),
+    actionAccent = colorOf(accent),
+    accentSoft = colorOf(accentSoft),
+    onAction = colorOf(onAccent),
+)
 
 val WarmPageSpacingTokens = WarmPageSpacing(
     none = GeneratedDesignTokens.Spacing.Space0.dp,
@@ -157,6 +173,9 @@ val WarmPageRadiusTokens = WarmPageRadii(
     task = GeneratedDesignTokens.Radii.Task.dp,
     coverCompact = GeneratedDesignTokens.Radii.CoverCompact.dp,
     coverHero = GeneratedDesignTokens.Radii.CoverHero.dp,
+    panel = GeneratedDesignTokens.Radii.Panel.dp,
+    dialog = GeneratedDesignTokens.Radii.Dialog.dp,
+    pill = GeneratedDesignTokens.Radii.Pill.dp,
 )
 
 internal val LocalWarmPageColors = staticCompositionLocalOf { AppLightColors }

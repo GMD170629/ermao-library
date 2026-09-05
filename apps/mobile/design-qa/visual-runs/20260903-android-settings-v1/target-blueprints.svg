@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <rect width="1440" height="900" fill="#F5F0E8"/>
+  <style>
+    .phone{fill:#FBFAF8;stroke:#D7D0C8;stroke-width:2}.title{font:700 26px sans-serif;fill:#17191D}
+    .bar{font:600 18px sans-serif;fill:#17191D}.section{font:500 12px sans-serif;fill:#6F6A65}
+    .row{font:400 15px sans-serif;fill:#17191D}.support{font:400 11px sans-serif;fill:#6F6A65}
+    .line{stroke:#E6E1DB;stroke-width:1}.accent{fill:#C83B23}.soft{fill:#FFF0EA}
+    .field{fill:#FFFDF9;stroke:#E6E1DB;stroke-width:1.5}.note{font:500 13px sans-serif;fill:#6F5E50}
+  </style>
+  <text x="32" y="42" class="title">Android Settings · Target Contract v1</text>
+
+  <g transform="translate(35 70)">
+    <rect class="phone" rx="28" width="315" height="780"/>
+    <text x="20" y="70" class="title">我的</text>
+    <text x="20" y="116" class="section">账户</text>
+    <circle cx="38" cy="153" r="10" class="soft"/><text x="62" y="153" class="row">个人资料</text><text x="62" y="173" class="support">头像与显示名称</text><text x="286" y="160" class="row">›</text>
+    <line x1="62" x2="295" y1="190" y2="190" class="line"/>
+    <circle cx="38" cy="220" r="10" class="soft"/><text x="62" y="220" class="row">账户与安全</text><text x="62" y="240" class="support">登录邮箱、密码与退出登录</text><text x="286" y="227" class="row">›</text>
+    <text x="20" y="286" class="section">下载与连接</text>
+    <circle cx="38" cy="323" r="10" class="soft"/><text x="62" y="323" class="row">下载</text><text x="62" y="343" class="support">管理本机离线内容</text><text x="286" y="330" class="row">›</text>
+    <line x1="62" x2="295" y1="360" y2="360" class="line"/>
+    <circle cx="38" cy="390" r="10" class="soft"/><text x="62" y="390" class="row">邮件与 Kindle</text><text x="62" y="410" class="support">接收地址与 SMTP</text><text x="286" y="397" class="row">›</text>
+    <text x="20" y="456" class="section">管理与偏好</text>
+    <circle cx="38" cy="493" r="10" class="soft"/><text x="62" y="493" class="row">书库管理</text><text x="62" y="513" class="support">用户、OPDS 与系统日志</text><text x="286" y="500" class="row">›</text>
+    <line x1="0" x2="315" y1="716" y2="716" class="line"/><rect x="18" y="733" width="62" height="32" rx="16" class="soft"/><text x="35" y="754" class="accent">我的</text>
+    <text x="16" y="804" class="note">Root · collapsible title · navigation visible</text>
+  </g>
+
+  <g transform="translate(385 70)">
+    <rect class="phone" rx="28" width="315" height="780"/>
+    <text x="18" y="50" class="bar">‹</text><text x="52" y="50" class="bar">账户与安全</text><text x="257" y="50" class="accent">保存</text>
+    <rect x="16" y="76" width="141" height="48" rx="10" class="soft"/><text x="52" y="106" class="accent">登录邮箱</text><text x="210" y="106" class="row">密码</text>
+    <text x="18" y="160" class="section">登录凭据</text>
+    <rect x="16" y="178" width="283" height="62" rx="12" class="field"/><text x="30" y="197" class="support">邮箱</text><text x="30" y="224" class="row">reader@example.com</text>
+    <rect x="16" y="252" width="283" height="62" rx="12" class="field"/><text x="30" y="271" class="support">当前密码</text><text x="30" y="298" class="row">••••••••</text><text x="270" y="292" class="row">◉</text>
+    <text x="18" y="604" class="section">账户操作</text><line x1="16" x2="299" y1="620" y2="620" class="line"/><text x="18" y="656" class="accent">退出登录</text><text x="18" y="676" class="support">将从当前服务器移除此设备会话</text>
+    <text x="16" y="804" class="note">Detail · pinned tabs · explicit save · no root nav</text>
+  </g>
+
+  <g transform="translate(735 70)">
+    <rect class="phone" rx="28" width="315" height="780"/>
+    <text x="18" y="50" class="bar">‹</text><text x="52" y="50" class="bar">编辑用户</text><text x="257" y="50" class="accent">保存</text>
+    <text x="18" y="92" class="section">用户</text>
+    <rect x="16" y="110" width="283" height="62" rx="12" class="field"/><text x="30" y="129" class="support">显示名称</text><text x="30" y="156" class="row">Reader</text>
+    <rect x="16" y="184" width="283" height="62" rx="12" class="field"/><text x="30" y="203" class="support">邮箱</text><text x="30" y="230" class="row">reader@example.com</text>
+    <text x="18" y="282" class="section">角色</text><rect x="16" y="298" width="283" height="48" rx="12" class="field"/><rect x="16" y="298" width="141" height="48" rx="12" class="soft"/><text x="61" y="328" class="accent">管理员</text><text x="220" y="328" class="row">成员</text>
+    <text x="18" y="382" class="section">权限</text><text x="18" y="420" class="row">系统管理权限</text><text x="18" y="440" class="support">管理 OPDS、日志等系统设置</text><rect x="250" y="400" width="46" height="28" rx="14" class="soft"/>
+    <line x1="16" x2="299" y1="470" y2="470" class="line"/><text x="18" y="508" class="row">访问范围</text><text x="18" y="528" class="support">全部书库</text><text x="286" y="516" class="row">›</text>
+    <text x="16" y="804" class="note">Aggregate editor · consistent fields and choices</text>
+  </g>
+
+  <g transform="translate(1085 70)">
+    <rect class="phone" rx="28" width="315" height="780"/>
+    <rect x="0" y="0" width="315" height="180" rx="28" fill="#2B2118"/><rect x="0" y="160" width="315" height="620" rx="28" fill="#FFF9F1"/>
+    <rect x="132" y="174" width="50" height="5" rx="3" fill="#6F5E50"/><text x="18" y="222" class="title">阅读设置</text><text x="278" y="222" class="title">×</text>
+    <text x="18" y="260" class="section">阅读界面</text><text x="18" y="298" class="row">进度显示</text><text x="260" y="298" class="row">自动 ›</text><line x1="18" x2="297" y1="316" y2="316" class="line"/>
+    <text x="18" y="352" class="row">常显时钟</text><rect x="250" y="333" width="46" height="28" rx="14" class="soft"/>
+    <text x="18" y="412" class="section">翻页</text><text x="18" y="450" class="row">点击区域</text><rect x="18" y="468" width="279" height="48" rx="12" class="field"/><rect x="18" y="468" width="93" height="48" rx="12" class="soft"/><text x="48" y="498" class="accent">标准</text><text x="140" y="498" class="row">反向</text><text x="238" y="498" class="row">关闭</text>
+    <text x="18" y="566" class="row">滑动翻页</text><text x="18" y="586" class="support">当前格式始终使用滑动翻页</text>
+    <text x="18" y="642" class="section">排版</text><text x="18" y="680" class="row">页面适配</text><text x="240" y="680" class="support">整页</text>
+    <text x="16" y="804" class="note">Context sheet · shared rhythm · compact read-only states</text>
+  </g>
+</svg>

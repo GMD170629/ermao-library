@@ -122,6 +122,24 @@ export function readiumNavigationEntries(publication: Publication): ReaderNaviga
   return map(publication.toc, [], 0);
 }
 
+/** Flattens authored navigation for list UIs without losing its hierarchy depth. */
+export function flattenReadiumNavigationEntries(
+  entries: readonly ReaderNavigationEntry[]
+): ReaderNavigationEntry[] {
+  const flattened: ReaderNavigationEntry[] = [];
+  const visit = (entry: ReaderNavigationEntry, fallbackLevel: number) => {
+    const { children: _children, ...withoutChildren } = entry;
+    flattened.push({
+      ...withoutChildren,
+      index: entry.index ?? flattened.length,
+      level: entry.level ?? fallbackLevel
+    });
+    for (const child of entry.children ?? []) visit(child, fallbackLevel + 1);
+  };
+  for (const entry of entries) visit(entry, 0);
+  return flattened;
+}
+
 export function closestReadiumPosition<T extends { locations: { totalProgression?: number } }>(positions: T[], progression: number): T | null {
   if (positions.length === 0 || !Number.isFinite(progression)) return null;
   const target = Math.max(0, Math.min(1, progression));

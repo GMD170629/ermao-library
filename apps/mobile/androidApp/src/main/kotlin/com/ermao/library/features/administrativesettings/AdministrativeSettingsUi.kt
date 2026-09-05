@@ -1,53 +1,41 @@
 package com.ermao.library.features.administrativesettings
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ermao.library.ui.components.SettingsSaveAction
+import com.ermao.library.ui.components.WarmPageErrorState
+import com.ermao.library.ui.components.WarmPageLoadingState
+import com.ermao.library.ui.components.WarmPagePermissionGate
+import com.ermao.library.ui.components.WarmSettingsDangerAction
+import com.ermao.library.ui.components.WarmSettingsDivider
+import com.ermao.library.ui.components.WarmSettingsInlineMessage
+import com.ermao.library.ui.components.WarmSettingsNavigationRow
+import com.ermao.library.ui.components.WarmSettingsScaffold
+import com.ermao.library.ui.components.WarmSettingsScaffoldRole
+import com.ermao.library.ui.components.WarmSettingsSection
+import com.ermao.library.ui.components.WarmSettingsSwitchRow
+import com.ermao.library.ui.components.WarmSettingsValueRow
 import com.ermao.library.ui.theme.WarmPageThemeValues
 import kotlinx.coroutines.flow.collectLatest
 
@@ -194,32 +182,24 @@ fun AdministrativeSettingsDestination(
 private fun <T : AdministrativePageSnapshot> AdministrativeScreenState.typed(): AdministrativePageState<T> =
     AdministrativePageState(phase, snapshot as? T, failure, mutationInFlight)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AdministrativePage(
     title: AdministrativeCopy,
     locale: AdministrativeLocale,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    toolbarActions: @Composable () -> Unit = {},
+    toolbarActions: @Composable RowScope.() -> Unit = {},
+    tabs: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val theme = WarmPageThemeValues
-    Scaffold(
-        modifier = modifier,
-        containerColor = theme.colors.canvas,
-        topBar = {
-            TopAppBar(
-                title = { Text(title.text(locale)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.testTag("administrative-back")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, AdministrativeCopy.NavigateBack.text(locale))
-                    }
-                },
-                actions = { toolbarActions() },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = theme.colors.canvas),
-            )
-        },
+    WarmSettingsScaffold(
+        role = WarmSettingsScaffoldRole.Detail,
+        title = title.text(locale),
+        modifier = modifier.testTag("administrative-page-${title.name}"),
+        onBack = onBack,
+        navigationContentDescription = AdministrativeCopy.NavigateBack.text(locale),
+        actions = toolbarActions,
+        tabs = tabs,
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()),
@@ -237,20 +217,27 @@ internal fun <T : AdministrativePageSnapshot> ColumnScope.PageStateContent(
 ) {
     val snapshot = state.snapshot
     if (state.phase == AdministrativePagePhase.PermissionDenied) {
-        AdministrativeStateMessage(Icons.Outlined.Lock, AdministrativeCopy.PermissionDenied.text(locale), null)
+        WarmPagePermissionGate(
+            title = AdministrativeCopy.PermissionDenied.text(locale),
+            message = AdministrativeCopy.PermissionDeniedHint.text(locale),
+            modifier = Modifier.fillMaxWidth(),
+        )
         return
     }
     if (snapshot == null && state.phase == AdministrativePagePhase.Loading) {
-        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(Modifier.testTag("administrative-loading"))
-        }
+        WarmPageLoadingState(
+            title = AdministrativeCopy.Loading.text(locale),
+            modifier = Modifier.fillMaxWidth().testTag("administrative-loading"),
+        )
         return
     }
     if (snapshot == null && state.phase == AdministrativePagePhase.Failure) {
-        AdministrativeStateMessage(
-            Icons.Outlined.ErrorOutline,
-            failureText(state.failure, locale),
-            if (state.failure?.retryable == true) onRetry else null,
+        WarmPageErrorState(
+            title = AdministrativeCopy.OperationFailed.text(locale),
+            message = failureText(state.failure, locale),
+            retryLabel = if (state.failure?.retryable == true) AdministrativeCopy.Retry.text(locale) else null,
+            onRetry = if (state.failure?.retryable == true) onRetry else null,
+            modifier = Modifier.fillMaxWidth(),
         )
         return
     }
@@ -260,36 +247,24 @@ internal fun <T : AdministrativePageSnapshot> ColumnScope.PageStateContent(
 }
 
 @Composable
-private fun AdministrativeStateMessage(icon: ImageVector, text: String, onRetry: (() -> Unit)?) {
-    Column(
-        Modifier.fillMaxWidth().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Icon(icon, contentDescription = null)
-        Text(text)
-        onRetry?.let { OutlinedButton(onClick = it) { Text(AdministrativeCopy.Retry.text(guessLocale(text))) } }
-    }
-}
-
-@Composable
 private fun InlineAdministrativeFailure(
     failure: AdministrativeFailure,
     locale: AdministrativeLocale,
     onRetry: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(failureText(failure, locale), color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
-        if (failure.retryable) TextButton(onClick = onRetry) { Text(AdministrativeCopy.Retry.text(locale)) }
+    Column(Modifier.fillMaxWidth()) {
+        WarmSettingsInlineMessage(
+            message = failureText(failure, locale),
+            color = MaterialTheme.colorScheme.error,
+        )
+        if (failure.retryable) {
+            TextButton(
+                onClick = onRetry,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text(AdministrativeCopy.Retry.text(locale)) }
+        }
     }
 }
-
-private fun guessLocale(text: String): AdministrativeLocale =
-    if (text.any { it.code in 0x4E00..0x9FFF }) AdministrativeLocale.ZhCn else AdministrativeLocale.EnUs
 
 internal fun failureText(failure: AdministrativeFailure?, locale: AdministrativeLocale): String = when (failure?.kind) {
     AdministrativeErrorKind.Forbidden -> AdministrativeCopy.PermissionDenied.text(locale)
@@ -299,12 +274,7 @@ internal fun failureText(failure: AdministrativeFailure?, locale: Administrative
 
 @Composable
 internal fun AdministrativeSection(title: AdministrativeCopy, locale: AdministrativeLocale) {
-    Text(
-        title.text(locale),
-        style = WarmPageThemeValues.typography.label,
-        color = WarmPageThemeValues.colors.textSecondary,
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp).semantics { heading() },
-    )
+    WarmSettingsSection(title.text(locale)) {}
 }
 
 @Composable
@@ -312,23 +282,18 @@ internal fun AdministrativeNavigationRow(
     title: String,
     summary: String?,
     onClick: () -> Unit,
-    leading: ImageVector? = null,
+    leading: androidx.compose.ui.graphics.vector.ImageVector? = null,
     attention: Boolean = false,
+    testTag: String? = null,
 ) {
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = summary?.let { ({ Text(it) }) },
-        leadingContent = leading?.let { icon -> ({ Icon(icon, null) }) },
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (attention) Text("●", color = MaterialTheme.colorScheme.error)
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onClick),
+    WarmSettingsNavigationRow(
+        title = title,
+        summary = if (attention) listOfNotNull(summary, "•").joinToString(" ") else summary,
+        icon = leading,
+        modifier = testTag?.let(Modifier::testTag) ?: Modifier,
+        onClick = onClick,
     )
-    AdministrativeDivider(if (leading == null) 16.dp else 56.dp)
+    AdministrativeDivider(afterIcon = leading != null)
 }
 
 @Composable
@@ -338,13 +303,11 @@ internal fun AdministrativeValueRow(
     supporting: String? = null,
     onClick: (() -> Unit)? = null,
 ) {
-    val clickModifier = if (onClick == null) Modifier else Modifier.clickable(role = Role.Button, onClick = onClick)
-    ListItem(
-        headlineContent = { Text(label) },
-        supportingContent = supporting?.let { ({ Text(it) }) },
-        trailingContent = { Text(value, color = WarmPageThemeValues.colors.textSecondary) },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).then(clickModifier),
+    WarmSettingsValueRow(
+        label = label,
+        value = value,
+        supporting = supporting,
+        onClick = onClick,
     )
     AdministrativeDivider()
 }
@@ -357,25 +320,19 @@ internal fun AdministrativeSwitchRow(
     supporting: String? = null,
     enabled: Boolean = true,
 ) {
-    ListItem(
-        headlineContent = { Text(label) },
-        supportingContent = supporting?.let { ({ Text(it) }) },
-        trailingContent = {
-            Switch(checked = checked, onCheckedChange = null, enabled = enabled)
-        },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(
-            enabled = enabled,
-            role = Role.Switch,
-            onClick = { onCheckedChange(!checked) },
-        ),
+    WarmSettingsSwitchRow(
+        label = label,
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        supporting = supporting,
+        enabled = enabled,
     )
     AdministrativeDivider()
 }
 
 @Composable
-internal fun AdministrativeDivider(start: androidx.compose.ui.unit.Dp = 16.dp) {
-    HorizontalDivider(Modifier.padding(start = start), color = WarmPageThemeValues.colors.divider)
+internal fun AdministrativeDivider(afterIcon: Boolean = false) {
+    WarmSettingsDivider(afterIcon = afterIcon)
 }
 
 @Composable
@@ -391,6 +348,8 @@ internal fun AdministrativeSaveAction(
         enabled = enabled,
         working = working,
         onClick = onClick,
+        modifier = Modifier.testTag("administrative-save-${label.name}"),
+        label = AdministrativeCopy.Save.text(locale),
     )
 }
 
@@ -415,11 +374,11 @@ internal fun DangerousAction(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    OutlinedButton(
-        onClick = onClick,
+    WarmSettingsDangerAction(
+        label = label.text(locale),
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
-    ) { Text(label.text(locale), color = MaterialTheme.colorScheme.error) }
+        onClick = onClick,
+    )
 }
 
 @Composable
@@ -457,18 +416,18 @@ internal fun AdministrativeActionSheet(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
         )
         actions.forEach { action ->
-            ListItem(
-                headlineContent = {
-                    Text(
-                        action.label.text(locale),
-                        color = if (action.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) {
+            TextButton(
+                onClick = {
                     onDismiss()
                     action.onSelect()
                 },
-            )
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Text(
+                    action.label.text(locale),
+                    color = if (action.destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
         TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Text(AdministrativeCopy.Cancel.text(locale))

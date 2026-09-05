@@ -108,7 +108,10 @@ export function ReaderSegmentedControl<T extends string>({ ariaLabel, ariaDescri
       aria-describedby={ariaDescribedBy}
       aria-disabled={disabled}
       className={cn('shuku-reader-control-border grid min-w-0 gap-1 rounded-xl border p-1', dark ? 'bg-white/[0.07]' : 'bg-stone-900/[0.055]', disabled && 'opacity-45', className)}
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      style={{
+        gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))`,
+        minHeight: 'var(--visual-component-reader-controls-compact-control-height)'
+      }}
     >
       {options.map((option) => {
         const Icon = option.icon;

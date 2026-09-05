@@ -97,6 +97,9 @@ import com.ermao.library.features.administrativesettings.AdministrativeSettingsS
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsSystemActions
 import com.ermao.library.features.administrativesettings.AdministrativeSettingsViewModel
 import com.ermao.library.features.administrativesettings.EmailKindleTab
+import com.ermao.library.features.administrativesettings.EmailKindleSnapshot
+import com.ermao.library.features.administrativesettings.KindleQueueSnapshot
+import com.ermao.library.features.administrativesettings.QueueStatus
 import com.ermao.library.features.administrativesettings.SharedAdministrativeSettingsAdapter
 import com.ermao.library.features.administrativesettings.rememberAdministrativeSettingsSystemActions
 import com.ermao.library.BuildConfig
@@ -203,9 +206,9 @@ fun MainShell(
     onRefreshSession: suspend () -> Unit,
     onPurgeCurrentNamespace: suspend () -> Unit,
     onLogout: suspend (purgeNamespace: Boolean) -> Unit,
+    modifier: Modifier = Modifier,
     audioPlayerRequested: Boolean = false,
     onAudioPlayerRequestConsumed: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val homeBackStack = rememberNavBackStack(HomeRoot)
     val libraryBackStack = rememberNavBackStack(LibraryRoot)
@@ -421,6 +424,17 @@ fun MainShell(
             sideEffects = AdministrativeSettingsSideEffects(onSessionUnauthorized),
         ),
     )
+    val administrativeStates by administrativeViewModel.states.collectAsStateWithLifecycle()
+    val meEmailAndKindleRoute = remember { AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle) }
+    val meRootVisible = selectedTab == TabId.Me && meBackStack.lastOrNull() == MeRoot
+    LaunchedEffect(administrativeViewModel, meRootVisible) {
+        if (meRootVisible) {
+            administrativeViewModel.load(meEmailAndKindleRoute)
+            administrativeViewModel.load(AdministrativeSettingsRoute.KindleQueue)
+        }
+    }
+    val emailAndKindleSnapshot = administrativeStates[meEmailAndKindleRoute]?.snapshot as? EmailKindleSnapshot
+    val kindleQueueSnapshot = administrativeStates[AdministrativeSettingsRoute.KindleQueue]?.snapshot as? KindleQueueSnapshot
     val administrativeSystemActions = rememberAdministrativeSettingsSystemActions()
     val currentBackStack = when (selectedTab) {
         TabId.Home -> homeBackStack
@@ -535,6 +549,7 @@ fun MainShell(
             }
         },
         modifier = modifier,
+        showNavigationChrome = selectedTab != TabId.Me || meBackStack.lastOrNull() == MeRoot,
         bottomAccessory = {
             if (audioMiniPlayerVisible) {
                 AudioMiniPlayer(
@@ -627,12 +642,19 @@ fun MainShell(
                         onOpenLanguage = { meBackStack.add(MeRoute.Language) },
                         onOpenAbout = { meBackStack.add(MeRoute.About) },
                         onOpenDownloads = { meBackStack.add(DownloadsCenterRoute) },
-                        canOpenAdministration = AdministrativeCapability.ViewAdministration in administrativeCapabilities,
+                        downloadStatus = downloadRecordsByResource.size.takeIf { it > 0 }?.toString(),
+                        appVersion = BuildConfig.VERSION_NAME,
+                        emailAndKindleConfigured = emailAndKindleSnapshot?.kindle?.smtpConfigured == true,
+                        failedKindleTaskCount = kindleQueueSnapshot?.tasks?.count { it.status == QueueStatus.Failed } ?: 0,
+                        isAdmin = session.authorization.isAdmin,
+                        canManageSystem = session.authorization.canManageSystem,
                         onOpenEmailAndKindle = {
-                            meBackStack.add(AdministrativeSettingsRoute.EmailKindle(EmailKindleTab.Kindle))
+                            meBackStack.add(meEmailAndKindleRoute)
                         },
                         onOpenKindleQueue = { meBackStack.add(AdministrativeSettingsRoute.KindleQueue) },
-                        onOpenAdministration = { meBackStack.add(AdministrativeSettingsRoute.Root) },
+                        onOpenUsers = { meBackStack.add(AdministrativeSettingsRoute.Users) },
+                        onOpenOpds = { meBackStack.add(AdministrativeSettingsRoute.Opds) },
+                        onOpenLogs = { meBackStack.add(AdministrativeSettingsRoute.Logs) },
                         onRetry = meViewModel::retryLoad,
                         modifier = Modifier.testTag("tab-me"),
                     )

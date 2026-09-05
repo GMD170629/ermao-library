@@ -146,7 +146,7 @@ fun RecognitionPolicyScreen(
             var includeMissing by remember(initial) { mutableStateOf(initial.includeMissingAuthorOrCover) }
             AdministrativeSection(AdministrativeCopy.Policy, locale)
             AdministrativeSwitchRow(AdministrativeCopy.ScheduledRecognition.text(locale), scheduled, { scheduled = it })
-            StepperRow(AdministrativeCopy.EveryHours.text(locale), hours, 1..48) { hours = it }
+            StepperRow(AdministrativeCopy.EveryHours.text(locale), locale, hours, 1..48) { hours = it }
             AdministrativeSwitchRow(AdministrativeCopy.RunAfterImport.text(locale), runAfterImport, { runAfterImport = it })
             AdministrativeSwitchRow(AdministrativeCopy.SaveMetadataToOpf.text(locale), saveOpf, { saveOpf = it })
             if (initial.opfQueueTotal > 0) {

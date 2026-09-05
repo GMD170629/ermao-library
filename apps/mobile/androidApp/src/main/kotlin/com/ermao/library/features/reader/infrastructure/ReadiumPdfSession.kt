@@ -13,6 +13,8 @@ import com.ermao.library.shared.modules.reader.LocalReaderSource
 import com.ermao.library.shared.modules.reader.PdfRangeServerPort
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderBookmark
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncPort
+import com.ermao.library.shared.modules.reader.ReaderBookmarkSyncTarget
 import com.ermao.library.shared.modules.reader.ReaderCapabilities
 import com.ermao.library.shared.modules.reader.ReaderError
 import com.ermao.library.shared.modules.reader.ReaderErrorCode
@@ -70,6 +72,9 @@ internal class ReadiumPdfSession(
     private val progressCoordinator: ReaderPositionSyncCoordinator? = null,
     initialPreferences: ReaderPreferences = ReaderPreferences(),
     private val persistPreferences: (ReaderPreferences) -> Unit = {},
+    private val bookmarkStore: AndroidReaderBookmarkStore,
+    private val bookmarkSyncPort: ReaderBookmarkSyncPort? = null,
+    private val bookmarkSyncTarget: ReaderBookmarkSyncTarget? = null,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
     private val presentationNamespaceKey: String? = null,
     private val publishProgressUpdate: (ReaderProgressPresentationUpdate) -> Unit = {},
@@ -79,7 +84,7 @@ internal class ReadiumPdfSession(
     override val morphology = ReaderMorphology.Pdf
     override val capabilities = ReaderCapabilities(
         canGoPrevious = true, canGoNext = true, hasTableOfContents = true,
-        supportsBookmarks = false, supportsAnnotations = false, supportsTheme = true,
+        supportsBookmarks = true, supportsAnnotations = false, supportsTheme = true,
         supportsSystemTheme = true, supportsFontSize = false, supportsFontFamily = false,
         supportsFontWeight = false, supportsLineHeight = false,
         supportsPositiveLetterSpacing = false, supportsNegativeLetterSpacing = false,
@@ -99,8 +104,6 @@ internal class ReadiumPdfSession(
     override val resumeNotice: StateFlow<ReaderResumeNotice?> = _resumeNotice.asStateFlow()
     private val _resumeActionFailed = MutableStateFlow(false)
     override val resumeActionFailed: StateFlow<Boolean> = _resumeActionFailed.asStateFlow()
-    override val bookmarks: StateFlow<List<ReaderBookmark>> = MutableStateFlow(emptyList())
-    override val bookmarkSyncPending: StateFlow<Boolean> = MutableStateFlow(false)
     override var tableOfContents: List<ReaderTocEntry> = emptyList()
         private set
 
@@ -113,10 +116,25 @@ internal class ReadiumPdfSession(
     private var pages: List<ReaderPdfPage> = emptyList()
     private var locationJob: Job? = null
     private var sessionScope: CoroutineScope? = null
+    private var lastObservedLocator: Locator? = null
     private var lastPersistedLocation: PdfReaderLocation? = null
     private var remoteTarget: ReaderProgressSnapshotV5? = null
     private var prepared = false
     private val saveMutex = Mutex()
+
+    private val bookmarkCoordinator = AndroidReaderBookmarkCoordinator(
+        bookmarkStore = bookmarkStore,
+        bookmarkSyncPort = bookmarkSyncPort,
+        bookmarkSyncTarget = bookmarkSyncTarget,
+        currentPosition = ::currentBookmarkPosition,
+        bookmarkLabel = ::currentBookmarkLabel,
+        bookmarkId = ::bookmarkId,
+        navigateToPosition = ::navigateToBookmarkPosition,
+        nowEpochMillis = nowEpochMillis,
+    )
+
+    override val bookmarks: StateFlow<List<ReaderBookmark>> = bookmarkCoordinator.bookmarks
+    override val bookmarkSyncPending: StateFlow<Boolean> = bookmarkCoordinator.bookmarkSyncPending
 
     override suspend fun prepare(classLoader: ClassLoader): PdfNavigatorFragment<*, *> {
         check(!prepared) { "Reader session is already prepared" }
@@ -140,6 +158,7 @@ internal class ReadiumPdfSession(
             throw ReaderOpenFailure(ReaderError(ReaderErrorCode.UnsupportedFormat))
         }
         publication = opened
+        bookmarkCoordinator.load()
         positions = opened.positions()
         progressCoordinator?.beginSession(remoteSnapshot)
         val openedPageCount = opened.metadata.numberOfPages
@@ -286,6 +305,7 @@ internal class ReadiumPdfSession(
         val currentNavigator = checkNotNull(navigator) { "Reader navigator is not prepared" }
         check(locationJob == null) { "Reader navigator is already bound" }
         sessionScope = scope
+        bookmarkCoordinator.bind(scope)
         progressCoordinator?.let { coordinator ->
             scope.launch {
                 coordinator.remotePositionNotices.collectLatest { notice ->
@@ -297,6 +317,7 @@ internal class ReadiumPdfSession(
         }
         locationJob = scope.launch {
             currentNavigator.currentLocator.collectLatest { locator ->
+                lastObservedLocator = locator
                 val page = locator.pageIndex()?.takeIf(::isValidPage) ?: return@collectLatest
                 val location = page.toLocation()
                 _currentLocation.value = location
@@ -376,9 +397,18 @@ internal class ReadiumPdfSession(
         persistPreferences(supported)
         _preferences.value = supported
     }
-    override fun toggleCurrentBookmark(): ReaderBookmarkChange? = null
-    override fun removeBookmark(id: String) = Unit
-    override fun goToBookmark(id: String): Boolean = false
+    override fun toggleCurrentBookmark(): ReaderBookmarkChange? =
+        bookmarkCoordinator.toggleCurrentBookmark()
+
+    override fun undoBookmarkChange(change: ReaderBookmarkChange): Boolean =
+        bookmarkCoordinator.undoBookmarkChange(change)
+
+    override fun removeBookmark(id: String) = bookmarkCoordinator.removeBookmark(id)
+
+    override fun undoBookmarkRemoval(id: String): Boolean =
+        bookmarkCoordinator.undoBookmarkRemoval(id)
+
+    override fun goToBookmark(id: String): Boolean = bookmarkCoordinator.goToBookmark(id)
     override suspend fun flush() {
         (_currentLocation.value as? PdfReaderLocation)?.let { location ->
             val locator = positions.getOrNull(location.pageIndex) ?: return@let
@@ -397,9 +427,11 @@ internal class ReadiumPdfSession(
     override fun release() {
         locationJob?.cancel()
         locationJob = null
+        bookmarkCoordinator.release()
         sessionScope = null
         navigator = null
         positions = emptyList()
+        lastObservedLocator = null
         remoteTarget = null
         publication?.close()
         publication = null
@@ -442,6 +474,43 @@ internal class ReadiumPdfSession(
     private fun pageForPosition(position: ReaderPositionReport): Int? = runCatching {
         Locator.fromJSON(org.json.JSONObject(position.locator.canonicalJson))?.pageIndex()
     }.getOrNull()?.takeIf(::isValidPage)
+
+    private fun currentBookmarkPosition(): ReaderPositionReport? {
+        val location = _currentLocation.value as? PdfReaderLocation ?: return null
+        val locator = lastObservedLocator ?: positions.getOrNull(location.pageIndex) ?: return null
+        return positionReport(locator, location.pageIndex)
+    }
+
+    private fun currentBookmarkLabel(): String {
+        val pageIndex = (_currentLocation.value as? PdfReaderLocation)?.pageIndex ?: return source.displayTitle
+        return pages.getOrNull(pageIndex)?.title ?: (pageIndex + 1).toString()
+    }
+
+    private fun bookmarkId(position: ReaderPositionReport): String {
+        val pageIndex = position.presentation.page?.number?.minus(1)
+            ?: pageForPosition(position)
+        return pageIndex?.takeIf(::isValidPage)?.let { "pdf:position:$it" }.orEmpty()
+    }
+
+    private fun navigateToBookmarkPosition(position: ReaderPositionReport): Boolean {
+        val locator = runCatching {
+            Locator.fromJSON(org.json.JSONObject(position.locator.canonicalJson))
+        }.getOrNull() ?: return false
+        val locatorHref = locator.href.toString().substringBefore('#')
+        if (locatorHref !in PDF_READER_HREFS) return false
+        val presentedHref = position.presentation.currentHref?.substringBefore('#')
+        if (presentedHref != null && presentedHref !in PDF_READER_HREFS) return false
+        val presentationPage = position.presentation.page?.number?.minus(1)
+            ?.takeIf { it >= 0 }
+        val locatorPage = locator.pageIndex()
+        if (presentationPage != null && locatorPage != null && presentationPage != locatorPage) {
+            return false
+        }
+        val pageIndex = presentationPage ?: locatorPage ?: return false
+        if (!isValidPage(pageIndex)) return false
+        if (position.presentation.page?.total?.let { it != pageCount } == true) return false
+        return goTo(pageIndex.toLocation())
+    }
 
     private fun positionReport(locator: Locator, page: Int): ReaderPositionReport {
         val progression = if (pageCount <= 1) 1.0 else page.toDouble() / (pageCount - 1)
@@ -496,7 +565,10 @@ internal class ReadiumPdfSession(
         pageNumber = snapshot.position.presentation.page?.number,
     )
 
-    private companion object { const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L }
+    private companion object {
+        const val LOCAL_SAVE_DEBOUNCE_MILLIS = 500L
+        val PDF_READER_HREFS = setOf("publication.pdf", "document.pdf")
+    }
 }
 
 internal data class AndroidRemotePdfiumSessionConfiguration(

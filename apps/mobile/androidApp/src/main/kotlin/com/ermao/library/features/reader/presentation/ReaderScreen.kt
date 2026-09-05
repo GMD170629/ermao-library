@@ -6,6 +6,7 @@ import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -46,7 +49,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
@@ -57,10 +60,14 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.automirrored.filled.Notes
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.outlined.Notes
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -72,7 +79,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -114,6 +120,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentContainerView
 import androidx.core.view.WindowCompat
@@ -144,22 +151,16 @@ import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderReadingProgression
 import com.ermao.library.shared.modules.reader.PdfReaderLocation
 import com.ermao.library.shared.modules.reader.ReaderProgressStyle
+import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
 import com.ermao.library.shared.modules.reader.ReaderTocEntry
 import com.ermao.library.shared.modules.reader.ReflowReaderLocation
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.ui.theme.ReaderWarmPageTheme
 import com.ermao.library.ui.theme.WarmPageThemeValues
-import com.ermao.library.ui.components.WarmPageChoice
-import com.ermao.library.ui.components.WarmPageModalBottomSheet
-import com.ermao.library.ui.components.WarmPageSegmentedControl
+import com.ermao.library.ui.theme.readerColors
 import com.ermao.library.ui.components.WarmPageSnackbarHost
 import com.ermao.library.ui.components.WarmSettingsInlineMessage
-import com.ermao.library.ui.components.WarmSettingsChoice
-import com.ermao.library.ui.components.WarmSettingsChoiceSheet
-import com.ermao.library.ui.components.WarmSettingsDivider
-import com.ermao.library.ui.components.WarmSettingsSection
-import com.ermao.library.ui.components.WarmSettingsSwitchRow
-import com.ermao.library.ui.components.WarmSettingsValueRow
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
@@ -242,15 +243,19 @@ internal fun ReaderScreen(
         }
     }
     val settingState: (ReaderSettingDefinition) -> ReaderSettingState = { setting ->
-        ReaderSettingsCatalog.resolveReaderSetting(
-            setting,
-            morphology,
-            capabilities,
-            preferences,
-            controller != null,
-            nativeUnavailable,
-            wideViewport,
-        )
+        if (morphology == ReaderMorphology.Reflowable && setting.control == ReaderControl.CommandAnimation) {
+            ReaderSettingState(ReaderControlAvailability.NotImplemented, "notImplemented")
+        } else {
+            ReaderSettingsCatalog.resolveReaderSetting(
+                setting,
+                morphology,
+                capabilities,
+                preferences,
+                controller != null,
+                nativeUnavailable,
+                wideViewport,
+            )
+        }
     }
     val negativeLetterSpacingEnabled = ReaderSettingsCatalog.resolveReaderControl(
         ReaderControl.NegativeLetterSpacing,
@@ -300,6 +305,23 @@ internal fun ReaderScreen(
                     throw cancelled
                 } catch (_: Exception) {
                     contentsState = ReaderContentsLoadState.Failed
+                }
+            }
+        }
+    }
+    val toggleCurrentBookmark: () -> Unit = {
+        controller?.let { activeController ->
+            val change = activeController.toggleCurrentBookmark() ?: return@let
+            snackbarHostState.currentSnackbarData?.dismiss()
+            coroutineScope.launch {
+                val result = snackbarHostState.showSnackbar(
+                    message = if (change.added) bookmarkAddedMessage else bookmarkRemovedMessage,
+                    actionLabel = undoLabel,
+                    withDismissAction = true,
+                    duration = SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    activeController.undoBookmarkChange(change)
                 }
             }
         }
@@ -375,32 +397,92 @@ internal fun ReaderScreen(
                     preferences = preferences,
                     adjacentChapters = adjacentChapters,
                     bookmarks = bookmarks,
-                    onToggleBookmark = {
-                        controller?.let { activeController ->
-                            val change = activeController.toggleCurrentBookmark() ?: return@let
-                            snackbarHostState.currentSnackbarData?.dismiss()
-                            coroutineScope.launch {
-                                val result = snackbarHostState.showSnackbar(
-                                    message = if (change.added) bookmarkAddedMessage else bookmarkRemovedMessage,
-                                    actionLabel = undoLabel,
-                                    withDismissAction = true,
-                                    duration = SnackbarDuration.Short,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    activeController.undoBookmarkChange(change)
-                                }
-                            }
+                    panel = panel,
+                    onDismissPanel = { panel = null },
+                    panelContent = {
+                        when (panel) {
+                            ReaderPanel.Contents -> ReaderContentsPanel(
+                                state = contentsState,
+                                morphology = morphology,
+                                currentLocation = currentLocation,
+                                pendingEntryId = pendingNavigationId,
+                                navigationFailed = navigationFailed,
+                                onRetry = requestContents,
+                                onSelect = { entry ->
+                                    controller?.let { activeController ->
+                                        coroutineScope.launch {
+                                            navigationMutex.withLock {
+                                                pendingNavigationId = entry.id
+                                                navigationFailed = false
+                                                if (activeController.navigateTo(entry) is ReaderNavigationCompleted) {
+                                                    panel = null
+                                                } else {
+                                                    navigationFailed = true
+                                                }
+                                                pendingNavigationId = null
+                                            }
+                                        }
+                                    }
+                                },
+                                onDismiss = { panel = null },
+                            )
+                            ReaderPanel.Bookmarks -> ReaderNotesPanel(
+                                capabilities = capabilities,
+                                morphology = morphology,
+                                bookmarks = bookmarks,
+                                bookmarkActive = currentBookmark(bookmarks, currentLocation),
+                                syncPending = bookmarkSyncPending,
+                                navigationFailed = navigationFailed,
+                                onToggleBookmark = toggleCurrentBookmark,
+                                onJump = { bookmarkId ->
+                                    navigationFailed = controller?.goToBookmark(bookmarkId) != true
+                                    if (!navigationFailed) panel = null
+                                },
+                                onRemove = { bookmarkId ->
+                                    controller?.let { activeController ->
+                                        activeController.removeBookmark(bookmarkId)
+                                        snackbarHostState.currentSnackbarData?.dismiss()
+                                        coroutineScope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = bookmarkRemovedMessage,
+                                                actionLabel = undoLabel,
+                                                withDismissAction = true,
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                activeController.undoBookmarkRemoval(bookmarkId)
+                                            }
+                                        }
+                                    }
+                                },
+                                snackbarHostState = snackbarHostState,
+                                onDismiss = { panel = null },
+                            )
+                            ReaderPanel.Appearance,
+                            ReaderPanel.Settings -> ReaderPreferencePanel(
+                                panel = panel ?: ReaderPanel.Settings,
+                                preferences = preferences,
+                                morphology = controller?.morphology ?: ReaderMorphology.Reflowable,
+                                settingState = settingState,
+                                negativeLetterSpacingEnabled = negativeLetterSpacingEnabled,
+                                failure = preferencesFailure,
+                                onUpdate = updatePreferences,
+                                onDismiss = { panel = null },
+                            )
+                            null -> Unit
                         }
                     },
+                    onToggleBookmark = toggleCurrentBookmark,
                     onClose = { coroutineScope.launch { navigationMutex.withLock { onClose() } } },
                     panelFocus = panelFocus,
                     onPanel = {
-                        panelTrigger = it
-                        if (it == ReaderPanel.Contents) {
+                        val nextPanel = if (panel == it) null else it
+                        if (nextPanel != null) panelTrigger = nextPanel
+                        if (nextPanel == ReaderPanel.Contents) {
                             navigationFailed = false
                             requestContents()
                         }
-                        panel = it
+                        panel = nextPanel
                     },
                     onSeek = { target ->
                         val moved = controller?.goToTotalProgression(target) == true
@@ -465,91 +547,6 @@ internal fun ReaderScreen(
             }
         }
 
-        when (panel) {
-            ReaderPanel.Contents -> ReaderContentsSheet(
-                state = contentsState,
-                currentLocation = currentLocation,
-                pendingEntryId = pendingNavigationId,
-                navigationFailed = navigationFailed,
-                onDismiss = { panel = null },
-                onRetry = requestContents,
-                onSelect = { entry ->
-                    controller?.let { activeController ->
-                        coroutineScope.launch {
-                            navigationMutex.withLock {
-                                pendingNavigationId = entry.id
-                                navigationFailed = false
-                                if (activeController.navigateTo(entry) is ReaderNavigationCompleted) {
-                                    panel = null
-                                } else {
-                                    navigationFailed = true
-                                }
-                                pendingNavigationId = null
-                            }
-                        }
-                    }
-                },
-            )
-            ReaderPanel.Bookmarks -> ReaderNotesSheet(
-                capabilities = capabilities,
-                bookmarks = bookmarks,
-                syncPending = bookmarkSyncPending,
-                navigationFailed = navigationFailed,
-                onJump = { bookmarkId ->
-                    navigationFailed = controller?.goToBookmark(bookmarkId) != true
-                    if (!navigationFailed) panel = null
-                },
-                onRemove = { bookmarkId ->
-                    controller?.let { activeController ->
-                        activeController.removeBookmark(bookmarkId)
-                        snackbarHostState.currentSnackbarData?.dismiss()
-                        coroutineScope.launch {
-                            val result = snackbarHostState.showSnackbar(
-                                message = bookmarkRemovedMessage,
-                                actionLabel = undoLabel,
-                                withDismissAction = true,
-                                duration = SnackbarDuration.Short,
-                            )
-                            if (result == SnackbarResult.ActionPerformed) {
-                                activeController.undoBookmarkRemoval(bookmarkId)
-                            }
-                        }
-                    }
-                },
-                snackbarHostState = snackbarHostState,
-                onDismiss = { panel = null },
-            )
-            ReaderPanel.Appearance -> ReaderPreferenceSheet(
-                ReaderPanel.Appearance,
-                preferences,
-                controller?.morphology ?: ReaderMorphology.Reflowable,
-                settingState = settingState,
-                negativeLetterSpacingEnabled = negativeLetterSpacingEnabled,
-                failure = preferencesFailure,
-                onUpdate = updatePreferences,
-                onDismiss = { panel = null },
-            )
-            ReaderPanel.Settings -> ReaderPreferenceSheet(
-                ReaderPanel.Settings,
-                preferences,
-                controller?.morphology ?: ReaderMorphology.Reflowable,
-                settingState = settingState,
-                negativeLetterSpacingEnabled = negativeLetterSpacingEnabled,
-                failure = preferencesFailure,
-                onUpdate = updatePreferences,
-                onDismiss = { panel = null },
-            )
-            null -> Unit
-        }
-        if (preferencesFailure != null) {
-            Surface(color = MaterialTheme.colorScheme.errorContainer) {
-                Text(
-                    readerPreferenceFailureMessage(preferencesFailure),
-                    Modifier.fillMaxWidth().padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
-        }
     }
 }
 
@@ -614,6 +611,9 @@ private fun ReaderControlOverlay(
     preferences: ReaderPreferences,
     adjacentChapters: ReaderAdjacentChapters,
     bookmarks: List<ReaderBookmark>,
+    panel: ReaderPanel?,
+    onDismissPanel: () -> Unit,
+    panelContent: @Composable () -> Unit,
     onToggleBookmark: () -> Unit,
     panelFocus: Map<ReaderPanel, FocusRequester>,
     onClose: () -> Unit,
@@ -667,12 +667,17 @@ private fun ReaderControlOverlay(
         Box(
             Modifier
                 .align(Alignment.Center)
-                .fillMaxWidth(0.34f)
-                .fillMaxHeight()
+                .then(
+                    if (panel == null) {
+                        Modifier.fillMaxWidth(0.34f).fillMaxHeight()
+                    } else {
+                        Modifier.fillMaxSize()
+                    },
+                )
                 .clickable(
                     interactionSource = centerTapInteraction,
                     indication = null,
-                    onClick = onHide,
+                    onClick = if (panel == null) onHide else onDismissPanel,
                 ),
         )
 
@@ -682,6 +687,8 @@ private fun ReaderControlOverlay(
             presentationProgress,
             preferences,
             adjacentChapters,
+            panel = panel,
+            panelContent = panelContent,
             onPanel,
             onSeek,
             onNavigateChapter,
@@ -699,6 +706,8 @@ private fun ReaderBottomConsole(
     presentationProgress: Double?,
     preferences: ReaderPreferences,
     adjacentChapters: ReaderAdjacentChapters,
+    panel: ReaderPanel?,
+    panelContent: @Composable () -> Unit,
     onPanel: (ReaderPanel) -> Unit,
     onSeek: (Double) -> Boolean,
     onNavigateChapter: (ReaderTocEntry) -> Unit,
@@ -755,64 +764,110 @@ private fun ReaderBottomConsole(
     val leftEnabled = controller != null && (!reflowable || leftChapter != null)
     val rightEnabled = controller != null && (!reflowable || rightChapter != null)
 
-    Box(
+    BoxWithConstraints(
         modifier
             .navigationBarsPadding()
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
+        val targetHeight = panel?.let(::readerPanelSurfaceHeight) ?: READER_HOME_CONTENT_HEIGHT
+        val maxReaderSurfaceHeight =
+            (maxHeight - GeneratedDesignTokens.ReaderControls.TopClearance.dp).coerceAtLeast(READER_NAVIGATION_HEIGHT)
+        val boundedHeight = targetHeight.coerceAtMost(maxReaderSurfaceHeight)
         Surface(
-            Modifier.fillMaxWidth(),
-            color = colors.surface.copy(alpha = 0.96f),
+            Modifier
+                .fillMaxWidth()
+                .height(boundedHeight)
+                .testTag(if (panel == null) READER_HOME_CONSOLE_TEST_TAG else READER_SHEET_TEST_TAG),
+            color = colors.canvas,
             contentColor = colors.textPrimary,
-            shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
+            shape = RoundedCornerShape(readerConsoleOuterRadius()),
             border = BorderStroke(1.dp, colors.divider),
             shadowElevation = 6.dp,
         ) {
-            Column {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = goLeft, enabled = leftEnabled) {
-                    Icon(Icons.Default.ChevronLeft, stringResource(leftDescription))
-                }
-                ReaderSlider(
-                    value = sliderProgress,
-                    onValueChange = { dragging = true; sliderProgress = it },
-                    onValueChangeFinished = {
-                        dragging = false
-                        val origin = totalProgression
-                        if (origin != null && onSeek(sliderProgress.toDouble())) {
-                            pendingSeekOrigin = origin
-                        } else {
-                            sliderProgress = origin?.toFloat() ?: 0f
-                            pendingSeekOrigin = null
+            Column(Modifier.fillMaxSize()) {
+                if (panel != null) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .testTag(READER_PANEL_WORKSPACE_TEST_TAG),
+                    ) {
+                        panelContent()
+                    }
+                } else {
+                    Row(
+                            Modifier
+                                .fillMaxWidth()
+                            .height(READER_HOME_PROGRESS_HEIGHT)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = goLeft, enabled = leftEnabled) {
+                            Icon(Icons.Default.ChevronLeft, stringResource(leftDescription))
                         }
-                    },
-                    enabled = seekEnabled,
-                    modifier = Modifier
-                        .weight(1f)
-                        .semantics { contentDescription = progressDescription }
-                        .testTag(READER_PROGRESS_TEST_TAG),
-                )
-                IconButton(onClick = goRight, enabled = rightEnabled) {
-                    Icon(Icons.Default.ChevronRight, stringResource(rightDescription))
+                        ReaderSlider(
+                            value = sliderProgress,
+                            onValueChange = { dragging = true; sliderProgress = it },
+                            onValueChangeFinished = {
+                                dragging = false
+                                val origin = totalProgression
+                                if (origin != null && onSeek(sliderProgress.toDouble())) {
+                                    pendingSeekOrigin = origin
+                                } else {
+                                    sliderProgress = origin?.toFloat() ?: 0f
+                                    pendingSeekOrigin = null
+                                }
+                            },
+                            enabled = seekEnabled,
+                            modifier = Modifier
+                                .weight(1f)
+                                .semantics { contentDescription = progressDescription }
+                                .testTag(READER_PROGRESS_TEST_TAG),
+                        )
+                        IconButton(onClick = goRight, enabled = rightEnabled) {
+                            Icon(Icons.Default.ChevronRight, stringResource(rightDescription))
+                        }
+                    }
+                }
+                HorizontalDivider(color = colors.divider)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(READER_NAVIGATION_HEIGHT)
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                ) {
+                    ReaderNavAction(
+                        Icons.AutoMirrored.Outlined.FormatListBulleted,
+                        R.string.reader_table_of_contents,
+                        READER_CONTENTS_TEST_TAG,
+                        focusRequester = panelFocus.getValue(ReaderPanel.Contents),
+                        selected = panel == ReaderPanel.Contents,
+                    ) { onPanel(ReaderPanel.Contents) }
+                    ReaderNavAction(
+                        Icons.Outlined.EditNote,
+                        R.string.reader_notes,
+                        "reader-notes",
+                        focusRequester = panelFocus.getValue(ReaderPanel.Bookmarks),
+                        selected = panel == ReaderPanel.Bookmarks,
+                    ) { onPanel(ReaderPanel.Bookmarks) }
+                    ReaderNavAction(
+                        Icons.Outlined.Palette,
+                        R.string.reader_appearance,
+                        "reader-appearance",
+                        focusRequester = panelFocus.getValue(ReaderPanel.Appearance),
+                        enabled = controller?.capabilities?.supportsTheme == true,
+                        selected = panel == ReaderPanel.Appearance,
+                    ) { onPanel(ReaderPanel.Appearance) }
+                    ReaderNavAction(
+                        Icons.Outlined.Settings,
+                        R.string.reader_settings,
+                        READER_SETTINGS_TEST_TAG,
+                        focusRequester = panelFocus.getValue(ReaderPanel.Settings),
+                        selected = panel == ReaderPanel.Settings,
+                        contentDescriptionResource = R.string.reader_settings_accessibility,
+                    ) { onPanel(ReaderPanel.Settings) }
                 }
             }
-            HorizontalDivider(color = colors.divider)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
-                ReaderNavAction(Icons.AutoMirrored.Filled.MenuBook, R.string.reader_table_of_contents, READER_CONTENTS_TEST_TAG, focusRequester = panelFocus.getValue(ReaderPanel.Contents)) { onPanel(ReaderPanel.Contents) }
-                ReaderNavAction(
-                    Icons.AutoMirrored.Filled.Notes, R.string.reader_notes, "reader-notes",
-                    focusRequester = panelFocus.getValue(ReaderPanel.Bookmarks),
-                    enabled = controller?.capabilities?.supportsBookmarks == true,
-                ) { onPanel(ReaderPanel.Bookmarks) }
-                if (controller?.capabilities?.supportsTheme == true) {
-                    ReaderNavAction(Icons.Default.Palette, R.string.reader_appearance, "reader-appearance", focusRequester = panelFocus.getValue(ReaderPanel.Appearance)) { onPanel(ReaderPanel.Appearance) }
-                }
-                ReaderNavAction(Icons.Default.Settings, R.string.reader_settings, READER_SETTINGS_TEST_TAG, focusRequester = panelFocus.getValue(ReaderPanel.Settings)) { onPanel(ReaderPanel.Settings) }
-            }
-        }
         }
     }
 }
@@ -938,7 +993,7 @@ private fun ReaderSlider(
                 .fillMaxWidth()
                 .padding(horizontal = thumbSize / 2)
                 .height(6.dp)
-                .background(colors.accentSoft, CircleShape),
+                .background(readerSliderInactiveTrack(colors), CircleShape),
         ) {
             Box(
                 Modifier
@@ -982,27 +1037,61 @@ private fun RowScope.ReaderNavAction(
     tag: String,
     focusRequester: FocusRequester,
     enabled: Boolean = true,
+    selected: Boolean = false,
+    contentDescriptionResource: Int? = null,
     onClick: () -> Unit,
 ) {
+    val resolvedContentDescription = contentDescriptionResource?.let { stringResource(it) }
     TextButton(
         onClick,
         Modifier
             .weight(1f)
-            .height(60.dp)
+            .fillMaxHeight()
+            .heightIn(min = READER_ANDROID_TOUCH_TARGET)
             .testTag(tag)
             .focusRequester(focusRequester),
         enabled = enabled,
         shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+        contentPadding = PaddingValues(4.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.textPrimary,
+            disabledContentColor = WarmPageThemeValues.colors.textTertiary,
+        ),
     ) {
         Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (selected) {
+                        Modifier.background(
+                            WarmPageThemeValues.colors.actionAccent.copy(alpha = 0.12f),
+                            RoundedCornerShape(15.dp),
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.Center,
         ) {
-            Icon(icon, contentDescription = null)
-            Text(stringResource(label), style = MaterialTheme.typography.labelSmall)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Text(
+                stringResource(label),
+                style = MaterialTheme.typography.labelSmall,
+                modifier = if (resolvedContentDescription == null) Modifier else Modifier.semantics {
+                    contentDescription = resolvedContentDescription
+                },
+            )
         }
     }
 }
+
+private fun readerSliderInactiveTrack(colors: com.ermao.library.ui.theme.WarmPageColors): Color =
+    if (colors.canvas.luminance() >= SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE) {
+        Color(0xFFEFEFEF)
+    } else {
+        colors.textSecondary.copy(alpha = 0.42f)
+    }
 
 @Composable
 private fun progressLabel(preferences: ReaderPreferences, location: ReaderLocation?, progress: Float?): String {
@@ -1053,9 +1142,8 @@ private fun rememberClock(enabled: Boolean): String? {
     return if (enabled) DateFormat.getTimeInstance(DateFormat.SHORT).format(now) else null
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderPreferenceSheet(
+private fun ReaderPreferencePanel(
     panel: ReaderPanel,
     preferences: ReaderPreferences,
     morphology: ReaderMorphology,
@@ -1064,11 +1152,12 @@ private fun ReaderPreferenceSheet(
     failure: ReaderCommandRejected?,
     onUpdate: (ReaderPreferences) -> Unit,
     onDismiss: () -> Unit,
-) = ReaderSheet(
-    title = if (panel == ReaderPanel.Appearance) R.string.reader_appearance else R.string.reader_settings_title,
-    onDismiss = onDismiss,
-    usePageTitle = true,
-) { scroll ->
+){
+    ReaderPanelWorkspace(
+        title = if (panel == ReaderPanel.Appearance) R.string.reader_appearance else R.string.reader_settings_title,
+        onDismiss = onDismiss,
+    ) {
+        val scroll = rememberScrollState()
     val chinese = androidx.compose.ui.platform.LocalConfiguration.current.locales[0].language == "zh"
     val theme = WarmPageThemeValues
     var advanced by remember { mutableStateOf(false) }
@@ -1084,15 +1173,13 @@ private fun ReaderPreferenceSheet(
     val regularSections = populatedSections.filter { !it.first.advanced && it.first.id != "reset" }
     val advancedSections = populatedSections.filter { it.first.advanced }
     val resetSections = populatedSections.filter { it.first.id == "reset" }
-    val sectionStyle = if (panel == ReaderPanel.Settings) {
-        ReaderPreferenceSectionStyle.GroupedCard
-    } else {
-        ReaderPreferenceSectionStyle.Flat
-    }
-    Column(
-        Modifier.verticalScroll(scroll).testTag(READER_PREFERENCES_SCROLL_TEST_TAG),
-        verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
-    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(scroll)
+                .testTag(READER_PREFERENCES_SCROLL_TEST_TAG),
+            verticalArrangement = Arrangement.spacedBy(theme.spacing.three),
+        ) {
         if (failure != null) {
             WarmSettingsInlineMessage(
                 message = readerPreferenceFailureMessage(failure),
@@ -1109,7 +1196,6 @@ private fun ReaderPreferenceSheet(
                 negativeLetterSpacingEnabled,
                 chinese,
                 onUpdate,
-                sectionStyle,
             )
         }
         if (advancedSections.isNotEmpty()) {
@@ -1174,7 +1260,6 @@ private fun ReaderPreferenceSheet(
                                 negativeLetterSpacingEnabled,
                                 chinese,
                                 onUpdate,
-                                sectionStyle,
                             )
                         }
                     }
@@ -1190,15 +1275,10 @@ private fun ReaderPreferenceSheet(
                 negativeLetterSpacingEnabled,
                 chinese,
                 onUpdate,
-                sectionStyle,
             )
         }
+        }
     }
-}
-
-private enum class ReaderPreferenceSectionStyle {
-    Flat,
-    GroupedCard,
 }
 
 @Composable
@@ -1210,7 +1290,6 @@ private fun ReaderPreferenceSection(
     negativeLetterSpacingEnabled: Boolean,
     chinese: Boolean,
     onUpdate: (ReaderPreferences) -> Unit,
-    style: ReaderPreferenceSectionStyle,
 ) {
     val theme = WarmPageThemeValues
     val settingsWithState = settings.map { it to settingState(it) }
@@ -1218,25 +1297,9 @@ private fun ReaderPreferenceSection(
         HorizontalDivider(color = theme.colors.divider)
     }
     if (section.id == "top" || section.id == "reset") {
-        Column(verticalArrangement = Arrangement.spacedBy(theme.spacing.one)) {
+        Column(verticalArrangement = Arrangement.spacedBy(if (section.id == "top") 12.dp else theme.spacing.one)) {
             settingsWithState.forEachIndexed { index, (setting, state) ->
-                if (index > 0) HorizontalDivider(color = theme.colors.divider)
-                ReaderCatalogSetting(
-                    setting,
-                    preferences,
-                    state,
-                    negativeLetterSpacingEnabled,
-                    chinese,
-                    onUpdate,
-                )
-            }
-        }
-    } else if (style == ReaderPreferenceSectionStyle.Flat) {
-        WarmSettingsSection(
-            title = if (chinese) section.chinese else section.english,
-        ) {
-            settingsWithState.forEachIndexed { index, (setting, state) ->
-                if (index > 0) HorizontalDivider(color = theme.colors.divider)
+                if (section.id == "reset" && index > 0) HorizontalDivider(color = theme.colors.divider)
                 ReaderCatalogSetting(
                     setting,
                     preferences,
@@ -1248,38 +1311,43 @@ private fun ReaderPreferenceSection(
             }
         }
     } else {
-        Column(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("reader-setting-section-${section.id}"),
+                .testTag("reader-setting-section-card-${section.id}"),
+            shape = RoundedCornerShape(theme.radii.task),
+            color = theme.colors.surfaceRaised.copy(alpha = 0.45f),
+            border = BorderStroke(theme.components.dividerThickness, theme.colors.divider),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
-            Text(
-                text = if (chinese) section.chinese else section.english,
-                style = theme.typography.headline,
-                color = theme.colors.textPrimary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("reader-setting-section-heading-${section.id}")
-                    .padding(
-                        start = theme.components.settings.horizontalInset,
-                        end = theme.components.settings.horizontalInset,
-                        bottom = theme.components.settings.sectionHeaderBottomSpacing,
-                    )
-                    .semantics { heading() },
-            )
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("reader-setting-section-card-${section.id}"),
-                shape = RoundedCornerShape(theme.radii.task),
-                color = theme.colors.surfaceRaised,
-                border = BorderStroke(theme.components.dividerThickness, theme.colors.divider),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
+            Column(
+                Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column {
-                    settingsWithState.forEachIndexed { index, (setting, state) ->
-                        if (index > 0) WarmSettingsDivider()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag("reader-setting-section-heading-${section.id}")
+                        .padding(horizontal = 4.dp)
+                        .semantics { heading() },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        if (section.id == "textAppearance" || section.id == "paragraph") Icons.Default.TextFields else Icons.Default.Tune,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = theme.colors.textSecondary,
+                    )
+                    Text(
+                        text = if (chinese) section.chinese else section.english,
+                        style = theme.typography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                        color = theme.colors.textPrimary,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    settingsWithState.forEach { (setting, state) ->
                         ReaderCatalogSetting(
                             setting,
                             preferences,
@@ -1322,15 +1390,7 @@ private fun ReaderCatalogSetting(
     val theme = WarmPageThemeValues
     val label = if (chinese) setting.chinese else setting.english
     val value = setting.value(preferences)
-    var choiceSheetVisible by remember(setting.id) { mutableStateOf(false) }
     val available = state.availability == ReaderControlAvailability.Available
-    val fixedSwipe = setting.id == "swipePageTurn" &&
-        state.availability == ReaderControlAvailability.NotImplemented &&
-        state.reasonId == "notImplemented"
-    val selectedValueLabel = setting.options.firstOrNull { option ->
-        option.value == value ||
-            option.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true
-    }?.let { option -> if (chinese) option.chinese else option.english } ?: value
     val unavailableReason = state.reasonId?.let(
         com.ermao.library.shared.modules.reader.ReaderSettingsCatalog.availabilityReasons::get,
     )
@@ -1343,37 +1403,16 @@ private fun ReaderCatalogSetting(
     }
     Column(
         Modifier.fillMaxWidth().testTag("reader-setting-${setting.id}"),
-        verticalArrangement = Arrangement.spacedBy(theme.spacing.one),
+        verticalArrangement = Arrangement.spacedBy(theme.spacing.half),
     ) {
-        if (!available) {
-            val status = when {
-                fixedSwipe -> stringResource(R.string.reader_setting_always_on)
-                state.availability == ReaderControlAvailability.NotImplemented ->
-                    stringResource(R.string.reader_setting_not_adjustable)
-                else -> stringResource(R.string.reader_setting_temporarily_unavailable)
-            }
-            val explanation = when {
-                fixedSwipe -> stringResource(R.string.reader_setting_swipe_always_on_explanation)
-                state.availability == ReaderControlAvailability.NotImplemented ->
-                    stringResource(R.string.reader_setting_not_adjustable_explanation)
-                else -> unavailableMessage
-            }
-            WarmSettingsValueRow(
-                label = label,
-                value = status,
-                supporting = explanation,
-                modifier = Modifier
-                    .testTag("reader-setting-readonly-${setting.id}")
-                    .semantics(mergeDescendants = true) {},
-            )
-            return@Column
-        }
         when (setting.kind) {
             "action" -> TextButton(
                 onClick = { onUpdate(resetReaderPreferences()) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = theme.components.controls.minimumTouchTarget),
+                    .height(READER_COMPACT_CONTROL_HEIGHT)
+                    .testTag("reader-setting-control-${setting.id}"),
+                enabled = available,
             ) {
                 Text(
                     text = label,
@@ -1385,10 +1424,12 @@ private fun ReaderCatalogSetting(
             }
             "toggle" -> {
                 val checked = value == "true" || value == "system"
-                WarmSettingsSwitchRow(
+                ReaderCompactToggle(
                     label = label,
                     checked = checked,
                     modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
+                    enabled = available,
+                    description = unavailableMessage.takeIf { !available },
                     onCheckedChange = {
                         change(if (setting.id == "themeMode") {
                             if (it) "system" else "manual"
@@ -1396,73 +1437,49 @@ private fun ReaderCatalogSetting(
                     },
                 )
             }
-            "number" -> ReaderNumberSetting(setting, label, value.toDouble(), available, ::change)
+            "number" -> ReaderNumberSetting(
+                setting,
+                label,
+                value.toDouble(),
+                available,
+                ::change,
+                unavailableMessage.takeIf {
+                    !available && !(setting.id.endsWith("PageWidth") && state.reasonId == "notImplemented")
+                },
+            )
             else -> {
                 if (setting.id == "theme") {
-                    Text(
-                        text = label,
-                        style = theme.typography.body,
-                        color = theme.colors.textPrimary,
-                        modifier = Modifier.padding(horizontal = theme.spacing.two),
+                    ReaderThemeChoices(
+                        setting,
+                        value,
+                        chinese,
+                        available,
+                        ::change,
+                        unavailableMessage.takeIf { !available },
                     )
-                    ReaderThemeChoices(setting, value, chinese, available, ::change)
-                } else if (
-                    setting.options.size > 4 ||
-                    setting.options.any { option ->
-                        val optionLabel = if (chinese) option.chinese else option.english
-                        optionLabel.length > 16
-                    }
-                ) {
-                    WarmSettingsValueRow(
-                        label = label,
-                        value = selectedValueLabel,
-                        modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
-                        onClick = { choiceSheetVisible = true },
-                        enabled = available,
-                    )
-                    if (choiceSheetVisible) {
-                        WarmSettingsChoiceSheet(
-                            title = label,
-                            options = setting.options.map { option ->
-                                WarmSettingsChoice(
-                                    id = option.value,
-                                    value = option.value,
-                                    label = if (chinese) option.chinese else option.english,
-                                    enabled = setting.id != "letterSpacing" ||
-                                        option.value.toDouble() >= 0 || negativeLetterSpacingEnabled,
-                                )
-                            },
-                            selected = value,
-                            onSelect = ::change,
-                            onDismissRequest = { choiceSheetVisible = false },
-                        )
-                    }
                 } else {
-                    Text(
-                        text = label,
-                        style = theme.typography.body,
-                        color = theme.colors.textPrimary,
-                        modifier = Modifier.padding(horizontal = theme.spacing.two),
-                    )
-                    WarmPageSegmentedControl(
+                    ReaderCompactOptions(
+                        label = label,
+                        value = value,
                         options = setting.options.map { option ->
-                            WarmPageChoice(
+                            ReaderCompactOption(
                                 value = option.value,
                                 label = if (chinese) option.chinese else option.english,
                                 enabled = setting.id != "letterSpacing" ||
-                                    option.value.toDouble() >= 0 ||
+                                    option.value.toDoubleOrNull()?.let { it >= 0 } == true ||
                                     negativeLetterSpacingEnabled,
                             )
                         },
-                        selected = value,
-                        onSelect = ::change,
                         enabled = available,
-                        modifier = Modifier.padding(
-                            horizontal = theme.components.settings.horizontalInset,
-                        ).testTag("reader-setting-control-${setting.id}"),
+                        description = unavailableMessage.takeIf { !available },
+                        onChange = ::change,
+                        modifier = Modifier.testTag("reader-setting-control-${setting.id}"),
                     )
                 }
-                if (setting.options.none { it.value == value || it.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true }) {
+                if (setting.options.none {
+                        it.value == value ||
+                            it.value.toDoubleOrNull()?.let { number -> number == value.toDoubleOrNull() } == true
+                    }) {
                     WarmSettingsInlineMessage(
                         message = stringResource(R.string.reader_setting_saved_value, value),
                     )
@@ -1478,6 +1495,164 @@ private fun ReaderCatalogSetting(
     }
 }
 
+private data class ReaderCompactOption(
+    val value: String,
+    val label: String,
+    val enabled: Boolean = true,
+)
+
+@Composable
+private fun ReaderCompactToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    description: String? = null,
+) {
+    val theme = WarmPageThemeValues
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = READER_ANDROID_TOUCH_TARGET)
+            .alpha(if (enabled) 1f else 0.42f)
+            .background(
+                color = theme.colors.surfaceRaised.copy(alpha = if (enabled) 0.55f else 0.35f),
+                shape = RoundedCornerShape(theme.radii.control),
+            )
+            .border(1.dp, theme.colors.divider, RoundedCornerShape(theme.radii.control))
+            .clickable(
+                enabled = enabled,
+                role = Role.Switch,
+                onClick = { onCheckedChange(!checked) },
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                label,
+                style = theme.typography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium),
+                color = if (enabled) theme.colors.textPrimary else theme.colors.textTertiary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            description?.let {
+                Text(
+                    it,
+                    style = theme.typography.caption.copy(fontSize = 11.sp, lineHeight = 16.sp),
+                    color = theme.colors.textSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Box(
+            Modifier
+                .width(44.dp)
+                .height(24.dp)
+                .background(
+                    if (checked) theme.colors.actionAccent else theme.colors.textPrimary.copy(alpha = 0.1f),
+                    CircleShape,
+                )
+                .border(1.dp, if (checked) theme.colors.actionAccent else theme.colors.divider, CircleShape),
+        ) {
+            Box(
+                Modifier
+                    .offset(x = if (checked) 22.dp else 2.dp, y = 2.dp)
+                    .size(20.dp)
+                    .background(Color.White, CircleShape),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderCompactOptions(
+    label: String,
+    value: String,
+    options: List<ReaderCompactOption>,
+    enabled: Boolean,
+    description: String?,
+    onChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = WarmPageThemeValues
+    Column(
+        modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.42f),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(READER_COMPACT_CONTROL_HEIGHT),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                label,
+                Modifier.width(36.dp),
+                style = theme.typography.caption,
+                color = if (enabled) theme.colors.textPrimary else theme.colors.textTertiary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .border(1.dp, theme.colors.divider, RoundedCornerShape(theme.radii.control))
+                    .background(
+                        theme.colors.textPrimary.copy(alpha = if (enabled) 0.055f else 0.025f),
+                        RoundedCornerShape(theme.radii.control),
+                    )
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                options.forEach { option ->
+                    val selected = option.value == value
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .selectable(
+                                selected = selected,
+                                enabled = enabled && option.enabled,
+                                role = Role.RadioButton,
+                                onClick = { onChange(option.value) },
+                            )
+                            .background(
+                                if (selected) theme.colors.surfaceRaised else Color.Transparent,
+                                RoundedCornerShape(8.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            option.label,
+                            style = theme.typography.caption,
+                            color = if (selected) theme.colors.actionAccent else theme.colors.textPrimary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            }
+        }
+        description?.let {
+            Text(
+                it,
+                Modifier.padding(start = 48.dp),
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ReaderThemeChoices(
     setting: com.ermao.library.shared.modules.reader.ReaderSettingDefinition,
@@ -1485,56 +1660,78 @@ private fun ReaderThemeChoices(
     chinese: Boolean,
     available: Boolean,
     onChange: (String) -> Unit,
+    description: String? = null,
 ) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = WarmPageThemeValues.components.settings.horizontalInset),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        setting.options.forEach { option ->
-            val selected = option.value == value
-            val label = if (chinese) option.chinese else option.english
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .selectable(
-                        selected = selected,
-                        enabled = available,
-                        role = Role.RadioButton,
-                        onClick = { onChange(option.value) },
-                    )
-                    .semantics { contentDescription = label },
-                contentAlignment = Alignment.Center,
-            ) {
-                Surface(
-                    Modifier.size(34.dp),
-                    shape = CircleShape,
-                    color = readerThemeSwatch(option.value),
-                    border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(
+                    WarmPageThemeValues.colors.textPrimary.copy(alpha = 0.055f),
+                    RoundedCornerShape(WarmPageThemeValues.radii.control),
+                )
+                .border(
+                    1.dp,
+                    WarmPageThemeValues.colors.divider,
+                    RoundedCornerShape(WarmPageThemeValues.radii.control),
+                )
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            setting.options.forEach { option ->
+                val selected = option.value == value
+                val label = if (chinese) option.chinese else option.english
+                Box(
+                    Modifier
+                        .size(READER_THEME_SWATCH_TOUCH_TARGET)
+                        .selectable(
+                            selected = selected,
+                            enabled = available,
+                            role = Role.RadioButton,
+                            onClick = { onChange(option.value) },
+                        )
+                        .semantics { contentDescription = label },
+                    contentAlignment = Alignment.Center,
                 ) {
-                    if (selected) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = readerThemeSwatchForeground(option.value))
+                    Surface(
+                        Modifier.size(READER_THEME_SWATCH_SIZE),
+                        shape = CircleShape,
+                        color = readerThemeSwatch(option.value),
+                        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
+                    ) {
+                        if (selected) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Check, null, Modifier.size(18.dp), tint = readerThemeSwatchForeground(option.value))
+                            }
                         }
                     }
                 }
             }
         }
+        description?.let {
+            Text(
+                it,
+                Modifier.padding(horizontal = WarmPageThemeValues.components.settings.horizontalInset + 48.dp),
+                style = WarmPageThemeValues.typography.caption,
+                color = WarmPageThemeValues.colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
-private fun readerThemeSwatch(value: String): androidx.compose.ui.graphics.Color = when (value) {
-    "day" -> androidx.compose.ui.graphics.Color(0xFFF7F7F4)
-    "warm" -> androidx.compose.ui.graphics.Color(0xFFFDF6EA)
-    "green" -> androidx.compose.ui.graphics.Color(0xFFE8F0E3)
-    "night" -> androidx.compose.ui.graphics.Color(0xFF151311)
-    "black" -> androidx.compose.ui.graphics.Color.Black
-    else -> androidx.compose.ui.graphics.Color.Transparent
-}
+private fun readerThemeSwatch(value: String): Color =
+    ReaderTheme.entries.firstOrNull { it.wireValue == value }
+        ?.let(::readerColors)
+        ?.canvas
+        ?: Color.Transparent
 
-private fun readerThemeSwatchForeground(value: String): androidx.compose.ui.graphics.Color =
-    if (value == "night" || value == "black") androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color(0xFF2B2118)
+private fun readerThemeSwatchForeground(value: String): Color =
+    ReaderTheme.entries.firstOrNull { it.wireValue == value }
+        ?.let(::readerColors)
+        ?.textPrimary
+        ?: Color.Transparent
 
 @Composable
 private fun ReaderNumberSetting(
@@ -1543,47 +1740,82 @@ private fun ReaderNumberSetting(
     number: Double,
     available: Boolean,
     onChange: (String) -> Unit,
+    description: String? = null,
 ) {
     val theme = WarmPageThemeValues
     if (setting.id.endsWith("PageWidth")) {
-        var sliderValue by remember(number) { mutableFloatStateOf(number.toFloat()) }
-        Text(
-            text = label,
-            style = theme.typography.body,
-            color = theme.colors.textPrimary,
-            modifier = Modifier.padding(horizontal = theme.spacing.two),
-        )
+        val presentedNumber = if (available) number else setting.minimum
+        var sliderValue by remember(presentedNumber) { mutableFloatStateOf(presentedNumber.toFloat()) }
         Row(
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = theme.components.settings.rowMinimumHeight)
-                .padding(horizontal = theme.spacing.two),
+                .alpha(if (available) 1f else 0.55f),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ReaderSlider(
-                value = sliderValue,
-                onValueChange = { sliderValue = it },
-                onValueChangeFinished = { onChange(numberSettingValue(setting, sliderValue.toDouble())) },
-                valueRange = setting.minimum.toFloat()..setting.maximum.toFloat(),
-                steps = ((setting.maximum - setting.minimum) / setting.step).roundToInt().minus(1).coerceAtLeast(0),
-                enabled = available,
-                modifier = Modifier
-                    .weight(1f)
-                    .semantics { contentDescription = label },
-            )
             Text(
-                "${sliderValue.roundToInt()} px",
-                Modifier.width(64.dp),
-                style = theme.typography.label,
+                text = label,
+                style = theme.typography.caption,
+                color = if (available) theme.colors.textPrimary else theme.colors.textTertiary,
+                modifier = Modifier.width(36.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                Modifier
+                    .weight(1f)
+                    .height(READER_COMPACT_CONTROL_HEIGHT)
+                    .background(
+                        theme.colors.textPrimary.copy(alpha = if (available) 0.055f else 0.025f),
+                        RoundedCornerShape(theme.radii.control),
+                    )
+                    .border(1.dp, theme.colors.divider, RoundedCornerShape(theme.radii.control))
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ReaderSlider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = { onChange(numberSettingValue(setting, sliderValue.toDouble())) },
+                    valueRange = setting.minimum.toFloat()..setting.maximum.toFloat(),
+                    steps = ((setting.maximum - setting.minimum) / setting.step).roundToInt().minus(1).coerceAtLeast(0),
+                    enabled = available,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { contentDescription = label },
+                )
+                Text(
+                    "${sliderValue.roundToInt()}px",
+                    Modifier.width(56.dp),
+                    style = theme.typography.caption,
+                    color = if (available) theme.colors.textSecondary else theme.colors.textTertiary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                )
+            }
+        }
+        description?.let {
+            Text(
+                it,
+                Modifier.padding(start = 48.dp, end = theme.components.settings.horizontalInset),
+                style = theme.typography.caption,
                 color = theme.colors.textSecondary,
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     } else {
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = 54.dp)
+                .heightIn(min = READER_COMPACT_CONTROL_HEIGHT)
+                .alpha(if (available) 1f else 0.42f)
+                .background(
+                    theme.colors.textPrimary.copy(alpha = 0.055f),
+                    RoundedCornerShape(theme.radii.control),
+                )
+                .border(1.dp, theme.colors.divider, RoundedCornerShape(theme.radii.control))
                 .padding(horizontal = theme.spacing.two),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(theme.spacing.oneAndHalf),
@@ -1600,7 +1832,11 @@ private fun ReaderNumberSetting(
                 modifier = Modifier.semantics { contentDescription = "${label} −" },
             ) { Icon(Icons.Default.Remove, null, Modifier.size(theme.components.controls.iconSize)) }
             Text(
-                if (setting.id.endsWith("Zoom")) "${(number * 100).roundToInt()}%" else java.text.NumberFormat.getNumberInstance().format(number),
+                when {
+                    setting.id.endsWith("Zoom") -> "${(number * 100).roundToInt()}%"
+                    setting.id == "fontSize" -> "${java.text.NumberFormat.getNumberInstance().format(number)}px"
+                    else -> java.text.NumberFormat.getNumberInstance().format(number)
+                },
                 Modifier.width(64.dp),
                 style = theme.typography.label,
                 color = theme.colors.textPrimary,
@@ -1612,6 +1848,16 @@ private fun ReaderNumberSetting(
                 modifier = Modifier.semantics { contentDescription = "${label} +" },
             ) { Icon(Icons.Default.Add, null, Modifier.size(theme.components.controls.iconSize)) }
         }
+        description?.let {
+            Text(
+                it,
+                Modifier.padding(start = 48.dp, end = theme.components.settings.horizontalInset),
+                style = theme.typography.caption,
+                color = theme.colors.textSecondary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -1620,99 +1866,244 @@ private fun numberSettingValue(setting: com.ermao.library.shared.modules.reader.
     return if (setting.step >= 1) bounded.roundToInt().toString() else (kotlin.math.round(bounded * 100) / 100).toString()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderNotesSheet(
+private fun ReaderNotesPanel(
     capabilities: ReaderCapabilities,
+    morphology: ReaderMorphology,
     bookmarks: List<ReaderBookmark>,
+    bookmarkActive: Boolean,
     syncPending: Boolean,
     navigationFailed: Boolean,
+    onToggleBookmark: () -> Unit,
     onJump: (String) -> Unit,
     onRemove: (String) -> Unit,
     snackbarHostState: SnackbarHostState,
     onDismiss: () -> Unit,
-) =
-    ReaderSheet(R.string.reader_notes, onDismiss, snackbarHostState) { scroll ->
+) {
+    var selectedTab by remember { mutableStateOf("bookmarks") }
+    ReaderPanelWorkspace(
+        title = R.string.reader_notes,
+        subtitle = stringResource(R.string.reader_bookmark_count, bookmarks.size),
+        onDismiss = onDismiss,
+        snackbarHostState = snackbarHostState,
+    ) {
         Column(
-            Modifier.verticalScroll(scroll),
+            Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (navigationFailed) Text(stringResource(R.string.reader_navigation_failed), color = MaterialTheme.colorScheme.error)
-            WarmPageSegmentedControl(
-                options = listOf(
-                    WarmPageChoice("bookmarks", stringResource(R.string.reader_bookmarks)),
-                    WarmPageChoice("annotations", stringResource(R.string.reader_annotations), capabilities.supportsAnnotations),
-                ),
-                selected = "bookmarks",
-                onSelect = {},
-            )
-            if (syncPending) Text(stringResource(R.string.reader_bookmarks_pending), color = MaterialTheme.colorScheme.primary)
-            if (bookmarks.isEmpty()) {
-                Surface(
-                    color = WarmPageThemeValues.colors.surfaceRaised,
-                    shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
-                    border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+            if (morphology != ReaderMorphology.Comic) {
+                ReaderNotesTabs(
+                    selected = selectedTab,
+                    annotationsEnabled = true,
+                    onSelect = { selectedTab = it },
+                )
+            }
+            if (selectedTab == "bookmarks") {
+                OutlinedButton(
+                    onClick = onToggleBookmark,
+                    enabled = capabilities.supportsBookmarks,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(READER_COMPACT_CONTROL_HEIGHT),
+                    shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = WarmPageThemeValues.colors.textPrimary,
+                        disabledContentColor = WarmPageThemeValues.colors.textPrimary.copy(alpha = 0.42f),
+                    ),
                 ) {
-                    Column(
-                        Modifier.fillMaxWidth().padding(vertical = 28.dp, horizontal = 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(Icons.Default.BookmarkBorder, null, tint = WarmPageThemeValues.colors.textSecondary)
-                        Text(stringResource(R.string.reader_bookmarks_empty), style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            stringResource(R.string.reader_bookmarks_empty_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = WarmPageThemeValues.colors.textSecondary,
-                        )
-                    }
+                    Icon(
+                        if (bookmarkActive) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(
+                            if (bookmarkActive) R.string.reader_remove_current_location else R.string.reader_add_current_location,
+                        ),
+                        style = WarmPageThemeValues.typography.caption,
+                    )
                 }
-            } else {
-                bookmarks.forEach { bookmark ->
+                if (syncPending) Text(stringResource(R.string.reader_bookmarks_pending), color = MaterialTheme.colorScheme.primary)
+                if (bookmarks.isEmpty()) {
                     Surface(
+                        modifier = Modifier.weight(1f),
                         color = WarmPageThemeValues.colors.surfaceRaised,
-                        shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                        shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
                         border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
                     ) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            TextButton({ onJump(bookmark.id) }, Modifier.weight(1f)) {
-                                Column(Modifier.fillMaxWidth()) {
-                                    Text(bookmark.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        stringResource(R.string.reader_progress_percent, bookmark.displayPercent.toInt()),
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
+                        Column(
+                            Modifier.fillMaxSize().padding(vertical = 28.dp, horizontal = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Default.BookmarkBorder, null, tint = WarmPageThemeValues.colors.textSecondary)
+                            Text(stringResource(R.string.reader_bookmarks_empty), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                stringResource(R.string.reader_bookmarks_empty_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = WarmPageThemeValues.colors.textSecondary,
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        bookmarks.forEach { bookmark ->
+                            Surface(
+                                color = WarmPageThemeValues.colors.surfaceRaised,
+                                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                                border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+                            ) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton({ onJump(bookmark.id) }, Modifier.weight(1f)) {
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Text(bookmark.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(
+                                                stringResource(R.string.reader_progress_percent, bookmark.displayPercent.toInt()),
+                                                style = MaterialTheme.typography.labelSmall,
+                                            )
+                                        }
+                                    }
+                                    IconButton({ onRemove(bookmark.id) }) {
+                                        Icon(Icons.Default.Delete, stringResource(R.string.reader_bookmark_remove))
+                                    }
                                 }
-                            }
-                            IconButton({ onRemove(bookmark.id) }) {
-                                Icon(Icons.Default.Delete, stringResource(R.string.reader_bookmark_remove))
                             }
                         }
                     }
                 }
+            } else {
+                ReaderAnnotationsEmptyPanel(Modifier.weight(1f))
             }
         }
     }
+}
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReaderContentsSheet(
+private fun ReaderNotesTabs(
+    selected: String,
+    annotationsEnabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    val theme = WarmPageThemeValues
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(READER_COMPACT_CONTROL_HEIGHT)
+            .background(theme.colors.textPrimary.copy(alpha = 0.055f), RoundedCornerShape(theme.radii.control))
+            .border(1.dp, theme.colors.divider, RoundedCornerShape(theme.radii.control))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        listOf(
+            Triple("bookmarks", stringResource(R.string.reader_bookmarks), true),
+            Triple("annotations", stringResource(R.string.reader_annotations), annotationsEnabled),
+        ).forEach { (value, label, enabled) ->
+            val selectedOption = selected == value
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .selectable(
+                        selected = selectedOption,
+                        enabled = enabled,
+                        role = Role.Tab,
+                        onClick = { onSelect(value) },
+                    )
+                    .background(
+                        if (selectedOption) theme.colors.surfaceRaised else Color.Transparent,
+                        RoundedCornerShape(8.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    style = theme.typography.caption,
+                    color = when {
+                        !enabled -> theme.colors.textTertiary
+                        selectedOption -> theme.colors.actionAccent
+                        else -> theme.colors.textPrimary
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderAnnotationsEmptyPanel(modifier: Modifier = Modifier) {
+    Surface(
+        modifier.fillMaxWidth(),
+        color = WarmPageThemeValues.colors.surfaceRaised,
+        shape = RoundedCornerShape(WarmPageThemeValues.radii.task),
+        border = BorderStroke(1.dp, WarmPageThemeValues.colors.divider),
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(vertical = 28.dp, horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Outlined.Notes, null, tint = WarmPageThemeValues.colors.textSecondary)
+            Text(stringResource(R.string.reader_annotations_empty), style = MaterialTheme.typography.titleSmall)
+            Text(
+                stringResource(R.string.reader_annotations_empty_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = WarmPageThemeValues.colors.textSecondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderContentsPanel(
     state: ReaderContentsLoadState,
+    morphology: ReaderMorphology,
     currentLocation: ReaderLocation?,
     pendingEntryId: String?,
     navigationFailed: Boolean,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
     onSelect: (ReaderTocEntry) -> Unit,
-) = WarmPageModalBottomSheet(onDismissRequest = onDismiss) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.82f)
-            .padding(horizontal = 16.dp)
-            .testTag(READER_SHEET_TEST_TAG),
+) {
+    val readyState = state as? ReaderContentsLoadState.Ready
+    val currentEntry = readyState?.entries?.firstOrNull {
+        readerContentsEntrySelected(currentLocation, it.entry.location)
+    }
+    val subtitle = when {
+        morphology == ReaderMorphology.Reflowable && currentEntry != null -> {
+            val location = currentLocation as? ReflowReaderLocation
+            val percent = location?.totalProgression ?: location?.progression ?: 0.0
+            val formatter = java.text.NumberFormat.getNumberInstance().apply {
+                minimumFractionDigits = 1
+                maximumFractionDigits = 1
+            }
+            "${currentEntry.entry.title} · ${formatter.format(percent * 100)}%"
+        }
+        morphology == ReaderMorphology.Comic && currentLocation is ComicReaderLocation ->
+            stringResource(
+                R.string.reader_comic_toc_detail,
+                currentLocation.pageIndex + 1,
+                currentLocation.pageIndex,
+                readyState?.entries?.size ?: 0,
+            )
+        morphology == ReaderMorphology.Pdf && currentLocation is PdfReaderLocation ->
+            stringResource(
+                R.string.reader_pdf_page_count_detail,
+                currentLocation.pageIndex + 1,
+                readyState?.entries?.size ?: 0,
+            )
+        else -> null
+    }
+    ReaderPanelWorkspace(
+        title = R.string.reader_contents_title,
+        subtitle = subtitle,
+        onDismiss = onDismiss,
     ) {
-        ReaderSheetHeader(R.string.reader_contents_title, onDismiss)
+        Column(Modifier.fillMaxSize()) {
         when (state) {
             ReaderContentsLoadState.NotRequested,
             ReaderContentsLoadState.Loading -> Box(
@@ -1746,7 +2137,6 @@ private fun ReaderContentsSheet(
                 OutlinedButton(onClick = onRetry) { Text(stringResource(R.string.retry_action)) }
             }
             is ReaderContentsLoadState.Ready -> {
-                val currentLabel = readerContentsCurrentLabel(currentLocation)
                 LazyColumn(
                     Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1760,61 +2150,91 @@ private fun ReaderContentsSheet(
                         )
                     }
                 }
-                currentLabel?.let { current ->
-                    item(key = "current-location") {
-                        Surface(
-                            color = WarmPageThemeValues.colors.accentSoft,
-                            shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                        ) {
-                            Text(
-                                stringResource(R.string.reader_contents_current, current),
-                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = WarmPageThemeValues.colors.actionAccent,
-                            )
+                if (morphology == ReaderMorphology.Comic && state.entries.isNotEmpty()) {
+                    item(key = "page-heading") {
+                        Text(
+                            stringResource(R.string.reader_page_number_heading),
+                            style = WarmPageThemeValues.typography.caption,
+                            color = WarmPageThemeValues.colors.textSecondary,
+                        )
+                    }
+                    item(key = "page-navigation") {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.entries.forEachIndexed { index, entry ->
+                                val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
+                                TextButton(
+                                    onClick = { onSelect(entry.entry) },
+                                    enabled = pendingEntryId == null,
+                                    modifier = Modifier.width(110.dp).height(READER_COMPACT_CONTROL_HEIGHT),
+                                    shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                                    colors = ButtonDefaults.textButtonColors(
+                                        containerColor = if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.surfaceRaised,
+                                        contentColor = if (selected) WarmPageThemeValues.colors.onAction else WarmPageThemeValues.colors.textPrimary,
+                                    ),
+                                    border = BorderStroke(1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
+                                ) { Text(index.toString()) }
+                            }
                         }
                     }
                 }
-                if (state.entries.isEmpty()) {
-                    item(key = "empty") {
-                        Text(stringResource(R.string.reader_contents_empty), Modifier.padding(vertical = 24.dp))
+                if (morphology == ReaderMorphology.Reflowable || morphology == ReaderMorphology.Pdf) {
+                    item(key = "chapter-heading") {
+                        Text(
+                            stringResource(R.string.reader_chapter_heading),
+                            style = WarmPageThemeValues.typography.caption,
+                            color = WarmPageThemeValues.colors.textSecondary,
+                        )
                     }
                 }
-                itemsIndexed(
-                    state.entries,
-                    key = { index, entry -> "${entry.entry.id}:$index" },
-                ) { index, entry ->
-                    val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
-                    Surface(
-                        color = if (selected) WarmPageThemeValues.colors.accentSoft else WarmPageThemeValues.colors.surfaceRaised,
-                        shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
-                        border = BorderStroke(1.dp, if (selected) WarmPageThemeValues.colors.accentSoft else WarmPageThemeValues.colors.divider),
-                    ) {
-                        TextButton(
-                            { onSelect(entry.entry) },
-                            Modifier.fillMaxWidth(),
-                            enabled = pendingEntryId == null,
+                if (morphology == ReaderMorphology.Pdf || state.entries.isEmpty()) {
+                    item(key = "empty") {
+                        Text(
+                            stringResource(R.string.reader_contents_empty),
+                            Modifier.padding(vertical = 24.dp),
+                            style = WarmPageThemeValues.typography.caption,
+                            color = WarmPageThemeValues.colors.textSecondary,
+                        )
+                    }
+                }
+                if (morphology == ReaderMorphology.Reflowable) {
+                    itemsIndexed(
+                        state.entries,
+                        key = { index, entry -> "${entry.entry.id}:$index" },
+                    ) { index, entry ->
+                        val selected = readerContentsEntrySelected(currentLocation, entry.entry.location)
+                        Surface(
+                            color = if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.surfaceRaised,
                             shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                            border = BorderStroke(1.dp, if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.divider),
                         ) {
-                            Row(
-                                Modifier.fillMaxWidth().padding(start = (entry.depth * 12).dp),
-                                verticalAlignment = Alignment.CenterVertically,
+                            TextButton(
+                                { onSelect(entry.entry) },
+                                Modifier.fillMaxWidth(),
+                                enabled = pendingEntryId == null,
+                                shape = RoundedCornerShape(WarmPageThemeValues.radii.control),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = if (selected) WarmPageThemeValues.colors.onAction else WarmPageThemeValues.colors.textPrimary,
+                                ),
                             ) {
-                                Text(
-                                    (index + 1).toString(),
-                                    Modifier.width(36.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = WarmPageThemeValues.colors.textTertiary,
-                                )
-                                Text(
-                                    entry.entry.title,
-                                    Modifier.weight(1f),
-                                    color = if (selected) WarmPageThemeValues.colors.actionAccent else WarmPageThemeValues.colors.textPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (pendingEntryId == entry.entry.id) {
-                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Row(
+                                    Modifier.fillMaxWidth().padding(start = (entry.depth * 12).dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        (index + 1).toString(),
+                                        Modifier.width(36.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) WarmPageThemeValues.colors.onAction.copy(alpha = 0.75f) else WarmPageThemeValues.colors.textTertiary,
+                                    )
+                                    Text(
+                                        entry.entry.title,
+                                        Modifier.weight(1f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (pendingEntryId == entry.entry.id) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    }
                                 }
                             }
                         }
@@ -1824,6 +2244,7 @@ private fun ReaderContentsSheet(
                 }
             }
         }
+    }
     }
 }
 
@@ -1843,49 +2264,42 @@ private fun readerContentsEntrySelected(current: ReaderLocation?, entry: ReaderL
 }
 
 @Composable
-private fun readerContentsCurrentLabel(location: ReaderLocation?): String? = when (location) {
-    is ComicReaderLocation -> stringResource(R.string.reader_comic_page, location.pageIndex + 1)
-    is PdfReaderLocation -> stringResource(R.string.reader_pdf_page, location.pageIndex + 1)
-    else -> null
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ReaderSheet(
+private fun ReaderPanelWorkspace(
     title: Int,
+    subtitle: String? = null,
     onDismiss: () -> Unit,
     snackbarHostState: SnackbarHostState? = null,
     usePageTitle: Boolean = false,
-    content: @Composable (ScrollState) -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val theme = WarmPageThemeValues
-    WarmPageModalBottomSheet(
-        onDismissRequest = onDismiss,
-        skipPartiallyExpanded = true,
-    ) {
-        Box(Modifier.fillMaxWidth()) {
-            Column(
-                Modifier
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(
+                    start = readerConsoleContentInset(),
+                    top = 8.dp,
+                    end = readerConsoleContentInset(),
+                ),
+        ) {
+            ReaderSheetHeader(title, subtitle, onDismiss, usePageTitle)
+            Spacer(Modifier.height(20.dp))
+            Box(
+                modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = theme.spacing.two)
-                    .testTag(READER_SHEET_TEST_TAG),
+                    .weight(1f),
             ) {
-                ReaderSheetHeader(title, onDismiss, usePageTitle)
-                Box(
-                    modifier = Modifier.weight(1f, fill = false),
-                ) {
-                    content(rememberScrollState())
-                }
-                Spacer(Modifier.height(theme.spacing.six))
+                content()
             }
-            snackbarHostState?.let { hostState ->
-                WarmPageSnackbarHost(
-                    hostState = hostState,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
-                )
-            }
+        }
+        snackbarHostState?.let { hostState ->
+            WarmPageSnackbarHost(
+                hostState = hostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = theme.spacing.two, vertical = theme.spacing.one),
+            )
         }
     }
 }
@@ -1893,36 +2307,56 @@ private fun ReaderSheet(
 @Composable
 private fun ReaderSheetHeader(
     title: Int,
+    subtitle: String?,
     onDismiss: () -> Unit,
     usePageTitle: Boolean = false,
 ) {
     val theme = WarmPageThemeValues
     Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = theme.components.settings.rowMinimumHeight),
+            Modifier
+                .fillMaxWidth()
+                .height(READER_ANDROID_TOUCH_TARGET),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            stringResource(title),
-            Modifier
-                .weight(1f)
-                .semantics { heading() },
-            style = if (usePageTitle) theme.typography.title else theme.typography.sectionTitle,
-            color = theme.colors.textPrimary,
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(title),
+                Modifier.semantics { heading() },
+                style = if (usePageTitle) theme.typography.title else theme.typography.label.copy(
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                ),
+                color = theme.colors.textPrimary,
+            )
+            subtitle?.let {
+                Text(
+                    it,
+                    style = theme.typography.caption.copy(fontSize = 11.sp, lineHeight = 14.sp),
+                    color = theme.colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         IconButton(onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.reader_done)) }
     }
 }
 
 private fun currentBookmark(bookmarks: List<ReaderBookmark>, location: ReaderLocation?): Boolean {
-    val current = location as? ReflowReaderLocation ?: return false
     return bookmarks.any { bookmark ->
-        bookmark.position.presentation.currentHref == current.resourceKey &&
-            kotlin.math.abs(
-                bookmark.position.presentation.totalProgression -
-                    (current.totalProgression ?: current.progression ?: 0.0),
-            ) < 0.0001
+        val presentation = bookmark.position.presentation
+        when (location) {
+            is ReflowReaderLocation ->
+                presentation.currentHref == location.resourceKey &&
+                    kotlin.math.abs(
+                        presentation.totalProgression -
+                            (location.totalProgression ?: location.progression ?: 0.0),
+                    ) < 0.0001
+            is ComicReaderLocation ->
+                presentation.page?.number == location.pageIndex + 1 &&
+                    presentation.currentHref?.substringBefore('#') == location.resourceHref.substringBefore('#')
+            is PdfReaderLocation -> presentation.page?.number == location.pageIndex + 1
+            else -> false
+        }
     }
 }
 
@@ -2059,6 +2493,32 @@ internal const val READER_PASSIVE_STATUS_TEST_TAG = "reader-passive-status"
 internal const val READER_LINE_HEIGHT_TEST_TAG = "reader-line-height"
 internal const val READER_PREFERENCES_SCROLL_TEST_TAG = "reader-preferences-scroll"
 internal const val READER_SHEET_TEST_TAG = "reader-sheet"
+internal const val READER_PANEL_WORKSPACE_TEST_TAG = "reader-panel-workspace"
+internal const val READER_HOME_CONSOLE_TEST_TAG = "reader-home-console"
 private const val PROGRESS_SEEK_FEEDBACK_TIMEOUT_MILLIS = 4_000L
 private const val SYSTEM_BAR_LIGHT_SURFACE_LUMINANCE = 0.5f
 private val READER_WIDE_VIEWPORT_MIN_WIDTH = 640.dp
+
+private val READER_HOME_CONTENT_HEIGHT = GeneratedDesignTokens.ReaderControls.HomeContentHeight.dp
+private val READER_CONSOLE_VERTICAL_INSET =
+    (GeneratedDesignTokens.ReaderControls.HomeHeight - GeneratedDesignTokens.ReaderControls.HomeContentHeight).dp
+private val READER_HOME_PROGRESS_HEIGHT =
+    (GeneratedDesignTokens.ReaderControls.HomeContentHeight - GeneratedDesignTokens.ReaderControls.NavigationHeight).dp
+private val READER_NAVIGATION_HEIGHT = GeneratedDesignTokens.ReaderControls.NavigationHeight.dp
+private val READER_COMPACT_CONTROL_HEIGHT = GeneratedDesignTokens.ReaderControls.CompactControlHeight.dp
+private val READER_ANDROID_TOUCH_TARGET = GeneratedDesignTokens.Accessibility.MinimumTouchTarget.Android.dp
+private val READER_THEME_SWATCH_TOUCH_TARGET = READER_ANDROID_TOUCH_TARGET
+private val READER_THEME_SWATCH_SIZE = GeneratedDesignTokens.ReaderControls.ThemeSwatchSize.dp
+
+private fun readerPanelSurfaceHeight(panel: ReaderPanel): androidx.compose.ui.unit.Dp = (when (panel) {
+    ReaderPanel.Contents -> GeneratedDesignTokens.ReaderControls.TocPanelHeight.dp
+    ReaderPanel.Bookmarks -> GeneratedDesignTokens.ReaderControls.NotesPanelHeight.dp
+    ReaderPanel.Appearance -> GeneratedDesignTokens.ReaderControls.AppearancePanelHeight.dp
+    ReaderPanel.Settings -> GeneratedDesignTokens.ReaderControls.SettingsPanelHeight.dp
+}) - READER_CONSOLE_VERTICAL_INSET
+
+private fun readerConsoleOuterRadius(): androidx.compose.ui.unit.Dp =
+    GeneratedDesignTokens.ReaderControls.OuterRadius.dp
+
+private fun readerConsoleContentInset(): androidx.compose.ui.unit.Dp =
+    GeneratedDesignTokens.ReaderControls.ContentInset.dp

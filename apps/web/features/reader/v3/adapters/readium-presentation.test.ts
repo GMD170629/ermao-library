@@ -11,13 +11,14 @@ import {
   projectReadiumEffectivePreferences,
   resolveReadiumViewportPresentation
 } from './readium-presentation';
+import { visualTokens } from '../../../../generated/visual-tokens';
 
 const themeColors: Record<ReaderTheme, readonly [string, string, string]> = {
-  day: ['#F7F7F4', '#1E293B', '#2563EB'],
-  warm: ['#FDF6EA', '#2B2118', '#B45309'],
-  green: ['#E8F0E3', '#203126', '#2F6B45'],
-  night: ['#0F172A', '#E2E8F0', '#93C5FD'],
-  black: ['#000000', '#F8FAFC', '#93C5FD']
+  day: [visualTokens.reader.themes.day.canvas, visualTokens.reader.themes.day.textPrimary, visualTokens.reader.themes.day.link],
+  warm: [visualTokens.reader.themes.warm.canvas, visualTokens.reader.themes.warm.textPrimary, visualTokens.reader.themes.warm.link],
+  green: [visualTokens.reader.themes.green.canvas, visualTokens.reader.themes.green.textPrimary, visualTokens.reader.themes.green.link],
+  night: [visualTokens.reader.themes.night.canvas, visualTokens.reader.themes.night.textPrimary, visualTokens.reader.themes.night.link],
+  black: [visualTokens.reader.themes.black.canvas, visualTokens.reader.themes.black.textPrimary, visualTokens.reader.themes.black.link]
 };
 
 function preferencesWith(
@@ -177,11 +178,11 @@ test('residual style stays small and only overrides publisher-owned surfaces whe
 
   assert.match(strict, /@font-face/);
   assert.match(strict, /blob:shuku-font/);
-  assert.match(strict, /background: #FDF6EA !important/);
+  assert.match(strict, new RegExp(`background: ${visualTokens.reader.themes.warm.canvas} !important`));
   assert.match(strict, /font-family: "Shuku Test", serif !important/);
   assert.doesNotMatch(strict, /padding-block/);
   assert.doesNotMatch(strict, /data-shuku-readium-media-only/);
-  assert.match(publisher, /background: #FDF6EA !important/);
+  assert.match(publisher, new RegExp(`background: ${visualTokens.reader.themes.warm.canvas} !important`));
   assert.doesNotMatch(publisher, /font-family: .* !important/);
   assert.doesNotMatch(publisher, /line-height: .* !important/);
   assert.doesNotMatch(publisher, /data-shuku-smart-paragraph/);

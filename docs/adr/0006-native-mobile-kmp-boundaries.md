@@ -48,9 +48,11 @@ application session snapshots or ordinary key-value storage. System TLS trust is
 default; bypass is an explicit per-profile mode reached only through the native risk
 confirmation flow.
 
-`design/tokens.json` is the sole numeric design-token source. Gradle validates it and
-generates Kotlin, Swift, and Android resource outputs at build time. Generated outputs are
-not committed and Mobile does not introduce a Node package or join pnpm/Turbo.
+`packages/design-contracts/visual-tokens.json` is the sole numeric design-token source for Web,
+Android, and iOS. Gradle validates it and generates CSS, TypeScript, Kotlin, Swift, and Android
+resource outputs. Kotlin, Swift, and Android resources remain build-only; Web CSS/TypeScript are
+committed compatibility artifacts because the Web build remains Node-only and does not invoke
+Gradle. Mobile does not introduce a Node runtime or join pnpm/Turbo.
 
 iOS integrates the shared framework through the Kotlin direct-integration Xcode build
 phase. CocoaPods and experimental Swift Export are not part of the bootstrap architecture.

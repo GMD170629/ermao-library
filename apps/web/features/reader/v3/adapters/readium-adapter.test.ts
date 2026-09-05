@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Locator, Publication } from '@readium/shared';
+import { createLocalPublication } from '../original-publication/local-publication';
+import {
+  parseEpub2NcxNavigation,
+  parseEpub3Navigation,
+  resolveEpub2NcxManifestItem,
+  resolveEpubNavigation
+} from './readium-publication';
 import {
   closestReadiumPosition,
   findReadiumPublicationResource,
   isAllowedReadiumExternalHref,
   resolveReadiumStartupTargets,
   readiumTotalProgression,
+  flattenReadiumNavigationEntries,
   readiumNavigationEntries,
   resolveReadiumHref
 } from './readium-navigation';
@@ -145,5 +153,200 @@ test('Readium TOC conversion preserves nesting and exposes zero-based reading-or
       index: 1,
       level: 1
     }]
+  }]);
+});
+
+test('Readium navigation flattening keeps authored order and depth for the reader list', () => {
+  const entries = [{
+    id: 'root',
+    label: 'Part I',
+    level: 0,
+    children: [{
+      id: 'chapter',
+      label: 'Chapter 1',
+      href: 'text/one.xhtml',
+      level: 1,
+      children: [{ id: 'section', label: 'Section 1.1', level: 2 }]
+    }]
+  }];
+
+  assert.deepEqual(flattenReadiumNavigationEntries(entries), [
+    { id: 'root', label: 'Part I', level: 0, index: 0 },
+    { id: 'chapter', label: 'Chapter 1', href: 'text/one.xhtml', level: 1, index: 1 },
+    { id: 'section', label: 'Section 1.1', level: 2, index: 2 }
+  ]);
+});
+
+test('local publication manifests preserve recursive TOC links', () => {
+  const publication = createLocalPublication({
+    title: 'Nested contents',
+    readingProgression: 'ltr',
+    writingMode: 'horizontal',
+    readingOrder: [{
+      href: 'text/chapter.xhtml',
+      type: 'application/xhtml+xml',
+      title: 'Chapter',
+      positionLength: 1,
+      read: async () => new Uint8Array()
+    }],
+    toc: [{
+      href: 'text/chapter.xhtml',
+      title: 'Part I',
+      children: [{
+        href: 'text/chapter.xhtml#section',
+        title: 'Section 1',
+        children: [{ href: 'text/chapter.xhtml#subsection', title: 'Section 1.1' }]
+      }]
+    }]
+  });
+
+  assert.deepEqual(publication.publication.toc?.serialize(), [{
+    href: 'text/chapter.xhtml',
+    title: 'Part I',
+    type: 'application/xhtml+xml',
+    children: [{
+      href: 'text/chapter.xhtml#section',
+      title: 'Section 1',
+      type: 'application/xhtml+xml',
+      children: [{
+        href: 'text/chapter.xhtml#subsection',
+        title: 'Section 1.1',
+        type: 'application/xhtml+xml'
+      }]
+    }]
+  }]);
+  publication.close();
+});
+
+test('local publication falls back to reading order when an explicit TOC is empty', () => {
+  const publication = createLocalPublication({
+    title: 'Reading order fallback',
+    readingProgression: 'ltr',
+    writingMode: 'horizontal',
+    readingOrder: [{
+      href: 'text/chapter.xhtml',
+      type: 'application/xhtml+xml',
+      title: 'Chapter',
+      positionLength: 1,
+      read: async () => new Uint8Array()
+    }],
+    toc: []
+  });
+
+  assert.deepEqual(publication.publication.toc?.serialize(), [{
+    href: 'text/chapter.xhtml',
+    title: 'Chapter',
+    type: 'application/xhtml+xml'
+  }]);
+  publication.close();
+});
+
+test('EPUB navigation precedence uses EPUB3, then NCX, then reading order', () => {
+  const epub3 = [{ href: 'text/epub3.xhtml', title: 'EPUB3' }];
+  const ncx = [{ href: 'text/ncx.xhtml', title: 'NCX' }];
+  const readingOrder = [{ href: 'text/reading-order.xhtml', title: 'Reading order' }];
+
+  assert.deepEqual(resolveEpubNavigation(epub3, ncx, readingOrder), epub3);
+  assert.deepEqual(resolveEpubNavigation([], ncx, readingOrder), ncx);
+  assert.deepEqual(resolveEpubNavigation([], [], readingOrder), readingOrder);
+});
+
+test('EPUB2 NCX lookup follows a valid spine toc association and falls back to a legal NCX', () => {
+  const items = new Map([
+    ['alternate-ncx', { path: 'OPS/alternate.ncx', type: 'APPLICATION/X-DTBNcx+XML', properties: '' }],
+    ['ncx', { path: 'OPS/toc.ncx', type: 'application/x-dtbncx+xml', properties: '' }],
+    ['nav', { path: 'OPS/nav.xhtml', type: 'application/xhtml+xml', properties: 'nav' }]
+  ]);
+
+  assert.deepEqual(resolveEpub2NcxManifestItem(items, 'ncx'), items.get('ncx'));
+  assert.deepEqual(resolveEpub2NcxManifestItem(items, 'nav'), items.get('alternate-ncx'));
+  assert.deepEqual(resolveEpub2NcxManifestItem(items, null), items.get('alternate-ncx'));
+});
+
+type FakeElement = {
+  localName: string;
+  tagName: string;
+  children: FakeElement[];
+  textContent: string;
+  getAttribute: (name: string) => string | null;
+  getAttributeNS: (_namespace: string, name: string) => string | null;
+  hasAttribute: (name: string) => boolean;
+  querySelector: (selector: string) => FakeElement | null;
+};
+
+function fakeElement(
+  name: string,
+  attributes: Record<string, string> = {},
+  children: FakeElement[] = [],
+  textContent = ''
+): FakeElement {
+  const findAnchor = (items: readonly FakeElement[]): FakeElement | null => {
+    for (const item of items) {
+      if (item.localName === 'a' && item.hasAttribute('href')) return item;
+      const nested = findAnchor(item.children);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  return {
+    localName: name,
+    tagName: name,
+    children,
+    textContent,
+    getAttribute: (attribute) => attributes[attribute] ?? null,
+    getAttributeNS: (_namespace, attribute) => attributes[`epub:${attribute}`] ?? null,
+    hasAttribute: (attribute) => Object.prototype.hasOwnProperty.call(attributes, attribute),
+    querySelector: (selector) => selector === 'a[href]' ? findAnchor(children) : null
+  };
+}
+
+test('EPUB3 navigation parser preserves nested entries, fragments, and skips unknown targets', () => {
+  const anchor = fakeElement('a', { href: 'chapter.xhtml#start' }, [], 'Chapter');
+  const nestedAnchor = fakeElement('a', { href: 'chapter.xhtml#section' }, [], 'Section');
+  const invalidAnchor = fakeElement('a', { href: 'missing.xhtml' }, [], 'Missing');
+  const nav = fakeElement('nav', { 'epub:type': 'toc' }, [fakeElement('ol', {}, [
+    fakeElement('li', {}, [anchor, fakeElement('ol', {}, [fakeElement('li', {}, [nestedAnchor])])]),
+    fakeElement('li', {}, [invalidAnchor])
+  ])]);
+  const document = {
+    querySelectorAll: (selector: string) => selector === 'nav' ? [nav] : []
+  } as unknown as XMLDocument;
+
+  assert.deepEqual(parseEpub3Navigation(document, 'OPS/nav.xhtml', new Set(['OPS/chapter.xhtml'])), [{
+    href: 'OPS/chapter.xhtml#start',
+    title: 'Chapter',
+    children: [{ href: 'OPS/chapter.xhtml#section', title: 'Section' }]
+  }]);
+});
+
+test('EPUB3 navigation parser ignores non-TOC navs so NCX fallback remains available', () => {
+  const nav = fakeElement('nav', { 'epub:type': 'landmarks' }, [fakeElement('ol', {}, [
+    fakeElement('li', {}, [fakeElement('a', { href: 'chapter.xhtml' }, [], 'Landmark')])
+  ])]);
+  const document = {
+    querySelectorAll: (selector: string) => selector === 'nav' ? [nav] : []
+  } as unknown as XMLDocument;
+
+  assert.deepEqual(parseEpub3Navigation(document, 'OPS/nav.xhtml', new Set(['OPS/chapter.xhtml'])), []);
+});
+
+test('EPUB2 NCX parser resolves navPoints relative to the NCX and keeps nesting', () => {
+  const chapter = fakeElement('content', { src: '../Text/chapter.xhtml#one' });
+  const section = fakeElement('content', { src: '../Text/chapter.xhtml#two' });
+  const navPoint = fakeElement('navPoint', {}, [
+    fakeElement('navLabel', {}, [fakeElement('text', {}, [], 'Chapter')]),
+    chapter,
+    fakeElement('navPoint', {}, [
+      fakeElement('navLabel', {}, [fakeElement('text', {}, [], 'Section')]),
+      section
+    ])
+  ]);
+  const root = fakeElement('ncx', {}, [fakeElement('navMap', {}, [navPoint])]);
+  const document = { documentElement: root } as unknown as XMLDocument;
+
+  assert.deepEqual(parseEpub2NcxNavigation(document, 'OPS/toc.ncx', new Set(['Text/chapter.xhtml'])), [{
+    href: 'Text/chapter.xhtml#one',
+    title: 'Chapter',
+    children: [{ href: 'Text/chapter.xhtml#two', title: 'Section' }]
   }]);
 });

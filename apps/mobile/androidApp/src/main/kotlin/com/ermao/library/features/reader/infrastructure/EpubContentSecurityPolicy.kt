@@ -39,7 +39,7 @@ internal object EpubContentSecurityPolicy {
     private fun securityHead(viewport: String): String =
         "<meta http-equiv=\"Content-Security-Policy\" content=\"$CONTENT_SECURITY_POLICY\" " +
             "data-shuku-safety-policy-version=\"${ReaderSafetyPolicy.policyVersion}\"/>" + viewport +
-            safetyStyle()
+            safetyStyle() + ReadiumPublicationVisualStyle.markup
 
     private fun safetyStyle(): String {
         val selectors = readerSafetySanitizedElementSelectors().joinToString(",")

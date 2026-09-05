@@ -1,21 +1,23 @@
+@import '../generated/visual-tokens.css';
+
 :root {
-  --shuku-bg: #fbfaf8;
-  --shuku-sidebar: #f3f1ee;
-  --shuku-panel: #fffdfa;
-  --shuku-panel-strong: #ffffff;
-  --shuku-text: #17191d;
-  --shuku-muted: #77736f;
-  --shuku-line: #e6e1db;
-  --shuku-line-strong: #d8d1c9;
-  --shuku-accent: #ff4f2a;
-  --shuku-accent-hover: #e94320;
-  --shuku-accent-soft: #fce6df;
-  --shuku-accent-softer: #fff3ee;
-  --shuku-focus: rgb(255 155 126 / 42%);
-  --shuku-success: #3f9c59;
-  --shuku-warning: #c67b12;
-  --shuku-radius-sm: 10px;
-  --shuku-radius-md: 14px;
-  --shuku-radius-lg: 20px;
+  --shuku-bg: var(--visual-color-app-canvas);
+  --shuku-sidebar: var(--visual-color-app-navigation);
+  --shuku-panel: var(--visual-color-app-surface);
+  --shuku-panel-strong: var(--visual-color-app-surface-raised);
+  --shuku-text: var(--visual-color-app-text-primary);
+  --shuku-muted: var(--visual-color-app-text-secondary);
+  --shuku-line: var(--visual-color-app-divider);
+  --shuku-line-strong: var(--visual-color-app-divider-strong);
+  --shuku-accent: var(--visual-color-app-brand-accent);
+  --shuku-accent-hover: var(--visual-color-app-brand-hover);
+  --shuku-accent-soft: var(--visual-color-app-accent-soft);
+  --shuku-accent-softer: var(--visual-color-app-accent-softer);
+  --shuku-focus: color-mix(in srgb, var(--visual-color-app-focus-ring) 42%, transparent);
+  --shuku-success: var(--visual-color-app-success);
+  --shuku-warning: var(--visual-color-app-warning);
+  --shuku-radius-sm: var(--visual-radius-control);
+  --shuku-radius-md: var(--visual-radius-panel);
+  --shuku-radius-lg: var(--visual-radius-dialog);
   --shuku-shadow-cover: 0 8px 20px rgb(59 45 36 / 14%);
 }

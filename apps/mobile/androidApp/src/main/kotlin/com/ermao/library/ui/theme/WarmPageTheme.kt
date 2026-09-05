@@ -9,13 +9,14 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.shared.modules.reader.ReaderTheme
 import com.ermao.library.shared.modules.reader.ReaderThemeMode
 
-private val LightError = colorOf("#BA1A1A")
-private val LightOnError = colorOf("#FFFFFF")
-private val LightErrorContainer = colorOf("#FFDAD6")
-private val LightOnErrorContainer = colorOf("#410002")
+private val LightError = colorOf(GeneratedDesignTokens.App.Danger)
+private val LightOnError = colorOf(GeneratedDesignTokens.App.OnDanger)
+private val LightErrorContainer = colorOf(GeneratedDesignTokens.App.DangerContainer)
+private val LightOnErrorContainer = colorOf(GeneratedDesignTokens.App.OnDangerContainer)
 private val DarkError = colorOf("#FFB4AB")
 private val DarkOnError = colorOf("#690005")
 private val DarkErrorContainer = colorOf("#93000A")
@@ -36,7 +37,7 @@ internal val AppLightColorScheme = lightColorScheme(
     onSurfaceVariant = AppLightColors.textSecondary,
     outline = AppLightColors.divider,
     outlineVariant = AppLightColors.divider,
-    inversePrimary = AppDarkColors.actionAccent,
+    inversePrimary = AppLightColors.brandAccent,
     secondaryContainer = AppLightColors.accentSoft,
     onSecondaryContainer = AppLightColors.textPrimary,
     tertiary = AppLightColors.brandAccent,
@@ -50,7 +51,7 @@ internal val AppLightColorScheme = lightColorScheme(
     onError = LightOnError,
     errorContainer = LightErrorContainer,
     onErrorContainer = LightOnErrorContainer,
-    scrim = AppDarkColors.canvas,
+    scrim = AppLightColors.textPrimary,
     surfaceBright = AppLightColors.surfaceRaised,
     surfaceDim = AppLightColors.canvas,
     surfaceContainerLowest = AppLightColors.surfaceRaised,
@@ -58,45 +59,6 @@ internal val AppLightColorScheme = lightColorScheme(
     surfaceContainer = AppLightColors.surface,
     surfaceContainerHigh = AppLightColors.surface,
     surfaceContainerHighest = AppLightColors.surfaceRaised,
-)
-
-internal val AppDarkColorScheme = darkColorScheme(
-    primary = AppDarkColors.actionAccent,
-    onPrimary = AppDarkColors.onAction,
-    primaryContainer = AppDarkColors.accentSoft,
-    onPrimaryContainer = AppDarkColors.textPrimary,
-    secondary = AppDarkColors.brandAccent,
-    onSecondary = AppDarkColors.surface,
-    background = AppDarkColors.canvas,
-    onBackground = AppDarkColors.textPrimary,
-    surface = AppDarkColors.surface,
-    onSurface = AppDarkColors.textPrimary,
-    surfaceVariant = AppDarkColors.accentSoft,
-    onSurfaceVariant = AppDarkColors.textSecondary,
-    outline = AppDarkColors.divider,
-    outlineVariant = AppDarkColors.divider,
-    inversePrimary = AppLightColors.actionAccent,
-    secondaryContainer = AppDarkColors.accentSoft,
-    onSecondaryContainer = AppDarkColors.textPrimary,
-    tertiary = AppDarkColors.brandAccent,
-    onTertiary = AppDarkColors.surface,
-    tertiaryContainer = AppDarkColors.accentSoft,
-    onTertiaryContainer = AppDarkColors.textPrimary,
-    surfaceTint = AppDarkColors.actionAccent,
-    inverseSurface = AppDarkColors.textPrimary,
-    inverseOnSurface = AppDarkColors.canvas,
-    error = DarkError,
-    onError = DarkOnError,
-    errorContainer = DarkErrorContainer,
-    onErrorContainer = DarkOnErrorContainer,
-    scrim = AppLightColors.textPrimary,
-    surfaceBright = AppDarkColors.surfaceRaised,
-    surfaceDim = AppDarkColors.canvas,
-    surfaceContainerLowest = AppDarkColors.canvas,
-    surfaceContainerLow = AppDarkColors.surface,
-    surfaceContainer = AppDarkColors.surface,
-    surfaceContainerHigh = AppDarkColors.surfaceRaised,
-    surfaceContainerHighest = AppDarkColors.surfaceRaised,
 )
 
 internal val AppMaterialTypography = Typography(
@@ -119,14 +81,10 @@ internal val AppMaterialTypography = Typography(
 
 @Composable
 fun WarmPageTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val colors = if (darkTheme) AppDarkColors else AppLightColors
-    val materialColors = if (darkTheme) AppDarkColorScheme else AppLightColorScheme
-
     CompositionLocalProvider(
-        LocalWarmPageColors provides colors,
+        LocalWarmPageColors provides AppLightColors,
         LocalWarmPageSpacing provides WarmPageSpacingTokens,
         LocalWarmPageRadii provides WarmPageRadiusTokens,
         LocalWarmPageMetrics provides WarmPageMetricTokens,
@@ -134,12 +92,19 @@ fun WarmPageTheme(
         LocalWarmPageTypography provides WarmPageTypographyTokens,
     ) {
         MaterialTheme(
-            colorScheme = materialColors,
+            colorScheme = AppLightColorScheme,
             typography = AppMaterialTypography,
             content = content,
         )
     }
 }
+
+@Composable
+fun WarmPageTheme(
+    // Temporary source-compatible adapter for fixtures and tests; the app palette remains light-only.
+    @Suppress("UNUSED_PARAMETER") darkTheme: Boolean,
+    content: @Composable () -> Unit,
+) = WarmPageTheme(content)
 
 @Composable
 fun ReaderWarmPageTheme(
@@ -174,7 +139,7 @@ fun ReaderWarmPageTheme(
 }
 
 private fun readerMaterialColorScheme(colors: WarmPageColors, dark: Boolean): ColorScheme {
-    val inverseColors = if (dark) AppLightColors else AppDarkColors
+    val inverseColors = if (dark) readerColors(ReaderTheme.Day) else readerColors(ReaderTheme.Night)
     val error = if (dark) DarkError else LightError
     val onError = if (dark) DarkOnError else LightOnError
     val errorContainer = if (dark) DarkErrorContainer else LightErrorContainer

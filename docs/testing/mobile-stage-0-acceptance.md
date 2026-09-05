@@ -22,8 +22,9 @@
 - iOS provides the SwiftUI bootstrap/auth gates, Keychain cookie persistence,
   UserDefaults profiles, generated Warm Page theme, four independent NavigationStack
   paths, a stable KMP adapter, XCTest targets, and a shared Xcode scheme.
-- `design/tokens.json` is the only numeric token source. Gradle generates Kotlin, Swift,
-  and Android resources without adding a Node package.
+- `packages/design-contracts/visual-tokens.json` is the only numeric token source. Gradle generates CSS,
+  TypeScript, Kotlin, Swift, and Android resources; Web commits only the generated CSS/TypeScript artifacts
+  so its Node build never invokes Gradle.
 
 ## Evidence collected on the Windows/WSL host
 

@@ -50,6 +50,20 @@ cd apps/api-python
 uv run python -m app.bootstrap.prestart
 ```
 
+## Windows one-click development service
+
+On Windows, double-click `start-windows.cmd` in the repository root, or run:
+
+```powershell
+pnpm dev:test:windows
+```
+
+The Windows-native launcher runs the schema prestart check and then starts the FastAPI API,
+import worker, Next.js development server, and unified port-3000 gateway. It uses
+`apps/api-python/.venv-windows`, stores runtime state and per-process logs under
+`.tmp/windows-dev`, and restarts a previous instance that it launched. Press `Ctrl+C` in the
+launcher window to stop all four processes. The launcher never invokes WSL.
+
 ## Verification
 
 - `scripts/verify-python-backend-migration.mjs` verifies the unified runtime, current

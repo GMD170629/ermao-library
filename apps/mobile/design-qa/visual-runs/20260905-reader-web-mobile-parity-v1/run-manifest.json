@@ -1,0 +1,42 @@
+{
+  "runId": "20260905-reader-web-mobile-parity-v1",
+  "status": "PASS",
+  "targetContract": "target-contract.md",
+  "issueLedger": "issue-ledger.md",
+  "source": {
+    "commit": "9ff93969bf46c24d24e97c0103cae50244fd64aa",
+    "dirtyWorkspace": true,
+    "note": "Task changes are layered onto an existing dirty workspace; unrelated user changes must be preserved."
+  },
+  "target": {
+    "authority": "Web mobile Reader",
+    "logicalViewport": "411x914",
+    "referenceDirectory": "iteration-04/web"
+  },
+  "android": {
+    "status": "PASS",
+    "candidateDirectory": "iteration-11/android/reader-controls",
+    "apkSha256": "ED3C34562B510E025FFD34881CA264E5045E95D1CDEB910C93820DC152EAEC6C",
+    "device": {
+      "serial": "9e896bbc",
+      "model": "M2102K1AC",
+      "androidVersion": "12",
+      "resolution": "1440x3200",
+      "densityDpi": 560,
+      "physicalDevice": true,
+      "locale": "zh-CN",
+      "orientation": "portrait"
+    }
+  },
+  "baseline": {
+    "status": "accepted-for-non-regression",
+    "directory": "../../../../../artifacts/reader-ui-comparison/android"
+  },
+  "verification": {
+    "primary": "passed: physical-device captures for controls, toc, notes, appearance, settings",
+    "flow": "passed: focused Reader UI, bookmark, and local PDF instrumentation 17/17",
+    "format": "passed: EPUB, comic, and PDF capture matrix",
+    "risk": "passed: 1.3x font scale 13/13; final cold launch has no crash or ANR",
+    "independentReview": "passed: iteration-11 has no remaining actionable difference under target-contract.md"
+  }
+}

@@ -1,6 +1,7 @@
 import Combine
 import CryptoKit
 import Foundation
+import SwiftUI
 @preconcurrency import ErmaoShared
 @preconcurrency import ReadiumNavigator
 @preconcurrency import ReadiumShared
@@ -181,15 +182,68 @@ struct IosReaderPreferences: Codable, Equatable, Sendable {
 }
 
 extension IosReaderTheme {
-    var colors: (background: String, foreground: String, accent: String) {
+    var colors: IosReaderThemeColors {
         switch self {
-        case .day: ("#F7F7F4", "#1E293B", "#B45309")
-        case .warm: ("#FDF6EA", "#2B2118", "#B45309")
-        case .green: ("#E8F0E3", "#203126", "#3F6F4E")
-        case .night: ("#0F172A", "#E2E8F0", "#F59E0B")
-        case .black: ("#000000", "#F8FAFC", "#F59E0B")
+        case .day: IosReaderThemeColors(
+            canvas: GeneratedDesignTokens.Reader.Day.canvas,
+            surface: GeneratedDesignTokens.Reader.Day.surface,
+            foreground: GeneratedDesignTokens.Reader.Day.textPrimary,
+            secondary: GeneratedDesignTokens.Reader.Day.textSecondary,
+            divider: GeneratedDesignTokens.Reader.Day.divider,
+            accent: GeneratedDesignTokens.Reader.Day.accent
+        )
+        case .warm: IosReaderThemeColors(
+            canvas: GeneratedDesignTokens.Reader.Warm.canvas,
+            surface: GeneratedDesignTokens.Reader.Warm.surface,
+            foreground: GeneratedDesignTokens.Reader.Warm.textPrimary,
+            secondary: GeneratedDesignTokens.Reader.Warm.textSecondary,
+            divider: GeneratedDesignTokens.Reader.Warm.divider,
+            accent: GeneratedDesignTokens.Reader.Warm.accent
+        )
+        case .green: IosReaderThemeColors(
+            canvas: GeneratedDesignTokens.Reader.Green.canvas,
+            surface: GeneratedDesignTokens.Reader.Green.surface,
+            foreground: GeneratedDesignTokens.Reader.Green.textPrimary,
+            secondary: GeneratedDesignTokens.Reader.Green.textSecondary,
+            divider: GeneratedDesignTokens.Reader.Green.divider,
+            accent: GeneratedDesignTokens.Reader.Green.accent
+        )
+        case .night: IosReaderThemeColors(
+            canvas: GeneratedDesignTokens.Reader.Night.canvas,
+            surface: GeneratedDesignTokens.Reader.Night.surface,
+            foreground: GeneratedDesignTokens.Reader.Night.textPrimary,
+            secondary: GeneratedDesignTokens.Reader.Night.textSecondary,
+            divider: GeneratedDesignTokens.Reader.Night.divider,
+            accent: GeneratedDesignTokens.Reader.Night.accent
+        )
+        case .black: IosReaderThemeColors(
+            canvas: GeneratedDesignTokens.Reader.Black.canvas,
+            surface: GeneratedDesignTokens.Reader.Black.surface,
+            foreground: GeneratedDesignTokens.Reader.Black.textPrimary,
+            secondary: GeneratedDesignTokens.Reader.Black.textSecondary,
+            divider: GeneratedDesignTokens.Reader.Black.divider,
+            accent: GeneratedDesignTokens.Reader.Black.accent
+        )
         }
     }
+
+    var preferredColorScheme: ColorScheme {
+        switch self {
+        case .night, .black: .dark
+        case .day, .warm, .green: .light
+        }
+    }
+}
+
+struct IosReaderThemeColors {
+    let canvas: String
+    let surface: String
+    let foreground: String
+    let secondary: String
+    let divider: String
+    let accent: String
+
+    var background: String { canvas }
 }
 
 final class IosReaderPreferencesStore: @unchecked Sendable {

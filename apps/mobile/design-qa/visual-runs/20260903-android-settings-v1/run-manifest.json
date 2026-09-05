@@ -1,0 +1,40 @@
+{
+  "runId": "20260903-android-settings-v1",
+  "status": "IN_PROGRESS",
+  "targetContract": "target-contract.md",
+  "targetBlueprint": "target-blueprints.svg",
+  "baselineDirectory": "../../../../../artifacts/audits/android-settings-2026-09-03",
+  "implementation": {
+    "platform": "Android",
+    "designSystem": "Material 3 + WarmPage",
+    "thirdPartyUiLibraryAdded": false,
+    "businessContractsChanged": false
+  },
+  "device": {
+    "serial": "9e896bbc",
+    "manufacturer": "Xiaomi",
+    "model": "M2102K1AC",
+    "androidVersion": "12",
+    "resolution": "1440x3200",
+    "densityDpi": 560,
+    "physicalDevice": true
+  },
+  "acceptanceMatrix": [
+    "zh-CN/light/font-1.0/product-shell",
+    "en-US/light/font-1.0",
+    "zh-CN/dark/font-1.0",
+    "en-US/dark/font-1.0",
+    "zh-CN/light/font-1.3",
+    "en-US/light/font-2.0",
+    "TalkBack/zh-CN",
+    "TalkBack/en-US"
+  ],
+  "artifacts": {
+    "apk": null,
+    "testApk": null,
+    "screenshots": [],
+    "instrumentation": null,
+    "crashAnrCheck": null,
+    "independentReview": null
+  }
+}

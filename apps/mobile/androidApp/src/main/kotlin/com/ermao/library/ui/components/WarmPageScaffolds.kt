@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import com.ermao.library.ui.theme.WarmPageThemeValues
 
@@ -70,6 +71,7 @@ fun WarmPageScaffold(
                     color = theme.colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("warm-page-title"),
                 )
             }
             val navigationContent: @Composable () -> Unit = {

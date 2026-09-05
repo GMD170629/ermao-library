@@ -13,48 +13,38 @@ struct AppTheme: Equatable, Sendable {
     let accentSoft: Color
     let onAction: Color
 
-    static func app(for colorScheme: ColorScheme) -> AppTheme {
-        switch colorScheme {
-        case .dark:
-            return AppTheme(
-                canvas: Color(hex: GeneratedDesignTokens.AppDark.canvas),
-                surface: Color(hex: GeneratedDesignTokens.AppDark.surface),
-                surfaceRaised: Color(hex: GeneratedDesignTokens.AppDark.surfaceRaised),
-                textPrimary: Color(hex: GeneratedDesignTokens.AppDark.textPrimary),
-                textSecondary: Color(hex: GeneratedDesignTokens.AppDark.textSecondary),
-                textTertiary: Color(hex: GeneratedDesignTokens.AppDark.textTertiary),
-                divider: Color(hex: GeneratedDesignTokens.AppDark.divider),
-                brandAccent: Color(hex: GeneratedDesignTokens.AppDark.brandAccent),
-                actionAccent: Color(hex: GeneratedDesignTokens.AppDark.actionAccent),
-                accentSoft: Color(hex: GeneratedDesignTokens.AppDark.accentSoft),
-                onAction: Color(hex: GeneratedDesignTokens.AppDark.onAction)
-            )
-        default:
-            return AppTheme(
-                canvas: Color(hex: GeneratedDesignTokens.AppLight.canvas),
-                surface: Color(hex: GeneratedDesignTokens.AppLight.surface),
-                surfaceRaised: Color(hex: GeneratedDesignTokens.AppLight.surfaceRaised),
-                textPrimary: Color(hex: GeneratedDesignTokens.AppLight.textPrimary),
-                textSecondary: Color(hex: GeneratedDesignTokens.AppLight.textSecondary),
-                textTertiary: Color(hex: GeneratedDesignTokens.AppLight.textTertiary),
-                divider: Color(hex: GeneratedDesignTokens.AppLight.divider),
-                brandAccent: Color(hex: GeneratedDesignTokens.AppLight.brandAccent),
-                actionAccent: Color(hex: GeneratedDesignTokens.AppLight.actionAccent),
-                accentSoft: Color(hex: GeneratedDesignTokens.AppLight.accentSoft),
-                onAction: Color(hex: GeneratedDesignTokens.AppLight.onAction)
-            )
-        }
-    }
+    static let app = AppTheme(
+        canvas: Color(hex: GeneratedDesignTokens.App.canvas),
+        surface: Color(hex: GeneratedDesignTokens.App.surface),
+        surfaceRaised: Color(hex: GeneratedDesignTokens.App.surfaceRaised),
+        textPrimary: Color(hex: GeneratedDesignTokens.App.textPrimary),
+        textSecondary: Color(hex: GeneratedDesignTokens.App.textSecondary),
+        textTertiary: Color(hex: GeneratedDesignTokens.App.textTertiary),
+        divider: Color(hex: GeneratedDesignTokens.App.divider),
+        brandAccent: Color(hex: GeneratedDesignTokens.App.brandAccent),
+        actionAccent: Color(hex: GeneratedDesignTokens.App.actionAccent),
+        accentSoft: Color(hex: GeneratedDesignTokens.App.accentSoft),
+        onAction: Color(hex: GeneratedDesignTokens.App.onAction)
+    )
 }
 
 private struct AppThemeKey: EnvironmentKey {
-    static let defaultValue = AppTheme.app(for: .light)
+    static let defaultValue = AppTheme.app
+}
+
+private struct SystemColorSchemeKey: EnvironmentKey {
+    static let defaultValue = ColorScheme.light
 }
 
 extension EnvironmentValues {
     var appTheme: AppTheme {
         get { self[AppThemeKey.self] }
         set { self[AppThemeKey.self] = newValue }
+    }
+
+    var systemColorScheme: ColorScheme {
+        get { self[SystemColorSchemeKey.self] }
+        set { self[SystemColorSchemeKey.self] = newValue }
     }
 }
 
@@ -83,7 +73,7 @@ extension CGFloat {
     static let space4 = CGFloat(GeneratedDesignTokens.Spacing.space4)
     static let space5 = CGFloat(GeneratedDesignTokens.Spacing.space5)
     static let space6 = CGFloat(GeneratedDesignTokens.Spacing.space6)
-    static let iosMinimumTouchTarget = CGFloat(GeneratedDesignTokens.Progress.iosMinimumTouchTarget)
+    static let iosMinimumTouchTarget = CGFloat(GeneratedDesignTokens.Accessibility.MinimumTouchTarget.ios)
 }
 
 enum AppTextRole: Sendable {

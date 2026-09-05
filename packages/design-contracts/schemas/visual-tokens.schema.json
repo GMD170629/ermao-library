@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ermao.local/schemas/visual-tokens.schema.json",
+  "title": "Ermao cross-platform visual tokens",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "contractVersion",
+    "appearance",
+    "colors",
+    "reader",
+    "spacing",
+    "radii",
+    "typography",
+    "components",
+    "accessibility"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 3 },
+    "contractVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "appearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app"],
+      "properties": { "app": { "const": "lightOnly" } }
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app"],
+      "properties": { "app": { "$ref": "#/$defs/appPalette" } }
+    },
+    "reader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["themes"],
+      "properties": {
+        "themes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["day", "warm", "green", "night", "black"],
+          "properties": {
+            "day": { "$ref": "#/$defs/readerPalette" },
+            "warm": { "$ref": "#/$defs/readerPalette" },
+            "green": { "$ref": "#/$defs/readerPalette" },
+            "night": { "$ref": "#/$defs/readerPalette" },
+            "black": { "$ref": "#/$defs/readerPalette" }
+          }
+        }
+      }
+    },
+    "spacing": { "$ref": "#/$defs/numericMap" },
+    "radii": { "$ref": "#/$defs/numericMap" },
+    "typography": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/typographyRole" }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cover", "progress", "settings", "readerControls"],
+      "properties": {
+        "cover": { "$ref": "#/$defs/tokenMap" },
+        "progress": { "$ref": "#/$defs/numericMap" },
+        "settings": { "$ref": "#/$defs/numericMap" },
+        "readerControls": { "$ref": "#/$defs/readerControls" }
+      }
+    },
+    "accessibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumTouchTarget"],
+      "properties": {
+        "minimumTouchTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["web", "ios", "android"],
+          "properties": {
+            "web": { "type": "number", "minimum": 44 },
+            "ios": { "type": "number", "minimum": 44 },
+            "android": { "type": "number", "minimum": 48 }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hexColor": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
+    "appPalette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canvas", "navigation", "surface", "surfaceRaised", "textPrimary", "textSecondary",
+        "textTertiary", "divider", "dividerStrong", "brandAccent", "brandHover", "actionAccent",
+        "accentSoft", "accentSofter", "focusRing", "success", "warning", "danger",
+        "dangerContainer", "onDanger", "onDangerContainer", "onAction"
+      ],
+      "properties": {
+        "canvas": { "$ref": "#/$defs/hexColor" },
+        "navigation": { "$ref": "#/$defs/hexColor" },
+        "surface": { "$ref": "#/$defs/hexColor" },
+        "surfaceRaised": { "$ref": "#/$defs/hexColor" },
+        "textPrimary": { "$ref": "#/$defs/hexColor" },
+        "textSecondary": { "$ref": "#/$defs/hexColor" },
+        "textTertiary": { "$ref": "#/$defs/hexColor" },
+        "divider": { "$ref": "#/$defs/hexColor" },
+        "dividerStrong": { "$ref": "#/$defs/hexColor" },
+        "brandAccent": { "$ref": "#/$defs/hexColor" },
+        "brandHover": { "$ref": "#/$defs/hexColor" },
+        "actionAccent": { "$ref": "#/$defs/hexColor" },
+        "accentSoft": { "$ref": "#/$defs/hexColor" },
+        "accentSofter": { "$ref": "#/$defs/hexColor" },
+        "focusRing": { "$ref": "#/$defs/hexColor" },
+        "success": { "$ref": "#/$defs/hexColor" },
+        "warning": { "$ref": "#/$defs/hexColor" },
+        "danger": { "$ref": "#/$defs/hexColor" },
+        "dangerContainer": { "$ref": "#/$defs/hexColor" },
+        "onDanger": { "$ref": "#/$defs/hexColor" },
+        "onDangerContainer": { "$ref": "#/$defs/hexColor" },
+        "onAction": { "$ref": "#/$defs/hexColor" }
+      }
+    },
+    "readerPalette": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canvas", "surface", "surfaceRaised", "textPrimary", "textSecondary", "textTertiary",
+        "divider", "link", "accent", "accentSoft", "onAccent", "colorScheme"
+      ],
+      "properties": {
+        "canvas": { "$ref": "#/$defs/hexColor" },
+        "surface": { "$ref": "#/$defs/hexColor" },
+        "surfaceRaised": { "$ref": "#/$defs/hexColor" },
+        "textPrimary": { "$ref": "#/$defs/hexColor" },
+        "textSecondary": { "$ref": "#/$defs/hexColor" },
+        "textTertiary": { "$ref": "#/$defs/hexColor" },
+        "divider": { "$ref": "#/$defs/hexColor" },
+        "link": { "$ref": "#/$defs/hexColor" },
+        "accent": { "$ref": "#/$defs/hexColor" },
+        "accentSoft": { "$ref": "#/$defs/hexColor" },
+        "onAccent": { "$ref": "#/$defs/hexColor" },
+        "colorScheme": { "enum": ["light", "dark"] }
+      }
+    },
+    "numericMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "tokenMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": ["string", "number"] }
+    },
+    "readerControls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "homeHeight", "homeContentHeight", "tocPanelHeight", "notesPanelHeight",
+        "appearancePanelHeight", "settingsPanelHeight", "navigationHeight", "contentInset",
+        "outerRadius", "topClearance", "compactControlHeight", "themeSwatchSize"
+      ],
+      "properties": {
+        "homeHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "homeContentHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "tocPanelHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "notesPanelHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "appearancePanelHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "settingsPanelHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "navigationHeight": { "type": "number", "minimum": 44 },
+        "contentInset": { "type": "number", "exclusiveMinimum": 0 },
+        "outerRadius": { "type": "number", "exclusiveMinimum": 0 },
+        "topClearance": { "type": "number", "exclusiveMinimum": 0 },
+        "compactControlHeight": { "type": "number", "minimum": 44 },
+        "themeSwatchSize": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "typographyRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["size", "lineHeight", "weight", "familyRole"],
+      "properties": {
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "lineHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "weight": { "type": "number", "minimum": 100, "maximum": 900 },
+        "familyRole": { "enum": ["systemSans", "readerSerif"] }
+      }
+    }
+  }
+}

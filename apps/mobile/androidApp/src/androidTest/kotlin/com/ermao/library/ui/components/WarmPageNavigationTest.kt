@@ -47,6 +47,38 @@ class WarmPageNavigationTest {
     val composeRule = createComposeRule()
 
     @Test
+    fun hiddenNavigationChromeKeepsContentButRemovesAccessoryAndDestinations() {
+        val navigationItems = listOf(
+            WarmPageNavigationItem(
+                id = "me",
+                labelResource = R.string.tab_me,
+                selectedIcon = Icons.Filled.Person,
+                unselectedIcon = Icons.Outlined.Person,
+                testTag = "hidden-tab-me",
+            ),
+        )
+
+        composeRule.setContent {
+            WarmPageTheme(darkTheme = false) {
+                WarmPageNavigationSuite(
+                    items = navigationItems,
+                    selected = "me",
+                    onSelect = {},
+                    showNavigationChrome = false,
+                    bottomAccessory = { Text("audio", Modifier.testTag("hidden-mini-player")) },
+                ) {
+                    Text("detail", Modifier.testTag("hidden-detail-content"))
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("hidden-detail-content").assertIsDisplayed()
+        composeRule.onNodeWithTag("bottom-navigation-shell").assertDoesNotExist()
+        composeRule.onNodeWithTag("hidden-tab-me").assertDoesNotExist()
+        composeRule.onNodeWithTag("hidden-mini-player").assertDoesNotExist()
+    }
+
+    @Test
     fun compactNavigationSharesOneSurfaceWithAccessoryAndPreservesTabSemantics() {
         val navigationItems = listOf(
             WarmPageNavigationItem(

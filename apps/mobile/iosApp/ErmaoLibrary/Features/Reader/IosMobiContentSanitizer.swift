@@ -23,7 +23,38 @@ enum IosPublicationSecurityPolicy {
         let selectors = ErmaoShared.PublicKt.readerSafetySanitizedElementSelectors()
             .joined(separator: ",")
         let style = selectors.isEmpty ? "" : "<style>\(selectors){display:none!important;}</style>"
-        return meta + style
+        return meta + style + readerThemeStyle
+    }
+
+    private static var readerThemeStyle: String {
+        """
+        <style data-shuku-reader-theme-adapter="v1">
+        :root[style*="--USER__backgroundColor"] { background-image: none !important; }
+        :root[style*="--USER__backgroundColor"] body,
+        :root[style*="--USER__backgroundColor"] body *,
+        :root[style*="--USER__backgroundColor"] body *::before,
+        :root[style*="--USER__backgroundColor"] body *::after {
+          background-color: transparent !important;
+          background-image: none !important;
+        }
+        :root.readium-sepia-on {
+          --RS__linkColor: \(GeneratedDesignTokens.Reader.Warm.link) !important;
+          --RS__visitedColor: \(GeneratedDesignTokens.Reader.Warm.link) !important;
+        }
+        :root.readium-night-on {
+          --RS__linkColor: \(GeneratedDesignTokens.Reader.Night.link) !important;
+          --RS__visitedColor: \(GeneratedDesignTokens.Reader.Night.link) !important;
+        }
+        :root[style*="\(GeneratedDesignTokens.Reader.Day.canvas)" i] {
+          --RS__linkColor: \(GeneratedDesignTokens.Reader.Day.link) !important;
+          --RS__visitedColor: \(GeneratedDesignTokens.Reader.Day.link) !important;
+        }
+        :root[style*="\(GeneratedDesignTokens.Reader.Green.canvas)" i] {
+          --RS__linkColor: \(GeneratedDesignTokens.Reader.Green.link) !important;
+          --RS__visitedColor: \(GeneratedDesignTokens.Reader.Green.link) !important;
+        }
+        </style>
+        """
     }
 
     /// Only for XHTML emitted by the owned TXT/FB2 templates, never original chapters.

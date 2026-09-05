@@ -3,6 +3,7 @@ package com.ermao.library.features.reader.infrastructure
 import android.content.res.Configuration
 import android.content.res.Resources
 import androidx.core.graphics.toColorInt
+import com.ermao.library.design.GeneratedDesignTokens
 import com.ermao.library.shared.modules.reader.ReaderFontFamily
 import com.ermao.library.shared.modules.reader.ReaderPageMargin
 import com.ermao.library.shared.modules.reader.ReaderPreferences
@@ -91,11 +92,26 @@ internal class ReadiumPreferencesMapper(private val resources: Resources) {
 
     private val ReaderTheme.colors: ThemeColors
         get() = when (this) {
-            ReaderTheme.Day -> ThemeColors("#F7F7F4", "#1E293B")
-            ReaderTheme.Warm -> ThemeColors("#FDF6EA", "#2B2118")
-            ReaderTheme.Green -> ThemeColors("#E8F0E3", "#203126")
-            ReaderTheme.Night -> ThemeColors("#0F172A", "#E2E8F0")
-            ReaderTheme.Black -> ThemeColors("#000000", "#F8FAFC")
+            ReaderTheme.Day -> ThemeColors(
+                GeneratedDesignTokens.Reader.Day.Canvas,
+                GeneratedDesignTokens.Reader.Day.TextPrimary,
+            )
+            ReaderTheme.Warm -> ThemeColors(
+                GeneratedDesignTokens.Reader.Warm.Canvas,
+                GeneratedDesignTokens.Reader.Warm.TextPrimary,
+            )
+            ReaderTheme.Green -> ThemeColors(
+                GeneratedDesignTokens.Reader.Green.Canvas,
+                GeneratedDesignTokens.Reader.Green.TextPrimary,
+            )
+            ReaderTheme.Night -> ThemeColors(
+                GeneratedDesignTokens.Reader.Night.Canvas,
+                GeneratedDesignTokens.Reader.Night.TextPrimary,
+            )
+            ReaderTheme.Black -> ThemeColors(
+                GeneratedDesignTokens.Reader.Black.Canvas,
+                GeneratedDesignTokens.Reader.Black.TextPrimary,
+            )
         }
 
     private data class ThemeColors(val background: String, val foreground: String)

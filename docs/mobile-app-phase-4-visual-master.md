@@ -8,7 +8,7 @@
 > 决策日期：2026-08-25
 > 取代：Warm Page v1.1
 > 适用范围：`apps/mobile` 的 iOS/Android 高保真设计、语义组件、主题、页面实现、原型、视觉回归和所有可见状态
-> 唯一数值令牌源：[`apps/mobile/design/tokens.json`](../apps/mobile/design/tokens.json)
+> 唯一数值令牌源：[`packages/design-contracts/visual-tokens.json`](../packages/design-contracts/visual-tokens.json)
 > 横切实现规范：[`mobile-app-development-global-guidelines.md`](mobile-app-development-global-guidelines.md)
 
 ## 1. 目的
@@ -37,7 +37,7 @@ v2 解决的不是“换一套皮肤”，而是以下系统性问题：
 | 页面树、导航、返回与覆盖层类型 | Phase 2 |
 | 用户任务、内容顺序、动作优先级和状态位置 | Phase 3 |
 | 全局视觉语义、信息流语法和 C/App-owned 组件合同 | 本文件 |
-| 精确颜色、间距、圆角、排版、Cover 和 Progress 数值 | `apps/mobile/design/tokens.json` |
+| 精确颜色、间距、圆角、排版、Cover 和 Progress 数值 | `packages/design-contracts/visual-tokens.json` |
 | A/B 类原生组件所有权、平台行为、无障碍和验收 | 全局开发规范 |
 | 页面构图和密度 | 当前有效的 Phase 5–7 页面合同与高保真锚点 |
 | PNG、竞品截图和真机截图 | 视觉证据；不拥有功能、数据身份、系统组件外壳或令牌数值 |

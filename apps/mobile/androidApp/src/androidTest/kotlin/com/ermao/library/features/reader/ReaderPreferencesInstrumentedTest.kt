@@ -1,5 +1,6 @@
 package com.ermao.library.features.reader
 
+import android.content.res.Configuration
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.ermao.library.features.reader.infrastructure.AndroidReaderPreferencesStore
@@ -10,6 +11,7 @@ import com.ermao.library.shared.modules.reader.ReaderPdfFit
 import com.ermao.library.shared.modules.reader.ReaderPreferences
 import com.ermao.library.shared.modules.reader.ReaderSpreadMode
 import com.ermao.library.shared.modules.reader.ReaderTheme
+import com.ermao.library.shared.modules.reader.ReaderThemeMode
 import com.ermao.library.shared.modules.reader.ReaderReadingMode
 import com.ermao.library.shared.modules.reader.ReaderReadingProgression
 import com.ermao.library.shared.modules.reader.ReaderWritingMode
@@ -23,6 +25,35 @@ import org.readium.r2.navigator.preferences.ReadingProgression
 @OptIn(ExperimentalReadiumApi::class)
 @RunWith(AndroidJUnit4::class)
 class ReaderPreferencesInstrumentedTest {
+    @Test
+    fun systemThemeUsesDeviceAppearanceWithoutOverwritingTheRememberedTheme() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val stored = ReaderPreferences(
+            appearance = ReaderPreferences().appearance.copy(
+                theme = ReaderTheme.Green,
+                themeMode = ReaderThemeMode.System,
+            ),
+        )
+        val dayConfiguration = Configuration(context.resources.configuration).apply {
+            uiMode = uiMode and Configuration.UI_MODE_NIGHT_MASK.inv() or Configuration.UI_MODE_NIGHT_NO
+        }
+        val nightConfiguration = Configuration(context.resources.configuration).apply {
+            uiMode = uiMode and Configuration.UI_MODE_NIGHT_MASK.inv() or Configuration.UI_MODE_NIGHT_YES
+        }
+
+        assertEquals(
+            ReaderTheme.Day,
+            ReadiumPreferencesMapper(context.createConfigurationContext(dayConfiguration).resources)
+                .effectiveTheme(stored),
+        )
+        assertEquals(
+            ReaderTheme.Night,
+            ReadiumPreferencesMapper(context.createConfigurationContext(nightConfiguration).resources)
+                .effectiveTheme(stored),
+        )
+        assertEquals(ReaderTheme.Green, stored.appearance.theme)
+    }
+
     @Test
     fun preferencesSurviveStoreRecreationAndRemainAccountScoped() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

@@ -5,11 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -383,17 +386,44 @@ fun ImportPreferencesScreen(
 }
 
 @Composable
-internal fun StepperRow(label: String, value: Int, range: IntRange, onChange: (Int) -> Unit) {
-    ListItem(
-        headlineContent = { Text(label) },
-        trailingContent = {
-            Row {
-                TextButton(onClick = { onChange(value - 1) }, enabled = value > range.first) { Text("−") }
-                Text(value.toString(), Modifier.padding(vertical = 12.dp))
-                TextButton(onClick = { onChange(value + 1) }, enabled = value < range.last) { Text("+") }
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-    )
+internal fun StepperRow(
+    label: String,
+    locale: AdministrativeLocale,
+    value: Int,
+    range: IntRange,
+    onChange: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 54.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = com.ermao.library.ui.theme.WarmPageThemeValues.typography.body,
+            color = com.ermao.library.ui.theme.WarmPageThemeValues.colors.textPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = { onChange(value - 1) }, enabled = value > range.first) {
+            Icon(
+                Icons.Rounded.Remove,
+                contentDescription = "${AdministrativeCopy.Decrease.text(locale)} $label",
+            )
+        }
+        Text(
+            text = value.toString(),
+            style = com.ermao.library.ui.theme.WarmPageThemeValues.typography.label,
+            color = com.ermao.library.ui.theme.WarmPageThemeValues.colors.textSecondary,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        IconButton(onClick = { onChange(value + 1) }, enabled = value < range.last) {
+            Icon(
+                Icons.Rounded.Add,
+                contentDescription = "${AdministrativeCopy.Increase.text(locale)} $label",
+            )
+        }
+    }
     AdministrativeDivider()
 }

@@ -1,24 +1,15 @@
 package com.ermao.library.features.administrativesettings
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,10 +18,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.ermao.library.ui.components.SettingsTextField
+import com.ermao.library.ui.components.WarmSettingsEmptyState
+import com.ermao.library.ui.components.WarmSettingsFilterBar
+import com.ermao.library.ui.components.WarmSettingsFilterOption
+import com.ermao.library.ui.components.WarmSettingsIcons
+import com.ermao.library.ui.components.WarmSettingsIdentityHeader
+import com.ermao.library.ui.components.WarmSettingsNavigationRow
 import com.ermao.library.ui.components.rememberForwardProgress
 
 private enum class QueueFilter { All, Running, Failed }
@@ -57,7 +53,16 @@ fun KindleQueueScreen(
                     QueueFilter.Failed -> it.status == QueueStatus.Failed
                 }
             }
-            if (tasks.isEmpty()) Text(AdministrativeCopy.Empty.text(locale), Modifier.padding(24.dp))
+            if (tasks.isEmpty()) {
+                WarmSettingsEmptyState(
+                    title = AdministrativeCopy.Empty.text(locale),
+                    message = when (filter) {
+                        QueueFilter.All -> AdministrativeCopy.Empty.text(locale)
+                        QueueFilter.Running -> AdministrativeCopy.Running.text(locale)
+                        QueueFilter.Failed -> AdministrativeCopy.Failed.text(locale)
+                    },
+                )
+            }
             tasks.forEach { task ->
                 QueueTaskRow(
                     task,
@@ -95,16 +100,21 @@ fun KindleQueueScreen(
 
 @Composable
 private fun QueueFilterRow(filter: QueueFilter, onSelect: (QueueFilter) -> Unit, locale: AdministrativeLocale) {
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QueueFilter.entries.forEach { item ->
-            val label = when (item) {
-                QueueFilter.All -> AdministrativeCopy.All
-                QueueFilter.Running -> AdministrativeCopy.Running
-                QueueFilter.Failed -> AdministrativeCopy.Failed
-            }
-            FilterChip(filter == item, { onSelect(item) }, { Text(label.text(locale)) })
-        }
-    }
+    WarmSettingsFilterBar(
+        options = QueueFilter.entries.map { item ->
+            WarmSettingsFilterOption(
+                value = item,
+                label = when (item) {
+                    QueueFilter.All -> AdministrativeCopy.All
+                    QueueFilter.Running -> AdministrativeCopy.Running
+                    QueueFilter.Failed -> AdministrativeCopy.Failed
+                }.text(locale),
+            )
+        },
+        selected = filter,
+        onSelect = onSelect,
+        modifier = Modifier.testTag("administrative-kindle-queue-filters"),
+    )
 }
 
 @Composable
@@ -116,19 +126,28 @@ private fun QueueTaskRow(
     onDelete: () -> Unit,
     onMore: () -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onMore).padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f)) {
-                Text(task.title, style = MaterialTheme.typography.titleMedium)
-                Text(task.maskedRecipient, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text(task.status.copy().text(locale), color = task.status.color())
-        }
+    Column(Modifier.fillMaxWidth()) {
+        WarmSettingsNavigationRow(
+            title = task.title,
+            summary = listOf(task.maskedRecipient, task.status.copy().text(locale)).joinToString(" · "),
+            modifier = Modifier.testTag("administrative-kindle-task-${task.id}"),
+            onClick = onMore,
+        )
         task.progress?.let { progress ->
             val animatedProgress = rememberForwardProgress(progress, progressIdentity = task.id)
-            LinearProgressIndicator(progress = { animatedProgress }, Modifier.fillMaxWidth().padding(top = 8.dp))
+            LinearProgressIndicator(
+                progress = { animatedProgress },
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
         }
-        task.statusCode?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        task.statusCode?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             if (task.status in setOf(QueueStatus.Queued, QueueStatus.Running)) TextButton(onClick = onCancel) { Text(AdministrativeCopy.CancelTask.text(locale)) }
             if (task.status == QueueStatus.Failed) TextButton(onClick = onRetry) { Text(AdministrativeCopy.RetryTask.text(locale)) }
@@ -170,32 +189,46 @@ fun UsersScreen(
     var enabledFilter by remember { mutableStateOf<Boolean?>(null) }
     AdministrativePage(
         AdministrativeCopy.UsersAndPermissions, locale, onBack, modifier,
-        toolbarActions = { IconButton({ onNavigate(AdministrativeSettingsRoute.UserEdit()) }) { Icon(Icons.Outlined.PersonAdd, AdministrativeCopy.AddUser.text(locale)) } },
+        toolbarActions = {
+            IconButton(onClick = { onNavigate(AdministrativeSettingsRoute.UserEdit()) }) {
+                Icon(WarmSettingsIcons.Users, AdministrativeCopy.AddUser.text(locale))
+            }
+        },
     ) {
         AdministrativeTextField(search, { search = it }, AdministrativeCopy.Search, locale, textAlign = TextAlign.Start)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(enabledFilter == null, { enabledFilter = null }, { Text(AdministrativeCopy.All.text(locale)) })
-            FilterChip(enabledFilter == true, { enabledFilter = true }, { Text(AdministrativeCopy.Enabled.text(locale)) })
-            FilterChip(enabledFilter == false, { enabledFilter = false }, { Text(AdministrativeCopy.Disabled.text(locale)) })
-        }
+        WarmSettingsFilterBar(
+            options = listOf(
+                WarmSettingsFilterOption(null, AdministrativeCopy.All.text(locale)),
+                WarmSettingsFilterOption(true, AdministrativeCopy.Enabled.text(locale)),
+                WarmSettingsFilterOption(false, AdministrativeCopy.Disabled.text(locale)),
+            ),
+            selected = enabledFilter,
+            onSelect = { enabledFilter = it },
+            modifier = Modifier.testTag("administrative-user-filters"),
+        )
         PageStateContent(state, locale, onRetry) { snapshot ->
-            snapshot.users.filter { user ->
+            val filteredUsers = snapshot.users.filter { user ->
                 (search.isBlank() || user.displayName.contains(search, true) || user.email.contains(search, true)) &&
                     (enabledFilter == null || user.enabled == enabledFilter)
-            }.forEach { user ->
-                ListItem(
-                    headlineContent = { Text(user.displayName) },
-                    supportingContent = { Text("${user.email}\n${user.role.copy().text(locale)}") },
-                    trailingContent = {
-                        Row {
-                            Text(if (user.enabled) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale))
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
-                        }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { onNavigate(AdministrativeSettingsRoute.UserEdit(user.id)) },
+            }
+            if (filteredUsers.isEmpty()) {
+                WarmSettingsEmptyState(
+                    title = AdministrativeCopy.Empty.text(locale),
+                    message = AdministrativeCopy.Search.text(locale),
                 )
-                AdministrativeDivider()
+            }
+            filteredUsers.forEach { user ->
+                AdministrativeNavigationRow(
+                    title = user.displayName,
+                    summary = listOf(
+                        user.email,
+                        user.role.copy().text(locale),
+                        if (user.enabled) AdministrativeCopy.Enabled.text(locale) else AdministrativeCopy.Disabled.text(locale),
+                    ).joinToString(" · "),
+                    onClick = { onNavigate(AdministrativeSettingsRoute.UserEdit(user.id)) },
+                    leading = WarmSettingsIcons.Users,
+                    testTag = "administrative-user-${user.id}",
+                )
             }
             if (snapshot.pageCount > 1) Text("${snapshot.page} / ${snapshot.pageCount} · ${snapshot.totalCount}", Modifier.padding(16.dp))
         }
@@ -293,11 +326,20 @@ fun UserEditScreen(
                 )
                 AdministrativeSection(AdministrativeCopy.AccountStatus, locale)
                 AdministrativeSwitchRow(AdministrativeCopy.EnableAccount.text(locale), enabled, { enabled = it })
-                TextButton(onClick = { showReset = true }, modifier = Modifier.fillMaxWidth()) { Text(AdministrativeCopy.ResetPassword.text(locale)) }
+                AdministrativeNavigationRow(
+                    title = AdministrativeCopy.ResetPassword.text(locale),
+                    summary = AdministrativeCopy.ResetAndRequireLogin.text(locale),
+                    onClick = { showReset = true },
+                )
             } else {
                 AdministrativeTextField(initialPassword, { initialPassword = it }, AdministrativeCopy.Password, locale, password = true)
             }
-            AdministrativeSwitchRow(AdministrativeCopy.System.text(locale), canManageSystem, { canManageSystem = it }, supporting = "canManageSystem")
+            AdministrativeSwitchRow(
+                AdministrativeCopy.ManageSystemPermission.text(locale),
+                canManageSystem,
+                { canManageSystem = it },
+                supporting = AdministrativeCopy.ManageSystemPermissionDescription.text(locale),
+            )
             AdministrativeSwitchRow(AdministrativeCopy.ImportTasks.text(locale), canViewManualImports, { canViewManualImports = it })
             if (current.user != null) DangerousAction(AdministrativeCopy.DeleteUser, locale, !state.mutationInFlight) { showDelete = true }
             if (showReset) ResetPasswordDialog(current.user?.id.orEmpty(), locale, onCommand) { showReset = false }
@@ -324,16 +366,18 @@ private fun ResetPasswordDialog(
         title = { Text(AdministrativeCopy.ResetPassword.text(locale)) },
         text = {
             Column {
-                SettingsTextField(
+                AdministrativeTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = AdministrativeCopy.NewPassword.text(locale),
+                    label = AdministrativeCopy.NewPassword,
+                    locale = locale,
                     password = true,
                 )
-                SettingsTextField(
+                AdministrativeTextField(
                     value = confirmation,
                     onValueChange = { confirmation = it },
-                    label = AdministrativeCopy.ConfirmPassword.text(locale),
+                    label = AdministrativeCopy.ConfirmPassword,
+                    locale = locale,
                     password = true,
                 )
             }
@@ -386,10 +430,10 @@ fun UserAccessScreen(
         },
     ) {
         PageStateContent(state, locale, onRetry) { current ->
-            ListItem(
-                headlineContent = { Text(current.user.displayName) },
-                supportingContent = { Text(current.user.email) },
-                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+            WarmSettingsIdentityHeader(
+                title = current.user.displayName,
+                subtitle = current.user.email,
+                avatar = { Icon(WarmSettingsIcons.Users, contentDescription = null) },
             )
             AdministrativeSwitchRow(AdministrativeCopy.AllLibraries.text(locale), allLibraries, { allLibraries = it })
             current.sources.forEach { source ->
@@ -397,7 +441,7 @@ fun UserAccessScreen(
                     source.name,
                     allLibraries || selected.contains(source.id),
                     { checked -> selected = if (checked) selected + source.id else selected - source.id },
-                    source.workCount?.let { "${source.path} · $it ${AdministrativeCopy.Works.text(locale)}" } ?: source.path,
+                    source.workCount?.let { "$it ${AdministrativeCopy.Works.text(locale)}" },
                     enabled = !allLibraries,
                 )
             }

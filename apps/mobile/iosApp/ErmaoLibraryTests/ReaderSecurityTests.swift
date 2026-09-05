@@ -300,7 +300,8 @@ final class ReaderSecurityTests: XCTestCase {
             try await applyNativePreferences()
             try await expectRendered("getComputedStyle(document.querySelector('p')).fontFamily.includes('\(nativeFamily)') && [...document.fonts].some(f=>f.family.includes('\(nativeFamily)') && f.status==='loaded')", "Bundled font must actually load: \(nativeFamily)")
         }
-        for (theme, rgb) in [(IosReaderTheme.day, "rgb(30, 41, 59)"), (.warm, "rgb(43, 33, 24)"), (.green, "rgb(32, 49, 38)"), (.black, "rgb(248, 250, 252)"), (.night, "rgb(226, 232, 240)")] {
+        for theme in IosReaderTheme.allCases {
+            let rgb = cssRGB(theme.colors.foreground)
             preferences.theme = theme
             try await applyNativePreferences()
             try await expectRendered("getComputedStyle(document.querySelector('p')).color === '\(rgb)'", "Theme must update the paragraph immediately: \(theme)")
@@ -308,8 +309,9 @@ final class ReaderSecurityTests: XCTestCase {
         preferences.themeMode = .system
         try await applyNativePreferences()
         let systemThemeNavigator = try XCTUnwrap(session.navigator)
-        for (appearance, rgb) in [(UIUserInterfaceStyle.dark, "rgb(226, 232, 240)"), (.light, "rgb(30, 41, 59)")] {
+        for (appearance, theme) in [(UIUserInterfaceStyle.dark, IosReaderTheme.night), (.light, .day)] {
             session.refreshSystemAppearance(appearance)
+            let rgb = cssRGB(theme.colors.foreground)
             try await expectRendered("getComputedStyle(document.querySelector('p')).color === '\(rgb)'", "System appearance must update the actual body color: \(appearance)")
             XCTAssertTrue(session.navigator === systemThemeNavigator)
             try await applyNativePreferences()
@@ -318,15 +320,16 @@ final class ReaderSecurityTests: XCTestCase {
         preferences = IosReaderPreferences()
         try await applyNativePreferences()
         XCTAssertEqual(session.preferences, IosReaderPreferences())
-        let defaultTypography = #"""
+        let defaultTextColor = cssRGB(IosReaderTheme.warm.colors.foreground)
+        let defaultTypography = """
         (() => {
             const style = getComputedStyle(document.querySelector('p'));
             return style.fontFamily.includes('Shuku Sans') &&
                 Math.abs(parseFloat(style.fontSize) - 18) < 0.7 &&
                 Math.abs(parseFloat(style.lineHeight) / parseFloat(style.fontSize) - 1.9) < 0.05 &&
-                style.color === 'rgb(43, 33, 24)';
+                style.color === '\(defaultTextColor)';
         })()
-        """#
+        """
         try await expectRendered(defaultTypography, "Reset must restore the actual default font, size, line height and Warm theme")
         var nonFinitePreferences = preferences
         nonFinitePreferences.lineHeight = .nan
@@ -1080,6 +1083,11 @@ private final class PhysicalReaderV5PositionPort: ErmaoShared.ReaderPositionServ
 private func canonicalJSONObjectData(_ json: String) throws -> Data {
     let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
     return try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+}
+
+private func cssRGB(_ hex: String) -> String {
+    let value = UInt64(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0
+    return "rgb(\((value >> 16) & 0xff), \((value >> 8) & 0xff), \(value & 0xff))"
 }
 
 @MainActor

@@ -1,8 +1,9 @@
 import type { ReaderTheme } from '@shuku/reader-core';
+import { visualTokens } from '../../generated/visual-tokens';
 
 export const DEFAULT_READER_THEME: ReaderTheme = 'warm';
 
-export const readerThemeSurfaces: Record<ReaderTheme, {
+type ReaderThemeSurface = {
   background: string;
   color: string;
   link: string;
@@ -10,52 +11,34 @@ export const readerThemeSurfaces: Record<ReaderTheme, {
   colorScheme: 'light' | 'dark';
   textClass: string;
   statusBarStyle: 'default' | 'black-translucent';
-}> = {
-  day: {
-    background: '#F7F7F4',
-    color: '#1E293B',
-    link: '#2563EB',
-    accent: '#B45309',
-    colorScheme: 'light',
-    textClass: 'text-slate-950',
-    statusBarStyle: 'black-translucent'
-  },
-  warm: {
-    background: '#FDF6EA',
-    color: '#2B2118',
-    link: '#B45309',
-    accent: '#B45309',
-    colorScheme: 'light',
-    textClass: 'text-slate-950',
-    statusBarStyle: 'black-translucent'
-  },
-  green: {
-    background: '#E8F0E3',
-    color: '#203126',
-    link: '#2F6B45',
-    accent: '#3F6F4E',
-    colorScheme: 'light',
-    textClass: 'text-slate-950',
-    statusBarStyle: 'black-translucent'
-  },
-  night: {
-    background: '#0F172A',
-    color: '#E2E8F0',
-    link: '#93C5FD',
-    accent: '#F59E0B',
-    colorScheme: 'dark',
-    textClass: 'text-slate-100',
-    statusBarStyle: 'black-translucent'
-  },
-  black: {
-    background: '#000000',
-    color: '#F8FAFC',
-    link: '#93C5FD',
-    accent: '#F59E0B',
-    colorScheme: 'dark',
-    textClass: 'text-slate-100',
-    statusBarStyle: 'black-translucent'
-  }
+};
+
+const readerThemeBehavior: Record<ReaderTheme, Pick<ReaderThemeSurface, 'textClass' | 'statusBarStyle'>> = {
+  day: { textClass: 'text-slate-950', statusBarStyle: 'black-translucent' },
+  warm: { textClass: 'text-slate-950', statusBarStyle: 'black-translucent' },
+  green: { textClass: 'text-slate-950', statusBarStyle: 'black-translucent' },
+  night: { textClass: 'text-slate-100', statusBarStyle: 'black-translucent' },
+  black: { textClass: 'text-slate-100', statusBarStyle: 'black-translucent' }
+};
+
+function readerSurface(theme: ReaderTheme): ReaderThemeSurface {
+  const palette = visualTokens.reader.themes[theme];
+  return {
+    background: palette.canvas,
+    color: palette.textPrimary,
+    link: palette.link,
+    accent: palette.accent,
+    colorScheme: palette.colorScheme,
+    ...readerThemeBehavior[theme]
+  };
+}
+
+export const readerThemeSurfaces: Record<ReaderTheme, ReaderThemeSurface> = {
+  day: readerSurface('day'),
+  warm: readerSurface('warm'),
+  green: readerSurface('green'),
+  night: readerSurface('night'),
+  black: readerSurface('black')
 };
 
 export function isDarkReaderTheme(theme: ReaderTheme) {
