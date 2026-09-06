@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+100k 数据准备完成（不是性能通过）：`local-load/corpus-100k-20260906-083050/library/` 含40000 EPUB、30000 PDF、30000 CBZ，142061309 bytes、100000唯一hash。全部按既有CLI执行大小/hash、ZIP CRC/必要成员和pypdf reopen，`strict=False`恢复警告保留，不称严格格式合规或客户端阅读通过。manifest SHA-256由主复核为 `3289b16e5f3af6eafcf75156573e88844996dfc45807778d0eb4d86593fa5c19`。`local-load/prepare-100k-supervision-20260906-083049/summary.json`、`validation-boundaries.json`、`process-exit-check.json` 记录16:30:49–16:47:30、退出0、498次采样无资源触线、源码前后不变；最低可用RAM8.89GiB/磁盘52.64GiB，过程树采样RSS峰值191.42MiB。
+
+下一项规模准备已从同一工具启动300k：`local-load/prepare-300k-supervision-20260906-085353/execution.json` 与 `resources.jsonl` 是恢复入口，监督PID130612；不能凭记录文件假定仍运行，恢复必须核查进程/持有句柄。未启动100k/300k性能测量；安静测量窗口须与数据生成、构建和其他功能运行分离。移动完整回归正在 `preflight-mobile/mobile-full-227e09f1-20260906/` 执行：已实得shared429/Android unit218全通过且零skip、lint零问题，仪器套件尚待最终结果。
+
 当前增量：`dc8381f7` native options 与 `227e09f1` 共享 AUDIO bootstrap 修复已推送。Android 第四次全新库真实 MP3 在线用例 **PASS，1 test / 13.106s**：`android-live/android-1788684078319/`。5秒确认3897ms/revision2，10秒确认7906ms/revision3，暂停9930ms/revision4，关闭留下 Stop pending，重开恢复9930ms并确认到revision7。`instrumentation.log`、`online-evidence.log`、`apk-hashes.json`、`mobile-tested.patch` 与 `post-run-verification.json` 关联源码/开发包/结果；7份源文件hash不变、API 5xx=0、一次性凭据已消费、测试服务和reverse已退出。仅覆盖短时单轨 MP3、真实 Media3/HTTP/SQLite/ACK/重开，不替代后台/30分钟/逐编码/跨设备/正式 APK。
 
 第三次运行 `android-live/android-1788683629933/` 保留 FAIL：已通过bootstrap与Range媒体请求，服务端与设备均确认revision2，但新测试按 Locator 字符串顺序比较，拒绝后端按键排序后的等价 JSON；620ms 的捕获→接收延迟与 Stop 后pending留在 `position-diagnostic.json`。测试改用完整 JSON 对象相等及完整typed presentation相等，身份、捕获时间、revision、pending及5秒时限不变，未更改产品序列化；第四次通过验证了修正。共享真实捕获的 AUDIO 响应先RED后GREEN，20项含负例的host检查通过，`preflight-mobile/bootstrap-format-20260906/` 保留原始响应hash与仅替换随机身份的映射；主增量构建/复验见 `50-bootstrap-format-device-build.log`、`51-online-json-value-observation-build.log`。
