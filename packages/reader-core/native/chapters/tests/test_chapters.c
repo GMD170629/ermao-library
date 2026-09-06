@@ -61,8 +61,13 @@ static void test_txt_leading_sequence_and_chinese_digits(void) {
         "Chapter 1\n\nChapter 2\n\nChapter 3\n\n"
         "Chapter 1\nbody one\nChapter 2\nbody two\nChapter 3\nbody three";
     const char chinese[] = "第1章\n一\n第１２章：二\n二\n";
+    const char spaced_chinese[] =
+        "序言\n第 1 章 书库星舰\n正文\n第\t２\t节\t下一节\n内容";
+    const char invalid_spaced_chinese[] =
+        "第 章\n正文\n第 1 2 章\n正文\n第 1 题\n正文";
     ErmaoChapterResult *result = NULL;
     const ErmaoChapterEntry *entry;
+    const ErmaoChapterEntry *second_entry;
     CHECK(ermao_chapters_parse_txt((const uint8_t *)toc_and_book,
                                    strlen(toc_and_book), &result) == ERMAO_CHAPTER_OK);
     CHECK(result != NULL && ermao_chapters_count(result) == 3U);
@@ -73,6 +78,31 @@ static void test_txt_leading_sequence_and_chinese_digits(void) {
     CHECK(ermao_chapters_parse_txt((const uint8_t *)chinese, strlen(chinese), &result) ==
           ERMAO_CHAPTER_OK);
     CHECK(result != NULL && ermao_chapters_count(result) == 2U);
+    ermao_chapters_free(result);
+    result = NULL;
+    CHECK(ermao_chapters_parse_txt((const uint8_t *)spaced_chinese,
+                                   strlen(spaced_chinese), &result) == ERMAO_CHAPTER_OK);
+    CHECK(result != NULL && ermao_chapters_count(result) == 2U);
+    CHECK(result != NULL && ermao_chapters_navigable_count(result) == 2U);
+    CHECK(result != NULL && ermao_chapters_text_length(result) == strlen(spaced_chinese));
+    CHECK(result != NULL && memcmp(ermao_chapters_text(result), spaced_chinese,
+                                   strlen(spaced_chinese)) == 0);
+    entry = ermao_chapters_entry(result, 0U);
+    second_entry = ermao_chapters_entry(result, 1U);
+    CHECK(entry != NULL && strcmp(entry->title, "第 1 章 书库星舰") == 0);
+    CHECK(entry != NULL && entry->source_start == strlen("序言\n"));
+    CHECK(entry != NULL && entry->source_end == strlen("序言\n第 1 章 书库星舰\n正文\n"));
+    CHECK(entry != NULL && entry->content_start == strlen("序言\n第 1 章 书库星舰\n"));
+    CHECK(second_entry != NULL && strcmp(second_entry->title, "第\t２\t节\t下一节") == 0);
+    CHECK(second_entry != NULL && second_entry->source_start ==
+          strlen("序言\n第 1 章 书库星舰\n正文\n"));
+    CHECK(second_entry != NULL && second_entry->content_start ==
+          strlen("序言\n第 1 章 书库星舰\n正文\n第\t２\t节\t下一节\n"));
+    ermao_chapters_free(result);
+    result = NULL;
+    CHECK(ermao_chapters_parse_txt((const uint8_t *)invalid_spaced_chinese,
+                                   strlen(invalid_spaced_chinese), &result) == ERMAO_CHAPTER_OK);
+    CHECK(result != NULL && ermao_chapters_count(result) == 0U);
     ermao_chapters_free(result);
 }
 

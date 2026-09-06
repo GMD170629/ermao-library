@@ -446,8 +446,13 @@ static bool chinese_numeral(const char *value, size_t length, size_t *used) {
     return false;
 }
 
+static bool chinese_heading_space(unsigned char value) {
+    return value == ' ' || value == '\t';
+}
+
 static bool chinese_suffix_start(const char *value, size_t length, size_t at) {
-    if (at >= length || value[at] == ' ' || value[at] == '\t' || value[at] == ':') {
+    if (at >= length || chinese_heading_space((unsigned char)value[at]) ||
+        value[at] == ':') {
         return true;
     }
     if (at + 3U <= length && (unsigned char)value[at] == 0xE3U &&
@@ -470,12 +475,18 @@ static bool chinese_heading(const char *value, size_t length, size_t *after_numb
     if (length < 6U || memcmp(value, "第", 3U) != 0) {
         return false;
     }
+    while (at < length && chinese_heading_space((unsigned char)value[at])) {
+        ++at;
+    }
     while (at < length && chinese_numeral(value + at, length - at, &used)) {
         at += used;
         found_number = true;
     }
     if (!found_number) {
         return false;
+    }
+    while (at < length && chinese_heading_space((unsigned char)value[at])) {
+        ++at;
     }
     for (i = 0U; i < sizeof(endings) / sizeof(endings[0]); ++i) {
         ending_size = strlen(endings[i]);
