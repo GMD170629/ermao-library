@@ -4,6 +4,8 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+POS-03登录阶段的测试预期修正依据：`58a8923a/process-recovery/r1788705072683-w0/`实际确认6084ms/r3后强杀，重启前后的完整IDB相等；cookie元数据证明本次重启未保留`shuku_session`，首次GET401，正常UI同账号登录后两张进度store为空。已核对`app-shell.tsx`登录页401→`clearPrivatePwaStorage`→Reader `clearAll`的现有隐私清理路径。原“登录后缓存不变”不符合此既有契约，改为检查两store清空；保留原失败、强杀前后完整IDB相等、源pending为0、fresh GET完整原ACK及真实引擎恢复≤2秒的全部有效保护。只修测试预期，不改认证/清理业务；不能据此宣称未确认位置或免重登恢复。命令16541已结束且清理成功，修正后typecheck/文件eslint PASS，真实恢复仍待重跑。
+
 POS-03实际强杀已执行但完整用例尚未通过：`a9bb694b/process-recovery/r1788704683244-w0/`及`r1788704727087-w1/`，Chrome两视口分别确认5668ms/r3、5857ms/r3后直接SIGKILL，旧root退出且同profile新root启动，完整IDB记录前后一致；随后首次GET均401，故未进入引擎恢复，原两次FAIL保留。两context、root、专用profile及fixture清理成功，55244已结束。已核对现有会话cookie带expires，但现场不证明401唯一根因；仅增加不含值的cookie元数据观察，并复用原真实UI登录同账号后继续，仍要求登录前后完整IDB、独立GET及实际播放位置不丢失。不得注入会话/进度，也不宣称免重登恢复。该最小修正服务POS-03的实际401阻断，typecheck和文件eslint通过；原场景实际完成后停止扩展。
 
 POS-03针对性测试`92b240ca`已整合为`ef3dc979`，仅复用原setup、音频打开与只读IDB观察，并增加专用持久Chrome的进程归属/强杀/重启验证；完整typecheck/lint通过。首跑`artifacts/releases/1.0/ef3dc979/process-recovery-and-adjacent/r1788704462524-w0/`在CDP命令行读取阶段因缺`--enable-automation`失败，尚未实际强杀；browser-observations和shutdown保留，context关闭、专用profile移除、fixture退出通过。原live及POS-04相邻2 PASS，完整命令如实为1 FAIL+2 PASS。TEST-12只补该参数后重跑原场景，保留所有安全守卫，不改业务或扩框架；执行53319已结束。

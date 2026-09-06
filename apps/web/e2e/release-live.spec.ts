@@ -827,7 +827,11 @@ test('release live paused confirmed MP3 survives dedicated Chrome process termin
     // Preserve the 401 and use the same real UI login as fresh setup.
     if (restartProgress.status === 401) {
       await loginLiveAccount(reopened, webOrigin, manifest.email, password);
-      expect(await storedProgress(reopened)).toEqual(confirmed);
+      // The existing login-page 401 policy clears private reader stores.
+      // Durability was checked before login; confirmed server recovery below
+      // must still retain the exact snapshot and engine position after cleanup.
+      await expect.poll(() => storedProgress(reopened)).toEqual({ pending: [], exact: [] });
+      evidence.afterLogin = await storedProgress(reopened);
     } else {
       expect(parseReaderV5ProgressSnapshot(responseData(restartProgress, progressPath).progressSnapshot))
         .toEqual(ack.currentSnapshot);
