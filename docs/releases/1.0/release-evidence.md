@@ -1,5 +1,13 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 AUDIO-13已关闭（源码582c81fc）：新库同一M4B三章原件、独立开发APK b5fce9966004f299d27350c86447238fe77e8e2981db0672b6b2209b7326535f，普通Playing9705ms→横屏Playing12643ms→竖屏仍Playing且播放器页保留；明确暂停15195ms后横/竖屏均state2、位置15195不变。普通账户安全页注销相邻：唯一测试媒体会话由系统媒体键开始播放，确认注销前真实Playing25054ms，确认后登录页且state0/position0。仅清除releasecheck合成账户私有数据，原App元数据不变。
+
+新包原场景证据`artifacts/releases/1.0/582c81fc/audio13-rotation-regression-20260907/`：rotation-controlled-*、rotation-paused-*、logout-confirm-controlled-before/logout-confirmed-*及normal-ui-observations关联原始XML/MediaSession/独立GET。最初27秒旋转到自然EOF、另一次中段准备及首次注销确认因已EOF被guard阻止，不计为决定性通过且保留；cmd media_session dispatch的packageName为空是设备命令自身失败，后用标准input媒体键在仅自有会话下执行，未调用生产runtime/API伪造位置。已安装APK实测hash与构建产物一致，开发Debug签名/可调试/独立包，不是正式APK；正式包仍暂缓。
+
+主审查、原失败、Android host/lint、独立边界复核及新包实际原场景/暂停/注销相邻齐备，没有新增测试基础设施或生产诊断。932项源码/样本/实际APK校验全部匹配，25次PUT200；10个401均在正常重新登录之前，之后无4xx/5xx。fixture exit0/cleanupErrors空、18084/3105释放、Web配置恢复、旋转free/portrait0恢复、自有reverse与临时XML移除、独立包强停及原工作区15项改动保留见cleanup-verification。停止本缺陷工具完善。
+
+当前恢复点：无活动fixture/子代理，设备已保留新开发包并退出专用账户。POS-09章节导航后的冷恢复已有子项通过，但真正携带显式启动参数及其他引擎仍按矩阵继续；下一步核对既有普通目录入口可达性并实测，或继续POS-10服务重启/未覆盖进度异常。ENV-11/12不可绕行，iOS/容器条件及正式产物暂缓独立保留。仍在R2，未冻结RC，五组最终门禁与正式发布均未完成。
+
 AUDIO-13候选自动与独立核验：MainShell复用现有LocalActivity及平台isChangingConfigurations，effect绑定contentKey/activity/runtime；仅配置重建豁免stop，null Activity仍停止，注销/清理显式stop保持。Android host222项无失败/跳过及lint通过（audio13-host-lint-configured.log，35s）；首轮因PATH未包含已有Python导致chapterCore host构建9009，原日志保留，补入现有venv后通过，没有变更工具。独立只读审查确认owner和安全边界，无需新增通用生命周期helper。真实新包旋转/注销相邻尚待执行，AUDIO-13保持待回归。
 
 2026-09-07 POS-09执行与AUDIO-13原失败：源码58cff471/独立开发APK32d16edc，新库M4B（带0/10/20s三章），普通播放器章节表选A10000，播放5秒后服务器完整B14978/r7（独立MediaSession采样14979），强停独立包pidof退出1，冷启首页继续首个Playing15000/959ms，误差22ms。准备断言最初要求两个独立采样毫秒完全相等而失败，未执行冷停；原GET及说明保留，恢复始终以已确认完整Locator14978为基准，2秒门槛未变。此为播放器内章节导航后的冷恢复子项，不冒充带章节参数的shell启动。
