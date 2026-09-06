@@ -162,7 +162,7 @@ Web、Android、iOS 均覆盖局域网 HTTP（在产品允许的配置下）、�
 | 可重排电子书 | EPUB、MOBI、AZW、AZW3、PRC、FB2、TXT | Web、Android、iOS |
 | PDF | PDF（不可因本次需求未单列而遗漏） | Web、Android、iOS |
 | 漫画 | CBZ、ZIP、CBR、RAR、IMAGE_DIR 图片目录 | Web、Android、iOS |
-| 有声书 | AUDIO 单文件、AUDIOBOOK_DIR 多轨目录；各已承诺容器与编码组合 | Web、Android、iOS |
+| 有声书 | AUDIO 单文件、AUDIOBOOK_DIR 多轨目录；本轮仅M4B、MP3、AAC、M4A（DEC-09），准确记录实际容器/编码 | Chrome、Android、iOS |
 
 这是应验收清单，不表示当前全部通过。旧的接收兼容枚举不自动扩大为新安装的新功能要求；但例如 M4B/M4A/MP3 源文件仍按 AUDIO 容器/编码矩阵验收，不能因存储枚举名变化漏测。
 
