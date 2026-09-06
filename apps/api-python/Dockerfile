@@ -19,16 +19,20 @@ FROM python:3.11.15-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1 \
   ERMAO_MOBI_CORE_LIBRARY=/usr/local/lib/libermao_mobi_core.so \
-  ERMAO_CHAPTER_CORE_LIBRARY=/usr/local/lib/libermao_chapters.so
+  ERMAO_CHAPTER_CORE_LIBRARY=/usr/local/lib/libermao_chapters.so \
+  PATH=/opt/shuku-python/bin:$PATH
 
 WORKDIR /app/apps/api-python
+COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg unar ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && ffprobe -version
 
 COPY apps/api-python/pyproject.toml apps/api-python/uv.lock ./
 COPY apps/api-python/app ./app
+COPY scripts/install-python-runtime.sh /app/scripts/install-python-runtime.sh
 COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so
 COPY --from=mobi-core-builder /build/chapters/libermao_chapters.so /usr/local/lib/libermao_chapters.so
 COPY --from=mobi-core-builder /src/chapters /usr/share/shuku/source/chapters
@@ -36,7 +40,7 @@ COPY --from=mobi-core-builder /src/mobi-core/LICENSE /usr/share/licenses/shuku-m
 COPY --from=mobi-core-builder /src/mobi-core/UPSTREAM.md /usr/share/licenses/shuku-mobi-core/UPSTREAM.md
 COPY --from=mobi-core-builder /src/mobi-core /usr/share/shuku/source/mobi-core
 
-RUN pip install --no-cache-dir . \
+RUN UV_NO_CACHE=1 sh /app/scripts/install-python-runtime.sh /app/apps/api-python /opt/shuku-python \
   && python -m compileall -q app
 
 EXPOSE 8000

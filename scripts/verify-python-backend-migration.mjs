@@ -126,7 +126,10 @@ expectIncludes('scripts/dev-test.sh', 'uv run --extra dev python -m app.worker.m
 expectIncludes('scripts/dev-test.sh', 'uv run python -m app.bootstrap.prestart');
 expectNotIncludes('scripts/dev-test.sh', 'pnpm --filter @shuku/scan-worker dev');
 expectIncludes('apps/web/Dockerfile.prod', 'scripts/start-unified-app.sh');
-expectIncludes('apps/web/Dockerfile.prod', 'pip install --no-cache-dir ./apps/api-python');
+expectIncludes('apps/web/Dockerfile.prod', 'sh ./scripts/install-python-runtime.sh /app/apps/api-python /opt/shuku-python');
+expectIncludes('apps/api-python/Dockerfile', 'sh /app/scripts/install-python-runtime.sh /app/apps/api-python /opt/shuku-python');
+expectIncludes('scripts/install-python-runtime.sh', '--locked --no-dev --no-emit-project');
+expectIncludes('scripts/install-python-runtime.sh', '--require-hashes');
 expectIncludes('apps/web/Dockerfile.prod', 'apps/api-python/app');
 expectNotIncludes('apps/web/Dockerfile.prod', 'libmobi-tools');
 expectNotIncludes('apps/web/Dockerfile.prod', 'calibre');

@@ -43,12 +43,14 @@ ENV NODE_ENV=production \
   PATH=/opt/shuku-python/bin:$PATH
 
 COPY --from=deps /usr/local/bin/node /usr/local/bin/node
+COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /usr/local/bin/uv
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates libstdc++6 unar \
+  && apt-get install -y --no-install-recommends openssl ca-certificates libstdc++6 unar ffmpeg \
   && rm -rf /var/lib/apt/lists/* \
   && node --version \
-  && python --version
+  && python --version \
+  && ffprobe -version
 
 COPY --from=builder /app/scripts/start-unified-app.sh ./scripts/start-unified-app.sh
 COPY --from=builder /app/scripts/unified-http-gateway.mjs ./scripts/unified-http-gateway.mjs
@@ -57,14 +59,15 @@ COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/api-python/app ./apps/api-python/app
 COPY --from=builder /app/apps/api-python/pyproject.toml ./apps/api-python/pyproject.toml
+COPY --from=builder /app/apps/api-python/uv.lock ./apps/api-python/uv.lock
+COPY scripts/install-python-runtime.sh ./scripts/install-python-runtime.sh
 COPY --from=mobi-core-builder /build/mobi-core/libermao_mobi_core.so /usr/local/lib/libermao_mobi_core.so
 COPY --from=mobi-core-builder /build/chapters/libermao_chapters.so /usr/local/lib/libermao_chapters.so
 COPY --from=mobi-core-builder /src/chapters /usr/share/shuku/source/chapters
 COPY --from=mobi-core-builder /src/mobi-core/LICENSE /usr/share/licenses/shuku-mobi-core/LICENSE
 COPY --from=mobi-core-builder /src/mobi-core/UPSTREAM.md /usr/share/licenses/shuku-mobi-core/UPSTREAM.md
 COPY --from=mobi-core-builder /src/mobi-core /usr/share/shuku/source/mobi-core
-RUN python -m venv /opt/shuku-python \
-  && /opt/shuku-python/bin/pip install --no-cache-dir ./apps/api-python \
+RUN UV_NO_CACHE=1 sh ./scripts/install-python-runtime.sh /app/apps/api-python /opt/shuku-python \
   && /opt/shuku-python/bin/python -m compileall -q ./apps/api-python/app \
   && rm -rf ./apps/api-python/build ./apps/api-python/*.egg-info \
   && chmod +x ./scripts/start-unified-app.sh \
