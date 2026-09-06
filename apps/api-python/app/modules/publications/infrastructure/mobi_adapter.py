@@ -589,11 +589,16 @@ class MobiPublicationAdapter(PublicationAdapter):
             content = core.read_resource(snapshot.book, descriptor)
             if is_markup:
                 # MOBI's native decoder returns authored HTML in memory. Run
-                # the same XML preparation/sanitization projection used by
-                # EPUB/FB2 before publication; the verified MOBI original is
-                # never rewritten or persisted.
+                # the shared preparation/sanitization projection before
+                # publication, selecting HTML explicitly rather than retrying
+                # failed XML. SVG remains strict XML. The original is unchanged.
                 try:
-                    content = sanitize_markup_resource(content)
+                    content = sanitize_markup_resource(
+                        content,
+                        syntax="html"
+                        if _base_media_type(descriptor.media_type) == "text/html"
+                        else "xml",
+                    )
                 except PublicationMarkupError as error:
                     if safe_href in snapshot.reading_order_hrefs:
                         raise publication_integrity_failure(

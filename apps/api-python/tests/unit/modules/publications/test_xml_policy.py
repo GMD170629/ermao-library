@@ -15,8 +15,12 @@ from app.contracts.reader_safety_policy_generated import (
 )
 from app.modules.publications.infrastructure import xml_policy
 from app.modules.publications.infrastructure.xml_policy import (
+    MarkupPreparationSession,
+    MarkupSourceRange,
+    XmlPolicyExpansionLimitError,
     XmlPolicyPreparationError,
     parse_xml,
+    prepare_xml,
 )
 
 
@@ -186,3 +190,140 @@ def test_declared_legacy_encoding_is_preserved_for_fb2_style_xml() -> None:
     _projection, root = parse_xml(source, expansion_limit_bytes=1024)
 
     assert "Привет" == "".join(root.itertext())
+
+
+def test_syntax_ranges_preserve_literal_declarations_and_share_the_entity_owner() -> (
+    None
+):
+    literal = '<!DOCTYPE html [<!ENTITY e "wrong">]> &e; &copy;'
+    declaration = '<!DOCTYPE html [<!ENTITY e "Readable">]>'
+    source = f"<xmp>{literal}</xmp>{declaration}<p>&e;</p><xmp>&e;</xmp>"
+
+    def prepare(session: MarkupPreparationSession) -> None:
+        assert session.source == source
+        session.literal(MarkupSourceRange(len("<xmp>"), len("<xmp>") + len(literal)))
+        start = source.index(declaration)
+        end = session.doctype_end(start)
+        assert end == start + len(declaration)
+        session.literal(
+            MarkupSourceRange(source.rindex("&e;"), source.rindex("&e;") + len("&e;"))
+        )
+
+    projection = prepare_xml(
+        source.encode(), expansion_limit_bytes=1024, prepare_markup=prepare
+    )
+    assert projection.source == source
+    assert projection.doctype_count == 1
+    assert (
+        projection.parser_source == f"<xmp>{literal}</xmp><p>Readable</p><xmp>&e;</xmp>"
+    )
+
+
+def test_syntax_literals_and_entity_expansion_use_one_document_budget() -> None:
+    declaration = '<!DOCTYPE html [<!ENTITY e "' + "E" * 80 + '">]>'
+    source = (
+        declaration
+        + "<xmp>"
+        + "A" * 60
+        + "</xmp><p>&e;&e;&e;</p><xmp>"
+        + "B" * 60
+        + "</xmp>"
+    )
+
+    def prepare(session: MarkupPreparationSession) -> None:
+        assert session.doctype_end(0) == len(declaration)
+        for text in ("A" * 60, "B" * 60):
+            session.literal(
+                MarkupSourceRange(source.index(text), source.index(text) + len(text))
+            )
+
+    projection = prepare_xml(
+        source.encode(), expansion_limit_bytes=len(source), prepare_markup=prepare
+    )
+    assert projection.parser_source == (
+        "<xmp>"
+        + "A" * 60
+        + "</xmp><p>"
+        + "E" * 80
+        + "&amp;e;&amp;e;</p><xmp>"
+        + "B" * 60
+        + "</xmp>"
+    )
+    assert len(projection.parser_source.encode()) <= len(source)
+
+
+def test_syntax_literal_xml_comment_does_not_hide_following_ordinary_entities() -> None:
+    source = "<xmp><!-- &copy;</xmp><p>&copy;</p><!-- end -->"
+
+    def prepare(session: MarkupPreparationSession) -> None:
+        session.literal(MarkupSourceRange(len("<xmp>"), source.index("</xmp>")))
+
+    projection = prepare_xml(
+        source.encode(), expansion_limit_bytes=1024, prepare_markup=prepare
+    )
+    assert projection.parser_source == "<xmp><!-- &copy;</xmp><p>©</p><!-- end -->"
+
+
+@pytest.mark.parametrize("budget_delta", [0, -1])
+def test_literal_bytes_obey_the_existing_exact_output_budget(budget_delta: int) -> None:
+    content = b"<xmp>&unknown;</xmp>"
+
+    def prepare(session: MarkupPreparationSession) -> None:
+        session.literal(MarkupSourceRange(len("<xmp>"), session.source.index("</xmp>")))
+
+    if budget_delta < 0:
+        with pytest.raises(XmlPolicyExpansionLimitError):
+            prepare_xml(
+                content,
+                expansion_limit_bytes=len(content) + budget_delta,
+                prepare_markup=prepare,
+            )
+    else:
+        projection = prepare_xml(
+            content, expansion_limit_bytes=len(content), prepare_markup=prepare
+        )
+        assert projection.parser_source.encode() == content
+
+
+@pytest.mark.parametrize(
+    "ranges",
+    [
+        (MarkupSourceRange(0, 50),),
+        (MarkupSourceRange(0, 5), MarkupSourceRange(2, 6)),
+    ],
+)
+def test_invalid_sdk_ranges_are_implementation_failures(
+    ranges: tuple[MarkupSourceRange, ...],
+) -> None:
+    def prepare(session: MarkupPreparationSession) -> None:
+        for span in ranges:
+            session.literal(span)
+
+    with pytest.raises(XmlPolicyPreparationError):
+        prepare_xml(
+            b"<p>readable</p>",
+            expansion_limit_bytes=1024,
+            prepare_markup=prepare,
+        )
+
+
+def test_xml_late_and_duplicate_declarations_keep_global_replacement() -> None:
+    source = (
+        b'<!DOCTYPE root [<!ENTITY e "old">]><root a="&e;">&e;</root>'
+        b'<!DOCTYPE root [<!ENTITY e "last">]>'
+    )
+    projection, root = parse_xml(source, expansion_limit_bytes=1024)
+    assert root.attrib == {"a": "last"}
+    assert root.text == "last"
+    assert projection.doctype_count == 2
+
+
+def test_sdk_cannot_register_a_doctype_overlapping_already_reported_literal() -> None:
+    source = "<xmp><!DOCTYPE html></xmp>"
+
+    def prepare(session: MarkupPreparationSession) -> None:
+        session.literal(MarkupSourceRange(len("<xmp>"), source.index("</xmp>")))
+        session.doctype_end(len("<xmp>"))
+
+    with pytest.raises(XmlPolicyPreparationError, match="overlap"):
+        prepare_xml(source.encode(), expansion_limit_bytes=1024, prepare_markup=prepare)

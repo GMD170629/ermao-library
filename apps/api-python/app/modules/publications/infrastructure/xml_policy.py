@@ -12,6 +12,7 @@ from __future__ import annotations
 import codecs
 import html
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from xml.etree import ElementTree
 
@@ -46,6 +47,25 @@ class XmlPolicyProjection:
     source: str
     parser_source: str
     doctype_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class MarkupSourceRange:
+    """Half-open offsets in the owner's decoded, unnormalized source."""
+
+    start: int
+    end: int
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedMarkupReference:
+    """One original reference, prepared once by the document owner."""
+
+    end: int
+    parser_text: str
+
+
+MarkupPreparer = Callable[["MarkupPreparationSession"], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +180,37 @@ def _skip_ignored_construct(source: str, index: int) -> int | None:
     return index
 
 
+def _doctype_end(source: str, start: int) -> int | None:
+    """Find one declaration's end using the shared quote/subset scanner."""
+    match = _DOCTYPE_OPEN.match(source, start)
+    if match is None:
+        return None
+    cursor = match.end()
+    quote: str | None = None
+    subset_depth = 0
+    while cursor < len(source):
+        character = source[cursor]
+        if quote is None and source.startswith(("<!--", "<![CDATA[", "<?"), cursor):
+            skipped = _skip_ignored_construct(source, cursor)
+            if skipped is None:
+                return None
+            cursor = skipped
+            continue
+        if quote is not None:
+            if character == quote:
+                quote = None
+        elif character in {"'", '"'}:
+            quote = character
+        elif character == "[":
+            subset_depth += 1
+        elif character == "]" and subset_depth:
+            subset_depth -= 1
+        elif character == ">" and subset_depth == 0:
+            return cursor + 1
+        cursor += 1
+    return None
+
+
 def _scan_doctypes(source: str) -> tuple[_Doctype, ...]:
     """Find well-formed DOCTYPE declarations outside ignored XML constructs."""
 
@@ -175,34 +226,7 @@ def _scan_doctypes(source: str) -> tuple[_Doctype, ...]:
                 continue
             match = _DOCTYPE_OPEN.match(source, index)
             if match is not None:
-                cursor = match.end()
-                quote: str | None = None
-                subset_depth = 0
-                doctype_end: int | None = None
-                while cursor < len(source):
-                    character = source[cursor]
-                    if quote is None and source.startswith(
-                        ("<!--", "<![CDATA[", "<?"), cursor
-                    ):
-                        skipped = _skip_ignored_construct(source, cursor)
-                        if skipped is None:
-                            cursor = len(source)
-                            break
-                        cursor = skipped
-                        continue
-                    if quote is not None:
-                        if character == quote:
-                            quote = None
-                    elif character in {"'", '"'}:
-                        quote = character
-                    elif character == "[":
-                        subset_depth += 1
-                    elif character == "]" and subset_depth:
-                        subset_depth -= 1
-                    elif character == ">" and subset_depth == 0:
-                        doctype_end = cursor + 1
-                        break
-                    cursor += 1
+                doctype_end = _doctype_end(source, index)
                 if doctype_end is None:
                     # Leave an incomplete declaration for ElementTree to reject
                     # as malformed XML rather than guessing at its boundary.
@@ -358,12 +382,24 @@ def _named_entity_values() -> dict[str, str]:
     return values
 
 
-def _replace_references(
+@dataclass(frozen=True, slots=True)
+class _ReferenceOperations:
+    output: list[str]
+    append_original: Callable[[str], None]
+    consume_source: Callable[[str], None]
+    replace_reference: Callable[[str], None]
+    replace_nonliteral: Callable[[int, int], None]
+    add_declarations: Callable[[dict[str, _EntityDeclaration]], None]
+    project_attribute: Callable[[int, str], None]
+    remaining_bytes: Callable[[], int]
+
+
+def _reference_operations(
     source: str,
     declarations: dict[str, _EntityDeclaration],
     *,
     expansion_limit_bytes: int,
-) -> str:
+) -> _ReferenceOperations:
     named_values = _named_entity_values()
     memo: dict[str, str] = {}
     memo_escaped_sizes: dict[str, int] = {}
@@ -611,28 +647,183 @@ def _replace_references(
             end = match.end()
         append_original(segment[end:])
 
-    previous_end = 0
-    for ignored in re.finditer(
-        r"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>", source, re.DOTALL
-    ):
-        replace_segment(source[previous_end : ignored.start()])
-        append_original(ignored.group(0))
-        previous_end = ignored.end()
-    replace_segment(source[previous_end:])
-    return "".join(output)
+    ignored_constructs = re.compile(
+        r"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>", re.DOTALL
+    )
+
+    def replace_nonliteral(start: int, end: int) -> None:
+        previous = start
+        # Never let an XML-looking construct in HTML raw text consume the
+        # following ordinary markup. The SDK has already resolved its context.
+        for ignored in ignored_constructs.finditer(source, start, end):
+            replace_segment(source[previous : ignored.start()])
+            append_original(ignored.group(0))
+            previous = ignored.end()
+        replace_segment(source[previous:end])
+
+    def add_declarations(fresh: dict[str, _EntityDeclaration]) -> None:
+        nonlocal active_materialized_bytes
+        # SDK declaration hooks occur between completed references. Invalidate
+        # cached resolutions, retaining the same output/remaining-source ledger.
+        declarations.update(fresh)
+        memo.clear()
+        memo_escaped_sizes.clear()
+        active_materialized_bytes = 0
+
+    def project_attribute(output_start: int, quoted_value: str) -> None:
+        nonlocal output_bytes
+        # The source value was consumed once while its original references were
+        # prepared. Charge its SDK serialization in place, never expand it again
+        # or refill the document budget. The normal output guard still applies.
+        output_bytes -= sum(len(part.encode("utf-8")) for part in output[output_start:])
+        del output[output_start:]
+        append_output(quoted_value)
+
+    return _ReferenceOperations(
+        output=output,
+        append_original=append_original,
+        consume_source=consume_source,
+        replace_reference=replace_segment,
+        replace_nonliteral=replace_nonliteral,
+        add_declarations=add_declarations,
+        project_attribute=project_attribute,
+        remaining_bytes=lambda: source_bytes_remaining,
+    )
 
 
-def prepare_xml(content: bytes, *, expansion_limit_bytes: int) -> XmlPolicyProjection:
+def _replace_references(
+    source: str,
+    declarations: dict[str, _EntityDeclaration],
+    *,
+    expansion_limit_bytes: int,
+) -> str:
+    operations = _reference_operations(
+        source, declarations, expansion_limit_bytes=expansion_limit_bytes
+    )
+    operations.replace_nonliteral(0, len(source))
+    return "".join(operations.output)
+
+
+class MarkupPreparationSession:
+    """One causal HTML document using the XML owner's resolver and byte ledger.
+
+    The SDK reports actual syntax in original coordinates. XML callers retain
+    their global declaration pass; HTML declarations affect subsequent original
+    references, without replaying earlier parser context or decoded values.
+    """
+
+    def __init__(self, source: str, *, expansion_limit_bytes: int) -> None:
+        self.source = source
+        self._operations = _reference_operations(
+            source, {}, expansion_limit_bytes=expansion_limit_bytes
+        )
+        self._cursor = 0
+        self._doctype_count = 0
+        self._attribute_output_start: int | None = None
+
+    def _ordinary_until(self, end: int) -> None:
+        if not self._cursor <= end <= len(self.source):
+            raise XmlPolicyPreparationError(
+                "markup SDK source ranges overlap or are invalid"
+            )
+        self._operations.replace_nonliteral(self._cursor, end)
+        self._cursor = end
+
+    def doctype_end(self, start: int) -> int | None:
+        end = _doctype_end(self.source, start)
+        if end is None:
+            return None
+        self._ordinary_until(start)
+        declaration = _Doctype(start, end, self.source[start:end])
+        self._operations.consume_source(declaration.text)
+        self._operations.add_declarations(
+            _scan_entity_declarations(_internal_subset(declaration))
+        )
+        self._cursor = end
+        self._doctype_count += 1
+        return end
+
+    def literal(self, span: MarkupSourceRange) -> None:
+        if not span.start <= span.end <= len(self.source):
+            raise XmlPolicyPreparationError("markup SDK literal range is invalid")
+        self._ordinary_until(span.start)
+        self._operations.append_original(self.source[span.start : span.end])
+        self._cursor = span.end
+
+    def attribute_reference(
+        self, start: int, *, value_start: int
+    ) -> PreparedMarkupReference | None:
+        match = _ENTITY_REFERENCE.match(self.source, start)
+        if match is None:
+            return None
+        if self._attribute_output_start is None:
+            self._ordinary_until(value_start)
+            self._attribute_output_start = len(self._operations.output)
+        self._ordinary_until(start)
+        output_start = len(self._operations.output)
+        self._operations.replace_reference(match.group(0))
+        self._cursor = match.end()
+        return PreparedMarkupReference(
+            end=match.end(),
+            parser_text="".join(self._operations.output[output_start:]),
+        )
+
+    def project_attribute(self, end: int, quoted_value: str) -> None:
+        if self._attribute_output_start is None:
+            raise XmlPolicyPreparationError(
+                "markup SDK attribute has no source projection"
+            )
+        self._ordinary_until(end)
+        self._operations.project_attribute(self._attribute_output_start, quoted_value)
+        self._attribute_output_start = None
+
+    def incomplete_attribute(self) -> None:
+        # The SDK drops a start tag unfinished at EOF. Keep its original syntax
+        # unfinished in the parser copy; do not invent a closing quote or tag.
+        self._attribute_output_start = None
+
+    def finish(self) -> XmlPolicyProjection:
+        if self._attribute_output_start is not None:
+            raise XmlPolicyPreparationError(
+                "markup SDK attribute projection is unfinished"
+            )
+        self._ordinary_until(len(self.source))
+        if self._operations.remaining_bytes() != 0:
+            raise XmlPolicyPreparationError(
+                "markup SDK source accounting is inconsistent"
+            )
+        return XmlPolicyProjection(
+            source=self.source,
+            parser_source="".join(self._operations.output),
+            doctype_count=self._doctype_count,
+        )
+
+
+def prepare_xml(
+    content: bytes,
+    *,
+    expansion_limit_bytes: int,
+    prepare_markup: MarkupPreparer | None = None,
+) -> XmlPolicyProjection:
     """Prepare XML for the standard-library parser without external I/O.
 
     ``expansion_limit_bytes`` is the caller's existing role budget: control
     documents use ``xmlControlDocumentMaxBytes`` and reflowable resources use
     ``reflowableMarkupMaxBytes``.  The function never writes the prepared copy
     to disk and never mutates the original bytes.
+
+    An HTML SDK may report actual syntax to one causal preparation session.
+    Entity parsing and the single document expansion budget remain here.
     """
 
     _require_xml_preparation_profile()
     source = _decode_source(content)
+    if prepare_markup is not None:
+        session = MarkupPreparationSession(
+            source, expansion_limit_bytes=expansion_limit_bytes
+        )
+        prepare_markup(session)
+        return session.finish()
     doctypes = _scan_doctypes(source)
     declarations: dict[str, _EntityDeclaration] = {}
     for doctype in doctypes:
@@ -672,6 +863,10 @@ def parse_xml(
 
 
 __all__ = [
+    "MarkupPreparationSession",
+    "MarkupPreparer",
+    "MarkupSourceRange",
+    "PreparedMarkupReference",
     "XmlPolicyDecodeError",
     "XmlPolicyExpansionLimitError",
     "XmlPolicyPreparationError",
