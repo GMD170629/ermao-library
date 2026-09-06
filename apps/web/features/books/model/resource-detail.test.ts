@@ -32,3 +32,16 @@ test('builds exact chapter, page and stable audio track links', () => {
   assert.equal(resourceDetailItemHref(resource({ format: 'PDF', readerType: 'pdf' }), { id: 'page', unitType: 'page', title: '', sortOrder: 8, assetId: null, mediaType: 'application/pdf', pageNumber: 9, previewUrl: '/preview' }), '/reader/resource-1?page=9');
   assert.equal(resourceDetailItemHref(resource({ format: 'AUDIOBOOK_DIR', readerType: 'audio' }), { id: 'track', unitType: 'track', title: 'Track', sortOrder: 0, assetId: 'asset 1', mediaType: 'audio/mpeg', durationMs: null, discNumber: null, trackNumber: null }), '/listen/resource-1?assetId=asset%201');
 });
+
+test('comic detail first and last pages target the matching zero-based Reader page', () => {
+  for (const format of ['CBZ', 'IMAGE_DIR'] as const) {
+    const comic = resource({ format, readerType: 'comic', pageCount: 6 });
+    for (const pageNumber of [1, 3, 6]) {
+      const href = resourceDetailItemHref(comic, {
+        id: `page-${pageNumber}`, unitType: 'page', title: `Page ${pageNumber}`,
+        sortOrder: pageNumber - 1, assetId: null, mediaType: 'image/png', pageNumber, previewUrl: null
+      });
+      assert.equal(href, `/reader/resource-1?page=${pageNumber - 1}`);
+    }
+  }
+});

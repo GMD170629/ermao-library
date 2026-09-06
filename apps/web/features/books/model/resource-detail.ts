@@ -76,7 +76,8 @@ export function resourceDetailItemHref(
       : null;
   }
   if (unit.unitType === 'page') {
-    return `/reader/${encodeURIComponent(resource.id)}?page=${encodeURIComponent(String(unit.pageNumber))}`;
+    const targetPage = resource.readerType === 'comic' ? unit.pageNumber - 1 : unit.pageNumber;
+    return `/reader/${encodeURIComponent(resource.id)}?page=${encodeURIComponent(String(targetPage))}`;
   }
   return unit.assetId
     ? `/listen/${encodeURIComponent(resource.id)}?assetId=${encodeURIComponent(unit.assetId)}`

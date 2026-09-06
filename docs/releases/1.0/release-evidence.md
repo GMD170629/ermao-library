@@ -4,6 +4,10 @@
 
 ## R1 当前执行与恢复入口（2026-09-06）
 
+READER-07（原RISK-07）已在实际链接生成owner边界复现：`23ae8c2e`的resourceDetailItemHref把漫画展示第1页生成`?page=1`，而Reader现有入口按零基pageIndex解析；正常6页末页同样会超出索引范围。新增受控回归原代码3 PASS/1 FAIL，首次断言实际得到page=1而期望page=0，证据`artifacts/releases/1.0/23ae8c2e/comic-detail-entry/red.log`。这不是已经完成真实点击后引擎恢复，原真实6页详情展示与源码链作为相邻事实保留。
+
+候选仅在resourceDetailItemHref的漫画页链接边界把pageNumber减一，PDF仍一基数，章节/音轨路径不变；所有ResourceDetailPreviewCard/Grid调用同一owner，无新URL协议或辅助工具。CBZ及IMAGE_DIR的第1/3/6页和PDF相邻5 PASS，完整Web478 PASS/0 skip、typecheck-final/lint/i18n通过。首次typecheck因新增测试字面量数组推断为string失败，保留typecheck.log；仅增加as const保持ResourceFormat类型后通过，不改阈值/规则。READER-07待真实详情点击首/末页及POS-09恢复，不能由链接边界GREEN关闭；ENV-12、其他格式/进度和外部条件不变。
+
 最终控制栏候选检查完成：`reader-console-regression/web-test-final.log`477 PASS/0 skip，typecheck-final/lint-final/i18n-final均退出0；独立只读审查通过四处按钮、漫画index边界、双页owner、EPUB与RTL保留。真实浏览器回归仍受ENV-12限制，READER-05/06不关闭。自有服务均已结束，无后台测试仍在运行。
 
 ENV-12恢复使用原Playwright入口，无新脚本。可在本机PowerShell手动运行以下命令并保留实际结果；不涉及生产、发布或真实账户，3100为原配置测试端口（本轮启动前已核实无监听）：

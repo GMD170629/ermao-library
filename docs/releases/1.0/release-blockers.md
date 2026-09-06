@@ -4,6 +4,8 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 ## R1 状态覆盖与外部条件
 
+READER-07 / RG-03 COM-*、RG-04 POS-09（RISK-07升级，应用边界已复现、真实UI待回归）：漫画详情第1页实际链接函数生成page=1而入口索引应0，6页末页对应索引应5；受控原失败留证，尚非真实点击后的错误引擎页。候选在唯一详情链接owner转换pageNumber→零基index，PDF及章节/音轨不变，针对性与完整Web/typecheck/lint/i18n通过。真实首/末页点选与恢复仍待验证，不关闭；证据见23ae8c2e/comic-detail-entry。下方原RISK-07静态记录作为历史保留。
+
 RISK-07 / RG-03、RG-04 POS-09：独立审查指出漫画详情resource_details.pageNumber是一基数，resourceDetailItemHref原样传?page，而reader-v3-page.tsx的漫画入口按零基pageIndex解析。此为尚未实际执行的静态线索，需真实详情页逐页点选与首/末页对照；不直接登记为已复现、不全局重定义索引。与已复现READER-06控制栏分开验证。
 
 当前覆盖：READER-04主资产识别/启动原缺陷已由`1d298ce6`真实production PDF/CBZ成功读页关闭，保留完整格式验收缺口。READER-05 PDF按钮导航、READER-06漫画零基索引与展示页号混用仍待真实回归。READER-06实际表现为第3页却标题第4页、目录0–5、末页上一页disabled，原现场在`1d298ce6/rg03-pdf-cbz-live/10..14-*`；候选仅修复控制栏索引和显示，不改Locator/保存协议。
