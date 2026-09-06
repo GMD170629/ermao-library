@@ -8,7 +8,7 @@ R1 日期：2026-09-06。正在自主执行代码回归和确认缺陷；下方 
 
 新增AUDIO-05（AAC-LC，RG-03/AUD-04+RG-04/POS-01）：真实5/10秒确认及9911ms暂停通过，重开容差FAIL，瞬时恢复值未知。新增AUDIO-06（FLAC24-bit，RG-03/AUD-05+RG-04/POS-02）：首5秒确认期限FAIL，瞬时状态未知。均为尚待分类的必测失败，不能仅用finally后DB推断根因；只补既有断言前最小观测，各一次复验后转具体业务修复或真实环境结论。WAV同入口9955ms恢复PASS独立保留。
 
-以上首次失败状态保留为历史，以首段及最新证据覆盖。RISK-06 / RG-04 POS-08：configureProgress提前替换active writer，而旧资源仍可播放；新Buffering捕获与既有Pause/Tick可能进入该身份窗口。只读路径尚非串写复现，正在用现有Android运行时与真实SQLite门控取得原场景证据；新候选不只丢弃旧书暂停保存，而是保留旧绑定直到新launch提交。未通过实际验证前不关闭此风险或放行AUDIO-07。
+以上首次失败状态保留为历史，以首段及最新证据覆盖。RISK-06现已升级为AUDIO-08 / RG-04 POS-08真实串写：configureProgress提前替换active writer，B restore挂起时A暂停2507ms被写入B，A自己的持久化仍0；原始门控/实际Media3/SQLite证据在 `android-writer-identity-20260906/`，不是静态推断。原候选未整合。`9df3d412` 保留旧绑定直到新launch提交，完整host/lint通过；另 `567909e4` 修正stop漏取消local preparation，取消场景仍待实际回归。原失败、新候选同场景GREEN及必要相邻回归完成前，不关闭AUDIO-07/08，不扩测试框架。
 
 ENV-11：用户已明确允许3107/3108回环测试服务。按相同命令重试仍在创建进程前被自动审批拒绝，理由仅“blocked by policy”；两端口无监听，RED/GREEN仍NOT_RUN。已请求用户手动启动已备妥的两份构建，不重复索要授权、不换入口绕过。拒绝及清理记录位于启动修复工作树的 `apps/web/.next/startup-progress/browser-red-green/explicit-authorization-*.json`。此项不阻塞其他验证。
 

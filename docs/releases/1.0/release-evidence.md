@@ -8,7 +8,7 @@
 
 IMP-01正常两模式UI与同库持久化子项PASS：`organization-live/imp01-ui-1788695317426/` 的实际Chrome创建/自动扫描，FLAT三本分别进入详情，VOLUMES两本及同Book内两个独立EPUB/PDF资源；主已复核截图05/10b。原执行900秒超期、后续ChunkLoadError、未存HTTP响应body及FLAT任务读回缺口保留在 `ui-result.json`，不改成完整浏览器命令PASS。为补齐本Case持久化判定，主对停服后保留的同一测试库运行固定只读ORM操作 `database-readback.py`，使用指定发布venv与mode=ro；两库模式/启用正确、各5任务SUCCEEDED，FLAT Book/Node/Resource/Asset=3/4/3/3、VOLUMES=2/4/3/3，DB与WAL全hash不变（`database-readback-complete.json`）。这是同库持久化证据，不是补造当时HTTP响应。911受测应用源码、样本和Next配置恢复均经原校验通过；此必测子项已具备UI及持久化依据，停止工具扩展，不计Reader引擎/production/PWA/最终RC或整RG-02通过。
 
-AUDIO-07候选暂未整合：`0159f691` 完整Android host219/0skip与lint通过，但独立审查指出prepare B时可能将A捕获交给B writer（RISK-06，静态可达尚未动态复现）。已暂停进一步原候选真机验收。主在独立工作区建立 `9df3d412`：prepared与active绑定分开、切换与launch提交一起完成、旧捕获继续写原身份、捕获/异步回读核对同context，仍复用KMP唯一writer/session/store；最终候选host/lint已执行，具体JUnit和真实跨资源RED/GREEN仍待汇总/验收。Hypatia仅补此风险所需的现有真实runtime/SQLite单次IO门控用例，不扩通用工具；FLAC原期限FAIL仍保留，不能由捕获模型结果倒推真实根因。后续从此处继续，不把原候选局部PASS合并为放行。
+AUDIO-07/08候选暂未整合：`0159f691` 捕获修复的完整Android host219/0skip与lint通过，但其身份窗口已由静态RISK-06升级为真机确证AUDIO-08。证据 `D:/www/ermao-release-android-formats/artifacts/releases/1.0/17c0b6ef2e68fb68e64202a53917078a448a5811/android-writer-identity-20260906/`：一次SQLite open门控确认B restore挂起、实际A仍Playing；A暂停2507ms，B行短暂出现A的完整Locator/2507ms，A仍0ms；故意坏的独立B样本随后进入真实engine Error，其初始0又覆盖B行，因此只看最终数据库会遗漏串写。主已复核原test diff、现场日志及正确的目标断言失败。新候选 `9df3d412` 将prepared与active绑定分开、在launch提交时切换，复用唯一KMP writer/session/store，捕获及异步回读核对同context；该提交完整host219/0skip与lint PASS。独立审查另指出stop未取消local preparation，追加 `567909e4` 两行使generation/local token失效，尚待必要相邻真实回归。以上候选均只在专用分支推送，主分支未整合；同一门控原失败与新候选GREEN、原FLAC及PCM必要回归继续，不扩通用测试工具，不凭模型结果认定FLAC原失败唯一根因。
 
 2026-09-06 19:40恢复增量：用户已授权SYNC-02的3107/3108服务；子任务实际重试仍在进程创建前遭自动审批拒绝，精确理由 `rejected: blocked by policy`。启动前Node/源码/测试/构建hash匹配，未创建Chrome context或服务，两端口均空闲；RED/GREEN仍NOT_RUN。证据 `D:/www/ermao-release-startup-progress/apps/web/.next/startup-progress/browser-red-green/explicit-authorization-start-rejection.json` 与 `explicit-authorization-cleanup.json`。已给用户两条现有构建的手动启动命令，等待期间继续Android和IMP-01界面验收。
 
@@ -66,8 +66,8 @@ DEC-07已纳入执行：停止已关闭AUDIO-03和ANDROID-03周边工具完善�
 |---|---|---|
 | RG-01 交付 | NOT_RUN / 部分BLOCKED | APK/IPA正式构建用户暂缓；Docker引擎、Mac/iOS条件仍缺 |
 | RG-02 初始化/连接 | 第一方新库链路部分PASS；OPDS客户端负责人放行（DEC-08） | 继续组织模式/异常连接及协议回归；双客户端由用户自测，不虚构代理实测 |
-| RG-03 格式 | READER-03本批关闭；WAV短时PASS；AAC/FLAC真实FAIL待分类 | AUDIO-05/06定位；TEST-11完整时窗仍待候选验证；逐格式/异常媒体/原生iOS矩阵未完成 |
-| RG-04 进度 | AUDIO-03关闭；AUDIO-04原生产链PASS但时窗证据有明确限制；SYNC-02自动回归PASS | SYNC-02浏览器对照受ENV-11阻塞；AAC恢复/FLAC确认失败；异常恢复、跨端仍待验收 |
+| RG-03 格式 | READER-03与AAC回零本批关闭；MP3/WAV/AAC正常短时PASS；FLAC原期限FAIL保留 | AUDIO-06待新候选验证；TEST-11完整时窗仍待补；逐格式/异常媒体/原生iOS矩阵未完成 |
+| RG-04 进度 | AUDIO-03关闭；AAC原恢复缺陷关闭；捕获饥饿与跨资源串写AUDIO-07/08待真实GREEN | SYNC-02浏览器对照受ENV-11阻塞；FLAC确认、异常恢复与跨端仍待验收；尚无同RC整体PASS |
 | RG-05 导入性能 | 本轮本机1万导入预检PASS（DEC-06） | 大规模/长时压力独立脚本按需运行，不作为当前阻塞；不外推NAS或30万表现 |
 
 持续播放最近恢复点：`audio-soak/production-1800-execution.json`，run `r1788689717566-w0`，启动源版本 `a5ac3b8b`，已以AUDIO-04 FAIL结束并安全清理。后续从原事件/HTTP日志定位，不假定它仍在运行。此工作属于音频功能稳定性，不是已停止的超大书库压测。
