@@ -412,7 +412,10 @@
     <string name="reader_annotations_empty">No annotations yet.</string>
     <string name="reader_bookmarks_empty">No bookmarks yet.</string>
     <string name="reader_bookmarks_empty_hint">Save your current location to return here quickly.</string>
-    <string name="reader_bookmark_count">%1$d bookmarks</string>
+    <plurals name="reader_bookmark_count">
+        <item quantity="one">%1$d bookmark</item>
+        <item quantity="other">%1$d bookmarks</item>
+    </plurals>
     <string name="reader_add_current_location">Add current location</string>
     <string name="reader_remove_current_location">Remove current location</string>
     <string name="reader_bookmarks_pending">Device first · Pending sync</string>
@@ -430,14 +433,14 @@
     <string name="reader_chapter_heading">Chapters</string>
     <string name="reader_page_number_heading">Page</string>
     <string name="reader_comic_toc_detail">Page %1$d · %2$d of %3$d</string>
-    <string name="reader_pdf_page_count_detail">%1$d of %2$d pages</string>
+    <plurals name="reader_pdf_page_count_detail">
+        <item quantity="one">%1$d of %2$d page</item>
+        <item quantity="other">%1$d of %2$d pages</item>
+    </plurals>
     <string name="reader_contents_empty">No chapters available</string>
-    <string name="reader_contents_current">Current: %1$s</string>
     <string name="reader_contents_loading">Loading contents…</string>
     <string name="reader_contents_load_failed">Couldn’t load the table of contents.</string>
     <string name="reader_progress_seek_failed">Couldn’t jump to that reading position.</string>
-    <string name="reader_restore_warning">The exact saved location was unavailable. Reading started from the closest safe location.</string>
-    <string name="reader_restore_warning_dismiss">Dismiss reading position warning</string>
     <string name="reader_error_title">Couldn’t open this book</string>
     <string name="reader_error_unsupported">This publication format is not supported by the Reader.</string>
     <string name="reader_error_corrupt">The book content is damaged or incomplete.</string>
@@ -579,7 +582,6 @@
         <item quantity="one">%1$d item</item>
         <item quantity="other">%1$d items</item>
     </plurals>
-    <string name="work_open_player">Open player</string>
     <string name="work_resource_importing">This resource is still importing. %1$s</string>
     <string name="work_resource_import_failed">Import failed. %1$s</string>
     <string name="work_resource_detail_loading">Loading resource details…</string>
@@ -658,11 +660,6 @@
     <string name="reader_error_read">The reader could not read the requested book resource.</string>
     <string name="reader_preferences_save_failed">Could not save reading settings on this device. Try again.</string>
     <string name="reader_preferences_engine_failed">Unable to apply the reading settings. Try again.</string>
-    <string name="reader_setting_always_on">Always on</string>
-    <string name="reader_setting_swipe_always_on_explanation">Swipe page turning is always on and cannot be turned off.</string>
-    <string name="reader_setting_not_adjustable">Not adjustable</string>
-    <string name="reader_setting_not_adjustable_explanation">This setting cannot currently be adjusted manually.</string>
-    <string name="reader_setting_temporarily_unavailable">Temporarily unavailable</string>
     <string name="reader_advanced_collapsed">Collapsed</string>
     <string name="reader_advanced_expanded">Expanded</string>
     <string name="audio_chapters_title">Chapters</string>

@@ -403,7 +403,9 @@
     <string name="reader_annotations_empty">还没有标注</string>
     <string name="reader_bookmarks_empty">还没有书签</string>
     <string name="reader_bookmarks_empty_hint">保存当前位置后，可从这里快速返回</string>
-    <string name="reader_bookmark_count">%1$d 个书签</string>
+    <plurals name="reader_bookmark_count">
+        <item quantity="other">%1$d 个书签</item>
+    </plurals>
     <string name="reader_add_current_location">添加当前位置</string>
     <string name="reader_remove_current_location">移除当前位置</string>
     <string name="reader_bookmarks_pending">本机优先 · 待同步</string>
@@ -421,14 +423,13 @@
     <string name="reader_chapter_heading">章节</string>
     <string name="reader_page_number_heading">页码</string>
     <string name="reader_comic_toc_detail">Page %1$d · 第 %2$d 页 / 共 %3$d 页</string>
-    <string name="reader_pdf_page_count_detail">第 %1$d 页 / 共 %2$d 页</string>
+    <plurals name="reader_pdf_page_count_detail">
+        <item quantity="other">第 %1$d 页 / 共 %2$d 页</item>
+    </plurals>
     <string name="reader_contents_empty">暂无可跳转章节</string>
-    <string name="reader_contents_current">当前：%1$s</string>
     <string name="reader_contents_loading">正在加载目录…</string>
     <string name="reader_contents_load_failed">无法加载目录。</string>
     <string name="reader_progress_seek_failed">无法跳转到该阅读位置。</string>
-    <string name="reader_restore_warning">无法使用精确保存位置，已从最接近的安全位置开始阅读。</string>
-    <string name="reader_restore_warning_dismiss">关闭阅读位置提示</string>
     <string name="reader_error_title">无法打开此书</string>
     <string name="reader_error_unsupported">阅读器暂不支持此出版物格式。</string>
     <string name="reader_error_corrupt">图书内容已损坏或不完整。</string>
@@ -566,7 +567,6 @@
     <plurals name="work_resource_units_count">
         <item quantity="other">共 %1$d 项</item>
     </plurals>
-    <string name="work_open_player">打开播放器</string>
     <string name="work_resource_importing">资源仍在导入中。%1$s</string>
     <string name="work_resource_import_failed">导入失败。%1$s</string>
     <string name="work_resource_detail_loading">正在加载资源详情…</string>
@@ -644,11 +644,6 @@
     <string name="reader_error_read">阅读器无法读取所请求的图书资源。</string>
     <string name="reader_preferences_save_failed">无法保存此设备的阅读设置，请重试。</string>
     <string name="reader_preferences_engine_failed">无法应用阅读设置，请重试。</string>
-    <string name="reader_setting_always_on">始终开启</string>
-    <string name="reader_setting_swipe_always_on_explanation">当前阅读器始终启用滑动翻页，无法手动关闭。</string>
-    <string name="reader_setting_not_adjustable">暂不可调整</string>
-    <string name="reader_setting_not_adjustable_explanation">此设置当前不支持手动调整。</string>
-    <string name="reader_setting_temporarily_unavailable">暂不可用</string>
     <string name="reader_advanced_collapsed">已收起</string>
     <string name="reader_advanced_expanded">已展开</string>
     <string name="audio_chapters_title">章节</string>
