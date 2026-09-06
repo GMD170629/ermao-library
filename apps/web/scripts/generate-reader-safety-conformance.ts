@@ -107,9 +107,10 @@ type MarkupEvaluator = Extract<Evaluator, 'REFLOWABLE_MARKUP' | 'REFLOWABLE_NAME
 type BrowserMarkupEvaluator = Extract<MarkupEvaluator, 'REFLOWABLE_MARKUP_SANITIZE' | 'REFLOWABLE_URI' | 'REFLOWABLE_SVG'>;
 type MarkupExecutableCase = ExecutableCase & Readonly<{ evaluator: MarkupEvaluator }>;
 type BrowserProfile = typeof READER_SAFETY_PROFILES.reflowable;
-type ConformanceBrowserName = 'chromium' | 'webkit';
+type ConformanceBrowserName = 'chrome' | 'chromium' | 'webkit';
 
 const CONFORMANCE_BROWSERS = {
+  chrome: chromium,
   chromium,
   webkit
 } as const;
@@ -827,7 +828,13 @@ export async function generateWebReaderSafetyConformanceReport(
   const browsers: Array<Readonly<{ name: ConformanceBrowserName; browser: Browser }>> = [];
   try {
     for (const name of browserNames) {
-      browsers.push({ name, browser: await CONFORMANCE_BROWSERS[name].launch({ headless: true }) });
+      browsers.push({
+        name,
+        browser: await CONFORMANCE_BROWSERS[name].launch({
+          headless: true,
+          ...(name === 'chrome' ? { channel: 'chrome' } : {})
+        })
+      });
     }
     const resultsByBrowser = await Promise.all(browsers.map(({ browser }) => (
       Promise.all(cases.map((testCase) => evaluateCase(testCase, browser)))
@@ -870,9 +877,19 @@ async function main(): Promise<void> {
   const outputIndex = process.argv.indexOf('--output');
   const outputPath = outputIndex >= 0 ? process.argv[outputIndex + 1] : undefined;
   if (!outputPath) throw new Error('Usage: generate-reader-safety-conformance.ts --output <path>');
+  const browserIndex = process.argv.indexOf('--browser');
+  const browserName = browserIndex >= 0 ? process.argv[browserIndex + 1] : undefined;
+  if (browserIndex >= 0 && browserName === undefined) {
+    throw new Error('--browser requires a value');
+  }
+  if (browserName !== undefined && browserName !== 'chrome' && browserName !== 'chromium' && browserName !== 'webkit') {
+    throw new Error('--browser must be chrome, chromium or webkit');
+  }
   const report = await generateWebReaderSafetyConformanceReport(
     await parseJsonFile(SUITE_PATH),
-    await parseJsonFile(MANIFEST_PATH)
+    await parseJsonFile(MANIFEST_PATH),
+    undefined,
+    browserName
   );
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
