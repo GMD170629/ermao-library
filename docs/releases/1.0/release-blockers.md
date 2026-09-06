@@ -1,5 +1,7 @@
 # 1.0 发布阻塞项
 
+2026-09-07 AUDIO-13（RG-03移动音频生命周期/RG-04 POS-09，真实FAIL，候选待回归）：Android普通M4B正在Playing15092ms时旋转，实际横屏返回首页，MediaSession变state0/position0；不是仅凭代码推断。MainShell配置重建销毁无条件停止Application持有的音频会话。候选仅跳过isChangingConfigurations期间的stop，账号/namespace和普通退出原停止行为保留，复用现有LocalActivity。旧包32d16edc原失败与完整服务证据位于58cff471/pos09-native-explicit-entry-20260907；新包真实旋转及注销相邻尚待验收，不关闭。播放器内部章节A10000→真实B14978/r7→冷启首页首次15000/959ms已通过，但不是已证明的携带chapterId显式启动重建。
+
 2026-09-07 POS-10 MP3活动会话双端子项已补齐：Chrome实际重连收到15034ms远端更新仍停5054.691ms；Android原任务回前台收到34ms更新仍停15034ms；两端只有显式跳转才采用远端位置。证据与清理见release-evidence首条。未发现本场景产品缺陷，未扩工具；不关闭整个POS-10，服务重启/其他引擎及POS-09等可执行缺口仍待验收。当前无活动fixture，原用户工作树保留；未冻结RC、未整体GO。
 
 2026-09-07 POS-06 Android晚ACK执行缺口已补齐：实际HTTP、独立SQLite、完整N/pending保留及owner/DB重建原mutation重试PASS，必要原online相邻9904→9904ms PASS；测试接入的编译/缺Compose宿主失败已分类、原日志保留并实际解除，未发现新业务缺陷。独立审查、源码/样本/安装包hash、配置/服务/设备清理见release-evidence。本次最小工具补口停止；不能把“现有工具没有入口”直接当外部阻塞，也不外推该用例到Chrome、socket丢包、其他引擎或SYNC-02。仍按矩阵推进未测异常，既有ENV-11/12、iOS/容器和正式产物暂缓保留，无整体GO。

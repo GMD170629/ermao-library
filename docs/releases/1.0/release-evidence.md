@@ -1,5 +1,11 @@
 # 1.0 发布证据与最终签收
 
+AUDIO-13候选自动与独立核验：MainShell复用现有LocalActivity及平台isChangingConfigurations，effect绑定contentKey/activity/runtime；仅配置重建豁免stop，null Activity仍停止，注销/清理显式stop保持。Android host222项无失败/跳过及lint通过（audio13-host-lint-configured.log，35s）；首轮因PATH未包含已有Python导致chapterCore host构建9009，原日志保留，补入现有venv后通过，没有变更工具。独立只读审查确认owner和安全边界，无需新增通用生命周期helper。真实新包旋转/注销相邻尚待执行，AUDIO-13保持待回归。
+
+2026-09-07 POS-09执行与AUDIO-13原失败：源码58cff471/独立开发APK32d16edc，新库M4B（带0/10/20s三章），普通播放器章节表选A10000，播放5秒后服务器完整B14978/r7（独立MediaSession采样14979），强停独立包pidof退出1，冷启首页继续首个Playing15000/959ms，误差22ms。准备断言最初要求两个独立采样毫秒完全相等而失败，未执行冷停；原GET及说明保留，恢复始终以已确认完整Locator14978为基准，2秒门槛未变。此为播放器内章节导航后的冷恢复子项，不冒充带章节参数的shell启动。
+
+随后真实旋转复现AUDIO-13：第一次在seek缓冲期返回首页/state0，仅作观察；第二次先重新打开并确认Playing15092ms，再旋转至横屏1，仍返回首页且state0/position0，形成稳定对照。首次旋转后的已确认15047/r13仍能恢复15092ms，故位置持久化可用不能抵销会话中断。证据根`artifacts/releases/1.0/58cff471/pos09-native-explicit-entry-20260907/`的rotation-playing-*、rotation-resume-first-playing、原始XML、GET与normal-ui-observations。932项源码/样本/实际安装APK hash一致，15次PUT200；10个401均为旧测试账户在新库重新认证前，后续无4xx/5xx。旋转恢复free/portrait0、原App元数据和15项用户改动保留、独立包强停、reverse移除、fixture exit0/无清理错误/端口释放见cleanup-verification。当前最小候选仅修MainShell对Application音频的配置销毁处理；host/lint及新包真实原场景/注销相邻待完成，未关闭缺陷。
+
 2026-09-07 POS-10活跃会话子项PASS：源码34d4a24e，新隔离库、Chrome production与已核验32d16edc开发APK，真实普通MP3播放。Chrome暂停5.054691s，专用标签实际离线期间Android确认15034ms/r8；恢复网络后出现“其他设备已阅读至50%”，引擎仍5.054691s/paused，显式跳转后15.034s/paused且提示清除。Android保留暂停15034ms会话进入后台，Chrome普通后退15秒确认34ms/r10；原任务回前台收到0%提示，系统MediaSession仍15034ms，点击“跳转至最新位置”后才34ms。无直接API位置写入、JS引擎修改或合成可见性事件。辅助标签切前台未产生hidden，故使用真实网络重连，不声称visibilitychange通过。
 
 证据`artifacts/releases/1.0/34d4a24e/pos10-active-session-20260907/`：normal-ui-observations明确为实际CUA/ADB观察转录；两个source-confirmed独立GET、Android原始XML/MediaSession、manifest及prestop-hashes可追溯。931项源码/原件hash全部匹配；11次进度PUT均200，10个401全部在Android新库重新登录前，后续无4xx/5xx，Chrome error为空。恢复专用标签网络并Network.disable，正常退出测试账号，主/辅助标签关闭；早期未使用空白tab35842965仍报告Debugger unattached，未访问用户其他标签。独立包强停、reverse移除、fixture exit0/cleanupErrors空、端口释放、Web配置恢复及原工作区15改动保留见cleanup-verification。未新增业务、回归测试或工具。

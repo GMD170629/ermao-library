@@ -4,6 +4,7 @@ import com.ermao.library.shared.modules.reader.ReaderFormatSupport
 import com.ermao.library.shared.modules.reader.ReaderDeliveryMode
 
 import androidx.annotation.StringRes
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -253,6 +254,7 @@ fun MainShell(
     val appContext = LocalContext.current.applicationContext
     val application = appContext as com.ermao.library.ErmaoLibraryApplication
     val audioRuntime = application.audioPlaybackRuntime
+    val activity = LocalActivity.current
     val audioSnapshot by audioRuntime.snapshot.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, audioRuntime) {
@@ -349,8 +351,12 @@ fun MainShell(
             }
         }
     }
-    DisposableEffect(contentKey) {
-        onDispose { audioRuntime.stop() }
+    DisposableEffect(contentKey, activity, audioRuntime) {
+        onDispose {
+            // The application owns playback across Activity configuration changes.
+            // Account/shell disposal still stops the authenticated audio session.
+            if (activity?.isChangingConfigurations != true) audioRuntime.stop()
+        }
     }
     val downloadActionsViewModel = remember(contentKey) {
         (appContext.applicationContext as com.ermao.library.ErmaoLibraryApplication).accountDownloads(session)
