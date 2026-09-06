@@ -1136,6 +1136,7 @@ class AndroidAudioPlaybackRuntime private constructor(
     private fun publishFromController(captureLifecycleProgress: Boolean = true) {
         val controller = controller ?: return
         if (activeSeek != null) return
+        val previousPhase = _snapshot.value.phase
         val currentMediaItemId = controller.currentMediaItemId
         val intent = activeIntent
         if (currentMediaItemId == null || intent == null) {
@@ -1183,6 +1184,10 @@ class AndroidAudioPlaybackRuntime private constructor(
             captureProgress(immediate = true, reason = AudioProgressSaveReason.Completed)
         } else if (captureLifecycleProgress && phase == AndroidAudioPhase.Paused) {
             captureProgress(immediate = true, reason = AudioProgressSaveReason.Pause)
+        } else if (captureLifecycleProgress && previousPhase == AndroidAudioPhase.Playing &&
+            phase == AndroidAudioPhase.Buffering) {
+            // Preserve the last advancing position before buffering restarts the capture timer.
+            captureProgress(immediate = false, reason = AudioProgressSaveReason.Tick)
         }
     }
 
