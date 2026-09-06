@@ -1,5 +1,9 @@
 # 1.0 发布证据与最终签收
 
+2026-09-07 POS-06本轮收尾：`5b967260`同一测试代码/开发APK的原online相邻在另一全新隔离库实际PASS（13.045s）：5秒3899ms/r2、10秒7900ms/r3、暂停9904ms/r4，关闭重开实际9904ms，误差0；本地/独立GET最终r7一致。证据`artifacts/releases/1.0/5b967260/pos06-online-adjacent-20260907/`的device-online、online-evidence、fixture manifest、api-observations及cleanup-verification。935项校验全部匹配（929应用源码/原件和6最终测试源码/配置/APK），7次PUT200，无4xx/5xx；正常stop/exit0、Web配置恢复、18084/3105释放、自有reverse移除、独立包强停、输入消费、原App元数据及原工作区15改动不变。独立审查、POS-06实际原用例与必要相邻齐备，本工具补口结束，不再扩展。以下“尚待相邻/进行中”是历史。
+
+当前恢复点：SYNC-03已关闭；POS-06的Android同步owner/HTTP/SQLite晚ACK和owner/DB重建重试子项PASS。仍需Chrome及其他引擎对应缺口，POS-05真实丢ACK/重试、POS-07真实客户端迟到提交、POS-08账号/服务器切换及POS-09/10等未覆盖场景按原矩阵继续；不能把本例当作SYNC-02的Chrome启动竞态回归。ENV-11/12执行限制、iOS和容器条件及正式APK/IPA暂缓分别保留，当前没有活动fixture/子代理；安装的releasecheck开发包含标准测试宿主，仅供后续隔离验收。下一项优先复用现有入口补进度异常或其他仍可执行门禁，不因缺少入口自动记外部BLOCKED；必要最小辅助须继续按DEC-07登记。尚未冻结RC，五组最终放行与正式发布均未完成。
+
 2026-09-07 POS-06 Android同步owner/真实HTTP/SQLite子项实际PASS（12.965s，尚待原online相邻收尾）：从真实播放器确认的M3933ms/r2、N9939ms/r4完整报告建立新mutation；M实际提交r5并扣留返回，N已持久化；释放旧ACK后第二次push进入但尚未发出，独立连接核对N/local/pending及confirmedRevision=0全量不变，服务器仍M/r5。取消并join第一scope、关闭并重开独立case DB后，原N mutation真实重试成为r6，5秒内本地/独立GET一致且pending清空。证据`artifacts/releases/1.0/938afd24/pos06-native-late-ack-20260907/online-evidence.log`与`device-pos06-with-host.log`，实际API/Web源码ffd4228a（目录名938afd24为准备点，manifest记录实际HEAD）；主设备应用生产业务源码未改。929项源码/原件hash一致，6次PUT200，无4xx/5xx；独立审查无必修项。
 
 这次仅新增一个针对性仪器用例及必要独立数据库参数，原确认/暂停/重开owner和断言保持；主审查去掉了多余确认封装、重复位置比较，并用位置值增加而非仅capture时间证明两个真实报告不同。首编译`test-build.log`为配置/测试类型引用失败，不是业务失败：release变体不能编译依赖debug专用视觉宿主的默认套件，Kotlin alias不能直接访问嵌套Accepted。独立opt-in APK仅编译既有release-live目录，默认全量套件及入口保留；结果类型直接引用现有公开application port定义。首次设备运行在Compose规则创建Activity前失败，`device-pos06.log`保留；输入文件当时未消费（device-fixture-before-retry.txt），没有发生业务调用。随后在现有隔离init中复用版本目录已有ui-test-manifest依赖提供标准Compose宿主，保留数据换装独立开发包并同输入复验通过，没有新增业务宿主或生产诊断。
