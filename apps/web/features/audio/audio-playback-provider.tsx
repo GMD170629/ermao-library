@@ -16,6 +16,7 @@ import { createStandardReaderLocator, parseStandardReaderLocator, standardLocato
 import { BEFORE_PWA_UPDATE_EVENT, type BeforePwaUpdateDetail } from '../../lib/pwa/update-coordination';
 import { AUDIO_DEVICE_PREFERENCES_KEY, readAudioDevicePreferences, writeAudioDevicePreferences } from '../../lib/audio-device-preferences';
 import { fetchAudioBootstrap } from './api';
+import { AudioPlayAttempt } from './application/audio-play-attempt';
 import {
   absolutePositionForTrack,
   audioFormatLabel,
@@ -164,6 +165,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   const [remoteJumpFailed, setRemoteJumpFailed] = useState(false);
   const { t: translate } = useAttributeI18n();
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playAttemptRef = useRef(new AudioPlayAttempt());
   const stateRef = useRef(state);
   const bootstrapRef = useRef<AudioBootstrap | null>(null);
   const trackIndexRef = useRef(-1);
@@ -182,6 +184,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
   if (!thisTabIdRef.current) thisTabIdRef.current = tabId();
   const sleepTargetChapterRef = useRef<string | null>(null);
   const runtime = getReaderRuntime();
+
+  useEffect(() => {
+    const attempt = playAttemptRef.current;
+    return () => attempt.cancel();
+  }, []);
 
   const updateState = useCallback((patch: Partial<AudioPlaybackState> | ((current: AudioPlaybackState) => Partial<AudioPlaybackState>)) => {
     setState((current) => {
@@ -227,14 +234,21 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     }).then(() => flush ? runtime.progress.flushNow() : undefined).catch(() => undefined);
   }, [runtime.progress]);
 
+  const pauseCurrentAudio = useCallback(() => {
+    playAttemptRef.current.cancel();
+    audioRef.current?.pause();
+  }, []);
+
   const playCurrentAudio = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio || !bootstrapRef.current || trackIndexRef.current < 0) return;
     claimPlayback();
-    try {
-      await audio.play();
+    const outcome = await playAttemptRef.current.run(() => audio.play());
+    if (outcome.type === 'superseded') return;
+    if (outcome.type === 'playing') {
       updateState({ lifecycle: 'playing', error: null, safetyError: null });
-    } catch (reason) {
+    } else {
+      const reason = outcome.reason;
       const blocked = reason instanceof DOMException && reason.name === 'NotAllowedError';
       updateState({
         lifecycle: 'paused',
@@ -270,7 +284,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const track = bootstrap.tracks[index];
     const nextPosition = clamp(positionMs, 0, Math.max(0, track.durationMs));
     if (!audio.paused) suppressedPauseEventsRef.current += 1;
-    audio.pause();
+    pauseCurrentAudio();
     trackIndexRef.current = index;
     pendingSeekRef.current = nextPosition;
     pendingAutoplayRef.current = autoplay;
@@ -297,7 +311,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       pendingAutoplayRef.current = false;
       void playCurrentAudio();
     }
-  }, [playCurrentAudio, updateState]);
+  }, [pauseCurrentAudio, playCurrentAudio, updateState]);
 
   const loadResource = useCallback((resourceId: string, options: LoadAudioResourceOptions = {}): Promise<void> => {
     const normalizedResourceId = resourceId.trim();
@@ -374,7 +388,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       const previousWasPlaying = Boolean(audioRef.current && !audioRef.current.paused);
       if (previousWasPlaying && audioRef.current) {
         suppressedPauseEventsRef.current += 1;
-        audioRef.current.pause();
+        pauseCurrentAudio();
       }
       updateState(beginAudioResourceSwitch(previousState, normalizedResourceId, request.summary));
       if (previousBootstrap) await persistProgress(false, true);
@@ -484,12 +498,13 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     });
     pendingLoadRef.current = request;
     return request.promise;
-  }, [configureTrack, persistProgress, playCurrentAudio, runtime.storage, updateState]);
+  }, [configureTrack, pauseCurrentAudio, persistProgress, playCurrentAudio, runtime.storage, updateState]);
 
   const pause = useCallback(() => {
-    audioRef.current?.pause();
+    pendingAutoplayRef.current = false;
+    pauseCurrentAudio();
     updateState((current) => current.bootstrap ? { lifecycle: 'paused' } : {});
-  }, [updateState]);
+  }, [pauseCurrentAudio, updateState]);
 
   const play = useCallback(async () => {
     if (stateRef.current.lifecycle === 'error' && stateRef.current.resourceId) {
@@ -685,7 +700,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (audio) {
       if (!audio.paused) suppressedPauseEventsRef.current += 1;
-      audio.pause();
+      pauseCurrentAudio();
       audio.removeAttribute('src');
       audio.load();
     }
@@ -700,7 +715,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       playbackRate: clamp(preferences.playbackRate ?? 1, 0.75, 3),
       volume: clamp(preferences.volume ?? 1, 0, 1)
     });
-  }, [persistProgress, updateState]);
+  }, [pauseCurrentAudio, persistProgress, updateState]);
 
   const close = useCallback(() => resetPlayback(true), [resetPlayback]);
 
@@ -814,7 +829,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         const reachedChapterEnd = targetChapter?.assetId === track.assetId && positionMs >= Math.max(targetChapter.startMs, targetChapter.endMs - 300);
         const reachedTrackEnd = target === `track:${track.assetId}` && positionMs >= Math.max(0, stateRef.current.durationMs - 300);
         if (reachedChapterEnd || reachedTrackEnd) {
-          audio.pause();
+          pauseCurrentAudio();
           sleepTargetChapterRef.current = null;
           updateState({ sleepTimerMode: null, sleepTimerEndsAt: null, lifecycle: 'paused' });
         }
@@ -900,7 +915,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener('error', handleError);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [attemptPendingSeek, claimPlayback, configureTrack, persistProgress, playCurrentAudio, updateState]);
+  }, [attemptPendingSeek, claimPlayback, configureTrack, pauseCurrentAudio, persistProgress, playCurrentAudio, updateState]);
 
   useEffect(() => {
     nextTrackPreloadAbortRef.current?.abort();
@@ -929,11 +944,11 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
     if (state.sleepTimerMode !== 'timer' || !state.sleepTimerEndsAt) return undefined;
     const delay = Math.max(0, state.sleepTimerEndsAt - Date.now());
     const timer = window.setTimeout(() => {
-      audioRef.current?.pause();
+      pauseCurrentAudio();
       updateState({ sleepTimerMode: null, sleepTimerEndsAt: null, lifecycle: 'paused' });
     }, Math.min(delay, 2_147_000_000));
     return () => window.clearTimeout(timer);
-  }, [state.sleepTimerEndsAt, state.sleepTimerMode, updateState]);
+  }, [pauseCurrentAudio, state.sleepTimerEndsAt, state.sleepTimerMode, updateState]);
 
   useEffect(() => {
     const receiveClaim = (message: unknown) => {
@@ -941,7 +956,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       if (value.type !== 'claim-playback' || !value.tabId || value.tabId === thisTabIdRef.current) return;
       const audio = audioRef.current;
       if (audio && !audio.paused) {
-        audio.pause();
+        pauseCurrentAudio();
         void persistProgress(false, true);
       }
     };
@@ -960,7 +975,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       if (playbackChannelRef.current === channel) playbackChannelRef.current = null;
       window.removeEventListener('storage', onStorage);
     };
-  }, [persistProgress]);
+  }, [pauseCurrentAudio, persistProgress]);
 
   useEffect(() => {
     const handleVisibility = () => {
@@ -993,7 +1008,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
         pendingAutoplayRef.current = false;
         if (audio && !audio.paused) {
           suppressedPauseEventsRef.current += 1;
-          audio.pause();
+          pauseCurrentAudio();
         }
         updateState((current) => current.bootstrap ? { lifecycle: 'paused' } : {});
         await persistProgress(false, true);
@@ -1011,7 +1026,7 @@ export function AudioPlaybackProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('shuku:private-data-clearing', handlePrivateDataClearing);
       window.removeEventListener(BEFORE_PWA_UPDATE_EVENT, handleBeforePwaUpdate);
     };
-  }, [persistProgress, resetPlayback, updateState]);
+  }, [pauseCurrentAudio, persistProgress, resetPlayback, updateState]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator)) return undefined;
